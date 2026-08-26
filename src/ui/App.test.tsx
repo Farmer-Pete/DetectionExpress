@@ -1,10 +1,12 @@
+import { describe, expect, it } from "bun:test";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
   it("renders the title", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Detection Dash" })).toBeInTheDocument();
+    // getByRole throws if the heading is missing, so finding it is the assertion.
+    const heading = screen.getByRole("heading", { name: "Detection Dash" });
+    expect(heading.textContent).toBe("Detection Dash");
   });
 });
