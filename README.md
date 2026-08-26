@@ -11,7 +11,9 @@ stream of security events, and keeps re-architecting it as new threats arrive.
 
 ## Stack
 
-TypeScript, React, and Vite. Bun is the runtime and package manager. The sim is plain TypeScript.
+TypeScript and React. Bun is the whole toolchain: runtime, package manager, test
+runner, and bundler. The sim is plain TypeScript. No Vite (see
+`docs/adr/0001-all-bun-drop-vite.md`).
 
 ## Develop
 

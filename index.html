@@ -2,16 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="./public/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Detection Dash</title>
   </head>
   <body>
     <div id="root"></div>
-    <!-- dev-guard:start (stripped from the production build by vite.config.ts) -->
+    <!-- dev-guard:start (stripped from the production build by scripts/postbuild.ts) -->
     <script>
-      // When this file is opened directly (file://), the Vite dev server is not
-      // running, so /src/main.tsx cannot compile and the page stays blank.
+      // When this file is opened directly (file://), the Bun dev server is not
+      // running, so ./src/main.tsx cannot compile and the page stays blank.
       // Show a clear message instead. This whole block is removed from dist/.
       if (location.protocol === "file:") {
         document.addEventListener("DOMContentLoaded", () => {
@@ -25,6 +25,6 @@
       }
     </script>
     <!-- dev-guard:end -->
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

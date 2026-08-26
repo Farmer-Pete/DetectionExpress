@@ -4,12 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc -b",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "dev": "bun ./index.html",
+    "build": "tsc --noEmit && rm -rf dist && bun build ./index.html --minify --outdir dist && bun scripts/postbuild.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./src",
+    "test:watch": "bun test ./src --watch",
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
@@ -22,17 +21,13 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@happy-dom/global-registrator": "^20.0.0",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^24.13.3",
+    "@types/bun": "^1.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.1.0",
-    "jsdom": "^30.0.1",
     "knip": "^6.32.2",
     "lefthook": "^2.1.10",
-    "typescript": "~6.0.2",
-    "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "typescript": "~6.0.2"
   }
 }

@@ -45,11 +45,18 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 7. **No ECS.** For dozens of Nodes and Events, plain typed modules with arrays and maps win. Revisit only if entity counts reach the thousands.
 
+## Toolchain
+
+- **Bun** is the whole toolchain: runtime, package manager, test runner, and bundler.
+- Dev server: `bun ./index.html`. Production build: `bun build ./index.html`.
+- We do not use Vite. See `docs/adr/0001-all-bun-drop-vite.md` for the decision and its reversal path.
+
 ## Testing
 
-- Test the sim as pure functions. It needs no DOM. It runs in the Vitest `sim` project (Node).
+- The test runner is `bun test` (see `bunfig.toml` for the happy-dom preload).
+- Test the sim as pure functions. It needs no DOM.
 - Make the sim deterministic. Use a seeded RNG and a fake clock. Snapshot sim state at tick N.
-- Test React parts in the Vitest `ui` project (jsdom) with Testing Library.
+- Test React parts with `@testing-library/react`. happy-dom provides the DOM.
 
 ## React Flow
 
