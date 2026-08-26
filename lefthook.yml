@@ -1,0 +1,15 @@
+# Git hooks. Installed by `lefthook install` (runs from the package.json prepare script).
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      glob: "*.{ts,tsx,js,jsx,json,jsonc,css}"
+      run: bunx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    typecheck:
+      run: bun run typecheck
+
+pre-push:
+  commands:
+    test:
+      run: bun run test
