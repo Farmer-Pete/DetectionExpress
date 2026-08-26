@@ -8,6 +8,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- dev-guard:start (stripped from the production build by vite.config.ts) -->
+    <script>
+      // When this file is opened directly (file://), the Vite dev server is not
+      // running, so /src/main.tsx cannot compile and the page stays blank.
+      // Show a clear message instead. This whole block is removed from dist/.
+      if (location.protocol === "file:") {
+        document.addEventListener("DOMContentLoaded", () => {
+          document.body.innerHTML =
+            '<div style="font:16px system-ui;padding:2rem;color:#e6edf3">' +
+            '<h1 style="color:#ff6b6b;margin:0 0 .5rem">Dev server not running</h1>' +
+            "<p>This page was opened as a file. Start the dev server, then open the URL it prints.</p>" +
+            '<pre style="background:#161b22;padding:1rem;border-radius:6px">bun run dev</pre>' +
+            "</div>";
+        });
+      }
+    </script>
+    <!-- dev-guard:end -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
