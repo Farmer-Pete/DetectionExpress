@@ -1,0 +1,9 @@
+[install]
+# Supply-chain cooldown. Bun installs only npm versions published at least this
+# many seconds ago, so a freshly compromised release is caught and yanked before
+# it can enter our lockfile. 604800 seconds is 7 days.
+minimumReleaseAge = 604800
+
+# Escape hatch: package names here bypass the cooldown when a fresh version is
+# genuinely needed. Keep this list short and justify every entry.
+minimumReleaseAgeExcludes = []
