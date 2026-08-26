@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
+    "audit": "bun audit --audit-level=high",
     "prepare": "lefthook install"
   },
   "dependencies": {
