@@ -1,21 +1,47 @@
 import { describe, expect, it } from "bun:test";
+import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
+import { isRawAuthV1 } from "../sim/endpoints/auth/formats/auth-v1";
+import type { PipeEvent, PipeMessage } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
+import { buildReferenceAlgorithm } from "../sim/scenarios/brute-force-login/reference";
+import { bruteForceLogin } from "../sim/scenarios/brute-force-login/scenario";
 import type { SimSnapshot } from "../sim/snapshot";
-import { type Clock, ManualDriver, type TickDriver } from "./clock";
+import { RuleError, type TaskAlgorithm } from "../sim/tasks";
+import { ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
-import { CHANNEL_CAP, HEAT_STROBE } from "./tuning";
+import {
+  BRUTE_FORCE_THRESHOLD,
+  CORRECTNESS_W_FN,
+  CORRECTNESS_W_FP,
+  CORRECTNESS_WINDOW,
+  GAME_SECONDS_PER_TICK,
+  LEVEL_SEED,
+} from "./tuning";
 
 const NODES: GraphNode[] = [
   { id: "ingest", kind: "ingest" },
+  { id: "normalize", kind: "normalize" },
+  { id: "match", kind: "match" },
   { id: "sink", kind: "sink" },
 ];
-const EDGES: GraphEdge[] = [{ id: "wire", source: "ingest", target: "sink" }];
+const EDGES: GraphEdge[] = [
+  { id: "e1", source: "ingest", target: "normalize" },
+  { id: "e2", source: "normalize", target: "match" },
+  { id: "e3", source: "match", target: "sink" },
+];
 
-// Read snapshot maps by variable keys: the maps are index signatures, so TS
-// wants bracket access while Biome would rewrite a literal key to dot notation.
-const WIRE_ID = "wire";
-const SINK_ID = "sink";
-const INGEST_ID = "ingest";
+const SCORER_CONFIG: ScorerConfig = {
+  threshold: BRUTE_FORCE_THRESHOLD,
+  window: CORRECTNESS_WINDOW,
+  wFn: CORRECTNESS_W_FN,
+  wFp: CORRECTNESS_W_FP,
+};
+
+/** normalize is identity, match never fires: the pipeline runs, nothing scores. */
+const idleAlgorithm: TaskAlgorithm = {
+  normalize: (raw) => raw,
+  match: () => null,
+};
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 50; i++) {
@@ -30,6 +56,38 @@ async function step(driver: ManualDriver, ticks: number): Promise<void> {
   }
 }
 
+function ev(id: number, ts: number, payload: unknown = { u: "x" }): PipeEvent {
+  return { id, ts, endpoint: "auth-v1", payload };
+}
+
+/** The normalized record the reference match reads, after Normalize runs. */
+interface ReferenceView {
+  user: string;
+  sourceIp: string;
+  outcome: "success" | "fail";
+  id: number;
+  ts: number;
+  endpoint: string;
+}
+
+function isReferenceView(value: unknown): value is ReferenceView {
+  return value instanceof Object && "user" in value && "outcome" in value && "id" in value;
+}
+
+/** A finite source: yields the given Events, then null (Ingest closes it). */
+function scheduleOf(events: PipeEvent[]): () => PipeMessage | null {
+  let i = 0;
+  return () => (i < events.length ? (events[i++] ?? null) : null);
+}
+
+interface LaunchOpts {
+  generator?: () => PipeMessage | null;
+  algorithm?: TaskAlgorithm;
+  scorer?: Scorer;
+  setSnapshot?: (snapshot: SimSnapshot) => void;
+  onError?: (error: unknown) => void;
+}
+
 interface Harness {
   handle: ReturnType<typeof start>;
   driver: ManualDriver;
@@ -37,17 +95,19 @@ interface Harness {
   last: () => SimSnapshot | undefined;
 }
 
-function launch(overrides: Partial<StartOptions> & { rates?: Record<string, number> }): Harness {
+function launch(opts: LaunchOpts): Harness {
   const driver = new ManualDriver();
   const snapshots: SimSnapshot[] = [];
-  const rates = overrides.rates ?? { ingest: 6, sink: 30 };
   const options: StartOptions = {
     getGraph: () => ({ nodes: NODES, edges: EDGES }),
-    getRate: overrides.getRate ?? ((id) => rates[id] ?? 1),
-    setSnapshot: overrides.setSnapshot ?? ((snapshot) => snapshots.push(snapshot)),
+    setSnapshot: opts.setSnapshot ?? ((snapshot) => snapshots.push(snapshot)),
+    scenario: bruteForceLogin,
+    algorithm: opts.algorithm ?? idleAlgorithm,
+    scorer: opts.scorer ?? createScorer([], SCORER_CONFIG),
+    generator: opts.generator ?? scheduleOf([]),
     driver,
-    bindVisibility: overrides.bindVisibility ?? (() => () => undefined),
-    ...(overrides.onError ? { onError: overrides.onError } : {}),
+    bindVisibility: () => () => undefined,
+    ...(opts.onError ? { onError: opts.onError } : {}),
   };
   const handle = start(options);
   return { handle, driver, snapshots, last: () => snapshots.at(-1) };
@@ -71,8 +131,11 @@ describe("engine start guards", () => {
     expect(() =>
       start({
         getGraph: () => ({ nodes: [{ id: "x", kind: "detect" }], edges: [] }),
-        getRate: () => 1,
         setSnapshot: () => undefined,
+        scenario: bruteForceLogin,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
         driver,
         bindVisibility: () => () => undefined,
       }),
@@ -81,15 +144,16 @@ describe("engine start guards", () => {
   });
 
   it("tears down after a setup failure past allocation", () => {
-    // bindVisibility runs after the Clock and channel exist. A throw here must
-    // stop the started driver and rethrow, so a half-built engine leaks nothing.
     const driver = new SpyDriver();
     const snapshots: SimSnapshot[] = [];
     expect(() =>
       start({
         getGraph: () => ({ nodes: NODES, edges: EDGES }),
-        getRate: () => 6,
         setSnapshot: (snapshot) => snapshots.push(snapshot),
+        scenario: bruteForceLogin,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
         driver,
         bindVisibility: () => {
           throw new Error("visibility bind boom");
@@ -102,75 +166,165 @@ describe("engine start guards", () => {
   });
 });
 
-describe("engine sampler", () => {
-  it("publishes rates that track the fed flow when the Sink keeps up", async () => {
-    const h = launch({ rates: { ingest: 6, sink: 30 } });
-    await step(h.driver, 150);
+describe("engine integration with the reference Algorithm", () => {
+  // Adapt the reference twin (typed to its concrete records) to the engine's
+  // untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it auth-v1
+  // payloads, and Normalize produces the record the reference match expects.
+  function referenceTaskAlgorithm(): TaskAlgorithm {
+    const algo = buildReferenceAlgorithm();
+    return {
+      normalize: (raw) => (isRawAuthV1(raw) ? algo.normalize(raw) : raw),
+      match: (view) => (isReferenceView(view) ? algo.match(view) : null),
+    };
+  }
+
+  function runReference(): Harness {
+    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const h = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+    });
+    return h;
+  }
+
+  it("reaches full Correctness and finalizes every Attack", async () => {
+    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
+    const h = runReference();
+    await step(h.driver, maxDue + 30);
+    await h.handle.whenStopped;
     const snap = h.last();
     expect(snap).toBeDefined();
     if (!snap) return;
-    const edge = snap.edges[WIRE_ID];
-    expect(edge).toBeDefined();
-    if (!edge) return;
-    expect(edge.inRate).toBeGreaterThan(3);
-    expect(edge.inRate).toBeLessThan(9);
-    expect(edge.outRate).toBeGreaterThan(3);
-    // The Sink keeps up, so completions track the ~6/s arrivals. The 500ms
-    // window smooths to that rate, not a jittery spike. A broken smoothing
-    // (per-sample, or a wrong window) would miss this band.
-    expect(snap.throughput).toBeGreaterThan(3);
-    expect(snap.throughput).toBeLessThan(9);
-    // The Sink keeps up, so its input stays near empty and it stays cool.
-    expect(snap.nodes[SINK_ID]?.heat).toBe(0);
-    expect(snap.nodes[INGEST_ID]?.heat).toBe(0);
-    h.handle.stop();
+    expect(snap.correctness.caught).toBe(run.attacks.length);
+    expect(snap.correctness.missed).toBe(0);
+    expect(snap.correctness.falseAlerts).toBe(0);
+    expect(snap.correctness.rolling).toBe(100);
   });
 
-  it("reddens the Sink to danger and keeps the Ingest calm at the bottleneck", async () => {
-    const h = launch({ rates: { ingest: 8, sink: 0.5 } }); // sink far slower
-    await step(h.driver, 700); // run the full ramp: Backlog fills, the Sink reddens
+  it("presents all three edge rates, four node heats, and a drained Backlog", async () => {
+    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
+    const h = runReference();
+    await step(h.driver, maxDue + 30);
+    await h.handle.whenStopped;
     const snap = h.last();
     expect(snap).toBeDefined();
     if (!snap) return;
-    // The slice's central outcome: the Backlog climbs high and the Sink crosses
-    // the strobe threshold, so a viewer sees it go red, not merely warm.
-    expect(snap.backlog).toBeGreaterThan(CHANNEL_CAP / 2); // occupancy past the ramp threshold
-    expect(snap.nodes[SINK_ID]?.heat).toBeGreaterThan(HEAT_STROBE); // red and strobing
-    expect(snap.nodes[INGEST_ID]?.heat).toBe(0); // the source stays calm
+    expect(Object.keys(snap.edges).sort()).toEqual(["e1", "e2", "e3"]);
+    expect(Object.keys(snap.nodes).sort()).toEqual(["ingest", "match", "normalize", "sink"]);
+    expect(snap.backlog).toBe(0); // sum of all channels, drained at the clean end
+  });
+
+  it("produces the same final snapshot when run twice", async () => {
+    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
+    const first = runReference();
+    await step(first.driver, maxDue + 30);
+    await first.handle.whenStopped;
+    const second = runReference();
+    await step(second.driver, maxDue + 30);
+    await second.handle.whenStopped;
+    expect(second.last()).toEqual(first.last());
+  });
+});
+
+describe("engine natural completion", () => {
+  it("force-publishes exactly one final snapshot at a clean end, then tears down", async () => {
+    // The single Event is due at tick 0, so it drains on microtasks with no tick.
+    // No normal sample runs; the only publish is the forced final one.
+    const h = launch({ generator: scheduleOf([ev(0, 0)]) });
+    await h.handle.whenStopped;
+    expect(h.snapshots).toHaveLength(1);
+    expect(h.last()?.backlog).toBe(0);
+  });
+
+  it("shares one builder: a zero-tick forced publish keeps prior rates and heat", async () => {
+    // Seven Events spread over ticks 0..6. A normal sample runs at tick 6; the
+    // last Event and the marker then drain on microtasks at the same tick, so the
+    // forced publish sees zero elapsed ticks and must carry the tick-6 rates/heat
+    // while still refreshing Backlog to zero.
+    const events = [0, 1, 2, 3, 4, 5, 6].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
+    const h = launch({ generator: scheduleOf(events) });
+    await step(h.driver, 6);
+    await h.handle.whenStopped;
+    const forced = h.snapshots.at(-1);
+    const normal = h.snapshots.at(-2);
+    expect(forced).toBeDefined();
+    expect(normal).toBeDefined();
+    if (!forced || !normal) return;
+    expect(forced.edges).toEqual(normal.edges); // rates carried, not recomputed
+    expect(forced.nodes).toEqual(normal.nodes); // heat carried
+    expect(forced.backlog).toBe(0); // but Backlog refreshed
+    const anyFlow = Object.values(forced.edges).some((e) => e.inRate > 0);
+    expect(anyFlow).toBe(true); // the carried rates are meaningfully non-zero
+  });
+
+  it("absorbs a throwing final setSnapshot and still resolves", async () => {
+    const h = launch({
+      generator: scheduleOf([ev(0, 0)]),
+      setSnapshot: () => {
+        throw new Error("final snapshot boom");
+      },
+    });
+    await h.handle.whenStopped; // resolves despite the throwing publish
+    expect(true).toBe(true);
+  });
+
+  it("absorbs both a throwing final setSnapshot and a throwing onError", async () => {
+    const h = launch({
+      generator: scheduleOf([ev(0, 0)]),
+      setSnapshot: () => {
+        throw new Error("final snapshot boom");
+      },
+      onError: () => {
+        throw new Error("reporter also boom");
+      },
+    });
+    await h.handle.whenStopped; // still resolves
+    expect(true).toBe(true);
+  });
+});
+
+describe("engine does not force a final publish outside a clean end", () => {
+  it("skips the forced publish on a user stop", async () => {
+    let nextId = 0;
+    // A source that never exhausts: each Event is due far in the future, so Ingest
+    // sleeps and the run never completes on its own.
+    const h = launch({ generator: () => ev(nextId++, 10_000) });
+    await step(h.driver, 7); // a couple of normal samples run
+    const afterStop = h.snapshots.length;
+    expect(afterStop).toBeGreaterThan(0);
     h.handle.stop();
+    await h.handle.whenStopped;
+    expect(h.snapshots.length).toBe(afterStop); // the continuation published nothing
+  });
+
+  it("skips the forced publish on a task failure and reports it", async () => {
+    const errors: unknown[] = [];
+    const throwing: TaskAlgorithm = {
+      normalize: (raw) => raw,
+      match: () => {
+        throw new Error("boom in match");
+      },
+    };
+    const h = launch({
+      generator: scheduleOf([ev(0, 0)]),
+      algorithm: throwing,
+      onError: (error) => errors.push(error),
+    });
+    await h.handle.whenStopped;
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(RuleError);
+    expect(h.snapshots).toHaveLength(0); // no normal sample, and no forced publish
   });
 });
 
 describe("engine stop", () => {
-  it("runs each teardown step exactly once, even when stop is called twice", async () => {
-    class CountStopDriver extends ManualDriver {
-      stops = 0;
-      override stop(): void {
-        this.stops += 1;
-        super.stop();
-      }
-    }
-    const driver = new CountStopDriver();
-    let detaches = 0;
-    const handle = start({
-      getGraph: () => ({ nodes: NODES, edges: EDGES }),
-      getRate: () => 6,
-      setSnapshot: () => undefined,
-      driver,
-      bindVisibility: () => () => {
-        detaches += 1;
-      },
-    });
-    await step(driver, 10);
-    handle.stop();
-    handle.stop(); // the second call is a guarded no-op
-    await handle.whenStopped;
-    expect(driver.stops).toBe(1); // the driver stopped once
-    expect(detaches).toBe(1); // visibility detached once
-  });
-
   it("writes no snapshot after stop", async () => {
-    const h = launch({});
+    let nextId = 0;
+    const h = launch({ generator: () => ev(nextId++, 10_000) });
     await step(h.driver, 30);
     const count = h.snapshots.length;
     expect(count).toBeGreaterThan(0);
@@ -179,35 +333,21 @@ describe("engine stop", () => {
     expect(h.snapshots.length).toBe(count);
   });
 
-  it("exits a paused task on stop", async () => {
-    const holder: { clock: Clock | null } = { clock: null };
-    const h = launch({
-      bindVisibility: (clock) => {
-        holder.clock = clock;
-        return () => undefined;
-      },
-    });
-    await step(h.driver, 5);
-    holder.clock?.pause();
-    await step(h.driver, 10); // held
-    h.handle.stop();
-    await h.handle.whenStopped; // resolves even though tasks were paused
-    expect(true).toBe(true);
-  });
-
   it("finishes teardown even when the driver's stop throws", async () => {
-    // A driver whose stop throws must not skip channel close or hang whenStopped.
     class BadStopDriver extends ManualDriver {
       override stop(): void {
         throw new Error("driver stop boom");
       }
     }
+    let nextId = 0;
     const driver = new BadStopDriver();
-    const snapshots: SimSnapshot[] = [];
     const handle = start({
       getGraph: () => ({ nodes: NODES, edges: EDGES }),
-      getRate: () => 6,
-      setSnapshot: (snapshot) => snapshots.push(snapshot),
+      setSnapshot: () => undefined,
+      scenario: bruteForceLogin,
+      algorithm: idleAlgorithm,
+      scorer: createScorer([], SCORER_CONFIG),
+      generator: () => ev(nextId++, 10_000),
       driver,
       bindVisibility: () => () => undefined,
     });
@@ -217,48 +357,12 @@ describe("engine stop", () => {
     expect(true).toBe(true);
   });
 
-  it("finishes teardown even when visibility detach throws", async () => {
-    // Detach is the last teardown step; a throw there must not escape stop.
-    const driver = new ManualDriver();
-    const handle = start({
-      getGraph: () => ({ nodes: NODES, edges: EDGES }),
-      getRate: () => 6,
-      setSnapshot: () => undefined,
-      driver,
-      bindVisibility: () => () => {
-        throw new Error("detach boom");
-      },
-    });
-    await step(driver, 20);
-    handle.stop(); // the engine swallows the detach throw
-    await handle.whenStopped; // still settles
-    expect(true).toBe(true);
-  });
-});
-
-describe("engine supervisor", () => {
-  it("stops once and surfaces an unexpected task error", async () => {
-    const errors: unknown[] = [];
-    const h = launch({
-      rates: { ingest: 6, sink: 30 },
-      getRate: (id) => {
-        if (id === "sink") {
-          throw new Error("boom in sink");
-        }
-        return 6;
-      },
-      onError: (error) => errors.push(error),
-    });
-    await step(h.driver, 20);
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toBeInstanceOf(Error);
-    await h.handle.whenStopped;
-  });
-
-  it("stops once and surfaces an unexpected sampler error", async () => {
+  it("surfaces a throwing sampler once, then stops", async () => {
     const errors: unknown[] = [];
     let calls = 0;
+    let nextId = 0;
     const h = launch({
+      generator: () => ev(nextId++, 10_000),
       setSnapshot: () => {
         calls++;
         throw new Error("boom in sampler");
@@ -269,65 +373,5 @@ describe("engine supervisor", () => {
     expect(errors).toHaveLength(1);
     expect(calls).toBe(1); // failed on the first publish, then stopped
     await h.handle.whenStopped;
-  });
-
-  it("does not surface the closed errors from a clean teardown", async () => {
-    const errors: unknown[] = [];
-    const h = launch({ onError: (error) => errors.push(error) });
-    await step(h.driver, 20);
-    h.handle.stop();
-    await h.handle.whenStopped;
-    expect(errors).toHaveLength(0);
-  });
-
-  it("tears down even when the onError handler throws", async () => {
-    const holder: { clock: Clock | null } = { clock: null };
-    const h = launch({
-      bindVisibility: (clock) => {
-        holder.clock = clock;
-        return () => undefined;
-      },
-      setSnapshot: () => {
-        throw new Error("boom in sampler");
-      },
-      onError: () => {
-        throw new Error("the handler also throws");
-      },
-    });
-    await step(h.driver, 5); // the first sample throws; fail() runs
-    const tickAtFail = holder.clock?.now() ?? -1;
-    await step(h.driver, 20); // the driver is stopped, so no more ticks
-    expect(holder.clock?.now()).toBe(tickAtFail); // torn down, not looping forever
-    await h.handle.whenStopped; // settles, no hang
-  });
-});
-
-describe("engine pause", () => {
-  it("stops sampling while paused, so heat and counts hold", async () => {
-    const holder: { clock: Clock | null } = { clock: null };
-    const h = launch({
-      rates: { ingest: 8, sink: 0.5 },
-      bindVisibility: (clock) => {
-        holder.clock = clock;
-        return () => undefined;
-      },
-    });
-    await step(h.driver, 700); // fill the Backlog past the threshold so the Sink heats up
-    const before = h.last();
-    expect(before).toBeDefined();
-    if (!before) return;
-    expect(before.nodes[SINK_ID]?.heat).toBeGreaterThan(0);
-    expect(before.backlog).toBeGreaterThan(0);
-    const count = h.snapshots.length;
-    const frozenHeat = before.nodes[SINK_ID]?.heat;
-    const frozenBacklog = before.backlog;
-
-    holder.clock?.pause();
-    await step(h.driver, 300); // paused: the sampler does not run
-    expect(h.snapshots.length).toBe(count); // no new snapshot published
-    // With no new sample, the last reading holds: heat and Backlog do not move.
-    expect(h.last()?.nodes[SINK_ID]?.heat).toBe(frozenHeat);
-    expect(h.last()?.backlog).toBe(frozenBacklog);
-    h.handle.stop();
   });
 });

@@ -1,6 +1,9 @@
+import type { ReactNode } from "react";
+
 /**
  * A labelled bar gauge with a numeric read. The caller supplies the fill color
- * as a palette token, so the gauge itself hard-codes no color.
+ * as a palette token, so the gauge itself hard-codes no color. `children`, when
+ * given, renders below the track (for example the Correctness counts).
  */
 interface GaugeProps {
   label: string;
@@ -9,6 +12,7 @@ interface GaugeProps {
   unit: string;
   /** A CSS color, always a palette token reference like `var(--a1)`. */
   fill: string;
+  children?: ReactNode;
 }
 
 export function Gauge(props: GaugeProps) {
@@ -26,6 +30,7 @@ export function Gauge(props: GaugeProps) {
           style={{ width: `${fraction * 100}%`, background: props.fill }}
         />
       </div>
+      {props.children}
     </div>
   );
 }

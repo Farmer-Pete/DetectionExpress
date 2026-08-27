@@ -45,6 +45,14 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 7. **No ECS.** For dozens of Nodes and Events, plain typed modules with arrays and maps win. Revisit only if entity counts reach the thousands.
 
+8. **Game clock only.** Time is the game Clock's ticks. The sim and the scorer use game-time values only (Clock ticks, scheduled Event timestamps, a processed watermark). Never use wall-clock time (`Date.now`, `performance.now`, `setInterval` durations) in sim or scoring logic. Render animations may pace with `requestAnimationFrame`, but never feed wall time back into the sim.
+
+## Folders for content
+
+- `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and generates it once; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.
+- `src/sim/scenarios/` holds one folder per Scenario. A Scenario composes Endpoints, drives the intent timeline, injects Attacks, and records the Ground truth. Pure logic, no React.
+- The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
+
 ## Toolchain
 
 - **Bun** is the whole toolchain: runtime, package manager, test runner, and bundler.

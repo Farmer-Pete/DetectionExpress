@@ -1,39 +1,58 @@
 /**
- * The app shell. A useEffect starts the engine once on mount and returns its
- * stop for cleanup, so render never drives the pipeline. React Strict Mode's
- * mount/unmount/mount cycle is safe: each start is self-contained and each stop
- * fully tears down.
+ * The app shell. A useEffect builds the run controller, runs it on mount, and
+ * disposes it on unmount, so render never drives the pipeline. React Strict Mode's
+ * mount/unmount/mount cycle is safe: each effect builds a fresh controller and the
+ * cleanup disposes it. The Run button reloads the current Algorithm source.
+ *
+ * Tests inject a controller through the `controller` prop, so the app never calls
+ * the real loader or engine under test.
  */
 import { ReactFlowProvider } from "@xyflow/react";
-import { useEffect } from "react";
-import { start } from "../game/engine";
-import { getGraph, getRate, useGameStore } from "../game/store";
+import { useEffect, useRef } from "react";
+import { createRunController, type RunController } from "../game/run-controller";
+import { getGraph, useGameStore } from "../game/store";
+import { bruteForceLogin } from "../sim/scenarios/brute-force-login/scenario";
+import { AlgorithmEditor } from "./AlgorithmEditor";
+import { Briefing } from "./Briefing";
 import { Hud } from "./hud/Hud";
 import { Pipeline } from "./Pipeline";
 
-export function App() {
+function buildController(): RunController {
+  return createRunController({
+    scenario: bruteForceLogin,
+    getGraph,
+    getSource: () => useGameStore.getState().source,
+    getSeed: () => useGameStore.getState().seed,
+    setSnapshot: useGameStore.getState().setSnapshot,
+    setError: useGameStore.getState().setError,
+  });
+}
+
+export function App({ controller }: { controller?: RunController } = {}) {
+  const controllerRef = useRef<RunController | null>(null);
+
   useEffect(() => {
-    const engine = start({
-      getGraph,
-      getRate,
-      setSnapshot: useGameStore.getState().setSnapshot,
-      onError: (error) => {
-        console.error("Detection Dash engine stopped on an error:", error);
-      },
-    });
-    return engine.stop;
-  }, []);
+    const active = controller ?? buildController();
+    controllerRef.current = active;
+    active.run();
+    return () => {
+      active.dispose();
+      controllerRef.current = null;
+    };
+  }, [controller]);
 
   return (
     <div className="app">
       <header className="topbar">
         <h1>Detection Dash</h1>
-        <span className="slice-tag">Slice 0 &mdash; Living stream</span>
+        <span className="slice-tag">Slice 1 &mdash; Catch the signal</span>
       </header>
       <Hud />
       <ReactFlowProvider>
         <Pipeline />
       </ReactFlowProvider>
+      <Briefing text={bruteForceLogin.briefing} />
+      <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
     </div>
   );
 }

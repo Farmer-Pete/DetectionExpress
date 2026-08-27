@@ -111,6 +111,26 @@ body {
     background 0.2s linear;
 }
 
+.gauge-counts {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.gauge-count-ok {
+  color: var(--ok);
+}
+
+.gauge-count-alert {
+  color: var(--alert);
+}
+
+.gauge-count-threat {
+  color: var(--threat);
+}
+
 /* Canvas */
 .pipeline {
   flex: 1 1 auto;
@@ -140,6 +160,16 @@ body {
 .node-sink {
   border-color: var(--a3);
   box-shadow: 0 0 14px color-mix(in srgb, var(--a3) 30%, transparent);
+}
+
+.node-normalize {
+  border-color: var(--a4);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a4) 27%, transparent);
+}
+
+.node-match {
+  border-color: var(--a2);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a2) 27%, transparent);
 }
 
 .node-title {
@@ -177,6 +207,14 @@ body {
   background: var(--a3);
 }
 
+.node-normalize .react-flow__handle {
+  background: var(--a4);
+}
+
+.node-match .react-flow__handle {
+  background: var(--a2);
+}
+
 /* Wire: a chevron belt */
 .stream-belt-bg {
   fill: var(--panel2);
@@ -206,4 +244,87 @@ body {
 
 .node-danger {
   animation: sink-strobe 0.5s ease-in-out infinite;
+}
+
+/* Briefing */
+.briefing {
+  margin: 0 1.5rem 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.briefing-title {
+  color: var(--dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  margin-bottom: 0.25rem;
+}
+
+.briefing-text {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+/* Algorithm editor */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 1.5rem 1rem;
+}
+
+.editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.editor-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.editor-run {
+  padding: 0.3rem 1.1rem;
+  border-radius: 8px;
+  border: 1px solid var(--a1);
+  background: color-mix(in srgb, var(--a1) 18%, transparent);
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editor-run:hover {
+  background: color-mix(in srgb, var(--a1) 30%, transparent);
+}
+
+.editor-code {
+  width: 100%;
+  min-height: 150px;
+  resize: vertical;
+  padding: 0.6rem 0.8rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  tab-size: 2;
+}
+
+.editor-error {
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--threat);
+  background: color-mix(in srgb, var(--threat) 15%, transparent);
+  color: var(--threat);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
 }

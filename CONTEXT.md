@@ -35,15 +35,19 @@ A monitored source of security telemetry, such as a host, a server, a firewall, 
 _Avoid_: Source, feed, input, device.
 
 **Alert**:
-An outcome the Engine emits when it flags an Event as a threat. A correct Alert raises Correctness. A wrong one lowers it.
+An object the Engine raises when the Algorithm decides a pattern is an Attack. It names a reason, a time, and the Events it cites. One correct Alert per Attack raises Correctness. A wrong or duplicate Alert lowers it.
 _Avoid_: Detection, hit, notification, flag.
 
 **Threat**:
-An Event that represents real malicious activity. The Engine should Alert on it. Missing one lowers Correctness.
-_Avoid_: Attack, signal, bad event.
+An Event that is part of a real Attack. On its own it can look ordinary. The Attack is the pattern across its Threats.
+_Avoid_: signal, bad event.
+
+**Attack**:
+A real intrusion hidden in the stream. It is one or more Threats on an account inside a time span. A Hunt defines the pattern that reveals it. The Engine should raise one Alert per Attack. Catching it raises Correctness. Missing it lowers it.
+_Avoid_: breach, incident, wave.
 
 **Ground truth**:
-The hidden label on each Event. It marks the Event as benign or as a Threat. The game keeps it hidden from the player and protects it from tampering.
+The hidden knowledge of which Events form the real Attacks in a run. The game holds it in the scorer, apart from the Events the Algorithm sees. The player does not see it. The code is open, so we do not obfuscate it.
 _Avoid_: Answer, label, key, tag.
 
 **Backlog**:
@@ -79,7 +83,7 @@ How well the Engine keeps up with the incoming event rate. Falling behind grows 
 _Avoid_: Speed, performance, rate.
 
 **Correctness**:
-How well the Engine produces the right outcomes. Missed Threats and false Alerts both lower it.
+How well the Engine produces the right outcomes. Missed Attacks and false Alerts both lower it.
 _Avoid_: Accuracy, quality.
 
 **Cost**:

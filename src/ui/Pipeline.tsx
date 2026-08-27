@@ -1,7 +1,7 @@
 /**
  * The Pipeline canvas. React Flow stays controlled: nodes and edges live in the
  * store, not in component state. Node and edge types are declared at module
- * scope so their identity is stable across renders. Slice 0 locks the topology,
+ * scope so their identity is stable across renders. Slice 1 locks the topology,
  * so the player cannot drag, connect, select, or delete anything.
  */
 import { Background, type EdgeTypes, type NodeTypes, ReactFlow } from "@xyflow/react";
@@ -9,9 +9,16 @@ import "@xyflow/react/dist/style.css";
 import { useGameStore } from "../game/store";
 import { StreamEdge } from "./edges/StreamEdge";
 import { IngestNode } from "./nodes/IngestNode";
+import { MatchNode } from "./nodes/MatchNode";
+import { NormalizeNode } from "./nodes/NormalizeNode";
 import { SinkNode } from "./nodes/SinkNode";
 
-const nodeTypes: NodeTypes = { ingest: IngestNode, sink: SinkNode };
+const nodeTypes: NodeTypes = {
+  ingest: IngestNode,
+  normalize: NormalizeNode,
+  match: MatchNode,
+  sink: SinkNode,
+};
 const edgeTypes: EdgeTypes = { stream: StreamEdge };
 
 export function Pipeline() {
@@ -33,11 +40,8 @@ export function Pipeline() {
         nodesConnectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
-        // Keep nodes interactive (elementsSelectable stays on) so the Sink slider
-        // receives pointer events. Turning it off sets pointer-events:none on the
-        // node, and the slider goes dead. Dragging is still off via nodesDraggable.
-        // Slice 0 is a fixed two-node display. The canvas does not pan or zoom,
-        // so a slider drag never moves the graph. Later slices can re-enable this.
+        // Slice 1 locks the four-node chain to a fixed display: it does not pan or
+        // zoom, and the player edits the Rule in the Algorithm editor, not the graph.
         panOnDrag={false}
         panOnScroll={false}
         zoomOnScroll={false}
