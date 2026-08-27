@@ -35,10 +35,14 @@ export class ManualDriver implements TickDriver {
     this.onTick = null;
   }
 
-  advance(ticks: number): void {
-    for (let i = 0; i < ticks; i++) {
-      this.onTick?.();
-    }
+  /**
+   * Fire exactly one tick. Multi-tick stepping is deliberately not offered here:
+   * a synchronous burst would starve a re-registering task, whose continuation
+   * runs as a microtask between ticks. Bulk stepping goes through a helper that
+   * drains those microtasks per tick (the `step` helpers in the task tests).
+   */
+  tick(): void {
+    this.onTick?.();
   }
 }
 

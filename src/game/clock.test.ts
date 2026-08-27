@@ -14,11 +14,22 @@ function makeClock(): { clock: Clock; driver: ManualDriver } {
   return { clock, driver };
 }
 
+/**
+ * Fire n ticks in a row. These tests check the tick count and single waits, so
+ * a synchronous burst is faithful. A test that drives a re-registering task
+ * steps one tick at a time and flushes between them instead.
+ */
+function tickN(driver: ManualDriver, n: number): void {
+  for (let i = 0; i < n; i++) {
+    driver.tick();
+  }
+}
+
 describe("Clock", () => {
   it("advances the tick count by hand", () => {
     const { clock, driver } = makeClock();
     expect(clock.now()).toBe(0);
-    driver.advance(5);
+    tickN(driver, 5);
     expect(clock.now()).toBe(5);
   });
 
@@ -28,10 +39,10 @@ describe("Clock", () => {
     clock.sleep(3).then(() => {
       woke = true;
     });
-    driver.advance(2);
+    tickN(driver, 2);
     await flush();
     expect(woke).toBe(false);
-    driver.advance(1);
+    tickN(driver, 1);
     await flush();
     expect(woke).toBe(true);
   });
@@ -57,7 +68,7 @@ describe("Clock", () => {
     clock.sleep(1).then(() => {
       woke = true;
     });
-    driver.advance(10);
+    tickN(driver, 10);
     await flush();
     expect(clock.now()).toBe(0); // paused ticks do not advance the count
     expect(passed).toBe(false);
@@ -84,10 +95,10 @@ describe("Clock", () => {
     clock.onTick(() => {
       ticks++;
     });
-    driver.advance(4);
+    tickN(driver, 4);
     expect(ticks).toBe(4);
     clock.pause();
-    driver.advance(4);
+    tickN(driver, 4);
     expect(ticks).toBe(4); // paused: the sampler is skipped
   });
 
@@ -111,9 +122,9 @@ describe("Clock", () => {
 
   it("stops advancing after stop", () => {
     const { clock, driver } = makeClock();
-    driver.advance(3);
+    tickN(driver, 3);
     clock.stop();
-    driver.advance(3);
+    tickN(driver, 3);
     expect(clock.now()).toBe(3);
   });
 });

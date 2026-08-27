@@ -16,7 +16,7 @@ async function flush(): Promise<void> {
 /** Step the clock one tick at a time, flushing so tasks progress each tick. */
 async function step(driver: ManualDriver, ticks: number): Promise<void> {
   for (let i = 0; i < ticks; i++) {
-    driver.advance(1);
+    driver.tick();
     await flush();
   }
 }
@@ -109,6 +109,40 @@ describe("runSink", () => {
     clock.stop();
     await task;
     expect(error).toBeInstanceOf(ClockStoppedError);
+  });
+});
+
+describe("backpressure", () => {
+  it("blocks the producer at capacity and loses nothing when drained", async () => {
+    const driver = new ManualDriver();
+    const clock = new Clock(HZ, driver);
+    const backlog = new Channel<Event>(3); // a small cap forces backpressure
+    let completed = 0;
+    guard(runIngest(backlog, clock, fixed(30), "ingest", HZ)); // fast producer, gap 2
+    await flush();
+    await step(driver, 40); // long enough to overfill if drops were allowed
+
+    // No Sink yet: the buffer caps at 3 and the next producer blocks. The held
+    // item is not counted as accepted, so nothing is dropped.
+    expect(backlog.size).toBe(3);
+    expect(backlog.accepted).toBe(3);
+    const acceptedWhileBlocked = backlog.accepted;
+
+    // Start a slow Sink and drain. Freed slots admit the blocked producer.
+    guard(
+      runSink(backlog, clock, fixed(6), "sink", HZ, () => {
+        completed += 1;
+      }),
+    ); // delay 10
+    await step(driver, 200);
+
+    expect(backlog.accepted).toBeGreaterThan(acceptedWhileBlocked); // production resumed
+    expect(backlog.pulled).toBeGreaterThan(0);
+    expect(completed).toBeGreaterThan(0);
+    expect(completed).toBeLessThanOrEqual(backlog.pulled); // one may be in-flight
+    // Conservation: every accepted Event is still buffered or was pulled. No loss.
+    expect(backlog.accepted).toBe(backlog.pulled + backlog.size);
+    clock.stop();
   });
 });
 

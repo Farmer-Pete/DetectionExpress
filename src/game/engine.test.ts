@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode } from "../sim/graph";
 import type { SimSnapshot } from "../sim/snapshot";
 import { type Clock, ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
+import { CHANNEL_CAP, HEAT_STROBE } from "./tuning";
 
 const NODES: GraphNode[] = [
   { id: "ingest", kind: "ingest" },
@@ -24,7 +25,7 @@ async function flush(): Promise<void> {
 
 async function step(driver: ManualDriver, ticks: number): Promise<void> {
   for (let i = 0; i < ticks; i++) {
-    driver.advance(1);
+    driver.tick();
     await flush();
   }
 }
@@ -125,14 +126,16 @@ describe("engine sampler", () => {
     h.handle.stop();
   });
 
-  it("reddens the Sink and keeps the Ingest calm when the Sink is the bottleneck", async () => {
+  it("reddens the Sink to danger and keeps the Ingest calm at the bottleneck", async () => {
     const h = launch({ rates: { ingest: 8, sink: 0.5 } }); // sink far slower
-    await step(h.driver, 700); // fill the Backlog past the occupancy threshold
+    await step(h.driver, 700); // run the full ramp: Backlog fills, the Sink reddens
     const snap = h.last();
     expect(snap).toBeDefined();
     if (!snap) return;
-    expect(snap.backlog).toBeGreaterThan(0);
-    expect(snap.nodes[SINK_ID]?.heat).toBeGreaterThan(0); // the bottleneck reddens
+    // The slice's central outcome: the Backlog climbs high and the Sink crosses
+    // the strobe threshold, so a viewer sees it go red, not merely warm.
+    expect(snap.backlog).toBeGreaterThan(CHANNEL_CAP / 2); // occupancy past the ramp threshold
+    expect(snap.nodes[SINK_ID]?.heat).toBeGreaterThan(HEAT_STROBE); // red and strobing
     expect(snap.nodes[INGEST_ID]?.heat).toBe(0); // the source stays calm
     h.handle.stop();
   });

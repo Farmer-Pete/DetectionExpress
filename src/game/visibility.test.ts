@@ -7,6 +7,13 @@ function setHidden(hidden: boolean): void {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
 }
 
+/** Fire n ticks in a row. These tests only read the tick count, so a burst is fine. */
+function tickN(driver: ManualDriver, n: number): void {
+  for (let i = 0; i < n; i++) {
+    driver.tick();
+  }
+}
+
 afterEach(() => {
   setHidden(false);
 });
@@ -17,7 +24,7 @@ describe("bindVisibility", () => {
     const driver = new ManualDriver();
     const clock = new Clock(60, driver);
     const detach = bindVisibility(clock);
-    driver.advance(10);
+    tickN(driver, 10);
     expect(clock.now()).toBe(0); // paused: no advance
     detach();
     clock.stop();
@@ -28,7 +35,7 @@ describe("bindVisibility", () => {
     const driver = new ManualDriver();
     const clock = new Clock(60, driver);
     const detach = bindVisibility(clock);
-    driver.advance(10);
+    tickN(driver, 10);
     expect(clock.now()).toBe(10);
     detach();
     clock.stop();
@@ -39,17 +46,17 @@ describe("bindVisibility", () => {
     const driver = new ManualDriver();
     const clock = new Clock(60, driver);
     const detach = bindVisibility(clock);
-    driver.advance(5);
+    tickN(driver, 5);
     expect(clock.now()).toBe(5);
 
     setHidden(true);
     document.dispatchEvent(new Event("visibilitychange"));
-    driver.advance(100);
+    tickN(driver, 100);
     expect(clock.now()).toBe(5); // paused: hidden ticks do not advance
 
     setHidden(false);
     document.dispatchEvent(new Event("visibilitychange"));
-    driver.advance(3);
+    tickN(driver, 3);
     expect(clock.now()).toBe(8); // resumed
     detach();
     clock.stop();
@@ -64,7 +71,7 @@ describe("bindVisibility", () => {
 
     setHidden(true);
     document.dispatchEvent(new Event("visibilitychange"));
-    driver.advance(5);
+    tickN(driver, 5);
     expect(clock.now()).toBe(5); // the listener is gone, so no pause
     clock.stop();
   });
