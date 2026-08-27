@@ -33,9 +33,9 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 1. **The sim owns the loop. React never drives it.** The loop lives in a plain-TS module in `src/game/`. A `useEffect` starts and stops it. Render never ticks the sim.
 
-2. **Fixed timestep for the sim. requestAnimationFrame for render.** Step the sim by a constant delta. Drain an accumulator each frame. Clamp the max steps per frame to avoid the "spiral of death". Pause the accumulator when the tab hides.
+2. **The sim is a real-time async pipeline driven by one Clock.** Nodes are async tasks. Events flow over a `Channel` between nodes, with backpressure. One Clock owns time, pause, and stop, and every wait goes through it. (Part 0 note: the Sink uses a short `sleep` to fake a slow node. That sleep is temporary. It goes away once players write their own node code, and the pipeline stays async but becomes deterministic.)
 
-3. **Each tick publishes one atomic snapshot.** The sim writes a single immutable snapshot per tick. React never reads half-updated state.
+3. **A sampler publishes one atomic snapshot.** A 10 to 30 Hz sampler reads the running pipeline and writes a single immutable snapshot. React never reads half-updated state.
 
 4. **React subscribes through an external store.** Read the snapshot with `useSyncExternalStore` or a store like Zustand. Never hold fast-changing sim state in `useState`. That re-renders the tree every tick.
 
@@ -54,8 +54,8 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 ## Testing
 
 - The test runner is `bun test` (see `bunfig.toml` for the happy-dom preload).
-- Test the sim as pure functions. It needs no DOM.
-- Make the sim deterministic. Use a seeded RNG and a fake clock. Snapshot sim state at tick N.
+- Test the transforms, the `Channel`, and the rate and heat math as pure functions. They need no DOM.
+- Keep real time out of the tests. Give the Sink an injectable delay, not a real clock. Drive the `Channel` by hand and assert on counts, rates, and heat.
 - Test React parts with `@testing-library/react`. happy-dom provides the DOM.
 
 ## React Flow

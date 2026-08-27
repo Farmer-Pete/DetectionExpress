@@ -1,0 +1,333 @@
+import { describe, expect, it } from "bun:test";
+import type { GraphEdge, GraphNode } from "../sim/graph";
+import type { SimSnapshot } from "../sim/snapshot";
+import { type Clock, ManualDriver, type TickDriver } from "./clock";
+import { type StartOptions, start } from "./engine";
+import { CHANNEL_CAP, HEAT_STROBE } from "./tuning";
+
+const NODES: GraphNode[] = [
+  { id: "ingest", kind: "ingest" },
+  { id: "sink", kind: "sink" },
+];
+const EDGES: GraphEdge[] = [{ id: "wire", source: "ingest", target: "sink" }];
+
+// Read snapshot maps by variable keys: the maps are index signatures, so TS
+// wants bracket access while Biome would rewrite a literal key to dot notation.
+const WIRE_ID = "wire";
+const SINK_ID = "sink";
+const INGEST_ID = "ingest";
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    await Promise.resolve();
+  }
+}
+
+async function step(driver: ManualDriver, ticks: number): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    driver.tick();
+    await flush();
+  }
+}
+
+interface Harness {
+  handle: ReturnType<typeof start>;
+  driver: ManualDriver;
+  snapshots: SimSnapshot[];
+  last: () => SimSnapshot | undefined;
+}
+
+function launch(overrides: Partial<StartOptions> & { rates?: Record<string, number> }): Harness {
+  const driver = new ManualDriver();
+  const snapshots: SimSnapshot[] = [];
+  const rates = overrides.rates ?? { ingest: 6, sink: 30 };
+  const options: StartOptions = {
+    getGraph: () => ({ nodes: NODES, edges: EDGES }),
+    getRate: overrides.getRate ?? ((id) => rates[id] ?? 1),
+    setSnapshot: overrides.setSnapshot ?? ((snapshot) => snapshots.push(snapshot)),
+    driver,
+    bindVisibility: overrides.bindVisibility ?? (() => () => undefined),
+    ...(overrides.onError ? { onError: overrides.onError } : {}),
+  };
+  const handle = start(options);
+  return { handle, driver, snapshots, last: () => snapshots.at(-1) };
+}
+
+/** A driver that records whether the Clock ever started it. */
+class SpyDriver implements TickDriver {
+  started = false;
+  stopped = false;
+  start(): void {
+    this.started = true;
+  }
+  stop(): void {
+    this.stopped = true;
+  }
+}
+
+describe("engine start guards", () => {
+  it("throws on an invalid graph and allocates nothing", () => {
+    const driver = new SpyDriver();
+    expect(() =>
+      start({
+        getGraph: () => ({ nodes: [{ id: "x", kind: "detect" }], edges: [] }),
+        getRate: () => 1,
+        setSnapshot: () => undefined,
+        driver,
+        bindVisibility: () => () => undefined,
+      }),
+    ).toThrow(/unknown/i);
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
+  it("tears down after a setup failure past allocation", () => {
+    // bindVisibility runs after the Clock and channel exist. A throw here must
+    // stop the started driver and rethrow, so a half-built engine leaks nothing.
+    const driver = new SpyDriver();
+    const snapshots: SimSnapshot[] = [];
+    expect(() =>
+      start({
+        getGraph: () => ({ nodes: NODES, edges: EDGES }),
+        getRate: () => 6,
+        setSnapshot: (snapshot) => snapshots.push(snapshot),
+        driver,
+        bindVisibility: () => {
+          throw new Error("visibility bind boom");
+        },
+      }),
+    ).toThrow(/visibility bind boom/);
+    expect(driver.started).toBe(true); // the Clock started it
+    expect(driver.stopped).toBe(true); // teardown stopped it again
+    expect(snapshots).toHaveLength(0); // nothing published
+  });
+});
+
+describe("engine sampler", () => {
+  it("publishes rates that track the fed flow when the Sink keeps up", async () => {
+    const h = launch({ rates: { ingest: 6, sink: 30 } });
+    await step(h.driver, 150);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const edge = snap.edges[WIRE_ID];
+    expect(edge).toBeDefined();
+    if (!edge) return;
+    expect(edge.inRate).toBeGreaterThan(3);
+    expect(edge.inRate).toBeLessThan(9);
+    expect(edge.outRate).toBeGreaterThan(3);
+    // The Sink keeps up, so completions track the ~6/s arrivals. The 500ms
+    // window smooths to that rate, not a jittery spike. A broken smoothing
+    // (per-sample, or a wrong window) would miss this band.
+    expect(snap.throughput).toBeGreaterThan(3);
+    expect(snap.throughput).toBeLessThan(9);
+    // The Sink keeps up, so its input stays near empty and it stays cool.
+    expect(snap.nodes[SINK_ID]?.heat).toBe(0);
+    expect(snap.nodes[INGEST_ID]?.heat).toBe(0);
+    h.handle.stop();
+  });
+
+  it("reddens the Sink to danger and keeps the Ingest calm at the bottleneck", async () => {
+    const h = launch({ rates: { ingest: 8, sink: 0.5 } }); // sink far slower
+    await step(h.driver, 700); // run the full ramp: Backlog fills, the Sink reddens
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    // The slice's central outcome: the Backlog climbs high and the Sink crosses
+    // the strobe threshold, so a viewer sees it go red, not merely warm.
+    expect(snap.backlog).toBeGreaterThan(CHANNEL_CAP / 2); // occupancy past the ramp threshold
+    expect(snap.nodes[SINK_ID]?.heat).toBeGreaterThan(HEAT_STROBE); // red and strobing
+    expect(snap.nodes[INGEST_ID]?.heat).toBe(0); // the source stays calm
+    h.handle.stop();
+  });
+});
+
+describe("engine stop", () => {
+  it("runs each teardown step exactly once, even when stop is called twice", async () => {
+    class CountStopDriver extends ManualDriver {
+      stops = 0;
+      override stop(): void {
+        this.stops += 1;
+        super.stop();
+      }
+    }
+    const driver = new CountStopDriver();
+    let detaches = 0;
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: () => undefined,
+      driver,
+      bindVisibility: () => () => {
+        detaches += 1;
+      },
+    });
+    await step(driver, 10);
+    handle.stop();
+    handle.stop(); // the second call is a guarded no-op
+    await handle.whenStopped;
+    expect(driver.stops).toBe(1); // the driver stopped once
+    expect(detaches).toBe(1); // visibility detached once
+  });
+
+  it("writes no snapshot after stop", async () => {
+    const h = launch({});
+    await step(h.driver, 30);
+    const count = h.snapshots.length;
+    expect(count).toBeGreaterThan(0);
+    h.handle.stop();
+    await step(h.driver, 30);
+    expect(h.snapshots.length).toBe(count);
+  });
+
+  it("exits a paused task on stop", async () => {
+    const holder: { clock: Clock | null } = { clock: null };
+    const h = launch({
+      bindVisibility: (clock) => {
+        holder.clock = clock;
+        return () => undefined;
+      },
+    });
+    await step(h.driver, 5);
+    holder.clock?.pause();
+    await step(h.driver, 10); // held
+    h.handle.stop();
+    await h.handle.whenStopped; // resolves even though tasks were paused
+    expect(true).toBe(true);
+  });
+
+  it("finishes teardown even when the driver's stop throws", async () => {
+    // A driver whose stop throws must not skip channel close or hang whenStopped.
+    class BadStopDriver extends ManualDriver {
+      override stop(): void {
+        throw new Error("driver stop boom");
+      }
+    }
+    const driver = new BadStopDriver();
+    const snapshots: SimSnapshot[] = [];
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: () => () => undefined,
+    });
+    await step(driver, 20);
+    handle.stop(); // the engine swallows the driver throw
+    await handle.whenStopped; // still settles
+    expect(true).toBe(true);
+  });
+
+  it("finishes teardown even when visibility detach throws", async () => {
+    // Detach is the last teardown step; a throw there must not escape stop.
+    const driver = new ManualDriver();
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: () => undefined,
+      driver,
+      bindVisibility: () => () => {
+        throw new Error("detach boom");
+      },
+    });
+    await step(driver, 20);
+    handle.stop(); // the engine swallows the detach throw
+    await handle.whenStopped; // still settles
+    expect(true).toBe(true);
+  });
+});
+
+describe("engine supervisor", () => {
+  it("stops once and surfaces an unexpected task error", async () => {
+    const errors: unknown[] = [];
+    const h = launch({
+      rates: { ingest: 6, sink: 30 },
+      getRate: (id) => {
+        if (id === "sink") {
+          throw new Error("boom in sink");
+        }
+        return 6;
+      },
+      onError: (error) => errors.push(error),
+    });
+    await step(h.driver, 20);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(Error);
+    await h.handle.whenStopped;
+  });
+
+  it("stops once and surfaces an unexpected sampler error", async () => {
+    const errors: unknown[] = [];
+    let calls = 0;
+    const h = launch({
+      setSnapshot: () => {
+        calls++;
+        throw new Error("boom in sampler");
+      },
+      onError: (error) => errors.push(error),
+    });
+    await step(h.driver, 20);
+    expect(errors).toHaveLength(1);
+    expect(calls).toBe(1); // failed on the first publish, then stopped
+    await h.handle.whenStopped;
+  });
+
+  it("does not surface the closed errors from a clean teardown", async () => {
+    const errors: unknown[] = [];
+    const h = launch({ onError: (error) => errors.push(error) });
+    await step(h.driver, 20);
+    h.handle.stop();
+    await h.handle.whenStopped;
+    expect(errors).toHaveLength(0);
+  });
+
+  it("tears down even when the onError handler throws", async () => {
+    const holder: { clock: Clock | null } = { clock: null };
+    const h = launch({
+      bindVisibility: (clock) => {
+        holder.clock = clock;
+        return () => undefined;
+      },
+      setSnapshot: () => {
+        throw new Error("boom in sampler");
+      },
+      onError: () => {
+        throw new Error("the handler also throws");
+      },
+    });
+    await step(h.driver, 5); // the first sample throws; fail() runs
+    const tickAtFail = holder.clock?.now() ?? -1;
+    await step(h.driver, 20); // the driver is stopped, so no more ticks
+    expect(holder.clock?.now()).toBe(tickAtFail); // torn down, not looping forever
+    await h.handle.whenStopped; // settles, no hang
+  });
+});
+
+describe("engine pause", () => {
+  it("stops sampling while paused, so heat and counts hold", async () => {
+    const holder: { clock: Clock | null } = { clock: null };
+    const h = launch({
+      rates: { ingest: 8, sink: 0.5 },
+      bindVisibility: (clock) => {
+        holder.clock = clock;
+        return () => undefined;
+      },
+    });
+    await step(h.driver, 700); // fill the Backlog past the threshold so the Sink heats up
+    const before = h.last();
+    expect(before).toBeDefined();
+    if (!before) return;
+    expect(before.nodes[SINK_ID]?.heat).toBeGreaterThan(0);
+    expect(before.backlog).toBeGreaterThan(0);
+    const count = h.snapshots.length;
+    const frozenHeat = before.nodes[SINK_ID]?.heat;
+    const frozenBacklog = before.backlog;
+
+    holder.clock?.pause();
+    await step(h.driver, 300); // paused: the sampler does not run
+    expect(h.snapshots.length).toBe(count); // no new snapshot published
+    // With no new sample, the last reading holds: heat and Backlog do not move.
+    expect(h.last()?.nodes[SINK_ID]?.heat).toBe(frozenHeat);
+    expect(h.last()?.backlog).toBe(frozenBacklog);
+    h.handle.stop();
+  });
+});
