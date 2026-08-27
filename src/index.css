@@ -1,6 +1,23 @@
 :root {
   color-scheme: dark;
   font-family: system-ui, sans-serif;
+
+  /* Detection Dash HUD — Vibrant Tones (docs/design/hud-palette.md) */
+  --bg: #0f303d;
+  --panel: #154457;
+  --panel2: #1b556d;
+  --line: rgba(251, 213, 123, 0.2);
+  --ink: #fbd57b;
+  --dim: #938c60;
+
+  --a1: #f8961e; /* Throughput, active Node, sparkline endpoint */
+  --a2: #f94144; /* Correctness, graph line, labels — shares Threat's hue */
+  --a3: #277da1; /* Cost */
+  --a4: #43aa8b; /* spare (seagrass) */
+
+  --threat: #f94144;
+  --alert: #f9c74f;
+  --ok: #43aa8b;
 }
 
 * {
@@ -10,13 +27,183 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #0b0f14;
-  color: #e6edf3;
+  background: var(--bg);
+  background-image: radial-gradient(1200px 500px at 50% -10%, var(--panel) 0%, var(--bg) 60%);
+  color: var(--ink);
 }
 
-main {
+.app {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding: 2rem;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 0.5rem;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+
+.slice-tag {
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+/* HUD */
+.hud {
+  display: flex;
+  gap: 1rem;
+  padding: 0.5rem 1.5rem 1rem;
+}
+
+.gauge {
+  flex: 1 1 0;
+  max-width: 320px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+}
+
+.gauge-label {
+  color: var(--dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.gauge-value {
+  font-size: 1.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.gauge-unit {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--dim);
+  margin-left: 0.15rem;
+}
+
+.gauge-track {
+  margin-top: 0.5rem;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition:
+    width 0.12s linear,
+    background 0.2s linear;
+}
+
+/* Canvas */
+.pipeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.react-flow__attribution {
+  background: transparent;
+  color: var(--dim);
+}
+
+/* Nodes */
+.node {
+  width: 116px;
+  padding: 0.6rem 0.7rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 2px solid var(--a1);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a1) 27%, transparent);
+  text-align: center;
+}
+
+.node-sink {
+  border-color: var(--a3);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a3) 30%, transparent);
+}
+
+.node-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.node-sub {
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.1rem;
+}
+
+.node-unit {
+  margin-left: 0.1rem;
+}
+
+.node-slider {
+  width: 100%;
+  margin-top: 0.5rem;
+  accent-color: var(--a1);
+  cursor: pointer;
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--a1);
+  border: none;
+}
+
+.node-sink .react-flow__handle {
+  background: var(--a3);
+}
+
+/* Wire: a chevron belt */
+.stream-belt-bg {
+  fill: var(--panel2);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.stream-chevron {
+  stroke: var(--ok);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The Sink blinks in the threat color when its own heat runs high. */
+@keyframes sink-strobe {
+  0%,
+  100% {
+    box-shadow: 0 0 10px color-mix(in srgb, var(--threat) 33%, transparent);
+    border-color: var(--threat);
+  }
+  50% {
+    box-shadow: 0 0 22px color-mix(in srgb, var(--threat) 67%, transparent);
+    border-color: var(--threat);
+  }
+}
+
+.node-danger {
+  animation: sink-strobe 0.5s ease-in-out infinite;
 }
