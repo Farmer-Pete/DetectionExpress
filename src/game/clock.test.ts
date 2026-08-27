@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Clock, ClockStoppedError, ManualDriver } from "./clock";
+import { Clock, ClockStoppedError, ManualDriver, type TickDriver } from "./clock";
 
 /** Drain the microtask queue without any real timer. */
 async function flush(): Promise<void> {
@@ -115,5 +115,41 @@ describe("Clock", () => {
     clock.stop();
     driver.advance(3);
     expect(clock.now()).toBe(3);
+  });
+});
+
+describe("Clock driver resilience", () => {
+  it("stops the driver when its start throws, so construction leaks nothing", () => {
+    class FailStartDriver implements TickDriver {
+      stopped = false;
+      start(): void {
+        throw new Error("start boom");
+      }
+      stop(): void {
+        this.stopped = true;
+      }
+    }
+    const driver = new FailStartDriver();
+    expect(() => new Clock(60, driver)).toThrow(/start boom/);
+    expect(driver.stopped).toBe(true); // partial start undone
+  });
+
+  it("rejects a pending sleep even when the driver's stop throws", async () => {
+    class FailStopDriver implements TickDriver {
+      start(): void {
+        // no-op: this test never advances
+      }
+      stop(): void {
+        throw new Error("stop boom");
+      }
+    }
+    const clock = new Clock(60, new FailStopDriver());
+    let rejection: unknown = null;
+    const guarded = clock.sleep(5).catch((error: unknown) => {
+      rejection = error;
+    });
+    expect(() => clock.stop()).toThrow(/stop boom/); // the driver error still surfaces
+    await guarded;
+    expect(rejection).toBeInstanceOf(ClockStoppedError); // but the waiter settled
   });
 });

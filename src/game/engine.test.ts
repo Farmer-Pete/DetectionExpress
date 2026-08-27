@@ -152,6 +152,28 @@ describe("engine stop", () => {
     await h.handle.whenStopped; // resolves even though tasks were paused
     expect(true).toBe(true);
   });
+
+  it("finishes teardown even when the driver's stop throws", async () => {
+    // A driver whose stop throws must not skip channel close or hang whenStopped.
+    class BadStopDriver extends ManualDriver {
+      override stop(): void {
+        throw new Error("driver stop boom");
+      }
+    }
+    const driver = new BadStopDriver();
+    const snapshots: SimSnapshot[] = [];
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: () => () => undefined,
+    });
+    await step(driver, 20);
+    handle.stop(); // the engine swallows the driver throw
+    await handle.whenStopped; // still settles
+    expect(true).toBe(true);
+  });
 });
 
 describe("engine supervisor", () => {

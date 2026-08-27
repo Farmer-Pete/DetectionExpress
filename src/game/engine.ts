@@ -169,7 +169,13 @@ export function start(options: StartOptions): EngineHandle {
       return;
     }
     stopped = true;
-    clock?.stop();
+    // Each step is independent: a throw in one (a driver that fails to stop)
+    // must not skip closing the channels or detaching visibility.
+    try {
+      clock?.stop();
+    } catch (error) {
+      console.error("Detection Dash: clock.stop() threw during teardown:", error);
+    }
     if (channels) {
       for (const channel of channels.values()) {
         channel.close();

@@ -84,9 +84,14 @@ export class Clock {
   constructor(hz: number, driver: TickDriver) {
     this.hz = hz;
     this.driver = driver;
-    driver.start(() => {
-      this.onDriverTick();
-    });
+    try {
+      driver.start(() => {
+        this.onDriverTick();
+      });
+    } catch (error) {
+      driver.stop(); // undo a partial start, so a failed construction leaks nothing
+      throw error;
+    }
   }
 
   /** Monotonic tick count. */
@@ -151,7 +156,8 @@ export class Clock {
       return;
     }
     this.stopped = true;
-    this.driver.stop();
+    // Reject every waiter first, so a throwing driver.stop() can never strand a
+    // pending sleep or gate and hang whenStopped.
     const error = new ClockStoppedError();
     for (const sleeper of this.sleepers.splice(0)) {
       sleeper.reject(error);
@@ -161,6 +167,7 @@ export class Clock {
     for (const gate of held) {
       gate.reject(error);
     }
+    this.driver.stop();
   }
 
   private onDriverTick(): void {
