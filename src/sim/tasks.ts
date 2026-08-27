@@ -62,3 +62,71 @@ export async function runSink(
     onComplete(); // the Event is now processed; drives the Throughput gauge
   }
 }
+
+/**
+ * A node's channels: the edge it targets is its `input`, the edge it sources is
+ * its `output`. A source has no input; a sink has no output.
+ */
+export interface NodeWiring {
+  input: Channel<Event> | undefined;
+  output: Channel<Event> | undefined;
+}
+
+/** The shared runtime a node task needs, apart from its own wiring. */
+export interface NodeRuntime {
+  clock: TaskClock;
+  getRate: GetRate;
+  clockHz: number;
+  /** Called each time a node finishes an Event. Drives the Throughput gauge. */
+  onComplete: () => void;
+}
+
+/**
+ * A node task: given a node's id, wiring, and runtime, run its loop until the
+ * Clock stops. The engine looks one up by node kind, so it never names a task
+ * directly.
+ */
+export type NodeTask = (nodeId: string, wiring: NodeWiring, runtime: NodeRuntime) => Promise<void>;
+
+/** Resolve a required channel or fail loudly. A missing one is a wiring bug. */
+function requireChannel(
+  channel: Channel<Event> | undefined,
+  nodeId: string,
+  role: string,
+): Channel<Event> {
+  if (!channel) {
+    throw new Error(`Node "${nodeId}" needs ${role} wiring, but none was built for it.`);
+  }
+  return channel;
+}
+
+/** The Ingest kind's task: produce into its output edge. */
+const ingestTask: NodeTask = (nodeId, wiring, runtime) =>
+  runIngest(
+    requireChannel(wiring.output, nodeId, "output"),
+    runtime.clock,
+    runtime.getRate,
+    nodeId,
+    runtime.clockHz,
+  );
+
+/** The Sink kind's task: drain its input edge. */
+const sinkTask: NodeTask = (nodeId, wiring, runtime) =>
+  runSink(
+    requireChannel(wiring.input, nodeId, "input"),
+    runtime.clock,
+    runtime.getRate,
+    nodeId,
+    runtime.clockHz,
+    runtime.onComplete,
+  );
+
+/**
+ * The node-kind registry: kind -> task. The engine spawns one task per graph
+ * node by its kind, so a later slice adds a node kind by adding one entry here,
+ * with no engine change.
+ */
+export const NODE_TASKS = new Map<string, NodeTask>([
+  ["ingest", ingestTask],
+  ["sink", sinkTask],
+]);

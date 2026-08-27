@@ -93,7 +93,11 @@ describe("engine sampler", () => {
     expect(edge.inRate).toBeGreaterThan(3);
     expect(edge.inRate).toBeLessThan(9);
     expect(edge.outRate).toBeGreaterThan(3);
-    expect(snap.throughput).toBeGreaterThan(0);
+    // The Sink keeps up, so completions track the ~6/s arrivals. The 500ms
+    // window smooths to that rate, not a jittery spike. A broken smoothing
+    // (per-sample, or a wrong window) would miss this band.
+    expect(snap.throughput).toBeGreaterThan(3);
+    expect(snap.throughput).toBeLessThan(9);
     // The Sink keeps up, so its input stays near empty and it stays cool.
     expect(snap.nodes[SINK_ID]?.heat).toBe(0);
     expect(snap.nodes[INGEST_ID]?.heat).toBe(0);
@@ -227,12 +231,21 @@ describe("engine pause", () => {
       },
     });
     await step(h.driver, 700); // fill the Backlog past the threshold so the Sink heats up
-    expect(h.last()?.nodes[SINK_ID]?.heat).toBeGreaterThan(0);
+    const before = h.last();
+    expect(before).toBeDefined();
+    if (!before) return;
+    expect(before.nodes[SINK_ID]?.heat).toBeGreaterThan(0);
+    expect(before.backlog).toBeGreaterThan(0);
     const count = h.snapshots.length;
+    const frozenHeat = before.nodes[SINK_ID]?.heat;
+    const frozenBacklog = before.backlog;
 
     holder.clock?.pause();
     await step(h.driver, 300); // paused: the sampler does not run
-    expect(h.snapshots.length).toBe(count); // no new snapshot, so heat holds
+    expect(h.snapshots.length).toBe(count); // no new snapshot published
+    // With no new sample, the last reading holds: heat and Backlog do not move.
+    expect(h.last()?.nodes[SINK_ID]?.heat).toBe(frozenHeat);
+    expect(h.last()?.backlog).toBe(frozenBacklog);
     h.handle.stop();
   });
 });

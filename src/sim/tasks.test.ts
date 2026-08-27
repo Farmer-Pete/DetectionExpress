@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { Clock, ClockStoppedError, ManualDriver } from "../game/clock";
 import { Channel } from "./channel";
 import type { Event } from "./event";
-import { runIngest, runSink } from "./tasks";
+import { NODE_TASKS, type NodeRuntime, runIngest, runSink, type TaskClock } from "./tasks";
 
 const HZ = 60;
 
@@ -142,5 +142,39 @@ describe("pause bound", () => {
     await step(driver, 20);
     expect(backlog.accepted).toBeGreaterThan(acceptedFrozen); // production resumes
     clock.stop();
+  });
+});
+
+describe("NODE_TASKS registry", () => {
+  // The task never touches the clock: it fails on wiring before its first await.
+  const idleClock: TaskClock = {
+    gate: () => Promise.resolve(),
+    sleep: () => Promise.resolve(),
+  };
+  const runtime: NodeRuntime = {
+    clock: idleClock,
+    getRate: fixed(6),
+    clockHz: HZ,
+    onComplete: () => undefined,
+  };
+  const noWiring = { input: undefined, output: undefined };
+
+  it("registers a task for each known node kind", () => {
+    expect(NODE_TASKS.has("ingest")).toBe(true);
+    expect(NODE_TASKS.has("sink")).toBe(true);
+  });
+
+  it("the Ingest task fails fast without an output channel", () => {
+    const task = NODE_TASKS.get("ingest");
+    expect(task).toBeDefined();
+    if (!task) return;
+    expect(() => task("ingest", noWiring, runtime)).toThrow(/output/i);
+  });
+
+  it("the Sink task fails fast without an input channel", () => {
+    const task = NODE_TASKS.get("sink");
+    expect(task).toBeDefined();
+    if (!task) return;
+    expect(() => task("sink", noWiring, runtime)).toThrow(/input/i);
   });
 });

@@ -15,7 +15,7 @@ import {
 import { nextHeat, occupancy } from "../sim/heat";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
 import type { SimSnapshot } from "../sim/snapshot";
-import { runIngest, runSink } from "../sim/tasks";
+import { NODE_TASKS, type NodeRuntime, type NodeWiring } from "../sim/tasks";
 import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
@@ -51,6 +51,29 @@ export interface EngineHandle {
 /** Errors expected during teardown. They are not failures. */
 function isTeardownError(error: unknown): boolean {
   return error instanceof ClockStoppedError || error instanceof ChannelClosedError;
+}
+
+/**
+ * A node's wiring, read off the edges: the edge it targets is its input, the
+ * edge it sources is its output. The linear chain has one edge, so the Ingest
+ * gets an output and the Sink gets an input.
+ */
+function wiringFor(
+  nodeId: string,
+  edges: GraphEdge[],
+  channels: Map<string, Channel<Event>>,
+): NodeWiring {
+  let input: Channel<Event> | undefined;
+  let output: Channel<Event> | undefined;
+  for (const edge of edges) {
+    if (edge.target === nodeId) {
+      input = channels.get(edge.id);
+    }
+    if (edge.source === nodeId) {
+      output = channels.get(edge.id);
+    }
+  }
+  return { input, output };
 }
 
 /**
@@ -136,7 +159,7 @@ export function start(options: StartOptions): EngineHandle {
   const chain = validateLinearChain(graph.nodes, graph.edges); // throws before allocation
 
   let clock: Clock | null = null;
-  let backlog: Channel<Event> | null = null;
+  let channels: Map<string, Channel<Event>> | null = null;
   let detachVisibility: (() => void) | null = null;
   let stopped = false;
   let completed = 0; // Sink completions, sampled for the Throughput gauge
@@ -147,7 +170,11 @@ export function start(options: StartOptions): EngineHandle {
     }
     stopped = true;
     clock?.stop();
-    backlog?.close();
+    if (channels) {
+      for (const channel of channels.values()) {
+        channel.close();
+      }
+    }
     detachVisibility?.();
   };
 
@@ -169,24 +196,40 @@ export function start(options: StartOptions): EngineHandle {
   try {
     const driver = options.driver ?? intervalDriver(CLOCK_HZ);
     clock = new Clock(CLOCK_HZ, driver);
-    backlog = new Channel<Event>(CHANNEL_CAP);
+
+    // One bounded channel per edge. The linear chain has a single edge, so this
+    // builds the one Backlog channel between the Ingest and the Sink.
+    const channelMap = new Map<string, Channel<Event>>();
+    for (const edge of graph.edges) {
+      channelMap.set(edge.id, new Channel<Event>(CHANNEL_CAP));
+    }
+    channels = channelMap; // publish to the outer scope so stop() can close each
+    const backlog = channelMap.get(chain.edgeId);
+    if (!backlog) {
+      throw new Error(`No channel was built for edge "${chain.edgeId}".`);
+    }
+
     const bind = options.bindVisibility ?? bindVisibilityDefault;
     detachVisibility = bind(clock);
 
     const onComplete = (): void => {
       completed += 1;
     };
-    const ingestTask = runIngest(backlog, clock, options.getRate, chain.ingestId, CLOCK_HZ).catch(
-      fail,
-    );
-    const sinkTask = runSink(
-      backlog,
+    const runtime: NodeRuntime = {
       clock,
-      options.getRate,
-      chain.sinkId,
-      CLOCK_HZ,
+      getRate: options.getRate,
+      clockHz: CLOCK_HZ,
       onComplete,
-    ).catch(fail);
+    };
+    // Spawn one task per node, looked up by kind. Adding a node kind is a new
+    // registry entry, not an engine change.
+    const tasks = graph.nodes.map((node) => {
+      const task = NODE_TASKS.get(node.kind);
+      if (!task) {
+        throw new Error(`No task is registered for node kind "${node.kind}".`);
+      }
+      return task(node.id, wiringFor(node.id, graph.edges, channelMap), runtime).catch(fail);
+    });
 
     const sample = makeSampler(clock, backlog, chain, options.setSnapshot, () => completed);
     clock.onTick(() => {
@@ -197,7 +240,7 @@ export function start(options: StartOptions): EngineHandle {
       }
     });
 
-    const whenStopped = Promise.allSettled([ingestTask, sinkTask]).then(() => undefined);
+    const whenStopped = Promise.allSettled(tasks).then(() => undefined);
     return { stop, whenStopped };
   } catch (error) {
     stop(); // partial teardown, so a half-built engine leaks nothing
