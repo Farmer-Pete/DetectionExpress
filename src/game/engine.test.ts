@@ -142,13 +142,31 @@ describe("engine sampler", () => {
 });
 
 describe("engine stop", () => {
-  it("is idempotent and settles whenStopped", async () => {
-    const h = launch({});
-    await step(h.driver, 10);
-    h.handle.stop();
-    h.handle.stop(); // no-op, no throw
-    await h.handle.whenStopped;
-    expect(true).toBe(true);
+  it("runs each teardown step exactly once, even when stop is called twice", async () => {
+    class CountStopDriver extends ManualDriver {
+      stops = 0;
+      override stop(): void {
+        this.stops += 1;
+        super.stop();
+      }
+    }
+    const driver = new CountStopDriver();
+    let detaches = 0;
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: () => undefined,
+      driver,
+      bindVisibility: () => () => {
+        detaches += 1;
+      },
+    });
+    await step(driver, 10);
+    handle.stop();
+    handle.stop(); // the second call is a guarded no-op
+    await handle.whenStopped;
+    expect(driver.stops).toBe(1); // the driver stopped once
+    expect(detaches).toBe(1); // visibility detached once
   });
 
   it("writes no snapshot after stop", async () => {
@@ -195,6 +213,24 @@ describe("engine stop", () => {
     });
     await step(driver, 20);
     handle.stop(); // the engine swallows the driver throw
+    await handle.whenStopped; // still settles
+    expect(true).toBe(true);
+  });
+
+  it("finishes teardown even when visibility detach throws", async () => {
+    // Detach is the last teardown step; a throw there must not escape stop.
+    const driver = new ManualDriver();
+    const handle = start({
+      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getRate: () => 6,
+      setSnapshot: () => undefined,
+      driver,
+      bindVisibility: () => () => {
+        throw new Error("detach boom");
+      },
+    });
+    await step(driver, 20);
+    handle.stop(); // the engine swallows the detach throw
     await handle.whenStopped; // still settles
     expect(true).toBe(true);
   });

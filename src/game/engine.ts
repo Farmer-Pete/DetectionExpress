@@ -48,6 +48,15 @@ export interface EngineHandle {
   whenStopped: Promise<void>;
 }
 
+/** Run one teardown step in isolation, so a throw cannot skip the others. */
+function teardownStep(label: string, step: () => void): void {
+  try {
+    step();
+  } catch (error) {
+    console.error(`Detection Dash: ${label} threw during teardown:`, error);
+  }
+}
+
 /**
  * A node's wiring, read off the edges: the edge it targets is its input, the
  * edge it sources is its output. The linear chain has one edge, so the Ingest
@@ -164,19 +173,15 @@ export function start(options: StartOptions): EngineHandle {
       return;
     }
     stopped = true;
-    // Each step is independent: a throw in one (a driver that fails to stop)
-    // must not skip closing the channels or detaching visibility.
-    try {
-      clock?.stop();
-    } catch (error) {
-      console.error("Detection Dash: clock.stop() threw during teardown:", error);
-    }
+    // Each step is independent: a throw in one (a driver that fails to stop, a
+    // detach that throws) must not skip the rest of teardown.
+    teardownStep("clock.stop", () => clock?.stop());
     if (channels) {
       for (const channel of channels.values()) {
-        channel.close();
+        teardownStep("channel.close", () => channel.close());
       }
     }
-    detachVisibility?.();
+    teardownStep("visibility detach", () => detachVisibility?.());
   };
 
   const fail = (error: unknown): void => {

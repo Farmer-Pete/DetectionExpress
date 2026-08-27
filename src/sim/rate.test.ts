@@ -62,9 +62,9 @@ describe("makeWindowedRate", () => {
     expect(out).toBeCloseTo(10, 6);
   });
 
-  it("averages over the samples seen so far before the window fills", () => {
-    const rate = makeWindowedRate(10, 20);
-    expect(rate(1)).toBe(20); // one completion in one sample
-    expect(rate(1)).toBe(20); // two completions in two samples, same rate
+  it("zero-pads the warm-up so the reading ramps up over the first window", () => {
+    const rate = makeWindowedRate(10, 20); // fixed 10-sample window
+    expect(rate(1)).toBe(2); // 1 completion over the fixed window: 1 * 20 / 10
+    expect(rate(1)).toBe(4); // 2 completions over the fixed window: 2 * 20 / 10
   });
 });
