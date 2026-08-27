@@ -1,132 +1,312 @@
 /**
  * Node task logic. Each node is an independent async loop. Each turn it passes
- * the Clock gate, moves one Event over its channel, and waits on the Clock. So a
- * pause holds every task at its next turn, and a stop unwinds it through a
+ * the Clock gate, moves one message over its channel, and waits on the Clock. So
+ * a pause holds every task at its next turn, and a stop unwinds it through a
  * rejected wait. No abort code lives here.
+ *
+ * The pipeline is the locked chain Ingest -> Normalize -> Match -> Sink. Ingest
+ * plays a seeded schedule and closes it with a single end-of-stream marker. The
+ * marker rides the same FIFO all the way through, so every task ends cleanly and
+ * in order (Match after `finalize`, Sink after consuming it).
  *
  * The tasks depend only on a minimal clock contract, so `sim/` never imports the
  * concrete Clock from `game/`.
  */
+import { GAME_SECONDS_PER_TICK } from "../game/tuning";
+import type { Alert } from "./alert";
 import type { Channel } from "./channel";
-import { type Event, makeEvent } from "./event";
+import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
 
 /** The slice of the Clock a task needs. The concrete Clock satisfies it. */
 export interface TaskClock {
+  now(): number;
   gate(): Promise<void>;
   sleep(ticks: number): Promise<void>;
 }
 
-/** Reads a node's current rate (events/sec). Injected by the engine. */
-export type GetRate = (nodeId: string) => number;
+/**
+ * The player's loaded Rule, as the tasks call it. Injected by the run controller.
+ * Both return an untyped value: the player owns the code, so the Match task parses
+ * their return at this boundary before handing it to the scorer.
+ */
+export interface TaskAlgorithm {
+  normalize: (raw: unknown) => unknown;
+  match: (e: unknown) => unknown;
+}
+
+/** The scorer surface the Match task drives. The full scorer also reads. */
+export interface TaskScorer {
+  record: (alerts: Alert | Alert[] | null | undefined, env: PipeEvent) => void;
+  finalize: () => void;
+}
 
 /**
- * The Ingest task: the source. Each turn it passes the gate, makes an Event,
- * pushes it into the Backlog, then sleeps one arrival gap. A full Backlog blocks
- * the push, so Ingest slows to the Sink's rate. Nothing is dropped.
+ * A structured Rule error. A throwing or bad-shaped `normalize`/`match` becomes
+ * one of these, so the supervisor reports it cleanly through `onError` instead of
+ * the raw player exception crashing the app.
+ */
+export class RuleError extends Error {
+  readonly phase: "normalize" | "match";
+  constructor(phase: "normalize" | "match", message: string) {
+    super(message);
+    this.name = "RuleError";
+    this.phase = phase;
+  }
+}
+
+/** A readable message for a thrown value, with a source frame when it carries one. */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) {
+    const frame = error.stack?.split("\n")[1]?.trim();
+    return frame?.startsWith("at ") ? `${error.message} (${frame.slice(3)})` : error.message;
+  }
+  return String(error);
+}
+
+/** A string primitive, by its tag rather than a representation check. */
+function isString(value: unknown): value is string {
+  return Object.prototype.toString.call(value) === "[object String]";
+}
+
+/**
+ * A plain object: `{}` or `Object.create(null)`, not an array, Date, Map, or
+ * class instance. `Object.getPrototypeOf` boxes a primitive rather than
+ * throwing, so every non-object domain value lands on its own wrapper
+ * prototype here and is rejected the same way as a class instance.
+ */
+function isPlainObject(value: unknown): value is object {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/** Accept the Rule's normalize result only when it is a plain object to forward. */
+function normalizedPayload(value: unknown): object {
+  if (isPlainObject(value)) {
+    return value;
+  }
+  throw new RuleError("normalize", "normalize must return a plain object.");
+}
+
+/** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
+function isAlert(value: unknown): value is Alert {
+  return (
+    value instanceof Object &&
+    "reason" in value &&
+    isString(value.reason) &&
+    "at" in value &&
+    Number.isFinite(value.at) &&
+    "events" in value &&
+    Array.isArray(value.events) &&
+    value.events.every((event) => Number.isFinite(event))
+  );
+}
+
+/** Parse the Rule's match return into Alert | Alert[] | null, or reject it. */
+function matchResult(value: unknown): Alert | Alert[] | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    if (value.every(isAlert)) {
+      return value;
+    }
+  } else if (isAlert(value)) {
+    return value;
+  }
+  throw new RuleError(
+    "match",
+    "match must return an Alert, an array of Alerts, null, or undefined.",
+  );
+}
+
+/**
+ * The Ingest task: the source. It plays the seeded schedule from `nextEvent`.
+ * For each Event it sleeps until the Clock reaches the Event's due tick, then
+ * pushes. Same-tick Events push in order; overdue Events push at once; a full
+ * channel blocks the push, so later Events wait and admission lags while `ts`
+ * stays the scheduled value. When the schedule is exhausted (the source returns
+ * null) it pushes exactly one end-of-stream marker, then returns.
  */
 export async function runIngest(
-  out: Channel<Event>,
+  out: Channel<PipeMessage>,
   clock: TaskClock,
-  getRate: GetRate,
-  nodeId: string,
-  clockHz: number,
+  nextEvent: () => PipeEvent | null,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
-    await out.push(makeEvent());
-    const gap = Math.round(clockHz / getRate(nodeId));
-    await clock.sleep(gap);
+    const event = nextEvent();
+    if (event === null) {
+      await out.push(END_OF_STREAM); // the schedule ran out; close it once
+      return;
+    }
+    const dueTick = Math.round(event.ts / GAME_SECONDS_PER_TICK);
+    const wait = dueTick - clock.now();
+    if (wait > 0) {
+      await clock.sleep(wait);
+    }
+    await out.push(event);
   }
 }
 
 /**
- * The Sink task: the drain. Each turn it passes the gate, pulls one Event from
- * the Backlog, sleeps a per-Event delay, then completes. A long delay lets the
- * Backlog fill.
+ * The Normalize task: an Event -> replace its payload with the Rule's normalize
+ * result and forward a fresh envelope. A marker -> forward it unchanged, without
+ * calling player code, then return.
+ */
+export async function runNormalize(
+  input: Channel<PipeMessage>,
+  output: Channel<PipeMessage>,
+  clock: TaskClock,
+  normalize: TaskAlgorithm["normalize"],
+): Promise<void> {
+  for (;;) {
+    await clock.gate();
+    const message = await input.pull();
+    if (isEndOfStream(message)) {
+      await output.push(message);
+      return;
+    }
+    let result: unknown;
+    try {
+      result = normalize(message.payload);
+    } catch (error) {
+      throw new RuleError("normalize", messageOf(error));
+    }
+    const payload = normalizedPayload(result);
+    await output.push({ id: message.id, ts: message.ts, endpoint: message.endpoint, payload });
+  }
+}
+
+/**
+ * The Match task: an Event -> run the Rule on a flat view and record its Alerts,
+ * then forward the Event to the Sink. Engine fields win in the view, so a payload
+ * field named `id` cannot shadow the real id. A marker -> call `scorer.finalize`,
+ * forward the marker, then return.
+ */
+export async function runMatch(
+  input: Channel<PipeMessage>,
+  output: Channel<PipeMessage>,
+  clock: TaskClock,
+  match: TaskAlgorithm["match"],
+  scorer: TaskScorer,
+): Promise<void> {
+  for (;;) {
+    await clock.gate();
+    const message = await input.pull();
+    if (isEndOfStream(message)) {
+      scorer.finalize();
+      await output.push(message);
+      return;
+    }
+    const payload = message.payload;
+    const base = payload instanceof Object ? payload : {};
+    const view = { ...base, id: message.id, ts: message.ts, endpoint: message.endpoint };
+    let result: unknown;
+    try {
+      result = match(view);
+    } catch (error) {
+      throw new RuleError("match", messageOf(error));
+    }
+    scorer.record(matchResult(result), message);
+    await output.push(message);
+  }
+}
+
+/**
+ * The Sink task: the drain. An Event -> complete it (drives Throughput). A marker
+ * -> return WITHOUT a completion, so it is not counted and Throughput stays exact.
+ * No fake sleep: the Sink drains immediately now that the player owns the work.
  */
 export async function runSink(
-  input: Channel<Event>,
+  input: Channel<PipeMessage>,
   clock: TaskClock,
-  getRate: GetRate,
-  nodeId: string,
-  clockHz: number,
   onComplete: () => void,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
-    await input.pull();
-    const delay = Math.round(clockHz / getRate(nodeId));
-    // Part 0 scaffolding: this per-Event sleep fakes a slow node. Part 1 gives
-    // players real node code and removes it.
-    await clock.sleep(delay);
-    onComplete(); // the Event is now processed; drives the Throughput gauge
+    const message = await input.pull();
+    if (isEndOfStream(message)) {
+      return;
+    }
+    onComplete();
   }
 }
 
 /**
  * A node's channels: the edge it targets is its `input`, the edge it sources is
- * its `output`. A source has no input; a sink has no output.
+ * its `output`. Ingest has no input; the Sink has no output.
  */
 export interface NodeWiring {
-  input: Channel<Event> | undefined;
-  output: Channel<Event> | undefined;
+  input: Channel<PipeMessage> | undefined;
+  output: Channel<PipeMessage> | undefined;
 }
 
 /** The shared runtime a node task needs, apart from its own wiring. */
 export interface NodeRuntime {
   clock: TaskClock;
-  getRate: GetRate;
-  clockHz: number;
-  /** Called each time a node finishes an Event. Drives the Throughput gauge. */
+  /** Called each time the Sink finishes an Event. Drives the Throughput gauge. */
   onComplete: () => void;
+  /** The player's loaded Rule. */
+  algorithm: TaskAlgorithm;
+  /** The Correctness scorer; the Match task is its single writer. */
+  scorer: TaskScorer;
+  /** The Ingest source: the scheduled Events, then null when exhausted. */
+  nextEvent: () => PipeEvent | null;
 }
 
 /**
  * A node task: given a node's id, wiring, and runtime, run its loop until the
- * Clock stops. The engine looks one up by node kind, so it never names a task
- * directly.
+ * Clock stops or the stream ends. The engine looks one up by node kind, so it
+ * never names a task directly.
  */
 export type NodeTask = (nodeId: string, wiring: NodeWiring, runtime: NodeRuntime) => Promise<void>;
 
 /** Resolve a required channel or fail loudly. A missing one is a wiring bug. */
 function requireChannel(
-  channel: Channel<Event> | undefined,
+  channel: Channel<PipeMessage> | undefined,
   nodeId: string,
   role: string,
-): Channel<Event> {
+): Channel<PipeMessage> {
   if (!channel) {
     throw new Error(`Node "${nodeId}" needs ${role} wiring, but none was built for it.`);
   }
   return channel;
 }
 
-/** The Ingest kind's task: produce into its output edge. */
 const ingestTask: NodeTask = (nodeId, wiring, runtime) =>
-  runIngest(
+  runIngest(requireChannel(wiring.output, nodeId, "output"), runtime.clock, runtime.nextEvent);
+
+const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
+  runNormalize(
+    requireChannel(wiring.input, nodeId, "input"),
     requireChannel(wiring.output, nodeId, "output"),
     runtime.clock,
-    runtime.getRate,
-    nodeId,
-    runtime.clockHz,
+    runtime.algorithm.normalize,
   );
 
-/** The Sink kind's task: drain its input edge. */
-const sinkTask: NodeTask = (nodeId, wiring, runtime) =>
-  runSink(
+const matchTask: NodeTask = (nodeId, wiring, runtime) =>
+  runMatch(
     requireChannel(wiring.input, nodeId, "input"),
+    requireChannel(wiring.output, nodeId, "output"),
     runtime.clock,
-    runtime.getRate,
-    nodeId,
-    runtime.clockHz,
-    runtime.onComplete,
+    runtime.algorithm.match,
+    runtime.scorer,
   );
+
+const sinkTask: NodeTask = (nodeId, wiring, runtime) =>
+  runSink(requireChannel(wiring.input, nodeId, "input"), runtime.clock, runtime.onComplete);
 
 /**
- * The node-kind registry: kind -> task. The engine spawns one task per graph
- * node by its kind, so a later slice adds a node kind by adding one entry here,
- * with no engine change.
+ * The node-kind registry: kind -> task. The engine spawns one task per graph node
+ * by its kind, so a later slice adds a node kind by adding one entry here, with no
+ * engine change.
  */
 export const NODE_TASKS = new Map<string, NodeTask>([
   ["ingest", ingestTask],
+  ["normalize", normalizeTask],
+  ["match", matchTask],
   ["sink", sinkTask],
 ]);

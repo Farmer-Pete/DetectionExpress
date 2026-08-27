@@ -3,6 +3,7 @@
  * publish tick. React reads it through primitive selectors; it never sees the
  * pipeline half-updated.
  */
+import type { CorrectnessReading } from "./correctness";
 
 /** Per-node live reading. */
 interface NodeReading {
@@ -19,15 +20,23 @@ interface EdgeReading {
 }
 
 export interface SimSnapshot {
-  /** Backlog channel size (the Sink's input). */
+  /** Total Backlog: the sum of every channel's buffered size. */
   backlog: number;
   /** Sink completions per second, smoothed. */
   throughput: number;
   nodes: Record<string, NodeReading>;
   edges: Record<string, EdgeReading>;
+  /** The rolling gauge value plus the global caught / missed / false-alert counts. */
+  correctness: CorrectnessReading;
 }
 
-/** The reading before the first sample: empty and calm. */
+/** The reading before the first sample: empty, calm, and perfectly correct. */
 export function emptySnapshot(): SimSnapshot {
-  return { backlog: 0, throughput: 0, nodes: {}, edges: {} };
+  return {
+    backlog: 0,
+    throughput: 0,
+    nodes: {},
+    edges: {},
+    correctness: { rolling: 100, caught: 0, missed: 0, falseAlerts: 0 },
+  };
 }

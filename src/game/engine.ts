@@ -1,11 +1,18 @@
 /**
  * The engine wires the graph into a running pipeline: a Clock, one channel per
- * edge, a node task per node, and a sampler that publishes one atomic snapshot
- * at PUBLISH_HZ. It owns the lifecycle: a transactional `start`, a single-stop
- * supervisor, and a synchronous idempotent `stop`.
+ * edge, a node task per node, and a sampler that publishes one atomic snapshot at
+ * PUBLISH_HZ. It owns the lifecycle: a transactional `start`, a single-stop
+ * supervisor, a synchronous idempotent `stop`, and a natural-completion
+ * continuation that force-publishes the finalized reading and tears down when the
+ * stream ends on its own.
+ *
+ * The Scenario, the loaded Algorithm, the scorer, and the Ingest generator are all
+ * injected by the run controller, so `sim/` stays pure and the engine never builds
+ * them or sees a login field.
  */
 import { Channel } from "../sim/channel";
-import type { Event } from "../sim/event";
+import type { Scorer } from "../sim/correctness";
+import type { PipeEvent, PipeMessage } from "../sim/event";
 import {
   type GraphEdge,
   type GraphNode,
@@ -15,7 +22,7 @@ import {
 import { nextHeat, occupancy } from "../sim/heat";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
 import type { SimSnapshot } from "../sim/snapshot";
-import { NODE_TASKS, type NodeRuntime, type NodeWiring } from "../sim/tasks";
+import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
@@ -32,13 +39,18 @@ import { bindVisibility as bindVisibilityDefault } from "./visibility";
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
 export interface StartOptions {
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
-  getRate: (nodeId: string) => number;
   setSnapshot: (snapshot: SimSnapshot) => void;
+  /** The player's loaded Rule. */
+  algorithm: TaskAlgorithm;
+  /** The Correctness scorer, fresh per run. */
+  scorer: Scorer;
+  /** The Ingest source: the scheduled Events, then null when exhausted. */
+  generator: () => PipeEvent | null;
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Defaults to the real visibility binding; tests pass a no-op. */
   bindVisibility?: (clock: Clock) => () => void;
-  /** Reports an unexpected engine failure. */
+  /** Reports an engine or Rule failure. */
   onError?: (error: unknown) => void;
 }
 
@@ -58,17 +70,17 @@ function teardownStep(label: string, step: () => void): void {
 }
 
 /**
- * A node's wiring, read off the edges: the edge it targets is its input, the
- * edge it sources is its output. The linear chain has one edge, so the Ingest
- * gets an output and the Sink gets an input.
+ * A node's wiring, read off the edges: the edge it targets is its input, the edge
+ * it sources is its output. In the four-node chain each middle node has both; the
+ * Ingest has only an output and the Sink only an input.
  */
 function wiringFor(
   nodeId: string,
   edges: GraphEdge[],
-  channels: Map<string, Channel<Event>>,
+  channels: Map<string, Channel<PipeMessage>>,
 ): NodeWiring {
-  let input: Channel<Event> | undefined;
-  let output: Channel<Event> | undefined;
+  let input: Channel<PipeMessage> | undefined;
+  let output: Channel<PipeMessage> | undefined;
   for (const edge of edges) {
     if (edge.target === nodeId) {
       input = channels.get(edge.id);
@@ -80,18 +92,30 @@ function wiringFor(
   return { input, output };
 }
 
+/** Per-edge smoothing state, kept across samples. */
+interface EdgeState {
+  lastAccepted: number;
+  lastPulled: number;
+  inRate: number;
+  outRate: number;
+}
+
 /**
- * Build the sampler. It runs every tick but samples once per publish interval
- * (CLOCK_HZ / PUBLISH_HZ ticks), computing per-edge rates and per-node heat from
- * exact per-sample deltas, then publishing one snapshot.
+ * Build the shared snapshot builder. It runs every tick in normal mode (gated on
+ * elapsed ticks) and once at a clean end in forced mode. A forced publish with no
+ * ticks elapsed keeps the prior rates and heat, but always refreshes the total
+ * Backlog and the finalized Correctness, so the final reading cannot drift from a
+ * normal one.
  */
 function makeSampler(
   clock: Clock,
-  backlog: Channel<Event>,
+  channels: Map<string, Channel<PipeMessage>>,
   chain: LinearChain,
+  edges: GraphEdge[],
+  scorer: Scorer,
   setSnapshot: (snapshot: SimSnapshot) => void,
   getCompleted: () => number,
-): () => void {
+): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const alpha = emaAlpha(RATE_TAU, PUBLISH_HZ);
   const rampStep = 1 / (HEAT_RAMP_S * PUBLISH_HZ);
@@ -99,56 +123,75 @@ function makeSampler(
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
   const throughputRate = makeWindowedRate(throughputSamples, PUBLISH_HZ);
 
-  let lastSampleTick = clock.now();
-  let lastAccepted = 0;
-  let lastPulled = 0;
-  let lastCompleted = 0;
-  let inRate = 0;
-  let outRate = 0;
-  let ingestHeat = 0;
-  let sinkHeat = 0;
+  const edgeState = new Map<string, EdgeState>();
+  for (const edgeId of chain.edgeIds) {
+    edgeState.set(edgeId, { lastAccepted: 0, lastPulled: 0, inRate: 0, outRate: 0 });
+  }
+  const nodeHeat = new Map<string, number>();
+  const nodeInput = new Map<string, Channel<PipeMessage> | undefined>();
+  for (const nodeId of chain.nodeIds) {
+    nodeHeat.set(nodeId, 0);
+    const inputEdge = edges.find((edge) => edge.target === nodeId);
+    nodeInput.set(nodeId, inputEdge ? channels.get(inputEdge.id) : undefined);
+  }
 
-  return () => {
+  let lastSampleTick = clock.now();
+  let lastCompleted = 0;
+  let throughput = 0;
+
+  return (force: boolean): void => {
     const now = clock.now();
     const ticks = now - lastSampleTick;
-    if (ticks < ticksPerSample) {
+    if (!force && ticks < ticksPerSample) {
       return;
     }
 
-    const inSample = perSecond(backlog.accepted - lastAccepted, ticks, CLOCK_HZ);
-    const outSample = perSecond(backlog.pulled - lastPulled, ticks, CLOCK_HZ);
-    inRate = ema(inRate, inSample, alpha);
-    outRate = ema(outRate, outSample, alpha);
-    // Throughput is a rolling average of Sink completions, so the gauge is
-    // steady and readable, not the jittery per-sample rate.
-    const completedNow = getCompleted();
-    const throughput = throughputRate(completedNow - lastCompleted);
-    lastAccepted = backlog.accepted;
-    lastPulled = backlog.pulled;
-    lastCompleted = completedNow;
-    lastSampleTick = now;
+    // With real elapsed ticks, refresh the smoothed rates, heat, and throughput
+    // from exact per-sample deltas. A forced publish at zero elapsed ticks skips
+    // this and keeps the prior values, adding no extra ramp or cool step.
+    if (ticks > 0) {
+      for (const edgeId of chain.edgeIds) {
+        const channel = channels.get(edgeId);
+        const state = edgeState.get(edgeId);
+        if (!channel || !state) {
+          continue;
+        }
+        const inSample = perSecond(channel.accepted - state.lastAccepted, ticks, CLOCK_HZ);
+        const outSample = perSecond(channel.pulled - state.lastPulled, ticks, CLOCK_HZ);
+        state.inRate = ema(state.inRate, inSample, alpha);
+        state.outRate = ema(state.outRate, outSample, alpha);
+        state.lastAccepted = channel.accepted;
+        state.lastPulled = channel.pulled;
+      }
+      const completedNow = getCompleted();
+      throughput = throughputRate(completedNow - lastCompleted);
+      lastCompleted = completedNow;
+      for (const nodeId of chain.nodeIds) {
+        const channel = nodeInput.get(nodeId);
+        const occ = channel ? occupancy(channel.size, channel.cap) : 0;
+        nodeHeat.set(
+          nodeId,
+          nextHeat(nodeHeat.get(nodeId) ?? 0, occ, OCC_THRESHOLD, rampStep, coolStep),
+        );
+      }
+      lastSampleTick = now;
+    }
 
-    // The Sink's input is the Backlog; the Ingest is a source with no input.
-    sinkHeat = nextHeat(
-      sinkHeat,
-      occupancy(backlog.size, backlog.cap),
-      OCC_THRESHOLD,
-      rampStep,
-      coolStep,
-    );
-    ingestHeat = nextHeat(ingestHeat, 0, OCC_THRESHOLD, rampStep, coolStep);
+    // Backlog and Correctness are always fresh, even on a zero-tick forced publish.
+    let backlog = 0;
+    for (const channel of channels.values()) {
+      backlog += channel.size;
+    }
+    const nodes: Record<string, { heat: number }> = {};
+    for (const [nodeId, heat] of nodeHeat) {
+      nodes[nodeId] = { heat };
+    }
+    const edgeReadings: Record<string, { inRate: number; outRate: number }> = {};
+    for (const [edgeId, state] of edgeState) {
+      edgeReadings[edgeId] = { inRate: state.inRate, outRate: state.outRate };
+    }
 
-    setSnapshot({
-      backlog: backlog.size,
-      throughput,
-      nodes: {
-        [chain.ingestId]: { heat: ingestHeat },
-        [chain.sinkId]: { heat: sinkHeat },
-      },
-      edges: {
-        [chain.edgeId]: { inRate, outRate },
-      },
-    });
+    setSnapshot({ backlog, throughput, nodes, edges: edgeReadings, correctness: scorer.reading() });
   };
 }
 
@@ -163,7 +206,7 @@ export function start(options: StartOptions): EngineHandle {
   const chain = validateLinearChain(graph.nodes, graph.edges); // throws before allocation
 
   let clock: Clock | null = null;
-  let channels: Map<string, Channel<Event>> | null = null;
+  let channels: Map<string, Channel<PipeMessage>> | null = null;
   let detachVisibility: (() => void) | null = null;
   let stopped = false;
   let completed = 0; // Sink completions, sampled for the Throughput gauge
@@ -204,17 +247,13 @@ export function start(options: StartOptions): EngineHandle {
     const driver = options.driver ?? intervalDriver(CLOCK_HZ);
     clock = new Clock(CLOCK_HZ, driver);
 
-    // One bounded channel per edge. The linear chain has a single edge, so this
-    // builds the one Backlog channel between the Ingest and the Sink.
-    const channelMap = new Map<string, Channel<Event>>();
+    // One bounded channel per edge. The chain has three edges: Ingest->Normalize,
+    // Normalize->Match, Match->Sink.
+    const channelMap = new Map<string, Channel<PipeMessage>>();
     for (const edge of graph.edges) {
-      channelMap.set(edge.id, new Channel<Event>(CHANNEL_CAP));
+      channelMap.set(edge.id, new Channel<PipeMessage>(CHANNEL_CAP));
     }
     channels = channelMap; // publish to the outer scope so stop() can close each
-    const backlog = channelMap.get(chain.edgeId);
-    if (!backlog) {
-      throw new Error(`No channel was built for edge "${chain.edgeId}".`);
-    }
 
     const bind = options.bindVisibility ?? bindVisibilityDefault;
     detachVisibility = bind(clock);
@@ -224,9 +263,10 @@ export function start(options: StartOptions): EngineHandle {
     };
     const runtime: NodeRuntime = {
       clock,
-      getRate: options.getRate,
-      clockHz: CLOCK_HZ,
       onComplete,
+      algorithm: options.algorithm,
+      scorer: options.scorer,
+      nextEvent: options.generator,
     };
     // Spawn one task per node, looked up by kind. Adding a node kind is a new
     // registry entry, not an engine change.
@@ -238,16 +278,39 @@ export function start(options: StartOptions): EngineHandle {
       return task(node.id, wiringFor(node.id, graph.edges, channelMap), runtime).catch(fail);
     });
 
-    const sample = makeSampler(clock, backlog, chain, options.setSnapshot, () => completed);
+    const publish = makeSampler(
+      clock,
+      channelMap,
+      chain,
+      graph.edges,
+      options.scorer,
+      options.setSnapshot,
+      () => completed,
+    );
     clock.onTick(() => {
       try {
-        sample();
+        publish(false);
       } catch (error) {
         fail(error);
       }
     });
 
-    const whenStopped = Promise.allSettled(tasks).then(() => undefined);
+    // Natural completion: when every task returns on its own (a clean end, not a
+    // user stop or a task failure), force-publish the finalized snapshot and tear
+    // down. A throwing setSnapshot routes through the guarded fail() path, and
+    // teardown still runs in the finally, so whenStopped stays resolve-only.
+    const whenStopped = Promise.allSettled(tasks).then(() => {
+      if (stopped) {
+        return;
+      }
+      try {
+        publish(true);
+      } catch (error) {
+        fail(error);
+      } finally {
+        stop();
+      }
+    });
     return { stop, whenStopped };
   } catch (error) {
     stop(); // partial teardown, so a half-built engine leaks nothing

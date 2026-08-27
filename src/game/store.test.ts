@@ -1,30 +1,45 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { SimSnapshot } from "../sim/snapshot";
-import { getGraph, getRate, useGameStore } from "./store";
-import { ARRIVAL_RATE } from "./tuning";
+import { referenceSource } from "../sim/scenarios/brute-force-login/reference";
+import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import { getGraph, useGameStore } from "./store";
+import { LEVEL_SEED } from "./tuning";
 
 const initial = useGameStore.getState();
 
 beforeEach(() => {
-  useGameStore.setState({ nodes: initial.nodes, edges: initial.edges, snapshot: initial.snapshot });
+  useGameStore.setState({
+    nodes: initial.nodes,
+    edges: initial.edges,
+    snapshot: emptySnapshot(),
+    source: referenceSource,
+    seed: LEVEL_SEED,
+    error: null,
+  });
 });
 
 describe("store", () => {
-  it("seeds a linear Ingest -> Sink graph the validator accepts", () => {
+  it("seeds the four-node chain the validator accepts", () => {
     const graph = getGraph();
-    expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "sink"]);
-    expect(graph.edges).toHaveLength(1);
+    expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "normalize", "match", "sink"]);
+    expect(graph.edges).toHaveLength(3);
   });
 
-  it("reads each node's rate through getRate", () => {
-    expect(getRate("ingest")).toBe(ARRIVAL_RATE);
-    expect(getRate("sink")).toBe(10);
+  it("seeds the Algorithm source and the level seed", () => {
+    expect(useGameStore.getState().source).toBe(referenceSource);
+    expect(useGameStore.getState().seed).toBe(LEVEL_SEED);
+    expect(useGameStore.getState().error).toBeNull();
   });
 
-  it("writes the Sink mu with setSinkRate, so getRate follows", () => {
-    useGameStore.getState().setSinkRate(3.5);
-    expect(getRate("sink")).toBe(3.5);
-    expect(getRate("ingest")).toBe(ARRIVAL_RATE); // untouched
+  it("edits the Algorithm source through setAlgorithmSource", () => {
+    useGameStore.getState().setAlgorithmSource("export function match(){ return null; }");
+    expect(useGameStore.getState().source).toContain("return null");
+  });
+
+  it("holds and clears the error through setError", () => {
+    useGameStore.getState().setError({ phase: "match", message: "boom" });
+    expect(useGameStore.getState().error).toEqual({ phase: "match", message: "boom" });
+    useGameStore.getState().setError(null);
+    expect(useGameStore.getState().error).toBeNull();
   });
 
   it("stores a published snapshot", () => {
@@ -32,7 +47,8 @@ describe("store", () => {
       backlog: 42,
       throughput: 7,
       nodes: { sink: { heat: 0.5 } },
-      edges: { "ingest-sink": { inRate: 8, outRate: 6 } },
+      edges: { e3: { inRate: 8, outRate: 6 } },
+      correctness: { rolling: 90, caught: 3, missed: 1, falseAlerts: 0 },
     };
     useGameStore.getState().setSnapshot(snapshot);
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
@@ -41,14 +57,14 @@ describe("store", () => {
   it("applies node change handlers", () => {
     useGameStore
       .getState()
-      .onNodesChange([{ id: "sink", type: "position", position: { x: 500, y: 200 } }]);
+      .onNodesChange([{ id: "sink", type: "position", position: { x: 900, y: 200 } }]);
     const sink = useGameStore.getState().nodes.find((node) => node.id === "sink");
-    expect(sink?.position).toEqual({ x: 500, y: 200 });
+    expect(sink?.position).toEqual({ x: 900, y: 200 });
   });
 
   it("applies edge change handlers", () => {
-    useGameStore.getState().onEdgesChange([{ id: "ingest-sink", type: "select", selected: true }]);
-    const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "ingest-sink");
+    useGameStore.getState().onEdgesChange([{ id: "e1", type: "select", selected: true }]);
+    const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "e1");
     expect(edge?.selected).toBe(true);
   });
 });

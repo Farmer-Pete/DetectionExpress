@@ -1,19 +1,35 @@
 import { describe, expect, it } from "bun:test";
-import { Clock, ClockStoppedError, ManualDriver } from "../game/clock";
+import { Clock, ManualDriver } from "../game/clock";
+import type { Alert } from "./alert";
 import { Channel } from "./channel";
-import type { Event } from "./event";
-import { NODE_TASKS, type NodeRuntime, runIngest, runSink, type TaskClock } from "./tasks";
+import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import {
+  NODE_TASKS,
+  type NodeRuntime,
+  RuleError,
+  runIngest,
+  runMatch,
+  runNormalize,
+  runSink,
+  type TaskClock,
+  type TaskScorer,
+} from "./tasks";
 
 const HZ = 60;
 
-/** Drain the microtask queue without a real timer. */
+/** A clock whose gate and sleep resolve at once: the task runs off channel flow. */
+const idleClock: TaskClock = {
+  now: () => 0,
+  gate: () => Promise.resolve(),
+  sleep: () => Promise.resolve(),
+};
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 50; i++) {
     await Promise.resolve();
   }
 }
 
-/** Step the clock one tick at a time, flushing so tasks progress each tick. */
 async function step(driver: ManualDriver, ticks: number): Promise<void> {
   for (let i = 0; i < ticks; i++) {
     driver.tick();
@@ -21,198 +37,328 @@ async function step(driver: ManualDriver, ticks: number): Promise<void> {
   }
 }
 
-/** Swallow the terminal rejection a task throws when the clock stops. */
 function guard(task: Promise<void>): void {
   task.catch(() => undefined);
 }
 
-function fixed(rate: number): (nodeId: string) => number {
-  return () => rate;
+function ev(id: number, ts: number, payload: unknown = { u: "bob" }): PipeEvent {
+  return { id, ts, endpoint: "auth-v1", payload };
 }
 
-describe("runIngest", () => {
-  it("produces one Event per arrival gap", async () => {
+function idOf(message: PipeMessage): number {
+  return isEndOfStream(message) ? -1 : message.id;
+}
+
+/** The flat view Match hands the Rule: engine fields plus the normalized payload. */
+interface FlatView {
+  id: number;
+  ts: number;
+  endpoint: string;
+  user: string;
+}
+
+function isFlatView(value: unknown): value is FlatView {
+  return (
+    value instanceof Object &&
+    "id" in value &&
+    "ts" in value &&
+    "endpoint" in value &&
+    "user" in value
+  );
+}
+
+/** A scorer stub that records its calls, so a task test can observe them. */
+function stubScorer(): TaskScorer & {
+  records: Array<{ alerts: unknown; env: PipeEvent }>;
+  finalizes: number;
+} {
+  const records: Array<{ alerts: unknown; env: PipeEvent }> = [];
+  let finalizes = 0;
+  return {
+    records,
+    get finalizes() {
+      return finalizes;
+    },
+    record(alerts, env) {
+      records.push({ alerts, env });
+    },
+    finalize() {
+      finalizes += 1;
+    },
+  };
+}
+
+describe("runIngest schedule", () => {
+  it("pushes same-tick Events in order, then exactly one marker at exhaustion", async () => {
     const driver = new ManualDriver();
     const clock = new Clock(HZ, driver);
-    const out = new Channel<Event>(100);
-    guard(runIngest(out, clock, fixed(6), "ingest", HZ)); // gap = round(60/6) = 10 ticks
+    const out = new Channel<PipeMessage>(100);
+    const events = [ev(0, 0), ev(1, 0), ev(2, 10)]; // GAME_SECONDS_PER_TICK=2 -> dueTicks 0,0,5
+    let i = 0;
+    guard(runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null)));
     await flush();
-    expect(out.accepted).toBe(1); // one at the top of the run
+    expect(out.accepted).toBe(2); // both ts=0 Events are due at tick 0
 
-    await step(driver, 10);
-    expect(out.accepted).toBe(2);
-    await step(driver, 10);
-    expect(out.accepted).toBe(3);
+    await step(driver, 5); // reach tick 5, the third Event's due tick
+    await flush();
+    expect(out.accepted).toBe(4); // third Event, then the single marker
+
+    const a = await out.pull();
+    const b = await out.pull();
+    const c = await out.pull();
+    const d = await out.pull();
+    expect([idOf(a), idOf(b), idOf(c)]).toEqual([0, 1, 2]); // schedule order held
+    expect(isEndOfStream(d)).toBe(true);
     clock.stop();
+  });
+
+  it("holds overdue Events behind backpressure and admits them in order, no loss", async () => {
+    const driver = new ManualDriver();
+    const clock = new Clock(HZ, driver);
+    const out = new Channel<PipeMessage>(2); // small cap forces backpressure
+    const events = [ev(0, 0), ev(1, 0), ev(2, 2), ev(3, 4)]; // dueTicks 0,0,1,2
+    let i = 0;
+    let done = false;
+    runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null))
+      .then(() => {
+        done = true;
+      })
+      .catch(() => undefined);
+    await flush();
+    expect(out.size).toBe(2); // two buffered, the third push is blocked
+
+    await step(driver, 10); // time runs on; the blocked Events are now overdue
+    const got: PipeMessage[] = [];
+    for (let k = 0; k < 5; k++) {
+      got.push(await out.pull());
+      await flush();
+    }
+    expect(got.slice(0, 4).map(idOf)).toEqual([0, 1, 2, 3]); // FIFO order preserved
+    const marker = got[4];
+    expect(marker !== undefined && isEndOfStream(marker)).toBe(true); // one marker, last
+    expect(done).toBe(true); // Ingest returned after the marker
+    clock.stop();
+  });
+});
+
+describe("runNormalize", () => {
+  it("replaces the payload and keeps id, ts, and endpoint", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    guard(
+      runNormalize(input, output, idleClock, (raw) => ({
+        user: raw instanceof Object && "u" in raw ? raw.u : null,
+      })),
+    );
+    await input.push(ev(5, 100, { u: "bob" }));
+    await flush();
+    const out = await output.pull();
+    expect(out).toEqual({ id: 5, ts: 100, endpoint: "auth-v1", payload: { user: "bob" } });
+    input.close();
+  });
+
+  it("forwards the marker without calling the player's normalize", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let calls = 0;
+    let done = false;
+    runNormalize(input, output, idleClock, (raw) => {
+      calls += 1;
+      return raw;
+    })
+      .then(() => {
+        done = true;
+      })
+      .catch(() => undefined);
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(isEndOfStream(await output.pull())).toBe(true);
+    expect(calls).toBe(0);
+    expect(done).toBe(true);
+  });
+
+  it("turns a non-object normalize result into a structured error, not a crash", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    runNormalize(input, output, idleClock, () => "not-an-object").catch((e: unknown) => {
+      err = e;
+    });
+    await input.push(ev(1, 0));
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("normalize");
+  });
+
+  it("keeps the FIFO order of Events and marker behind a full channel and does not hang", async () => {
+    const input = new Channel<PipeMessage>(5);
+    const output = new Channel<PipeMessage>(1); // tiny cap forces backpressure
+    let done = false;
+    runNormalize(input, output, idleClock, (raw) => raw)
+      .then(() => {
+        done = true;
+      })
+      .catch(() => undefined);
+    await input.push(ev(1, 0));
+    await input.push(ev(2, 0));
+    await input.push(END_OF_STREAM);
+    await flush();
+    const got: PipeMessage[] = [];
+    for (let k = 0; k < 3; k++) {
+      got.push(await output.pull());
+      await flush();
+    }
+    expect(got.map(idOf)).toEqual([1, 2, -1]); // Events then marker, in order
+    expect(done).toBe(true);
+  });
+});
+
+describe("runMatch", () => {
+  it("records the Alert against the Event and forwards the Event downstream", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const scorer = stubScorer();
+    const alert: Alert = { reason: "brute_force", at: 100, events: [1, 2] };
+    guard(runMatch(input, output, idleClock, () => alert, scorer));
+    await input.push(ev(5, 100, { user: "bob" }));
+    await flush();
+    expect(scorer.records).toHaveLength(1);
+    expect(scorer.records[0]?.alerts).toBe(alert);
+    expect(scorer.records[0]?.env.id).toBe(5);
+    expect(idOf(await output.pull())).toBe(5); // Event forwarded to the Sink
+    input.close();
+  });
+
+  it("hands the Rule a flat view that a payload field cannot shadow", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let seen: unknown;
+    guard(
+      runMatch(
+        input,
+        output,
+        idleClock,
+        (view) => {
+          seen = view;
+          return null;
+        },
+        stubScorer(),
+      ),
+    );
+    // The payload carries id/ts/endpoint that must NOT win over the envelope.
+    await input.push({
+      id: 7,
+      ts: 200,
+      endpoint: "auth-v1",
+      payload: { id: 999, ts: 999, endpoint: "evil", user: "bob" },
+    });
+    await flush();
+    expect(isFlatView(seen)).toBe(true);
+    if (isFlatView(seen)) {
+      expect(seen.id).toBe(7); // the envelope id wins over the payload's 999
+      expect(seen.ts).toBe(200);
+      expect(seen.endpoint).toBe("auth-v1");
+      expect(seen.user).toBe("bob");
+    }
+    input.close();
+  });
+
+  it("calls finalize exactly once and forwards the marker at end of stream", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const scorer = stubScorer();
+    let done = false;
+    runMatch(input, output, idleClock, () => null, scorer)
+      .then(() => {
+        done = true;
+      })
+      .catch(() => undefined);
+    await input.push(ev(1, 0));
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(scorer.finalizes).toBe(1);
+    expect(idOf(await output.pull())).toBe(1); // the Event first
+    expect(isEndOfStream(await output.pull())).toBe(true); // then the marker
+    expect(done).toBe(true);
+  });
+
+  it("turns a throwing match into a structured error, not a crash", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    runMatch(
+      input,
+      output,
+      idleClock,
+      () => {
+        throw new Error("boom in match");
+      },
+      stubScorer(),
+    ).catch((e: unknown) => {
+      err = e;
+    });
+    await input.push(ev(1, 0));
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("match");
+  });
+
+  it("turns a non-Alert match return into a structured error, not a crash", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    runMatch(input, output, idleClock, () => ({ nope: 1 }), stubScorer()).catch((e: unknown) => {
+      err = e;
+    });
+    await input.push(ev(1, 0));
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("match");
   });
 });
 
 describe("runSink", () => {
-  it("completes every Event it pulls at its service delay", async () => {
-    const driver = new ManualDriver();
-    const clock = new Clock(HZ, driver);
-    const backlog = new Channel<Event>(100);
-    await backlog.push({});
-    await backlog.push({});
-    let completed = 0;
-    guard(
-      runSink(backlog, clock, fixed(30), "sink", HZ, () => {
-        completed += 1;
-      }),
-    ); // delay = round(60/30) = 2 ticks
+  it("completes each Event but consumes the marker without a completion", async () => {
+    const input = new Channel<PipeMessage>(10);
+    let completes = 0;
+    let done = false;
+    runSink(input, idleClock, () => {
+      completes += 1;
+    })
+      .then(() => {
+        done = true;
+      })
+      .catch(() => undefined);
+    await input.push(ev(1, 0));
+    await input.push(ev(2, 0));
+    await input.push(END_OF_STREAM);
     await flush();
-    expect(backlog.pulled).toBe(1); // pulled the first, now sleeping
-    expect(completed).toBe(0); // not finished until the delay elapses
-
-    await step(driver, 2);
-    expect(backlog.pulled).toBe(2);
-    expect(completed).toBe(1); // the first Event finished after its delay
-    expect(backlog.size).toBe(0);
-    clock.stop();
-  });
-
-  it("loses no Event across a normal run", async () => {
-    const driver = new ManualDriver();
-    const clock = new Clock(HZ, driver);
-    const backlog = new Channel<Event>(100);
-    let completed = 0;
-    guard(runIngest(backlog, clock, fixed(6), "ingest", HZ)); // gap 10
-    guard(
-      runSink(backlog, clock, fixed(30), "sink", HZ, () => {
-        completed += 1;
-      }),
-    ); // delay 2, faster than arrivals
-    await flush();
-
-    await step(driver, 60);
-    await step(driver, 5); // let the last in-flight Event finish
-    // The Sink keeps up, so everything admitted is pulled and completed. None lost.
-    expect(backlog.accepted).toBeGreaterThan(3);
-    expect(backlog.pulled).toBe(backlog.accepted);
-    expect(completed).toBe(backlog.accepted);
-    expect(backlog.size).toBe(0);
-    clock.stop();
-  });
-
-  it("unwinds cleanly when the clock stops mid-turn", async () => {
-    const driver = new ManualDriver();
-    const clock = new Clock(HZ, driver);
-    const backlog = new Channel<Event>(100);
-    let error: unknown = null;
-    const task = runSink(backlog, clock, fixed(4), "sink", HZ, () => undefined).catch(
-      (e: unknown) => {
-        error = e;
-      },
-    );
-    await backlog.push({});
-    await step(driver, 1); // pulled, now sleeping
-    clock.stop();
-    await task;
-    expect(error).toBeInstanceOf(ClockStoppedError);
-  });
-});
-
-describe("backpressure", () => {
-  it("blocks the producer at capacity and loses nothing when drained", async () => {
-    const driver = new ManualDriver();
-    const clock = new Clock(HZ, driver);
-    const backlog = new Channel<Event>(3); // a small cap forces backpressure
-    let completed = 0;
-    guard(runIngest(backlog, clock, fixed(30), "ingest", HZ)); // fast producer, gap 2
-    await flush();
-    await step(driver, 40); // long enough to overfill if drops were allowed
-
-    // No Sink yet: the buffer caps at 3 and the next producer blocks. The held
-    // item is not counted as accepted, so nothing is dropped.
-    expect(backlog.size).toBe(3);
-    expect(backlog.accepted).toBe(3);
-    const acceptedWhileBlocked = backlog.accepted;
-
-    // Start a slow Sink and drain. Freed slots admit the blocked producer.
-    guard(
-      runSink(backlog, clock, fixed(6), "sink", HZ, () => {
-        completed += 1;
-      }),
-    ); // delay 10
-    await step(driver, 200);
-
-    expect(backlog.accepted).toBeGreaterThan(acceptedWhileBlocked); // production resumed
-    expect(backlog.pulled).toBeGreaterThan(0);
-    expect(completed).toBeGreaterThan(0);
-    expect(completed).toBeLessThanOrEqual(backlog.pulled); // one may be in-flight
-    // Conservation: every accepted Event is still buffered or was pulled. No loss.
-    expect(backlog.accepted).toBe(backlog.pulled + backlog.size);
-    clock.stop();
-  });
-});
-
-describe("pause bound", () => {
-  it("finishes at most one turn per task, then holds accepted and completed", async () => {
-    const driver = new ManualDriver();
-    const clock = new Clock(HZ, driver);
-    const backlog = new Channel<Event>(100);
-    let completed = 0;
-    guard(runIngest(backlog, clock, fixed(6), "ingest", HZ)); // gap 10
-    guard(
-      runSink(backlog, clock, fixed(6), "sink", HZ, () => {
-        completed += 1;
-      }),
-    ); // delay 10
-    await flush();
-    await step(driver, 40); // some events produced and processed
-    const acceptedBeforePause = backlog.accepted;
-
-    clock.pause();
-    await flush(); // allow at most one in-flight turn per task to settle
-    const acceptedFrozen = backlog.accepted;
-    const pulledFrozen = backlog.pulled;
-    const sizeFrozen = backlog.size;
-    const completedFrozen = completed;
-    expect(acceptedFrozen).toBeLessThanOrEqual(acceptedBeforePause + 1); // at most one more turn
-
-    await step(driver, 200); // paused ticks are absorbed; every counter holds
-    expect(backlog.accepted).toBe(acceptedFrozen);
-    expect(backlog.pulled).toBe(pulledFrozen); // the Sink pulls nothing while paused
-    expect(backlog.size).toBe(sizeFrozen);
-    expect(completed).toBe(completedFrozen);
-
-    clock.resume();
-    await step(driver, 20);
-    expect(backlog.accepted).toBeGreaterThan(acceptedFrozen); // production resumes
-    clock.stop();
+    expect(completes).toBe(2); // two Events, the marker does not count
+    expect(done).toBe(true); // returned on the marker
   });
 });
 
 describe("NODE_TASKS registry", () => {
-  // The task never touches the clock: it fails on wiring before its first await.
-  const idleClock: TaskClock = {
-    gate: () => Promise.resolve(),
-    sleep: () => Promise.resolve(),
-  };
   const runtime: NodeRuntime = {
     clock: idleClock,
-    getRate: fixed(6),
-    clockHz: HZ,
     onComplete: () => undefined,
+    algorithm: { normalize: (raw) => raw, match: () => null },
+    scorer: { record: () => undefined, finalize: () => undefined },
+    nextEvent: () => null,
   };
   const noWiring = { input: undefined, output: undefined };
 
-  it("registers a task for each known node kind", () => {
+  it("registers a task for each of the four chain kinds", () => {
     expect(NODE_TASKS.has("ingest")).toBe(true);
+    expect(NODE_TASKS.has("normalize")).toBe(true);
+    expect(NODE_TASKS.has("match")).toBe(true);
     expect(NODE_TASKS.has("sink")).toBe(true);
   });
 
-  it("the Ingest task fails fast without an output channel", () => {
-    const task = NODE_TASKS.get("ingest");
-    expect(task).toBeDefined();
-    if (!task) return;
-    expect(() => task("ingest", noWiring, runtime)).toThrow(/output/i);
-  });
-
-  it("the Sink task fails fast without an input channel", () => {
-    const task = NODE_TASKS.get("sink");
-    expect(task).toBeDefined();
-    if (!task) return;
-    expect(() => task("sink", noWiring, runtime)).toThrow(/input/i);
+  it("fails fast when a task is missing its wiring", () => {
+    expect(() => NODE_TASKS.get("ingest")?.("ingest", noWiring, runtime)).toThrow(/output/i);
+    expect(() => NODE_TASKS.get("normalize")?.("normalize", noWiring, runtime)).toThrow(/input/i);
+    expect(() => NODE_TASKS.get("match")?.("match", noWiring, runtime)).toThrow(/input/i);
+    expect(() => NODE_TASKS.get("sink")?.("sink", noWiring, runtime)).toThrow(/input/i);
   });
 });
