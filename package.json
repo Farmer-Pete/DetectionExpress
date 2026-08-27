@@ -16,8 +16,10 @@
     "prepare": "lefthook install"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.3",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
