@@ -5,7 +5,8 @@
  *
  * Part 0 scaffolding: the range slider and the Sink's `rate` field exist only to
  * fake a slow node for Slice 0. Part 1 gives players real node code and removes
- * both. The `nodrag` class keeps the slider from panning the canvas.
+ * both. The `nodrag nopan` classes stop a slider drag from moving the node or
+ * panning the canvas.
  */
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { memo } from "react";
@@ -31,7 +32,7 @@ export const SinkNode = memo(function SinkNode(props: NodeProps) {
       </div>
       {/* Part 0 scaffolding: the mu slider. Removed in Part 1. */}
       <input
-        className="nodrag node-slider"
+        className="nodrag nopan node-slider"
         type="range"
         min={SINK_MIN_RATE}
         max={20}

@@ -13,7 +13,7 @@ import {
   validateLinearChain,
 } from "../sim/graph";
 import { nextHeat, occupancy } from "../sim/heat";
-import { ema, emaAlpha, perSecond } from "../sim/rate";
+import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
 import type { SimSnapshot } from "../sim/snapshot";
 import { runIngest, runSink } from "../sim/tasks";
 import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
@@ -25,6 +25,7 @@ import {
   OCC_THRESHOLD,
   PUBLISH_HZ,
   RATE_TAU,
+  THROUGHPUT_WINDOW_MS,
 } from "./tuning";
 import { bindVisibility as bindVisibilityDefault } from "./visibility";
 
@@ -62,18 +63,21 @@ function makeSampler(
   backlog: Channel<Event>,
   chain: LinearChain,
   setSnapshot: (snapshot: SimSnapshot) => void,
+  getCompleted: () => number,
 ): () => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const alpha = emaAlpha(RATE_TAU, PUBLISH_HZ);
   const rampStep = 1 / (HEAT_RAMP_S * PUBLISH_HZ);
   const coolStep = 1 / (HEAT_COOL_S * PUBLISH_HZ);
+  const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
+  const throughputRate = makeWindowedRate(throughputSamples, PUBLISH_HZ);
 
   let lastSampleTick = clock.now();
   let lastAccepted = 0;
   let lastPulled = 0;
+  let lastCompleted = 0;
   let inRate = 0;
   let outRate = 0;
-  let throughput = 0;
   let ingestHeat = 0;
   let sinkHeat = 0;
 
@@ -88,9 +92,13 @@ function makeSampler(
     const outSample = perSecond(backlog.pulled - lastPulled, ticks, CLOCK_HZ);
     inRate = ema(inRate, inSample, alpha);
     outRate = ema(outRate, outSample, alpha);
-    throughput = ema(throughput, outSample, alpha);
+    // Throughput is a rolling average of Sink completions, so the gauge is
+    // steady and readable, not the jittery per-sample rate.
+    const completedNow = getCompleted();
+    const throughput = throughputRate(completedNow - lastCompleted);
     lastAccepted = backlog.accepted;
     lastPulled = backlog.pulled;
+    lastCompleted = completedNow;
     lastSampleTick = now;
 
     // The Sink's input is the Backlog; the Ingest is a source with no input.
@@ -131,6 +139,7 @@ export function start(options: StartOptions): EngineHandle {
   let backlog: Channel<Event> | null = null;
   let detachVisibility: (() => void) | null = null;
   let stopped = false;
+  let completed = 0; // Sink completions, sampled for the Throughput gauge
 
   const stop = (): void => {
     if (stopped) {
@@ -143,11 +152,18 @@ export function start(options: StartOptions): EngineHandle {
   };
 
   const fail = (error: unknown): void => {
-    if (isTeardownError(error)) {
-      return; // expected during teardown, not a failure
+    // Expected teardown errors are not failures. Once we are stopping, a second
+    // failure must not re-report or re-run teardown.
+    if (isTeardownError(error) || stopped) {
+      return;
     }
-    options.onError?.(error);
-    stop();
+    stop(); // tear down first, so a throwing onError cannot leak the engine
+    try {
+      options.onError?.(error);
+    } catch (handlerError) {
+      // A reporter that throws is the caller's bug. Log it so teardown still holds.
+      console.error("Detection Dash onError handler threw:", handlerError);
+    }
   };
 
   try {
@@ -157,12 +173,22 @@ export function start(options: StartOptions): EngineHandle {
     const bind = options.bindVisibility ?? bindVisibilityDefault;
     detachVisibility = bind(clock);
 
+    const onComplete = (): void => {
+      completed += 1;
+    };
     const ingestTask = runIngest(backlog, clock, options.getRate, chain.ingestId, CLOCK_HZ).catch(
       fail,
     );
-    const sinkTask = runSink(backlog, clock, options.getRate, chain.sinkId, CLOCK_HZ).catch(fail);
+    const sinkTask = runSink(
+      backlog,
+      clock,
+      options.getRate,
+      chain.sinkId,
+      CLOCK_HZ,
+      onComplete,
+    ).catch(fail);
 
-    const sample = makeSampler(clock, backlog, chain, options.setSnapshot);
+    const sample = makeSampler(clock, backlog, chain, options.setSnapshot, () => completed);
     clock.onTick(() => {
       try {
         sample();

@@ -36,6 +36,15 @@ export function validateLinearChain(nodes: GraphNode[], edges: GraphEdge[]): Lin
     }
   }
 
+  if (new Set(nodes.map((node) => node.id)).size !== nodes.length) {
+    throw new Error("Graph node ids must be unique.");
+  }
+  for (const edge of edges) {
+    if (edge.source === edge.target) {
+      throw new Error(`Edge "${edge.id}" is a self-edge, which is not a linear chain.`);
+    }
+  }
+
   const ingests = nodes.filter((node) => node.kind === "ingest");
   const sinks = nodes.filter((node) => node.kind === "sink");
   if (ingests.length !== 1 || sinks.length !== 1 || nodes.length !== 2) {

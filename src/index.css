@@ -133,13 +133,13 @@ body {
   border-radius: 10px;
   background: var(--panel);
   border: 2px solid var(--a1);
-  box-shadow: 0 0 14px rgba(248, 150, 30, 0.27);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a1) 27%, transparent);
   text-align: center;
 }
 
 .node-sink {
   border-color: var(--a3);
-  box-shadow: 0 0 14px rgba(39, 125, 161, 0.3);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a3) 30%, transparent);
 }
 
 .node-title {
@@ -195,11 +195,11 @@ body {
 @keyframes sink-strobe {
   0%,
   100% {
-    box-shadow: 0 0 10px rgba(249, 65, 68, 0.33);
+    box-shadow: 0 0 10px color-mix(in srgb, var(--threat) 33%, transparent);
     border-color: var(--threat);
   }
   50% {
-    box-shadow: 0 0 22px rgba(249, 65, 68, 0.67);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--threat) 67%, transparent);
     border-color: var(--threat);
   }
 }

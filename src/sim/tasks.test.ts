@@ -54,12 +54,19 @@ describe("runSink", () => {
     const backlog = new Channel<Event>(100);
     await backlog.push({});
     await backlog.push({});
-    guard(runSink(backlog, clock, fixed(30), "sink", HZ)); // delay = round(60/30) = 2 ticks
+    let completed = 0;
+    guard(
+      runSink(backlog, clock, fixed(30), "sink", HZ, () => {
+        completed += 1;
+      }),
+    ); // delay = round(60/30) = 2 ticks
     await flush();
     expect(backlog.pulled).toBe(1); // pulled the first, now sleeping
+    expect(completed).toBe(0); // not finished until the delay elapses
 
     await step(driver, 2);
     expect(backlog.pulled).toBe(2);
+    expect(completed).toBe(1); // the first Event finished after its delay
     expect(backlog.size).toBe(0);
     clock.stop();
   });
@@ -68,14 +75,21 @@ describe("runSink", () => {
     const driver = new ManualDriver();
     const clock = new Clock(HZ, driver);
     const backlog = new Channel<Event>(100);
+    let completed = 0;
     guard(runIngest(backlog, clock, fixed(6), "ingest", HZ)); // gap 10
-    guard(runSink(backlog, clock, fixed(30), "sink", HZ)); // delay 2, faster than arrivals
+    guard(
+      runSink(backlog, clock, fixed(30), "sink", HZ, () => {
+        completed += 1;
+      }),
+    ); // delay 2, faster than arrivals
     await flush();
 
     await step(driver, 60);
-    // The Sink keeps up, so everything admitted has been pulled and nothing is stuck.
+    await step(driver, 5); // let the last in-flight Event finish
+    // The Sink keeps up, so everything admitted is pulled and completed. None lost.
     expect(backlog.accepted).toBeGreaterThan(3);
     expect(backlog.pulled).toBe(backlog.accepted);
+    expect(completed).toBe(backlog.accepted);
     expect(backlog.size).toBe(0);
     clock.stop();
   });
@@ -85,9 +99,11 @@ describe("runSink", () => {
     const clock = new Clock(HZ, driver);
     const backlog = new Channel<Event>(100);
     let error: unknown = null;
-    const task = runSink(backlog, clock, fixed(4), "sink", HZ).catch((e: unknown) => {
-      error = e;
-    });
+    const task = runSink(backlog, clock, fixed(4), "sink", HZ, () => undefined).catch(
+      (e: unknown) => {
+        error = e;
+      },
+    );
     await backlog.push({});
     await step(driver, 1); // pulled, now sleeping
     clock.stop();
@@ -97,22 +113,34 @@ describe("runSink", () => {
 });
 
 describe("pause bound", () => {
-  it("lets each task finish at most one turn, then holds", async () => {
+  it("finishes at most one turn per task, then holds accepted and completed", async () => {
     const driver = new ManualDriver();
     const clock = new Clock(HZ, driver);
     const backlog = new Channel<Event>(100);
+    let completed = 0;
     guard(runIngest(backlog, clock, fixed(6), "ingest", HZ)); // gap 10
+    guard(
+      runSink(backlog, clock, fixed(6), "sink", HZ, () => {
+        completed += 1;
+      }),
+    ); // delay 10
     await flush();
-    await step(driver, 25); // some events produced
-    const acceptedAtPause = backlog.accepted;
+    await step(driver, 40); // some events produced and processed
+    const acceptedBeforePause = backlog.accepted;
 
     clock.pause();
-    await step(driver, 200); // paused ticks are absorbed; the count holds
-    expect(backlog.accepted).toBe(acceptedAtPause);
+    await flush(); // allow at most one in-flight turn per task to settle
+    const acceptedFrozen = backlog.accepted;
+    const completedFrozen = completed;
+    expect(acceptedFrozen).toBeLessThanOrEqual(acceptedBeforePause + 1); // at most one more turn
+
+    await step(driver, 200); // paused ticks are absorbed; both counts hold
+    expect(backlog.accepted).toBe(acceptedFrozen);
+    expect(completed).toBe(completedFrozen);
 
     clock.resume();
-    await step(driver, 10);
-    expect(backlog.accepted).toBe(acceptedAtPause + 1); // production resumes
+    await step(driver, 20);
+    expect(backlog.accepted).toBeGreaterThan(acceptedFrozen); // production resumes
     clock.stop();
   });
 });

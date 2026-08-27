@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { ema, emaAlpha, perSecond } from "./rate";
+import { ema, emaAlpha, makeWindowedRate, perSecond } from "./rate";
 
 describe("perSecond", () => {
   it("turns a per-sample count delta into events per second", () => {
@@ -40,5 +40,31 @@ describe("ema", () => {
   it("moves one step toward a new sample by exactly alpha", () => {
     const alpha = 0.25;
     expect(ema(0, 100, alpha)).toBe(25);
+  });
+});
+
+describe("makeWindowedRate", () => {
+  it("averages a steady stream into a steady rate", () => {
+    const rate = makeWindowedRate(10, 20); // 10 samples at 20 Hz is a 0.5s window
+    let out = 0;
+    for (let i = 0; i < 30; i++) {
+      out = rate(1); // one completion per 50ms sample is 20 per second
+    }
+    expect(out).toBeCloseTo(20, 6);
+  });
+
+  it("smooths a spiky input to its window mean", () => {
+    const rate = makeWindowedRate(10, 20);
+    let out = 0;
+    for (let i = 0; i < 40; i++) {
+      out = rate(i % 2); // alternating 0 and 1 averages to 0.5 per sample, so 10 per second
+    }
+    expect(out).toBeCloseTo(10, 6);
+  });
+
+  it("averages over the samples seen so far before the window fills", () => {
+    const rate = makeWindowedRate(10, 20);
+    expect(rate(1)).toBe(20); // one completion in one sample
+    expect(rate(1)).toBe(20); // two completions in two samples, same rate
   });
 });

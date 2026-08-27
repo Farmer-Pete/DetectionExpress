@@ -31,9 +31,17 @@ export function Pipeline() {
         edgeTypes={edgeTypes}
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable={false}
         edgesFocusable={false}
         deleteKeyCode={null}
+        // Keep nodes interactive (elementsSelectable stays on) so the Sink slider
+        // receives pointer events. Turning it off sets pointer-events:none on the
+        // node, and the slider goes dead. Dragging is still off via nodesDraggable.
+        // Slice 0 is a fixed two-node display. The canvas does not pan or zoom,
+        // so a slider drag never moves the graph. Later slices can re-enable this.
+        panOnDrag={false}
+        panOnScroll={false}
+        zoomOnScroll={false}
+        zoomOnDoubleClick={false}
         fitView
         minZoom={0.5}
         maxZoom={1.5}

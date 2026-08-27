@@ -76,8 +76,11 @@ export class Channel<T> {
 
   /** Waits while empty; drains buffered items then rejects when closed. */
   pull(): Promise<T> {
-    const buffered = this.buffer.shift();
-    if (buffered !== undefined) {
+    // Decide emptiness by length, not by a shift() sentinel. A shift() that
+    // returns undefined cannot tell an empty buffer from a buffered undefined.
+    const buffered = this.buffer[0];
+    if (this.buffer.length > 0 && buffered !== undefined) {
+      this.buffer.shift();
       this.pulled++;
       this.admitOneBlockedProducer();
       return Promise.resolve(buffered);

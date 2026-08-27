@@ -18,3 +18,25 @@ export function emaAlpha(tau: number, hz: number): number {
 export function ema(prev: number, sample: number, alpha: number): number {
   return prev + (sample - prev) * alpha;
 }
+
+/**
+ * A rolling window that averages per-sample counts into events per second. It
+ * keeps the last `samples` counts; once full, that spans a fixed window (at `hz`
+ * samples/sec, `samples` samples is `samples / hz` seconds). The average is the
+ * window total over that duration, so the reading is steady, not jittery. It
+ * reads no real time.
+ */
+export function makeWindowedRate(samples: number, hz: number): (count: number) => number {
+  const window: number[] = [];
+  return (count: number): number => {
+    window.push(count);
+    if (window.length > samples) {
+      window.shift();
+    }
+    let total = 0;
+    for (const value of window) {
+      total += value;
+    }
+    return (total * hz) / window.length;
+  };
+}

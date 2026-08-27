@@ -50,6 +50,7 @@ export async function runSink(
   getRate: GetRate,
   nodeId: string,
   clockHz: number,
+  onComplete: () => void,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
@@ -58,5 +59,6 @@ export async function runSink(
     // Part 0 scaffolding: this per-Event sleep fakes a slow node. Part 1 gives
     // players real node code and removes it.
     await clock.sleep(delay);
+    onComplete(); // the Event is now processed; drives the Throughput gauge
   }
 }

@@ -32,3 +32,6 @@ export const HEAT_COOL_S = 2.0;
 
 /** Heat above this strobes the belt and blinks the node. */
 export const HEAT_STROBE = 0.6;
+
+/** The Throughput gauge averages Sink completions over this window, in ms. */
+export const THROUGHPUT_WINDOW_MS = 500;

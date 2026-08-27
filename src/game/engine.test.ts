@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import type { SimSnapshot } from "../sim/snapshot";
-import { type Clock, ManualDriver } from "./clock";
+import { type Clock, ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
 
 const NODES: GraphNode[] = [
@@ -52,17 +52,31 @@ function launch(overrides: Partial<StartOptions> & { rates?: Record<string, numb
   return { handle, driver, snapshots, last: () => snapshots.at(-1) };
 }
 
+/** A driver that records whether the Clock ever started it. */
+class SpyDriver implements TickDriver {
+  started = false;
+  stopped = false;
+  start(): void {
+    this.started = true;
+  }
+  stop(): void {
+    this.stopped = true;
+  }
+}
+
 describe("engine start guards", () => {
-  it("throws on an invalid graph before allocating anything", () => {
+  it("throws on an invalid graph and allocates nothing", () => {
+    const driver = new SpyDriver();
     expect(() =>
       start({
         getGraph: () => ({ nodes: [{ id: "x", kind: "detect" }], edges: [] }),
         getRate: () => 1,
         setSnapshot: () => undefined,
-        driver: new ManualDriver(),
+        driver,
         bindVisibility: () => () => undefined,
       }),
     ).toThrow(/unknown/i);
+    expect(driver.started).toBe(false); // the Clock was never constructed
   });
 });
 
@@ -178,5 +192,47 @@ describe("engine supervisor", () => {
     h.handle.stop();
     await h.handle.whenStopped;
     expect(errors).toHaveLength(0);
+  });
+
+  it("tears down even when the onError handler throws", async () => {
+    const holder: { clock: Clock | null } = { clock: null };
+    const h = launch({
+      bindVisibility: (clock) => {
+        holder.clock = clock;
+        return () => undefined;
+      },
+      setSnapshot: () => {
+        throw new Error("boom in sampler");
+      },
+      onError: () => {
+        throw new Error("the handler also throws");
+      },
+    });
+    await step(h.driver, 5); // the first sample throws; fail() runs
+    const tickAtFail = holder.clock?.now() ?? -1;
+    await step(h.driver, 20); // the driver is stopped, so no more ticks
+    expect(holder.clock?.now()).toBe(tickAtFail); // torn down, not looping forever
+    await h.handle.whenStopped; // settles, no hang
+  });
+});
+
+describe("engine pause", () => {
+  it("stops sampling while paused, so heat and counts hold", async () => {
+    const holder: { clock: Clock | null } = { clock: null };
+    const h = launch({
+      rates: { ingest: 8, sink: 0.5 },
+      bindVisibility: (clock) => {
+        holder.clock = clock;
+        return () => undefined;
+      },
+    });
+    await step(h.driver, 700); // fill the Backlog past the threshold so the Sink heats up
+    expect(h.last()?.nodes[SINK_ID]?.heat).toBeGreaterThan(0);
+    const count = h.snapshots.length;
+
+    holder.clock?.pause();
+    await step(h.driver, 300); // paused: the sampler does not run
+    expect(h.snapshots.length).toBe(count); // no new snapshot, so heat holds
+    h.handle.stop();
   });
 });

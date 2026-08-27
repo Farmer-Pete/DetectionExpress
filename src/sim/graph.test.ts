@@ -57,4 +57,22 @@ describe("validateLinearChain", () => {
       validateLinearChain(chain.nodes, [{ id: "wire", source: "sink", target: "ingest" }]),
     ).toThrow();
   });
+
+  it("rejects duplicate node ids", () => {
+    expect(() =>
+      validateLinearChain(
+        [
+          { id: "same", kind: "ingest" },
+          { id: "same", kind: "sink" },
+        ],
+        [{ id: "wire", source: "same", target: "same" }],
+      ),
+    ).toThrow(/unique/i);
+  });
+
+  it("rejects a self-edge", () => {
+    expect(() =>
+      validateLinearChain(chain.nodes, [{ id: "wire", source: "ingest", target: "ingest" }]),
+    ).toThrow(/self-edge/i);
+  });
 });
