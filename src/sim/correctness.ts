@@ -75,12 +75,10 @@ function alertList(alerts: Alert | Alert[] | null | undefined): Alert[] {
 
 export function createScorer(attacks: readonly Attack[], config: ScorerConfig): Scorer {
   const state = new Map<number, AttackState>();
-  const byId = new Map<number, Attack>();
   // eventId -> the Attack that owns it, built once from Ground truth.
   const owner = new Map<number, number>();
   for (const attack of attacks) {
     state.set(attack.id, "pending");
-    byId.set(attack.id, attack);
     for (const eventId of attack.eventIds) {
       owner.set(eventId, attack.id);
     }

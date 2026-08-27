@@ -152,6 +152,53 @@ function assertFair(drafts: Draft[], victims: Set<string>, attacks: Attack[]): v
       throw new Error(`Victim ${d.account} emitted a benign failure outside its burst.`);
     }
   }
+  assertNoStrayThreshold(drafts, attacks);
+}
+
+/**
+ * The actual separability proof: no account's failures ever cross the
+ * threshold inside any BRUTE_FORCE_WINDOW_S window, except as a victim's own
+ * Attack. Drafts arrive sorted by `ts`, so each account's failures are already
+ * in time order; a two-pointer sweep over each account's failures finds the
+ * worst window in one pass.
+ */
+function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
+  const windowByAccount = new Map(attacks.map((a) => [a.account, a.window]));
+  const failsByAccount = new Map<string, Draft[]>();
+  for (const d of drafts) {
+    if (d.outcome !== "fail") {
+      continue;
+    }
+    const list = failsByAccount.get(d.account) ?? [];
+    list.push(d);
+    failsByAccount.set(d.account, list);
+  }
+
+  for (const [account, fails] of failsByAccount) {
+    const attackWindow = windowByAccount.get(account);
+    let start = 0;
+    for (let end = 0; end < fails.length; end++) {
+      const endTs = fails[end]?.ts ?? 0;
+      while (endTs - (fails[start]?.ts ?? 0) >= BRUTE_FORCE_WINDOW_S) {
+        start++;
+      }
+      const inThisWindow = fails.slice(start, end + 1);
+      if (inThisWindow.length < BRUTE_FORCE_THRESHOLD) {
+        continue;
+      }
+      const insideAttack =
+        attackWindow !== undefined &&
+        inThisWindow.every(
+          (f) => f.attackId !== null && f.ts >= attackWindow.startTs && f.ts <= attackWindow.endTs,
+        );
+      if (!insideAttack) {
+        throw new Error(
+          `Account ${account} crosses the brute-force threshold within a ` +
+            `${BRUTE_FORCE_WINDOW_S}s window outside any Attack.`,
+        );
+      }
+    }
+  }
 }
 
 /**

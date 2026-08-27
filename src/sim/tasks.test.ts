@@ -139,23 +139,6 @@ describe("runIngest schedule", () => {
     expect(done).toBe(true); // Ingest returned after the marker
     clock.stop();
   });
-
-  it("relays a marker the source itself supplies, exactly once", async () => {
-    const out = new Channel<PipeMessage>(10);
-    const messages: PipeMessage[] = [ev(0, 0), END_OF_STREAM];
-    let i = 0;
-    let done = false;
-    runIngest(out, idleClock, () => messages[i++] ?? null)
-      .then(() => {
-        done = true;
-      })
-      .catch(() => undefined);
-    await flush();
-    expect(out.accepted).toBe(2);
-    expect(idOf(await out.pull())).toBe(0);
-    expect(isEndOfStream(await out.pull())).toBe(true);
-    expect(done).toBe(true);
-  });
 });
 
 describe("runNormalize", () => {
@@ -358,11 +341,10 @@ describe("runSink", () => {
 describe("NODE_TASKS registry", () => {
   const runtime: NodeRuntime = {
     clock: idleClock,
-    clockHz: HZ,
     onComplete: () => undefined,
     algorithm: { normalize: (raw) => raw, match: () => null },
     scorer: { record: () => undefined, finalize: () => undefined },
-    nextMessage: () => null,
+    nextEvent: () => null,
   };
   const noWiring = { input: undefined, output: undefined };
 

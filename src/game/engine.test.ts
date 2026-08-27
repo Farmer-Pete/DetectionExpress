@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
 import { isRawAuthV1 } from "../sim/endpoints/auth/formats/auth-v1";
-import type { PipeEvent, PipeMessage } from "../sim/event";
+import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { buildReferenceAlgorithm } from "../sim/scenarios/brute-force-login/reference";
 import { bruteForceLogin } from "../sim/scenarios/brute-force-login/scenario";
@@ -75,13 +75,13 @@ function isReferenceView(value: unknown): value is ReferenceView {
 }
 
 /** A finite source: yields the given Events, then null (Ingest closes it). */
-function scheduleOf(events: PipeEvent[]): () => PipeMessage | null {
+function scheduleOf(events: PipeEvent[]): () => PipeEvent | null {
   let i = 0;
   return () => (i < events.length ? (events[i++] ?? null) : null);
 }
 
 interface LaunchOpts {
-  generator?: () => PipeMessage | null;
+  generator?: () => PipeEvent | null;
   algorithm?: TaskAlgorithm;
   scorer?: Scorer;
   setSnapshot?: (snapshot: SimSnapshot) => void;
@@ -101,7 +101,6 @@ function launch(opts: LaunchOpts): Harness {
   const options: StartOptions = {
     getGraph: () => ({ nodes: NODES, edges: EDGES }),
     setSnapshot: opts.setSnapshot ?? ((snapshot) => snapshots.push(snapshot)),
-    scenario: bruteForceLogin,
     algorithm: opts.algorithm ?? idleAlgorithm,
     scorer: opts.scorer ?? createScorer([], SCORER_CONFIG),
     generator: opts.generator ?? scheduleOf([]),
@@ -132,7 +131,6 @@ describe("engine start guards", () => {
       start({
         getGraph: () => ({ nodes: [{ id: "x", kind: "detect" }], edges: [] }),
         setSnapshot: () => undefined,
-        scenario: bruteForceLogin,
         algorithm: idleAlgorithm,
         scorer: createScorer([], SCORER_CONFIG),
         generator: scheduleOf([]),
@@ -150,7 +148,6 @@ describe("engine start guards", () => {
       start({
         getGraph: () => ({ nodes: NODES, edges: EDGES }),
         setSnapshot: (snapshot) => snapshots.push(snapshot),
-        scenario: bruteForceLogin,
         algorithm: idleAlgorithm,
         scorer: createScorer([], SCORER_CONFIG),
         generator: scheduleOf([]),
@@ -344,7 +341,6 @@ describe("engine stop", () => {
     const handle = start({
       getGraph: () => ({ nodes: NODES, edges: EDGES }),
       setSnapshot: () => undefined,
-      scenario: bruteForceLogin,
       algorithm: idleAlgorithm,
       scorer: createScorer([], SCORER_CONFIG),
       generator: () => ev(nextId++, 10_000),

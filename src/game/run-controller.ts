@@ -9,7 +9,7 @@
  * the seed, and injects them into the engine. The engine never builds them.
  */
 import { createScorer, type ScorerConfig } from "../sim/correctness";
-import type { PipeMessage } from "../sim/event";
+import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import type { Scenario } from "../sim/scenario";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
@@ -81,9 +81,21 @@ export function createRunController(deps: RunControllerDeps): RunController {
       return;
     }
     const gen = ++generation; // captured synchronously, BEFORE any await
-    engine?.stop(); // sync + idempotent; the old run's tasks unwind on their own
-    const source = deps.getSource();
-    const seed = deps.getSeed();
+
+    // Guarded so a throw here (a bad stop, a getSource/getSeed bug) reports a
+    // structured setup-phase error instead of rejecting the discarded run()
+    // promise silently.
+    let source: string;
+    let seed: number;
+    try {
+      engine?.stop(); // sync + idempotent; the old run's tasks unwind on their own
+      source = deps.getSource();
+      seed = deps.getSeed();
+    } catch (error) {
+      engine = null;
+      deps.setError(toErrorInfo("setup", error));
+      return;
+    }
 
     let algo: LoadedAlgorithm;
     try {
@@ -103,7 +115,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
       const generated = deps.scenario.generate(seed); // fresh per run
       const scorer = createScorer(generated.attacks, SCORER_CONFIG);
       let index = 0;
-      const generator = (): PipeMessage | null =>
+      const generator = (): PipeEvent | null =>
         index < generated.events.length ? (generated.events[index++] ?? null) : null;
       deps.setError(null);
       deps.setSnapshot(emptySnapshot());
@@ -111,7 +123,6 @@ export function createRunController(deps: RunControllerDeps): RunController {
       const handle = startEngine({
         getGraph: deps.getGraph,
         setSnapshot: deps.setSnapshot,
-        scenario: deps.scenario,
         algorithm: algo,
         scorer,
         generator,

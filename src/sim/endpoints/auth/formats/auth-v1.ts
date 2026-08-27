@@ -24,8 +24,10 @@ export const authV1: Endpoint<AuthRecord, RawAuthV1> = {
 };
 
 /**
- * Recognize an auth-v1 payload on the wire. The envelope carries `payload:
- * unknown`, so a reader narrows it here at the boundary instead of asserting.
+ * Recognize an auth-v1 payload. Not a production boundary check — no engine or
+ * Rule code reads the wire payload this way; it is a shared guard the tests
+ * (and the test-only reference-Algorithm adapter) use to narrow `payload:
+ * unknown` instead of asserting.
  */
 export function isRawAuthV1(value: unknown): value is RawAuthV1 {
   return (

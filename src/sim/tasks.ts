@@ -63,22 +63,44 @@ function messageOf(error: unknown): string {
   return String(error);
 }
 
+/** A string primitive, by its tag rather than a representation check. */
+function isString(value: unknown): value is string {
+  return Object.prototype.toString.call(value) === "[object String]";
+}
+
+/**
+ * A plain object: `{}` or `Object.create(null)`, not an array, Date, Map, or
+ * class instance. `Object.getPrototypeOf` boxes a primitive rather than
+ * throwing, so every non-object domain value lands on its own wrapper
+ * prototype here and is rejected the same way as a class instance.
+ */
+function isPlainObject(value: unknown): value is object {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
 /** Accept the Rule's normalize result only when it is a plain object to forward. */
 function normalizedPayload(value: unknown): object {
-  if (value instanceof Object && !Array.isArray(value)) {
+  if (isPlainObject(value)) {
     return value;
   }
   throw new RuleError("normalize", "normalize must return a plain object.");
 }
 
-/** A structural Alert check: enough to reject a return the scorer cannot fold. */
+/** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
 function isAlert(value: unknown): value is Alert {
   return (
     value instanceof Object &&
     "reason" in value &&
+    isString(value.reason) &&
     "at" in value &&
+    Number.isFinite(value.at) &&
     "events" in value &&
-    Array.isArray(value.events)
+    Array.isArray(value.events) &&
+    value.events.every((event) => Number.isFinite(event))
   );
 }
 
@@ -101,35 +123,31 @@ function matchResult(value: unknown): Alert | Alert[] | null {
 }
 
 /**
- * The Ingest task: the source. It plays the seeded schedule from `nextMessage`.
+ * The Ingest task: the source. It plays the seeded schedule from `nextEvent`.
  * For each Event it sleeps until the Clock reaches the Event's due tick, then
  * pushes. Same-tick Events push in order; overdue Events push at once; a full
  * channel blocks the push, so later Events wait and admission lags while `ts`
- * stays the scheduled value. When the schedule is exhausted it pushes exactly one
- * end-of-stream marker, then returns.
+ * stays the scheduled value. When the schedule is exhausted (the source returns
+ * null) it pushes exactly one end-of-stream marker, then returns.
  */
 export async function runIngest(
   out: Channel<PipeMessage>,
   clock: TaskClock,
-  nextMessage: () => PipeMessage | null,
+  nextEvent: () => PipeEvent | null,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
-    const message = nextMessage();
-    if (message === null) {
+    const event = nextEvent();
+    if (event === null) {
       await out.push(END_OF_STREAM); // the schedule ran out; close it once
       return;
     }
-    if (isEndOfStream(message)) {
-      await out.push(message); // the source supplied its own marker; relay it
-      return;
-    }
-    const dueTick = Math.round(message.ts / GAME_SECONDS_PER_TICK);
+    const dueTick = Math.round(event.ts / GAME_SECONDS_PER_TICK);
     const wait = dueTick - clock.now();
     if (wait > 0) {
       await clock.sleep(wait);
     }
-    await out.push(message);
+    await out.push(event);
   }
 }
 
@@ -229,7 +247,6 @@ export interface NodeWiring {
 /** The shared runtime a node task needs, apart from its own wiring. */
 export interface NodeRuntime {
   clock: TaskClock;
-  clockHz: number;
   /** Called each time the Sink finishes an Event. Drives the Throughput gauge. */
   onComplete: () => void;
   /** The player's loaded Rule. */
@@ -237,7 +254,7 @@ export interface NodeRuntime {
   /** The Correctness scorer; the Match task is its single writer. */
   scorer: TaskScorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
-  nextMessage: () => PipeMessage | null;
+  nextEvent: () => PipeEvent | null;
 }
 
 /**
@@ -260,7 +277,7 @@ function requireChannel(
 }
 
 const ingestTask: NodeTask = (nodeId, wiring, runtime) =>
-  runIngest(requireChannel(wiring.output, nodeId, "output"), runtime.clock, runtime.nextMessage);
+  runIngest(requireChannel(wiring.output, nodeId, "output"), runtime.clock, runtime.nextEvent);
 
 const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
   runNormalize(

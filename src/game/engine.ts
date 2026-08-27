@@ -12,7 +12,7 @@
  */
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
-import type { PipeMessage } from "../sim/event";
+import type { PipeEvent, PipeMessage } from "../sim/event";
 import {
   type GraphEdge,
   type GraphNode,
@@ -21,7 +21,6 @@ import {
 } from "../sim/graph";
 import { nextHeat, occupancy } from "../sim/heat";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
-import type { Scenario } from "../sim/scenario";
 import type { SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
@@ -41,15 +40,12 @@ import { bindVisibility as bindVisibilityDefault } from "./visibility";
 export interface StartOptions {
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
   setSnapshot: (snapshot: SimSnapshot) => void;
-  /** The Scenario the run plays. Injected for provenance; the run flows off the
-   * generator and scorer below, which the run controller built from it. */
-  scenario: Scenario;
   /** The player's loaded Rule. */
   algorithm: TaskAlgorithm;
   /** The Correctness scorer, fresh per run. */
   scorer: Scorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
-  generator: () => PipeMessage | null;
+  generator: () => PipeEvent | null;
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Defaults to the real visibility binding; tests pass a no-op. */
@@ -267,11 +263,10 @@ export function start(options: StartOptions): EngineHandle {
     };
     const runtime: NodeRuntime = {
       clock,
-      clockHz: CLOCK_HZ,
       onComplete,
       algorithm: options.algorithm,
       scorer: options.scorer,
-      nextMessage: options.generator,
+      nextEvent: options.generator,
     };
     // Spawn one task per node, looked up by kind. Adding a node kind is a new
     // registry entry, not an engine change.

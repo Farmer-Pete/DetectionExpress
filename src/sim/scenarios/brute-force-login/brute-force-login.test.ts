@@ -11,7 +11,7 @@ import {
 import { createScorer } from "../../correctness";
 import { isRawAuthV1, type RawAuthV1 } from "../../endpoints/auth/formats/auth-v1";
 import type { PipeEvent } from "../../event";
-import { referenceAlgorithm, referenceSource } from "./reference";
+import { buildReferenceAlgorithm, referenceSource } from "./reference";
 import { bruteForceLogin } from "./scenario";
 
 const TIMELINE = SCENARIO_MINUTES * 60;
@@ -139,11 +139,14 @@ describe("bruteForceLogin.generate", () => {
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
     });
+    // A fresh instance: the shared singleton's mutable state could carry
+    // cross-test corruption if another test also drove it.
+    const algo = buildReferenceAlgorithm();
 
     for (const ev of events) {
-      const norm = referenceAlgorithm.normalize(raw(ev));
+      const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      scorer.record(referenceAlgorithm.match(view), ev);
+      scorer.record(algo.match(view), ev);
     }
     scorer.finalize();
 

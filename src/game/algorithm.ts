@@ -46,6 +46,15 @@ export async function loadAlgorithm(source: string): Promise<LoadedAlgorithm> {
   if (!match) {
     throw new Error("The Algorithm must export a `match` function.");
   }
-  const normalize = asCallable(loaded.normalize) ?? ((data: unknown) => data);
+  let normalize: (raw: unknown) => unknown;
+  if (loaded.normalize === undefined) {
+    normalize = (data: unknown) => data; // omitted: default to identity
+  } else {
+    const callable = asCallable(loaded.normalize);
+    if (!callable) {
+      throw new Error("The Algorithm's `normalize` export, if present, must be a function.");
+    }
+    normalize = callable;
+  }
   return { normalize, match };
 }
