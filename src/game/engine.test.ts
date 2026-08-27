@@ -78,6 +78,27 @@ describe("engine start guards", () => {
     ).toThrow(/unknown/i);
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
+
+  it("tears down after a setup failure past allocation", () => {
+    // bindVisibility runs after the Clock and channel exist. A throw here must
+    // stop the started driver and rethrow, so a half-built engine leaks nothing.
+    const driver = new SpyDriver();
+    const snapshots: SimSnapshot[] = [];
+    expect(() =>
+      start({
+        getGraph: () => ({ nodes: NODES, edges: EDGES }),
+        getRate: () => 6,
+        setSnapshot: (snapshot) => snapshots.push(snapshot),
+        driver,
+        bindVisibility: () => {
+          throw new Error("visibility bind boom");
+        },
+      }),
+    ).toThrow(/visibility bind boom/);
+    expect(driver.started).toBe(true); // the Clock started it
+    expect(driver.stopped).toBe(true); // teardown stopped it again
+    expect(snapshots).toHaveLength(0); // nothing published
+  });
 });
 
 describe("engine sampler", () => {

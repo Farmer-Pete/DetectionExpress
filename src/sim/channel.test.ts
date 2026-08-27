@@ -134,4 +134,21 @@ describe("Channel", () => {
     await expect(blockedPush).rejects.toBeInstanceOf(ChannelClosedError);
     await expect(blockedPull).rejects.toBeInstanceOf(ChannelClosedError);
   });
+
+  it("delivers a buffered falsy value instead of reading it as empty", async () => {
+    const ch = new Channel<number>(2);
+    await ch.push(0); // 0 is falsy but is a real buffered item
+    expect(ch.size).toBe(1);
+    expect(await ch.pull()).toBe(0);
+    expect(ch.size).toBe(0);
+  });
+
+  it("delivers a buffered undefined value", async () => {
+    const ch = new Channel<undefined>(2);
+    await ch.push(undefined); // the emptiness signal must not be the value itself
+    expect(ch.size).toBe(1);
+    const pulled = await ch.pull();
+    expect(pulled).toBeUndefined();
+    expect(ch.size).toBe(0);
+  });
 });

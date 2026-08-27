@@ -4,7 +4,7 @@
  * at PUBLISH_HZ. It owns the lifecycle: a transactional `start`, a single-stop
  * supervisor, and a synchronous idempotent `stop`.
  */
-import { Channel, ChannelClosedError } from "../sim/channel";
+import { Channel } from "../sim/channel";
 import type { Event } from "../sim/event";
 import {
   type GraphEdge,
@@ -16,7 +16,7 @@ import { nextHeat, occupancy } from "../sim/heat";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
 import type { SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring } from "../sim/tasks";
-import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
+import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
   CLOCK_HZ,
@@ -46,11 +46,6 @@ export interface StartOptions {
 export interface EngineHandle {
   stop: () => void;
   whenStopped: Promise<void>;
-}
-
-/** Errors expected during teardown. They are not failures. */
-function isTeardownError(error: unknown): boolean {
-  return error instanceof ClockStoppedError || error instanceof ChannelClosedError;
 }
 
 /**
@@ -185,9 +180,10 @@ export function start(options: StartOptions): EngineHandle {
   };
 
   const fail = (error: unknown): void => {
-    // Expected teardown errors are not failures. Once we are stopping, a second
-    // failure must not re-report or re-run teardown.
-    if (isTeardownError(error) || stopped) {
+    // Suppress only once teardown has started. Then the rejected sleeps, gates,
+    // pushes, and pulls are expected. Before that, any error is a real failure,
+    // even a ClockStoppedError or ChannelClosedError, so tear down and report it.
+    if (stopped) {
       return;
     }
     stop(); // tear down first, so a throwing onError cannot leak the engine

@@ -131,11 +131,15 @@ describe("pause bound", () => {
     clock.pause();
     await flush(); // allow at most one in-flight turn per task to settle
     const acceptedFrozen = backlog.accepted;
+    const pulledFrozen = backlog.pulled;
+    const sizeFrozen = backlog.size;
     const completedFrozen = completed;
     expect(acceptedFrozen).toBeLessThanOrEqual(acceptedBeforePause + 1); // at most one more turn
 
-    await step(driver, 200); // paused ticks are absorbed; both counts hold
+    await step(driver, 200); // paused ticks are absorbed; every counter holds
     expect(backlog.accepted).toBe(acceptedFrozen);
+    expect(backlog.pulled).toBe(pulledFrozen); // the Sink pulls nothing while paused
+    expect(backlog.size).toBe(sizeFrozen);
     expect(completed).toBe(completedFrozen);
 
     clock.resume();

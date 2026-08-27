@@ -36,7 +36,10 @@ export class Channel<T> {
   /** Cumulative pulls that took an item. */
   pulled = 0;
 
-  private readonly buffer: T[] = [];
+  // Each item sits in its own slot object. Emptiness is a missing slot, never a
+  // value, so a buffered `undefined` (for a `Channel<undefined>`) is delivered,
+  // not mistaken for an empty buffer.
+  private readonly buffer: Array<{ value: T }> = [];
   private readonly pullWaiters: PullWaiter<T>[] = [];
   private readonly pushWaiters: PushWaiter<T>[] = [];
   private closed = false;
@@ -64,7 +67,7 @@ export class Channel<T> {
       return Promise.resolve();
     }
     if (this.buffer.length < this.cap) {
-      this.buffer.push(item);
+      this.buffer.push({ value: item });
       this.accepted++;
       return Promise.resolve();
     }
@@ -76,14 +79,12 @@ export class Channel<T> {
 
   /** Waits while empty; drains buffered items then rejects when closed. */
   pull(): Promise<T> {
-    // Decide emptiness by length, not by a shift() sentinel. A shift() that
-    // returns undefined cannot tell an empty buffer from a buffered undefined.
-    const buffered = this.buffer[0];
-    if (this.buffer.length > 0 && buffered !== undefined) {
-      this.buffer.shift();
+    // A slot is truthy whether or not its value is; only a missing slot is empty.
+    const slot = this.buffer.shift();
+    if (slot) {
       this.pulled++;
       this.admitOneBlockedProducer();
-      return Promise.resolve(buffered);
+      return Promise.resolve(slot.value);
     }
     // Empty buffer but a producer is blocked only when cap is 0: hand directly.
     const producer = this.pushWaiters.shift();
@@ -125,7 +126,7 @@ export class Channel<T> {
     if (!producer) {
       return;
     }
-    this.buffer.push(producer.item);
+    this.buffer.push({ value: producer.item });
     this.accepted++;
     producer.resolve();
   }
