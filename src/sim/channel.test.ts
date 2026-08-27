@@ -151,4 +151,10 @@ describe("Channel", () => {
     expect(pulled).toBeUndefined();
     expect(ch.size).toBe(0);
   });
+
+  it("rejects an invalid capacity at construction", () => {
+    expect(() => new Channel<number>(-1)).toThrow(/non-negative integer/);
+    expect(() => new Channel<number>(1.5)).toThrow(/non-negative integer/);
+    expect(() => new Channel<number>(Number.NaN)).toThrow(/non-negative integer/);
+  });
 });

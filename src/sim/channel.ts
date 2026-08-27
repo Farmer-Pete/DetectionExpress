@@ -45,6 +45,9 @@ export class Channel<T> {
   private closed = false;
 
   constructor(cap: number) {
+    if (!Number.isInteger(cap) || cap < 0) {
+      throw new Error(`Channel capacity must be a non-negative integer, got ${cap}.`);
+    }
     this.cap = cap;
   }
 
