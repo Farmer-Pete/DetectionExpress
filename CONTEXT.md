@@ -33,7 +33,7 @@ One sensor reading entering the Engine. It is flat and typed. Its schema depends
 _Avoid_: Record, message, log, item, signal.
 
 **Endpoint**:
-A sensor at the station, such as an account kiosk, a fare gate, a door reader, or a platform camera. Each Endpoint emits its own record format. Adding Endpoints is a main way the game grows harder.
+A sensor at the station, such as an account kiosk, a fare gate, a door reader, or a platform camera. Each Endpoint emits its own reading format. Adding Endpoints is a main way the game grows harder.
 _Avoid_: Source, feed, input, device.
 
 **Alert**:
@@ -119,5 +119,5 @@ The correctness risk a Tool introduces. Example: a cache can serve a stale answe
 _Avoid_: Bug, drawback, penalty.
 
 **Stress event**:
-A surge in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to log the same card. It turns a hidden flaw into a visible Correctness drop.
+A surge in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to report the same card. It turns a hidden flaw into a visible Correctness drop.
 _Avoid_: Attack, wave, test, spike.
