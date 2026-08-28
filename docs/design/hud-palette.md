@@ -1,6 +1,6 @@
 # HUD palette — Vibrant Tones
 
-This guide sets the color system for the Detection Dash HUD. It records the
+This guide sets the color system for the Detection Express HUD. It records the
 chosen palette, maps every color to a role, and gives a drop-in token block.
 Read it before you style any gauge, panel, or Node.
 
@@ -123,7 +123,7 @@ Paste this into the HUD root. Style components through the tokens.
 
 ```css
 :root {
-  /* Detection Dash HUD — Vibrant Tones */
+  /* Detection Express HUD — Vibrant Tones */
   --bg:     #0f303d;
   --panel:  #154457;
   --panel2: #1b556d;

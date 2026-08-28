@@ -1,21 +1,21 @@
 import { describe, expect, it } from "bun:test";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
-import { isRawAuthV1 } from "../sim/endpoints/auth/formats/auth-v1";
+import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
-import { buildReferenceAlgorithm } from "../sim/scenarios/brute-force-login/reference";
-import { bruteForceLogin } from "../sim/scenarios/brute-force-login/scenario";
+import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
+import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import type { SimSnapshot } from "../sim/snapshot";
 import { RuleError, type TaskAlgorithm } from "../sim/tasks";
 import { ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
 import {
-  BRUTE_FORCE_THRESHOLD,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
+  PIN_BRUTE_FORCE_THRESHOLD,
 } from "./tuning";
 
 const NODES: GraphNode[] = [
@@ -31,7 +31,7 @@ const EDGES: GraphEdge[] = [
 ];
 
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: BRUTE_FORCE_THRESHOLD,
+  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
@@ -56,14 +56,14 @@ async function step(driver: ManualDriver, ticks: number): Promise<void> {
   }
 }
 
-function ev(id: number, ts: number, payload: unknown = { u: "x" }): PipeEvent {
-  return { id, ts, endpoint: "auth-v1", payload };
+function ev(id: number, ts: number, payload: unknown = { acct: "x" }): PipeEvent {
+  return { id, ts, endpoint: "kiosk-v1", payload };
 }
 
 /** The normalized record the reference match reads, after Normalize runs. */
 interface ReferenceView {
-  user: string;
-  sourceIp: string;
+  account: string;
+  terminal: string;
   outcome: "success" | "fail";
   id: number;
   ts: number;
@@ -71,7 +71,7 @@ interface ReferenceView {
 }
 
 function isReferenceView(value: unknown): value is ReferenceView {
-  return value instanceof Object && "user" in value && "outcome" in value && "id" in value;
+  return value instanceof Object && "account" in value && "outcome" in value && "id" in value;
 }
 
 /** A finite source: yields the given Events, then null (Ingest closes it). */
@@ -165,18 +165,18 @@ describe("engine start guards", () => {
 
 describe("engine integration with the reference Algorithm", () => {
   // Adapt the reference twin (typed to its concrete records) to the engine's
-  // untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it auth-v1
+  // untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it kiosk-v1
   // payloads, and Normalize produces the record the reference match expects.
   function referenceTaskAlgorithm(): TaskAlgorithm {
     const algo = buildReferenceAlgorithm();
     return {
-      normalize: (raw) => (isRawAuthV1(raw) ? algo.normalize(raw) : raw),
+      normalize: (raw) => (isRawKioskV1(raw) ? algo.normalize(raw) : raw),
       match: (view) => (isReferenceView(view) ? algo.match(view) : null),
     };
   }
 
   function runReference(): Harness {
-    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const run = kioskPinAttack.generate(LEVEL_SEED);
     const h = launch({
       generator: scheduleOf(run.events),
       algorithm: referenceTaskAlgorithm(),
@@ -186,7 +186,7 @@ describe("engine integration with the reference Algorithm", () => {
   }
 
   it("reaches full Correctness and finalizes every Attack", async () => {
-    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const run = kioskPinAttack.generate(LEVEL_SEED);
     const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
     const h = runReference();
     await step(h.driver, maxDue + 30);
@@ -201,7 +201,7 @@ describe("engine integration with the reference Algorithm", () => {
   });
 
   it("presents all three edge rates, four node heats, and a drained Backlog", async () => {
-    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const run = kioskPinAttack.generate(LEVEL_SEED);
     const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
     const h = runReference();
     await step(h.driver, maxDue + 30);
@@ -215,7 +215,7 @@ describe("engine integration with the reference Algorithm", () => {
   });
 
   it("produces the same final snapshot when run twice", async () => {
-    const run = bruteForceLogin.generate(LEVEL_SEED);
+    const run = kioskPinAttack.generate(LEVEL_SEED);
     const maxDue = Math.max(...run.events.map((e) => Math.round(e.ts / GAME_SECONDS_PER_TICK)));
     const first = runReference();
     await step(first.driver, maxDue + 30);

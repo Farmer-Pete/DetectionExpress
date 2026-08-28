@@ -4,7 +4,7 @@ import type { Attack } from "./attack";
 import { type Counts, createScorer, type ScorerConfig, score } from "./correctness";
 import type { PipeEvent } from "./event";
 
-const REASON = "brute_force";
+const REASON = "pin_brute_force";
 
 function counts(caught: number, missed: number, falseAlerts: number): Counts {
   return { caught, missed, falseAlerts };
@@ -22,7 +22,7 @@ function attack(
 
 /** A bare Event carrying only the scheduled time the scorer folds on. */
 function at(ts: number): PipeEvent {
-  return { id: 0, ts, endpoint: "auth-v1", payload: null };
+  return { id: 0, ts, endpoint: "kiosk-v1", payload: null };
 }
 
 function alert(events: number[], ts: number, reason = REASON): Alert {

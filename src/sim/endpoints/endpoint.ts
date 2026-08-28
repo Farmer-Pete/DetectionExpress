@@ -24,7 +24,7 @@ export interface GenContext {
 }
 
 export interface Endpoint<Internal = unknown, Raw = unknown> {
-  /** The wire format's id, e.g. "auth-v1". */
+  /** The wire format's id, e.g. "kiosk-v1". */
   readonly id: string;
   /** Serialize the internal record into this format. */
   format(record: Internal): Raw;

@@ -39,11 +39,11 @@ export const THROUGHPUT_WINDOW_MS = 500;
 /** Ticks to game seconds. Sets the ~120x time compression (the Ingest schedule). */
 export const GAME_SECONDS_PER_TICK = 2;
 
-/** Failed logins within the window that flag a brute-force Attack. */
-export const BRUTE_FORCE_THRESHOLD = 5;
+/** Wrong PINs within the window that flag a PIN brute-force Attack. */
+export const PIN_BRUTE_FORCE_THRESHOLD = 5;
 
-/** The brute-force detection window, in game seconds (5 minutes). */
-export const BRUTE_FORCE_WINDOW_S = 300;
+/** The PIN brute-force detection window, in game seconds (5 minutes). */
+export const PIN_BRUTE_FORCE_WINDOW_S = 300;
 
 /** Share of accounts that see an Attack. */
 export const THREAT_RATE = 0.15;

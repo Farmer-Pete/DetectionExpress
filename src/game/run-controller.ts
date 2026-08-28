@@ -17,10 +17,10 @@ import { RuleError } from "../sim/tasks";
 import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
 import { type EngineHandle, type StartOptions, start as startDefault } from "./engine";
 import {
-  BRUTE_FORCE_THRESHOLD,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  PIN_BRUTE_FORCE_THRESHOLD,
 } from "./tuning";
 
 /** A run or Rule error, as the editor shows it. */
@@ -52,7 +52,7 @@ export interface RunControllerDeps {
 }
 
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: BRUTE_FORCE_THRESHOLD,
+  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,

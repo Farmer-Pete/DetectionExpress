@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "detection-dash",
+      "name": "detection-express",
       "dependencies": {
         "@faker-js/faker": "^10.6.0",
         "@xyflow/react": "^12.11.3",

@@ -7,16 +7,16 @@
  * import, so it needs no network and no loader. Both raise one Alert per Attack.
  */
 import type { Alert } from "../../alert";
-import type { RawAuthV1 } from "../../endpoints/auth/formats/auth-v1";
-import { BRUTE_FORCE_REASON } from "./attacks";
+import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /** The editor default and the browser run. Imports lodash by URL, like a player. */
 export const referenceSource = `import _ from "https://esm.sh/lodash@4.17.21";
 export function normalize(raw) {
   return {
-    user: raw.u,
-    sourceIp: raw.src,
-    outcome: _.startsWith(_.toLower(raw.res), "fail") ? "fail" : "success",
+    account: raw.acct,
+    terminal: raw.term,
+    outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
   };
 }
 const fails = {};
@@ -24,35 +24,35 @@ const firing = {};
 export function match(e) {
   const WINDOW = 300; // 5 minutes in game seconds
   if (e.outcome !== "fail") return null;
-  const f = (fails[e.user] ??= []);
+  const f = (fails[e.account] ??= []);
   f.push({ id: e.id, ts: e.ts });
-  fails[e.user] = f.filter((x) => x.ts > e.ts - WINDOW);
-  if (fails[e.user].length < 5) {
-    firing[e.user] = false;
+  fails[e.account] = f.filter((x) => x.ts > e.ts - WINDOW);
+  if (fails[e.account].length < 5) {
+    firing[e.account] = false;
     return null;
   }
-  if (firing[e.user]) return null; // one Alert per burst; no duplicates
-  firing[e.user] = true;
-  return { reason: "brute_force", at: e.ts, events: fails[e.user].map((x) => x.id) };
+  if (firing[e.account]) return null; // one Alert per burst; no duplicates
+  firing[e.account] = true;
+  return { reason: "pin_brute_force", at: e.ts, events: fails[e.account].map((x) => x.id) };
 }
 `;
 
 /** The player's shape after Normalize. */
-interface NormalizedAuth {
-  user: string;
-  sourceIp: string;
+interface NormalizedKiosk {
+  account: string;
+  terminal: string;
   outcome: "success" | "fail";
 }
 
 /** The flat view Match hands the Rule: the normalized payload plus engine fields. */
-interface MatchView extends NormalizedAuth {
+interface MatchView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
 }
 
 export interface ReferenceAlgorithm {
-  normalize(raw: RawAuthV1): NormalizedAuth;
+  normalize(raw: RawKioskV1): NormalizedKiosk;
   match(e: MatchView): Alert | null;
 }
 
@@ -70,28 +70,28 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
   return {
     normalize(raw) {
       return {
-        user: raw.u,
-        sourceIp: raw.src,
-        outcome: raw.res.toLowerCase().startsWith("fail") ? "fail" : "success",
+        account: raw.acct,
+        terminal: raw.term,
+        outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
       };
     },
     match(e) {
       if (e.outcome !== "fail") {
         return null;
       }
-      const f = fails.get(e.user) ?? [];
+      const f = fails.get(e.account) ?? [];
       f.push({ id: e.id, ts: e.ts });
       const kept = f.filter((x) => x.ts > e.ts - WINDOW);
-      fails.set(e.user, kept);
+      fails.set(e.account, kept);
       if (kept.length < THRESHOLD) {
-        firing.delete(e.user);
+        firing.delete(e.account);
         return null;
       }
-      if (firing.has(e.user)) {
+      if (firing.has(e.account)) {
         return null; // one Alert per burst; no duplicates
       }
-      firing.add(e.user);
-      return { reason: BRUTE_FORCE_REASON, at: e.ts, events: kept.map((x) => x.id) };
+      firing.add(e.account);
+      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, events: kept.map((x) => x.id) };
     },
   };
 }

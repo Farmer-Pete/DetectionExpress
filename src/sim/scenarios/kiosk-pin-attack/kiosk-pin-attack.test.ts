@@ -1,25 +1,25 @@
 import { describe, expect, it } from "bun:test";
 import {
-  BRUTE_FORCE_THRESHOLD,
-  BRUTE_FORCE_WINDOW_S,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
+  PIN_BRUTE_FORCE_THRESHOLD,
+  PIN_BRUTE_FORCE_WINDOW_S,
   SCENARIO_MINUTES,
 } from "../../../game/tuning";
 import { createScorer } from "../../correctness";
-import { isRawAuthV1, type RawAuthV1 } from "../../endpoints/auth/formats/auth-v1";
+import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
 import { buildReferenceAlgorithm, referenceSource } from "./reference";
-import { bruteForceLogin } from "./scenario";
+import { kioskPinAttack } from "./scenario";
 
 const TIMELINE = SCENARIO_MINUTES * 60;
 
-/** Read an Event's auth-v1 payload, narrowing at the boundary. */
-function raw(ev: PipeEvent): RawAuthV1 {
-  if (!isRawAuthV1(ev.payload)) {
-    throw new Error("expected an auth-v1 payload");
+/** Read an Event's kiosk-v1 payload, narrowing at the boundary. */
+function raw(ev: PipeEvent): RawKioskV1 {
+  if (!isRawKioskV1(ev.payload)) {
+    throw new Error("expected a kiosk-v1 payload");
   }
   return ev.payload;
 }
@@ -29,10 +29,10 @@ function failTimesByAccount(events: PipeEvent[]): Map<string, number[]> {
   const byAccount = new Map<string, number[]>();
   for (const ev of events) {
     const record = raw(ev);
-    if (record.res === "FAILURE") {
-      const list = byAccount.get(record.u) ?? [];
+    if (record.res === "WRONG_PIN") {
+      const list = byAccount.get(record.acct) ?? [];
       list.push(ev.ts);
-      byAccount.set(record.u, list);
+      byAccount.set(record.acct, list);
     }
   }
   return byAccount;
@@ -52,32 +52,38 @@ function maxFailsInWindow(times: number[], windowSeconds: number): number {
   return worst;
 }
 
-describe("bruteForceLogin.generate", () => {
+describe("kioskPinAttack", () => {
+  it("has the scenario id", () => {
+    expect(kioskPinAttack.id).toBe("kiosk-pin-attack");
+  });
+});
+
+describe("kioskPinAttack.generate", () => {
   it("is deterministic: the same seed gives the same stream and Attacks", () => {
-    const a = bruteForceLogin.generate(LEVEL_SEED);
-    const b = bruteForceLogin.generate(LEVEL_SEED);
+    const a = kioskPinAttack.generate(LEVEL_SEED);
+    const b = kioskPinAttack.generate(LEVEL_SEED);
     expect(a.events).toEqual(b.events);
     expect(a.attacks).toEqual(b.attacks);
   });
 
   it("assigns ids in sorted-time order with no gaps", () => {
-    const { events } = bruteForceLogin.generate(LEVEL_SEED);
+    const { events } = kioskPinAttack.generate(LEVEL_SEED);
     let prev = -1;
     events.forEach((ev, i) => {
       expect(ev.id).toBe(i);
-      expect(ev.endpoint).toBe("auth-v1");
+      expect(ev.endpoint).toBe("kiosk-v1");
       expect(ev.ts).toBeGreaterThanOrEqual(prev);
       prev = ev.ts;
     });
   });
 
   it("gives every Attack a valid window and enough evidence", () => {
-    const { events, attacks } = bruteForceLogin.generate(LEVEL_SEED);
+    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const byId = new Map(events.map((ev) => [ev.id, ev]));
     expect(attacks.length).toBeGreaterThan(0);
     for (const attack of attacks) {
-      expect(attack.reason).toBe("brute_force");
-      expect(attack.eventIds.length).toBeGreaterThanOrEqual(BRUTE_FORCE_THRESHOLD);
+      expect(attack.reason).toBe("pin_brute_force");
+      expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
       expect(attack.window.endTs).toBeLessThan(TIMELINE);
       for (const id of attack.eventIds) {
         const ev = byId.get(id);
@@ -86,8 +92,8 @@ describe("bruteForceLogin.generate", () => {
           continue;
         }
         const record = raw(ev);
-        expect(record.res).toBe("FAILURE");
-        expect(record.u).toBe(attack.account);
+        expect(record.res).toBe("WRONG_PIN");
+        expect(record.acct).toBe(attack.account);
         expect(ev.ts).toBeGreaterThanOrEqual(attack.window.startTs);
         expect(ev.ts).toBeLessThanOrEqual(attack.window.endTs);
       }
@@ -95,7 +101,7 @@ describe("bruteForceLogin.generate", () => {
   });
 
   it("gives each Attack a distinct account and a non-overlapping window", () => {
-    const { attacks } = bruteForceLogin.generate(LEVEL_SEED);
+    const { attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const accounts = new Set(attacks.map((a) => a.account));
     expect(accounts.size).toBe(attacks.length);
     const windows = [...attacks].sort((x, y) => x.window.startTs - y.window.startTs);
@@ -107,7 +113,7 @@ describe("bruteForceLogin.generate", () => {
   });
 
   it("is fair: only victims cross the threshold, and only via their burst", () => {
-    const { events, attacks } = bruteForceLogin.generate(LEVEL_SEED);
+    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const victimFails = new Map(attacks.map((a) => [a.account, new Set(a.eventIds)]));
     const failTimes = failTimesByAccount(events);
 
@@ -115,7 +121,9 @@ describe("bruteForceLogin.generate", () => {
       if (victimFails.has(account)) {
         continue; // victims are allowed their burst
       }
-      expect(maxFailsInWindow(times, BRUTE_FORCE_WINDOW_S)).toBeLessThan(BRUTE_FORCE_THRESHOLD);
+      expect(maxFailsInWindow(times, PIN_BRUTE_FORCE_WINDOW_S)).toBeLessThan(
+        PIN_BRUTE_FORCE_THRESHOLD,
+      );
     }
 
     // A victim's only failure Events are exactly its burst.
@@ -123,7 +131,7 @@ describe("bruteForceLogin.generate", () => {
       const burst = victimFails.get(attack.account) ?? new Set<number>();
       const fails = events.filter((ev) => {
         const record = raw(ev);
-        return record.u === attack.account && record.res === "FAILURE";
+        return record.acct === attack.account && record.res === "WRONG_PIN";
       });
       for (const ev of fails) {
         expect(burst.has(ev.id)).toBe(true);
@@ -132,9 +140,9 @@ describe("bruteForceLogin.generate", () => {
   });
 
   it("lets the in-process reference Algorithm score 100 via the scorer", () => {
-    const { events, attacks } = bruteForceLogin.generate(LEVEL_SEED);
+    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: BRUTE_FORCE_THRESHOLD,
+      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
