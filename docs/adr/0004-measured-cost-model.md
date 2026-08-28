@@ -20,9 +20,10 @@ lesson about where cost comes from.
 
 Measure the player's code throughput off the sim, then feed the sim a single fixed cost.
 
-- A profiler runs the player's `match` over a fixed corpus built from the level seed at peak
-  density. It times three things in one pass: the player's code (`C = events/playerMs`), a
-  detection-shaped anchor (`A = events/anchorMs`, the naive scan over the same corpus), and a
+- A profiler runs the player's code over a fixed corpus built from the level seed at peak
+  density. It times three things in one pass: the player's code — both `normalize` and `match`,
+  since a player can put heavy work in either (`C = events/playerMs`) — a detection-shaped anchor
+  (`A = events/anchorMs`, the fixed normalize plus the naive scan over the same corpus), and a
   stable integer oracle (`O`, kept only as profiler-health metadata).
 - It stores `codePerAnchor = C / A = anchorMs / playerMs`, a machine-independent code speed.
   The oracle and the player's code both scale with machine speed, so the ratio cancels it out.
@@ -89,8 +90,11 @@ limits (GH3-PLAN.md section 11).
 - **JIT warmth.** A short profile could measure faster than a short run. This slice raises
   volume hard, so the run warms up too; the profiler discards a warm-up stretch and matches the
   run's call count, and the waves are ordered low to high.
-- **Normalize is unpriced.** Only Match charges. A player could hide heavy work in `normalize`.
-  A later slice prices Normalize too.
+- **Normalize and match are both priced.** The profiler times the player's `normalize` and `match`
+  together, so heavy work in either is reflected in the measured rate — charged once at the Match
+  node, since the single service rate already accounts for both. The anchor's fixed `normalize` is
+  the baseline both rules are measured against; a player `normalize` of a very different shape falls
+  under the resource-mix-skew limit above, not a blind spot.
 - **Winnability is a band, not a proof.** We cannot prove a runtime on unknown hardware. We
   prove the separation ratio holds across a parameter band with margin. That is the honest
   guarantee here.

@@ -25,11 +25,25 @@ import { profile, spawnProfilerWorker } from "./profiler/profile";
 import { serviceRateForCode } from "./profiler/quantize";
 import { adaptLoaded } from "./profiler/worker-support";
 import {
+  CORPUS_VERSION,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   PIN_BRUTE_FORCE_THRESHOLD,
+  PROFILER_VERSION,
 } from "./tuning";
+
+/**
+ * The slice of a profiler Worker the controller drives. A real `Worker` satisfies
+ * it structurally, and a test provides a fake, so the message, error, defer, and
+ * fallback branches are all exercised without a live worker.
+ */
+export interface ProfilerWorkerLike {
+  postMessage(message: { source: string; hidden: boolean }): void;
+  terminate(): void;
+  addEventListener(type: "message", handler: (event: MessageEvent) => void): void;
+  addEventListener(type: "error", handler: (event: ErrorEvent) => void): void;
+}
 
 /** A run or Rule error, as the editor shows it. */
 export interface RuleErrorInfo {
@@ -66,8 +80,16 @@ export interface RunControllerDeps {
   setError: (error: RuleErrorInfo | null) => void;
   /** Defaults to the real Blob loader; tests inject a deterministic one. */
   loadAlgorithm?: (source: string) => Promise<LoadedAlgorithm>;
-  /** Defaults to the real profiler worker; tests inject a fixed rate. */
+  /**
+   * The whole service-rate seam. Defaults to the worker-backed resolver built from
+   * `spawnProfilerWorker` and `mainThreadResolveServiceRate` below; a test can
+   * still inject a fixed rate directly, bypassing the worker seam entirely.
+   */
   resolveServiceRate?: ResolveServiceRate;
+  /** Defaults to the real profiler worker spawn; tests inject a fake worker. */
+  spawnProfilerWorker?: () => ProfilerWorkerLike;
+  /** The main-thread fallback when no module Worker can be constructed. */
+  mainThreadResolveServiceRate?: ResolveServiceRate;
   /** Defaults to the real engine; tests inject a fake. */
   start?: (options: StartOptions) => EngineHandle;
   /** Called when a live run tears down on its own. */
@@ -96,7 +118,12 @@ function isFiniteNumber(value: unknown): value is number {
   return Number.isFinite(value);
 }
 
-/** Read the measured codePerAnchor out of a worker outcome, or null if it deferred. */
+/**
+ * Read the measured codePerAnchor out of a worker outcome, or null when the
+ * message is anything else: a deferral, an `{ ok: false, error }` failure, or a
+ * shape the controller does not recognize. A null therefore means "no usable
+ * reading" and the caller decides whether that is a defer-and-retry or an error.
+ */
 function parseCodePerAnchor(data: unknown): number | null {
   if (
     data instanceof Object &&
@@ -110,6 +137,32 @@ function parseCodePerAnchor(data: unknown): number | null {
     return data.result.codePerAnchor;
   }
   return null;
+}
+
+/** True when the worker deferred because the tab is hidden (its timers are throttled). */
+function deferredWhileHidden(data: unknown): boolean {
+  return (
+    data instanceof Object &&
+    "ok" in data &&
+    data.ok === false &&
+    "deferred" in data &&
+    data.deferred === "hidden"
+  );
+}
+
+/** A small stable string hash (FNV-1a). Enough to key a calibration cache entry. */
+function sourceHash(source: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/** The calibration cache key (GH3-PLAN.md 5.1): a valid entry is never re-measured. */
+function calibrationCacheKey(scenarioId: string, seed: number, source: string): string {
+  return `${scenarioId}|${seed}|${sourceHash(source)}|${CORPUS_VERSION}|${PROFILER_VERSION}`;
 }
 
 /**
@@ -135,41 +188,135 @@ function mainThreadResolveServiceRate(source: string): ServiceRateHandle {
 
 /**
  * The production service-rate seam: spawn the profiler worker, measure the Rule off
- * the sim, and quantize `codePerAnchor * OMEGA`. `cancel` terminates the worker, so
- * a superseded run leaves none running. If a module Worker cannot be constructed
- * (an environment that forbids one), fall back to a main-thread measurement instead
- * of failing the run.
+ * the sim, and quantize `codePerAnchor * OMEGA`.
+ *
+ * Three worker outcomes are distinct. A usable reading resolves the rate. A hidden
+ * defer is NOT a failure: the worker's timers are throttled while the tab is
+ * hidden, so the measurement holds and re-runs once the tab is visible again
+ * (GH3-PLAN.md 5.1/7). Anything else — an `{ ok: false, error }` failure, or a
+ * shape with no reading — rejects with a clean profile error, so the Run reports it
+ * instead of hanging. `cancel` terminates the worker and drops any pending
+ * visibility retry, so a superseded run leaves nothing running.
  */
-function workerResolveServiceRate(source: string): ServiceRateHandle {
-  let worker: Worker;
-  try {
-    worker = spawnProfilerWorker();
-  } catch {
-    return mainThreadResolveServiceRate(source);
-  }
-  const rate = new Promise<ServiceRate>((resolve, reject) => {
-    worker.addEventListener("message", (event: MessageEvent) => {
-      worker.terminate();
-      const codePerAnchor = parseCodePerAnchor(event.data);
-      if (codePerAnchor === null) {
-        reject(new Error("the profiler returned no usable reading"));
-        return;
-      }
-      resolve(serviceRateForCode(codePerAnchor));
+function makeWorkerResolveServiceRate(
+  spawn: () => ProfilerWorkerLike,
+  fallback: ResolveServiceRate,
+): ResolveServiceRate {
+  return (source: string): ServiceRateHandle => {
+    let activeWorker: ProfilerWorkerLike | null = null;
+    let detachVisibility: (() => void) | null = null;
+    let done = false;
+
+    const cleanup = (): void => {
+      activeWorker?.terminate();
+      activeWorker = null;
+      detachVisibility?.();
+      detachVisibility = null;
+    };
+
+    const rate = new Promise<ServiceRate>((resolve, reject) => {
+      const settleError = (error: Error): void => {
+        if (done) {
+          return;
+        }
+        done = true;
+        cleanup();
+        reject(error);
+      };
+      const settleRate = (value: ServiceRate): void => {
+        if (done) {
+          return;
+        }
+        done = true;
+        cleanup();
+        resolve(value);
+      };
+
+      const attempt = (): void => {
+        let worker: ProfilerWorkerLike;
+        try {
+          worker = spawn();
+        } catch {
+          // No module Worker here: measure on the main thread once. That path is
+          // not throttled by visibility, so it profiles regardless.
+          fallback(source).rate.then(settleRate, settleError);
+          return;
+        }
+        activeWorker = worker;
+        worker.addEventListener("message", (event: MessageEvent) => {
+          worker.terminate();
+          if (activeWorker === worker) {
+            activeWorker = null;
+          }
+          const codePerAnchor = parseCodePerAnchor(event.data);
+          if (codePerAnchor !== null) {
+            settleRate(serviceRateForCode(codePerAnchor));
+            return;
+          }
+          if (deferredWhileHidden(event.data)) {
+            waitForVisible(); // hold; re-profile once the tab is visible again
+            return;
+          }
+          settleError(new Error("the profiler returned no usable reading"));
+        });
+        worker.addEventListener("error", (event: ErrorEvent) => {
+          worker.terminate();
+          if (activeWorker === worker) {
+            activeWorker = null;
+          }
+          settleError(
+            event.error instanceof Error ? event.error : new Error("the profiler worker failed"),
+          );
+        });
+        worker.postMessage({ source, hidden: tabHidden() });
+      };
+
+      const waitForVisible = (): void => {
+        // The tab may have flipped back to visible before we handled the defer.
+        if (!tabHidden()) {
+          attempt();
+          return;
+        }
+        const onVisible = (): void => {
+          if (tabHidden()) {
+            return; // a spurious event while still hidden
+          }
+          document.removeEventListener("visibilitychange", onVisible);
+          detachVisibility = null;
+          attempt();
+        };
+        detachVisibility = () => document.removeEventListener("visibilitychange", onVisible);
+        document.addEventListener("visibilitychange", onVisible);
+      };
+
+      attempt();
     });
-    worker.addEventListener("error", (event: ErrorEvent) => {
-      worker.terminate();
-      reject(event.error ?? new Error("the profiler worker failed"));
-    });
-    worker.postMessage({ source, hidden: tabHidden() });
-  });
-  return { rate, cancel: () => worker.terminate() };
+
+    return {
+      rate,
+      cancel: () => {
+        if (done) {
+          return;
+        }
+        done = true;
+        cleanup();
+      },
+    };
+  };
 }
 
 export function createRunController(deps: RunControllerDeps): RunController {
   const load = deps.loadAlgorithm ?? loadAlgorithmDefault;
-  const resolveServiceRate = deps.resolveServiceRate ?? workerResolveServiceRate;
+  const spawn = deps.spawnProfilerWorker ?? spawnProfilerWorker;
+  const fallbackResolve = deps.mainThreadResolveServiceRate ?? mainThreadResolveServiceRate;
+  const resolveServiceRate =
+    deps.resolveServiceRate ?? makeWorkerResolveServiceRate(spawn, fallbackResolve);
   const startEngine = deps.start ?? startDefault;
+
+  // A resolved service rate is cached by its calibration key: an unchanged source
+  // (same scenario, seed, and profiler version) reuses the rate and never spawns a
+  // worker or measures again (GH3-PLAN.md 5.1).
+  const rateCache = new Map<string, ServiceRate>();
 
   let engine: EngineHandle | null = null;
   let profile: ServiceRateHandle | null = null;
@@ -212,23 +359,31 @@ export function createRunController(deps: RunControllerDeps): RunController {
       return; // a newer run superseded this one, or we were disposed, during the load
     }
 
-    // Measure the service rate off the sim. A superseded run cancels its worker.
-    const pending = resolveServiceRate(source);
-    profile = pending;
+    // Reuse a cached rate for an unchanged source: no worker, no measurement.
+    const cacheKey = calibrationCacheKey(deps.scenario.id, seed, source);
     let serviceRate: ServiceRate;
-    try {
-      serviceRate = await pending.rate;
-    } catch (error) {
-      if (!disposed && gen === generation) {
-        deps.setError(toErrorInfo("profile", error));
+    const cached = rateCache.get(cacheKey);
+    if (cached !== undefined) {
+      serviceRate = cached;
+    } else {
+      // Measure the service rate off the sim. A superseded run cancels its worker.
+      const pending = resolveServiceRate(source);
+      profile = pending;
+      try {
+        serviceRate = await pending.rate;
+      } catch (error) {
+        if (!disposed && gen === generation) {
+          deps.setError(toErrorInfo("profile", error));
+        }
+        return;
       }
-      return;
+      if (disposed || gen !== generation) {
+        pending.cancel();
+        return;
+      }
+      profile = null; // the reading is in hand; nothing left to cancel
+      rateCache.set(cacheKey, serviceRate);
     }
-    if (disposed || gen !== generation) {
-      pending.cancel();
-      return;
-    }
-    profile = null; // the reading is in hand; nothing left to cancel
 
     let phase = "setup";
     try {

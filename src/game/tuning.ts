@@ -98,6 +98,15 @@ export const PROFILE_BATCHES = 5;
 export const PROFILE_WARMUP_MS = 50;
 
 /**
+ * Cache-key components (GH3-PLAN.md 5.1). A calibration reading is only reused
+ * when the corpus and the profiler protocol that produced it are unchanged, so
+ * these versions are folded into the key. Bump one when its shape changes, so a
+ * stale reading is not reused.
+ */
+export const CORPUS_VERSION = 1;
+export const PROFILER_VERSION = 1;
+
+/**
  * The difficulty dial, in anchor-units per tick. `serviceRate = (C/A) * OMEGA`,
  * so a larger Omega gives every rule a higher records-per-tick rate. The naive
  * default rule measures at roughly one anchor-unit (C/A ~ 1), so its rate lands

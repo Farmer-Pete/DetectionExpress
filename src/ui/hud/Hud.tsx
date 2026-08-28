@@ -55,7 +55,13 @@ function outcomeText(status: RunStatus, reason: FailureReason) {
 
 export function Hud() {
   const throughput = useGameStore((state) => state.snapshot.throughput);
-  const backlog = useGameStore((state) => state.snapshot.backlog);
+  // The Backlog the player sees is the authoritative outstanding count,
+  // `admitted - completed`, the same value the checkpoint fails on. The channel
+  // sum can read zero on the terminal frame while an Event is still in service,
+  // so it must not drive this gauge (GH3-PLAN.md 5.5).
+  const admitted = useGameStore((state) => state.snapshot.admitted);
+  const completed = useGameStore((state) => state.snapshot.completed);
+  const backlog = admitted - completed;
   const rolling = useGameStore((state) => state.snapshot.correctness.rolling);
   const caught = useGameStore((state) => state.snapshot.correctness.caught);
   const missed = useGameStore((state) => state.snapshot.correctness.missed);

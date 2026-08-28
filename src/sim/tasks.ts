@@ -84,11 +84,32 @@ function isPlainObject(value: unknown): value is object {
 }
 
 /** Accept the Rule's normalize result only when it is a plain object to forward. */
-function normalizedPayload(value: unknown): object {
+export function normalizedPayload(value: unknown): object {
   if (isPlainObject(value)) {
     return value;
   }
   throw new RuleError("normalize", "normalize must return a plain object.");
+}
+
+/** The engine-owned fields the Match view carries alongside the normalized payload. */
+export interface EngineFields {
+  id: number;
+  ts: number;
+  endpoint: string;
+}
+
+/**
+ * Build the flat Match view: the normalized payload spread first, then the engine
+ * fields, so a payload field named `id` cannot shadow the real id. The profiler
+ * reproduces this exact view, so both the runtime and the profiler call this.
+ */
+export function withEngineFields<T extends object>(
+  base: T,
+  id: number,
+  ts: number,
+  endpoint: string,
+): T & EngineFields {
+  return { ...base, id, ts, endpoint };
 }
 
 /** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
@@ -106,7 +127,7 @@ function isAlert(value: unknown): value is Alert {
 }
 
 /** Parse the Rule's match return into Alert | Alert[] | null, or reject it. */
-function matchResult(value: unknown): Alert | Alert[] | null {
+export function matchResult(value: unknown): Alert | Alert[] | null {
   if (value === null || value === undefined) {
     return null;
   }
@@ -212,7 +233,7 @@ export async function runMatch(
     }
     const payload = message.payload;
     const base = payload instanceof Object ? payload : {};
-    const view = { ...base, id: message.id, ts: message.ts, endpoint: message.endpoint };
+    const view = withEngineFields(base, message.id, message.ts, message.endpoint);
     let result: unknown;
     try {
       result = match(view);

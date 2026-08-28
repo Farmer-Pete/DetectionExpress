@@ -3,7 +3,7 @@ import { CORPUS_PEAK_EVENTS_PER_TICK, LEVEL_SEED } from "../tuning";
 import { calibrate, type ProfilerRule } from "./calibrate";
 import { buildCorpus } from "./corpus";
 import type { Timer } from "./measure";
-import { makeNaiveScan, normalizeKiosk } from "./rules";
+import { makeNaiveScan, type NormalizedKiosk, normalizeKiosk } from "./rules";
 
 /**
  * The profiler orchestration: warm, measure the player's match throughput C, the
@@ -14,7 +14,7 @@ import { makeNaiveScan, normalizeKiosk } from "./rules";
  */
 
 /** A rule the profiler prices: the shared normalize plus a detector's step. */
-function naiveRule(): ProfilerRule {
+function naiveRule(): ProfilerRule<NormalizedKiosk> {
   const detector = makeNaiveScan();
   return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
 }
@@ -58,5 +58,25 @@ describe("calibrate", () => {
     expect(Number.isFinite(result.codePerAnchor)).toBe(true);
     expect(result.codePerAnchor).toBeGreaterThan(0);
     expect(result.oracleScore).toBeGreaterThan(0);
+  });
+
+  it("prices a rule that returns an array of Alerts without throwing (M2 review)", () => {
+    const corpus = buildCorpus(LEVEL_SEED, 100, CORPUS_PEAK_EVENTS_PER_TICK);
+    // A rule whose match returns an Alert[] runs fine in the run-time Match task;
+    // the profiler must price it the same way rather than rejecting the array.
+    const arrayRule: ProfilerRule<NormalizedKiosk> = {
+      normalize: normalizeKiosk,
+      match: (v) =>
+        v.outcome === "fail" ? [{ reason: "pin_brute_force", at: v.ts, events: [v.id] }] : [],
+    };
+    // If the profiler rejected arrays it would throw here; reaching a finite
+    // reading is the assertion that it prices the array shape like the runtime.
+    const result = calibrate(
+      arrayRule,
+      corpus,
+      { warmupMs: 10, batchMs: 10, batches: 1 },
+      steppingTimer(10),
+    );
+    expect(Number.isFinite(result.codePerAnchor)).toBe(true);
   });
 });

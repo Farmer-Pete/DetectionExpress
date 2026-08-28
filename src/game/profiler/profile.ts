@@ -64,7 +64,10 @@ export function spawnProfilerWorker(): Worker {
  * Profile `rule`. Defers if the guard blocks; otherwise measures over the corpus
  * and returns codePerAnchor and oracleScore.
  */
-export function profile(rule: ProfilerRule, options: ProfileOptions = {}): ProfileOutcome {
+export function profile<N extends object>(
+  rule: ProfilerRule<N>,
+  options: ProfileOptions = {},
+): ProfileOutcome {
   const hidden = options.hidden ?? tabHidden();
   const hasTimer = options.hasTimer ?? hasHighResTimer();
   const block = measurementBlock(hidden, hasTimer);

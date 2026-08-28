@@ -51,7 +51,7 @@ export function match(e) {
     counts[queue[head].account] -= 1;
     head++;
   }
-  if (head > 1024 && head * 2 >= queue.length) {
+  if (head >= 1024 && head * 2 >= queue.length) {
     queue.splice(0, head);
     head = 0;
   }
@@ -141,7 +141,7 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         if (front === undefined || front.ts > cutoff) {
           break;
         }
-        counts.set(front.account, (counts.get(front.account) ?? 1) - 1);
+        counts.set(front.account, (counts.get(front.account) ?? 0) - 1);
         head++;
       }
       if (head >= COMPACT_THRESHOLD && head * 2 >= queue.length) {

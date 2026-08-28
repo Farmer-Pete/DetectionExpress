@@ -16,6 +16,7 @@ import {
   type MatchView,
   makeIncrementalTally,
   makeNaiveScan,
+  type NormalizedKiosk,
   normalizeKiosk,
   SCAN_WINDOW_S,
 } from "../src/game/profiler/rules";
@@ -27,7 +28,7 @@ const REPEATS = 5;
 const THRESHOLD = 5;
 
 /** Wrap a detector as the rule the calibrator prices. */
-function ruleOf(detector: Detector): ProfilerRule {
+function ruleOf(detector: Detector): ProfilerRule<NormalizedKiosk> {
   return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
 }
 
@@ -150,7 +151,7 @@ function makeHeavyDetector(): Detector {
 
 interface Sample {
   name: string;
-  make: () => ProfilerRule;
+  make: () => ProfilerRule<NormalizedKiosk>;
 }
 
 const samples: Sample[] = [
@@ -227,3 +228,48 @@ for (const reading of readings) {
 const order = readings.map((r) => r.name.split(" ")[0]).join(" < ");
 console.log(`\n ordering (slow -> fast): ${order}`);
 console.log(` oracle O (health probe): ${(readings[0]?.oracle ?? 0).toFixed(3)} iters/ms\n`);
+
+// The gate: the measured C/A must order by algorithmic cost (a low reading is
+// slow), and each rule's spread across repeats must stay stable. A violation
+// exits non-zero so this can run as a check, not just a print. The absolute
+// numbers move machine to machine; the ordering and the spread bound do not.
+const MAX_SPREAD = 0.75; // a reading whose min..max spans more than this is unstable
+const byKey = new Map(readings.map((r) => [r.name.split(" ")[0], r]));
+const violations: string[] = [];
+
+/** Assert `slower` measured a lower C/A than `faster`, or record the violation. */
+function expectSlower(slower: string, faster: string): void {
+  const lo = byKey.get(slower)?.median ?? 0;
+  const hi = byKey.get(faster)?.median ?? 0;
+  if (!(lo < hi)) {
+    violations.push(
+      `ordering: ${slower} (${lo.toFixed(4)}) must measure slower than ${faster} (${hi.toFixed(4)})`,
+    );
+  }
+}
+
+// The robust chain: the poor O(n^2) rule is slowest, the heavy (naive + JSON)
+// rule sits below the plain naive scan, and both O(1) rules (the tally and the
+// bucket) measure faster than the naive scan. The bucket and the tally are both
+// O(1) and close, so their relative order is NOT asserted — it flips run to run.
+expectSlower("poor", "heavy");
+expectSlower("heavy", "naive");
+expectSlower("naive", "incremental");
+expectSlower("naive", "per-account");
+
+for (const reading of readings) {
+  if (reading.spread > MAX_SPREAD) {
+    violations.push(
+      `stability: ${reading.name} spread ${(reading.spread * 100).toFixed(1)}% exceeds ${(MAX_SPREAD * 100).toFixed(0)}%`,
+    );
+  }
+}
+
+if (violations.length > 0) {
+  console.error(" FAIL: the measured calibration broke its invariants:");
+  for (const violation of violations) {
+    console.error(`   - ${violation}`);
+  }
+  process.exit(1);
+}
+console.log(" PASS: ordering and stability hold.\n");

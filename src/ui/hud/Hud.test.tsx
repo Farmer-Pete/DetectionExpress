@@ -56,6 +56,23 @@ describe("Hud", () => {
     expect(screen.getByText("Won")).toBeDefined();
   });
 
+  it("reads the authoritative backlog (admitted - completed), not the channel sum", () => {
+    // On a terminal backlog loss the channels can read empty while one Event is
+    // still in service; admitted - completed keeps it visible (GH3-PLAN.md 5.5).
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        status: "failed",
+        failureReason: "backlog",
+        backlog: 0,
+        admitted: 40,
+        completed: 25,
+      },
+    });
+    render(<Hud />);
+    expect(screen.getByText("15")).toBeDefined(); // 40 - 25, not the channel-sum 0
+  });
+
   it("shows the loss and its reason", () => {
     useGameStore.setState({
       snapshot: { ...emptySnapshot(), status: "failed", failureReason: "backlog" },

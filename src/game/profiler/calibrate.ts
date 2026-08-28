@@ -15,16 +15,23 @@
 
 import type { Alert } from "../../sim/alert";
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import { type EngineFields, withEngineFields } from "../../sim/tasks";
 import { makeAnchor } from "./anchor";
 import { type Corpus, loopingCorpus } from "./corpus";
 import { type MeasureConfig, measureThroughput, type Timer } from "./measure";
 import { ORACLE_ROUNDS, oracleChecksum } from "./oracle";
-import { type MatchView, type NormalizedKiosk, normalizeKiosk } from "./rules";
+import { normalizeKiosk } from "./rules";
 
-/** A rule the profiler prices: normalize a raw payload, then match the flat view. */
-export interface ProfilerRule {
-  normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(view: MatchView): Alert | null;
+/**
+ * A rule the profiler prices: normalize a raw payload into some object shape `N`,
+ * then match the flat view (that shape plus the engine fields). The runtime only
+ * requires normalize to yield a plain object and match to yield an Alert, an array
+ * of Alerts, null, or undefined, so the profiler prices the same contract: `N`
+ * defaults to a bare object and match accepts every runtime shape.
+ */
+export interface ProfilerRule<N extends object = object> {
+  normalize(raw: RawKioskV1): N;
+  match(view: N & EngineFields): Alert | Alert[] | null;
 }
 
 /** The profiler's reading: the code speed and the machine-health probe. */
@@ -38,16 +45,17 @@ export interface CalibrationResult {
 /** The measurement protocol, injectable so tests can stub the timing. */
 export type MeasureFn = (runOnce: () => void, timer: Timer, config: MeasureConfig) => number;
 
-/** Build the flat match view the run-time Match task hands a rule. */
-function viewOf(normalized: NormalizedKiosk, id: number, ts: number, endpoint: string): MatchView {
-  return {
-    account: normalized.account,
-    terminal: normalized.terminal,
-    outcome: normalized.outcome,
-    id,
-    ts,
-    endpoint,
-  };
+/**
+ * The work one match result represents, as a plain count the sink folds in. The
+ * profiler only needs a work sink, not the scored Alerts, so an array counts as
+ * its length, a single Alert as one, and null as none. This mirrors the runtime,
+ * which accepts an Alert, an array of Alerts, null, or undefined from a rule.
+ */
+function matchWork(result: Alert | Alert[] | null): number {
+  if (result === null) {
+    return 0;
+  }
+  return Array.isArray(result) ? result.length : 1;
 }
 
 /**
@@ -56,8 +64,8 @@ function viewOf(normalized: NormalizedKiosk, id: number, ts: number, endpoint: s
  * anchor see the same stream and the readings are comparable. A running sink
  * consumes every result, so the JIT cannot elide the timed work.
  */
-export function calibrate(
-  rule: ProfilerRule,
+export function calibrate<N extends object>(
+  rule: ProfilerRule<N>,
   corpus: Corpus,
   config: MeasureConfig,
   timer: Timer,
@@ -68,15 +76,21 @@ export function calibrate(
   const playerNext = loopingCorpus(corpus);
   const runPlayer = (): void => {
     const event = playerNext();
-    const view = viewOf(rule.normalize(event.payload), event.id, event.ts, event.endpoint);
-    sink += rule.match(view) === null ? 0 : 1;
+    const normalized = rule.normalize(event.payload);
+    const view = withEngineFields(normalized, event.id, event.ts, event.endpoint);
+    sink += matchWork(rule.match(view));
   };
 
   const anchorNext = loopingCorpus(corpus);
   const anchor = makeAnchor();
   const runAnchor = (): void => {
     const event = anchorNext();
-    const view = viewOf(normalizeKiosk(event.payload), event.id, event.ts, event.endpoint);
+    const view = withEngineFields(
+      normalizeKiosk(event.payload),
+      event.id,
+      event.ts,
+      event.endpoint,
+    );
     sink += anchor(view);
   };
 

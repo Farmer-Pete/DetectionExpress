@@ -1,12 +1,28 @@
 import { describe, expect, it } from "bun:test";
-import { buildSchedule } from "../../sim/scenarios/kiosk-pin-attack/scenario";
+import type { Alert } from "../../sim/alert";
+import { createScorer, type ScorerConfig } from "../../sim/correctness";
+import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { PipeEvent } from "../../sim/event";
+import type { GraphEdge, GraphNode } from "../../sim/graph";
+import { buildOptimizationAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/optimization";
+import { buildReferenceAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/reference";
+import { buildSchedule, kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
 import { makeGovernor, type ServiceRate } from "../../sim/service-governor";
+import type { SimSnapshot } from "../../sim/snapshot";
+import type { TaskAlgorithm } from "../../sim/tasks";
+import { ManualDriver } from "../clock";
+import { start } from "../engine";
 import {
   CHANNEL_CAP,
   CORPUS_ACCOUNTS,
   CORPUS_FAIL_SHARE,
   CORPUS_PEAK_EVENTS_PER_TICK,
+  CORRECTNESS_W_FN,
+  CORRECTNESS_W_FP,
+  CORRECTNESS_WINDOW,
+  LEVEL_SEED,
   OMEGA,
+  PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
   WAVE_RATES,
 } from "../tuning";
@@ -165,9 +181,14 @@ const OMEGA_BAND = [15, 18, OMEGA];
 const PEAK = WAVE_RATES[WAVE_RATES.length - 1] ?? 0;
 
 describe("winnability cost model", () => {
-  it("prices the naive scan at one anchor and the tally far cheaper", () => {
-    expect(NAIVE_CODE_PER_ANCHOR).toBe(1);
-    // The window scan dwarfs the O(1) tally, so the separation ratio is large.
+  it("prices the naive scan by its density-driven cost and the tally far cheaper", () => {
+    // The modelling claim is that the naive scan's cost RISES with density, so
+    // pricing it at peak is its worst case. Assert that growth rather than the
+    // tautology that the anchor priced against itself is 1.
+    expect(naiveCost(CORPUS_PEAK_EVENTS_PER_TICK)).toBeGreaterThan(naiveCost(WAVE_RATES[0] ?? 1));
+    // The naive scan is the anchor, so its code-per-anchor sits at 1; the O(1)
+    // tally reads far higher, so the separation ratio is large.
+    expect(TALLY_CODE_PER_ANCHOR).toBeGreaterThan(NAIVE_CODE_PER_ANCHOR);
     expect(TALLY_CODE_PER_ANCHOR).toBeGreaterThan(10);
   });
 });
@@ -198,6 +219,104 @@ describe("winnability at the shipped tuning (nominal, skew 1)", () => {
     const result = simulate(tallyRate);
     expect(result.outcome).toBe("won");
     expect(result.maxBacklog).toBeLessThanOrEqual(CHANNEL_CAP); // never near the ceiling
+  });
+});
+
+// --- The real engine, nominal ----------------------------------------------
+// The band sweep above is an abstract integer model. This nominal case closes the
+// loop: it drives the SAME model-derived rates through the real engine, its real
+// channels, and its real governor sleep math, and checks the verdicts match — the
+// naive default drowns (failed), the applied tally survives (won).
+
+const NODES: GraphNode[] = [
+  { id: "ingest", kind: "ingest" },
+  { id: "normalize", kind: "normalize" },
+  { id: "match", kind: "match" },
+  { id: "sink", kind: "sink" },
+];
+const EDGES: GraphEdge[] = [
+  { id: "e1", source: "ingest", target: "normalize" },
+  { id: "e2", source: "normalize", target: "match" },
+  { id: "e3", source: "match", target: "sink" },
+];
+const REAL_SCORER_CONFIG: ScorerConfig = {
+  threshold: PIN_BRUTE_FORCE_THRESHOLD,
+  window: CORRECTNESS_WINDOW,
+  wFn: CORRECTNESS_W_FN,
+  wFp: CORRECTNESS_W_FP,
+};
+
+/** The normalized record the twin match reads, after Normalize runs. */
+interface KioskView {
+  account: string;
+  terminal: string;
+  outcome: "success" | "fail";
+  id: number;
+  ts: number;
+  endpoint: string;
+}
+
+/** The in-process twin shape both the naive default and the tally satisfy. */
+interface KioskTwin {
+  normalize(raw: RawKioskV1): { account: string; terminal: string; outcome: "success" | "fail" };
+  match(view: KioskView): Alert | null;
+}
+
+function isTwinView(value: unknown): value is KioskView {
+  return value instanceof Object && "account" in value && "outcome" in value && "id" in value;
+}
+
+/** Adapt an in-process twin to the engine's untyped TaskAlgorithm at the boundary. */
+function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
+  return {
+    normalize: (raw) => (isRawKioskV1(raw) ? twin.normalize(raw) : raw),
+    match: (view) => (isTwinView(view) ? twin.match(view) : null),
+  };
+}
+
+async function runRealEngine(algorithm: TaskAlgorithm, rate: ServiceRate) {
+  const run = kioskPinAttack.generate(LEVEL_SEED);
+  const driver = new ManualDriver();
+  const snapshots: SimSnapshot[] = [];
+  let index = 0;
+  const generator = (): PipeEvent | null =>
+    index < run.events.length ? (run.events[index++] ?? null) : null;
+  const handle = start({
+    getGraph: () => ({ nodes: NODES, edges: EDGES }),
+    setSnapshot: (snapshot) => snapshots.push(snapshot),
+    algorithm,
+    scorer: createScorer(run.attacks, REAL_SCORER_CONFIG),
+    generator,
+    serviceRate: rate,
+    checkpoints: run.checkpoints,
+    driver,
+    bindVisibility: () => () => undefined,
+  });
+  const deadline = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+  for (let i = 0; i < deadline + 2; i++) {
+    driver.tick();
+    for (let r = 0; r < 300; r++) {
+      await Promise.resolve();
+    }
+  }
+  await handle.whenStopped;
+  return snapshots.at(-1);
+}
+
+describe("winnability through the real engine (nominal)", () => {
+  const naiveRate = rateFor(NAIVE_CODE_PER_ANCHOR, OMEGA, 1);
+  const tallyRate = rateFor(TALLY_CODE_PER_ANCHOR, OMEGA, 1);
+
+  it("drowns the naive default: the run fails on Backlog", async () => {
+    const last = await runRealEngine(taskAlgorithmFor(buildReferenceAlgorithm()), naiveRate);
+    expect(last?.status).toBe("failed");
+    expect(last?.failureReason).toBe("backlog");
+  });
+
+  it("carries the applied tally: the run wins", async () => {
+    const last = await runRealEngine(taskAlgorithmFor(buildOptimizationAlgorithm()), tallyRate);
+    expect(last?.status).toBe("won");
+    expect(last?.failureReason).toBeNull();
   });
 });
 

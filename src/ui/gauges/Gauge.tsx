@@ -18,9 +18,12 @@ interface GaugeProps {
 }
 
 export function Gauge(props: GaugeProps) {
-  const fraction = Math.max(0, Math.min(1, props.value / props.max));
-  const readout =
-    props.digits === undefined ? Math.round(props.value) : props.value.toFixed(props.digits);
+  // A NaN or Infinity would render as text and break the fill width, so it reads
+  // as zero. A live gauge should never receive one, but this keeps a bad value
+  // from reaching the DOM.
+  const value = Number.isFinite(props.value) ? props.value : 0;
+  const fraction = Math.max(0, Math.min(1, value / props.max));
+  const readout = props.digits === undefined ? Math.round(value) : value.toFixed(props.digits);
   return (
     <div className="gauge">
       <div className="gauge-label">{props.label}</div>

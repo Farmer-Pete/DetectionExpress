@@ -4,7 +4,7 @@ import type { ProfilerRule } from "./calibrate";
 import { buildCorpus } from "./corpus";
 import type { Timer } from "./measure";
 import { profile, spawnProfilerWorker } from "./profile";
-import { makeNaiveScan, normalizeKiosk } from "./rules";
+import { makeNaiveScan, type NormalizedKiosk, normalizeKiosk } from "./rules";
 
 /**
  * The profiler entry ties the pure pieces to the environment: it applies the
@@ -12,7 +12,7 @@ import { makeNaiveScan, normalizeKiosk } from "./rules";
  * protocol. Everything the environment supplies is injectable, so this is tested
  * without a live worker or a DOM. See GH3-PLAN.md sections 6.5 and 7.
  */
-function naiveRule(): ProfilerRule {
+function naiveRule(): ProfilerRule<NormalizedKiosk> {
   const detector = makeNaiveScan();
   return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
 }

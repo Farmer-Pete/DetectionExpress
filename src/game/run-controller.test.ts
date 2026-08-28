@@ -6,6 +6,7 @@ import type { LoadedAlgorithm } from "./algorithm";
 import type { EngineHandle, StartOptions } from "./engine";
 import {
   createRunController,
+  type ProfilerWorkerLike,
   type RuleErrorInfo,
   type RunControllerDeps,
   type ServiceRateHandle,
@@ -243,5 +244,197 @@ describe("run controller", () => {
     expect(cleared).toBe(true);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]?.correctness.rolling).toBe(100); // emptySnapshot reset
+  });
+
+  it("reuses the cached rate for an unchanged source, and re-profiles a changed one (M2 review 6)", async () => {
+    let source = "source-A";
+    let calls = 0;
+    const controller = createRunController(
+      baseDeps({
+        getSource: () => source,
+        resolveServiceRate: () => {
+          calls += 1;
+          return fixedServiceRate();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    controller.run(); // same source: the cached rate is reused, no re-profile
+    await flush();
+    expect(calls).toBe(1);
+    source = "source-B"; // a changed source invalidates the key
+    controller.run();
+    await flush();
+    expect(calls).toBe(2);
+  });
+});
+
+/** Set `document.hidden` so the defer-and-retry path can be driven deterministically. */
+function setHidden(hidden: boolean): void {
+  Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
+}
+
+/** A profiler worker the test drives by hand: it records posts and emits outcomes. */
+class FakeProfilerWorker implements ProfilerWorkerLike {
+  private messageHandler: ((event: MessageEvent) => void) | null = null;
+  private errorHandler: ((event: ErrorEvent) => void) | null = null;
+  posted: { source: string; hidden: boolean }[] = [];
+  terminated = false;
+
+  postMessage(message: { source: string; hidden: boolean }): void {
+    this.posted.push(message);
+  }
+  terminate(): void {
+    this.terminated = true;
+  }
+  addEventListener(type: "message", handler: (event: MessageEvent) => void): void;
+  addEventListener(type: "error", handler: (event: ErrorEvent) => void): void;
+  addEventListener(
+    type: "message" | "error",
+    handler: ((event: MessageEvent) => void) & ((event: ErrorEvent) => void),
+  ): void {
+    if (type === "message") {
+      this.messageHandler = handler;
+    } else {
+      this.errorHandler = handler;
+    }
+  }
+  emitMessage(data: unknown): void {
+    this.messageHandler?.(new MessageEvent("message", { data }));
+  }
+  emitError(error: unknown): void {
+    this.errorHandler?.(new ErrorEvent("error", { error }));
+  }
+}
+
+const OK_OUTCOME = { ok: true, result: { codePerAnchor: 2, oracleScore: 1 } };
+
+/** Deps that exercise the real worker seam: no `resolveServiceRate` shortcut. */
+function workerDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
+  return {
+    scenario,
+    getGraph: () => graph,
+    getSource: () => "source",
+    getSeed: () => 1,
+    setSnapshot: () => undefined,
+    setError: () => undefined,
+    loadAlgorithm: async () => algo,
+    start: () => fakeHandle(),
+    ...over,
+  };
+}
+
+describe("run controller worker seam (M2 review 1, 2, 5)", () => {
+  it("reports a non-ok worker outcome as a clean profile error, without hanging", async () => {
+    const workers: FakeProfilerWorker[] = [];
+    const phases: string[] = [];
+    let started = 0;
+    const controller = createRunController(
+      workerDeps({
+        spawnProfilerWorker: () => {
+          const worker = new FakeProfilerWorker();
+          workers.push(worker);
+          return worker;
+        },
+        start: () => {
+          started += 1;
+          return fakeHandle();
+        },
+        setError: (e) => {
+          if (e) phases.push(e.phase);
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    workers[0]?.emitMessage({ ok: false, error: "match must return an Alert" });
+    await flush();
+    expect(phases).toContain("profile");
+    expect(started).toBe(0);
+    expect(workers[0]?.terminated).toBe(true);
+  });
+
+  it("rejects and terminates cleanly on an async worker error event", async () => {
+    const workers: FakeProfilerWorker[] = [];
+    const phases: string[] = [];
+    const controller = createRunController(
+      workerDeps({
+        spawnProfilerWorker: () => {
+          const worker = new FakeProfilerWorker();
+          workers.push(worker);
+          return worker;
+        },
+        setError: (e) => {
+          if (e) phases.push(e.phase);
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    workers[0]?.emitError(new Error("worker boom"));
+    await flush();
+    expect(phases).toContain("profile");
+    expect(workers[0]?.terminated).toBe(true);
+  });
+
+  it("defers a hidden-tab outcome and re-profiles on visibility, not a hard error", async () => {
+    const workers: FakeProfilerWorker[] = [];
+    const errors: (RuleErrorInfo | null)[] = [];
+    const rates: number[] = [];
+    setHidden(true);
+    const controller = createRunController(
+      workerDeps({
+        spawnProfilerWorker: () => {
+          const worker = new FakeProfilerWorker();
+          workers.push(worker);
+          return worker;
+        },
+        start: (options) => {
+          rates.push(options.serviceRate.num / options.serviceRate.den);
+          return fakeHandle();
+        },
+        setError: (e) => errors.push(e),
+      }),
+    );
+    controller.run();
+    await flush();
+    workers[0]?.emitMessage({ ok: false, deferred: "hidden" }); // hidden: hold, do not fail
+    await flush();
+    expect(errors.filter((e) => e !== null)).toHaveLength(0); // no hard error yet
+    expect(workers).toHaveLength(1); // still waiting; no retry spawned
+
+    setHidden(false);
+    document.dispatchEvent(new Event("visibilitychange")); // tab visible: re-profile
+    await flush();
+    expect(workers).toHaveLength(2); // a fresh measurement was spawned
+    workers[1]?.emitMessage(OK_OUTCOME);
+    await flush();
+    expect(rates).toHaveLength(1); // the re-profile resolved and the run started
+    setHidden(false); // leave the environment visible for later tests
+  });
+
+  it("falls back to the main thread when the worker cannot be spawned", async () => {
+    let fallbackCalls = 0;
+    const rates: number[] = [];
+    const controller = createRunController(
+      workerDeps({
+        spawnProfilerWorker: () => {
+          throw new Error("module Worker forbidden here");
+        },
+        mainThreadResolveServiceRate: () => {
+          fallbackCalls += 1;
+          return { rate: Promise.resolve({ num: 3, den: 1 }), cancel: () => undefined };
+        },
+        start: (options) => {
+          rates.push(options.serviceRate.num / options.serviceRate.den);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(fallbackCalls).toBe(1);
+    expect(rates).toEqual([3]);
   });
 });
