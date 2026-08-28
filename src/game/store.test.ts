@@ -50,6 +50,11 @@ describe("store", () => {
       nodes: { sink: { heat: 0.5 } },
       edges: { e3: { inRate: 8, outRate: 6 } },
       correctness: { rolling: 90, caught: 3, missed: 1, falseAlerts: 0 },
+      compute: 0.05,
+      status: "running",
+      failureReason: null,
+      admitted: 50,
+      completed: 8,
     };
     useGameStore.getState().setSnapshot(snapshot);
     expect(useGameStore.getState().snapshot).toEqual(snapshot);

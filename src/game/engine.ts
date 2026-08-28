@@ -1,14 +1,20 @@
 /**
  * The engine wires the graph into a running pipeline: a Clock, one channel per
- * edge, a node task per node, and a sampler that publishes one atomic snapshot at
- * PUBLISH_HZ. It owns the lifecycle: a transactional `start`, a single-stop
- * supervisor, a synchronous idempotent `stop`, and a natural-completion
- * continuation that force-publishes the finalized reading and tears down when the
- * stream ends on its own.
+ * edge, a node task per node, a governed Match, and a sampler that publishes one
+ * atomic snapshot at PUBLISH_HZ. It owns a deadline-driven lifecycle: a
+ * transactional `start`, checkpoints evaluated at the start-of-tick boundary, a
+ * single-stop supervisor, a synchronous idempotent `stop`, and a terminal deferred
+ * resolved only at true teardown.
  *
- * The Scenario, the loaded Algorithm, the scorer, and the Ingest generator are all
- * injected by the run controller, so `sim/` stays pure and the engine never builds
- * them or reads a sensor field itself.
+ * The run no longer ends when the stream drains. It ends at a checkpoint: a failed
+ * one (Backlog not clear, or Correctness below the floor) or the final deadline (a
+ * win when clear). Every game-outcome terminal transition force-publishes the
+ * terminal snapshot first, so the HUD always receives the outcome. An explicit
+ * stop is a teardown, not an outcome, so it publishes nothing.
+ *
+ * The Scenario, the loaded Algorithm, the scorer, the Ingest generator, the service
+ * rate, and the checkpoints are all injected by the run controller, so `sim/` stays
+ * pure and the engine never builds them or reads a sensor field itself.
  */
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
@@ -21,12 +27,16 @@ import {
 } from "../sim/graph";
 import { nextHeat, occupancy } from "../sim/heat";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
-import type { SimSnapshot } from "../sim/snapshot";
+import type { Checkpoint } from "../sim/scenario";
+import type { ServiceRate } from "../sim/service-governor";
+import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
   CLOCK_HZ,
+  CORRECTNESS_FLOOR,
+  GAME_SECONDS_PER_TICK,
   HEAT_COOL_S,
   HEAT_RAMP_S,
   OCC_THRESHOLD,
@@ -46,6 +56,10 @@ export interface StartOptions {
   scorer: Scorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   generator: () => PipeEvent | null;
+  /** The quantized per-Event service rate the Match governor charges. */
+  serviceRate: ServiceRate;
+  /** The wave boundaries plus the final deadline, in tick order. */
+  checkpoints: Checkpoint[];
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Defaults to the real visibility binding; tests pass a no-op. */
@@ -100,12 +114,20 @@ interface EdgeState {
   outRate: number;
 }
 
+/** The live run counters and lifecycle the sampler folds into every snapshot. */
+interface RunState {
+  compute: number;
+  getAdmitted: () => number;
+  getCompleted: () => number;
+  getStatus: () => RunStatus;
+  getFailureReason: () => FailureReason;
+}
+
 /**
  * Build the shared snapshot builder. It runs every tick in normal mode (gated on
- * elapsed ticks) and once at a clean end in forced mode. A forced publish with no
- * ticks elapsed keeps the prior rates and heat, but always refreshes the total
- * Backlog and the finalized Correctness, so the final reading cannot drift from a
- * normal one.
+ * elapsed ticks) and once per terminal transition in forced mode. A forced publish
+ * with no ticks elapsed keeps the prior rates and heat, but always refreshes
+ * Backlog, Correctness, and the run counters, so the terminal reading cannot drift.
  */
 function makeSampler(
   clock: Clock,
@@ -114,7 +136,7 @@ function makeSampler(
   edges: GraphEdge[],
   scorer: Scorer,
   setSnapshot: (snapshot: SimSnapshot) => void,
-  getCompleted: () => number,
+  run: RunState,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const alpha = emaAlpha(RATE_TAU, PUBLISH_HZ);
@@ -163,7 +185,7 @@ function makeSampler(
         state.lastAccepted = channel.accepted;
         state.lastPulled = channel.pulled;
       }
-      const completedNow = getCompleted();
+      const completedNow = run.getCompleted();
       throughput = throughputRate(completedNow - lastCompleted);
       lastCompleted = completedNow;
       for (const nodeId of chain.nodeIds) {
@@ -177,7 +199,8 @@ function makeSampler(
       lastSampleTick = now;
     }
 
-    // Backlog and Correctness are always fresh, even on a zero-tick forced publish.
+    // Backlog, Correctness, and the run counters are always fresh, even on a
+    // zero-tick forced publish.
     let backlog = 0;
     for (const channel of channels.values()) {
       backlog += channel.size;
@@ -191,7 +214,18 @@ function makeSampler(
       edgeReadings[edgeId] = { inRate: state.inRate, outRate: state.outRate };
     }
 
-    setSnapshot({ backlog, throughput, nodes, edges: edgeReadings, correctness: scorer.reading() });
+    setSnapshot({
+      backlog,
+      throughput,
+      nodes,
+      edges: edgeReadings,
+      correctness: scorer.reading(),
+      compute: run.compute,
+      status: run.getStatus(),
+      failureReason: run.getFailureReason(),
+      admitted: run.getAdmitted(),
+      completed: run.getCompleted(),
+    });
   };
 }
 
@@ -208,16 +242,28 @@ export function start(options: StartOptions): EngineHandle {
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
   let detachVisibility: (() => void) | null = null;
+  let publish: ((force: boolean) => void) | null = null;
   let stopped = false;
-  let completed = 0; // Sink completions, sampled for the Throughput gauge
+  let admitted = 0; // real Events pushed out of Ingest
+  let completed = 0; // Events drained at the Sink
+  let status: RunStatus = "running";
+  let failureReason: FailureReason = null;
 
+  const compute = options.serviceRate.den / options.serviceRate.num; // 1 / serviceRate
+
+  let resolveTerminal: () => void = () => undefined;
+  const whenStopped = new Promise<void>((resolve) => {
+    resolveTerminal = resolve;
+  });
+
+  // Pure teardown: idempotent, publishes nothing, and resolves the terminal
+  // deferred. Every terminal path (deadline, failed checkpoint, task failure,
+  // explicit stop) ends here.
   const stop = (): void => {
     if (stopped) {
       return;
     }
     stopped = true;
-    // Each step is independent: a throw in one (a driver that fails to stop, a
-    // detach that throws) must not skip the rest of teardown.
     teardownStep("clock.stop", () => clock?.stop());
     if (channels) {
       for (const channel of channels.values()) {
@@ -225,20 +271,49 @@ export function start(options: StartOptions): EngineHandle {
       }
     }
     teardownStep("visibility detach", () => detachVisibility?.());
+    resolveTerminal();
   };
 
-  const fail = (error: unknown): void => {
-    // Suppress only once teardown has started. Then the rejected sleeps, gates,
-    // pushes, and pulls are expected. Before that, any error is a real failure,
-    // even a ClockStoppedError or ChannelClosedError, so tear down and report it.
+  // Force-publish the terminal snapshot, guarded: a throwing setSnapshot must not
+  // strand teardown, and a re-throw on the forced call is swallowed too.
+  const forcePublish = (): void => {
+    if (!publish) {
+      return;
+    }
+    try {
+      publish(true);
+    } catch (error) {
+      console.error("Detection Express: terminal publish threw:", error);
+    }
+  };
+
+  // A game outcome: set the status, force-publish the terminal frame, then tear
+  // down. The HUD always sees the outcome before the engine goes away.
+  const finishOutcome = (nextStatus: RunStatus, reason: FailureReason): void => {
     if (stopped) {
       return;
+    }
+    status = nextStatus;
+    failureReason = reason;
+    forcePublish();
+    stop();
+  };
+
+  // A failure. A thrown Rule (a task failure) is a failed outcome, so it publishes
+  // the terminal frame. A throwing sampler cannot publish, so that path skips it.
+  const fail = (error: unknown, publishTerminal = true): void => {
+    if (stopped) {
+      return;
+    }
+    status = "failed";
+    failureReason = null;
+    if (publishTerminal) {
+      forcePublish();
     }
     stop(); // tear down first, so a throwing onError cannot leak the engine
     try {
       options.onError?.(error);
     } catch (handlerError) {
-      // A reporter that throws is the caller's bug. Log it so teardown still holds.
       console.error("Detection Express onError handler threw:", handlerError);
     }
   };
@@ -258,18 +333,21 @@ export function start(options: StartOptions): EngineHandle {
     const bind = options.bindVisibility ?? bindVisibilityDefault;
     detachVisibility = bind(clock);
 
-    const onComplete = (): void => {
-      completed += 1;
-    };
     const runtime: NodeRuntime = {
       clock,
-      onComplete,
+      onComplete: () => {
+        completed += 1;
+      },
+      onAdmit: () => {
+        admitted += 1;
+      },
       algorithm: options.algorithm,
       scorer: options.scorer,
       nextEvent: options.generator,
+      serviceRate: options.serviceRate,
     };
-    // Spawn one task per node, looked up by kind. Adding a node kind is a new
-    // registry entry, not an engine change.
+    // Spawn one task per node, looked up by kind. A thrown Rule rejects its task
+    // and routes through fail() as a failed outcome.
     const tasks = graph.nodes.map((node) => {
       const task = NODE_TASKS.get(node.kind);
       if (!task) {
@@ -277,40 +355,74 @@ export function start(options: StartOptions): EngineHandle {
       }
       return task(node.id, wiringFor(node.id, graph.edges, channelMap), runtime).catch(fail);
     });
+    // The marker draining ends every task cleanly; the Match task already finalized
+    // Correctness. The run does NOT end here: it waits for the final deadline.
+    void Promise.allSettled(tasks);
 
-    const publish = makeSampler(
+    publish = makeSampler(
       clock,
       channelMap,
       chain,
       graph.edges,
       options.scorer,
       options.setSnapshot,
-      () => completed,
+      {
+        compute,
+        getAdmitted: () => admitted,
+        getCompleted: () => completed,
+        getStatus: () => status,
+        getFailureReason: () => failureReason,
+      },
     );
-    clock.onTick(() => {
-      try {
-        publish(false);
-      } catch (error) {
-        fail(error);
-      }
-    });
 
-    // Natural completion: when every task returns on its own (a clean end, not a
-    // user stop or a task failure), force-publish the finalized snapshot and tear
-    // down. A throwing setSnapshot routes through the guarded fail() path, and
-    // teardown still runs in the finally, so whenStopped stays resolve-only.
-    const whenStopped = Promise.allSettled(tasks).then(() => {
+    // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it
+    // does not try to force-publish through the same broken sink.
+    const doPublish = publish;
+    clock.onTick(() => {
       if (stopped) {
         return;
       }
       try {
-        publish(true);
+        doPublish(false);
       } catch (error) {
-        fail(error);
-      } finally {
-        stop();
+        fail(error, false);
       }
     });
+
+    // Checkpoint evaluation, at the start-of-tick boundary, before task
+    // continuations resume. An Event whose service sleep is due on the checkpoint
+    // tick has not run its push yet, so it counts as still outstanding.
+    const checkpoints = options.checkpoints;
+    let nextCheckpoint = 0;
+    clock.onTick(() => {
+      if (stopped) {
+        return;
+      }
+      const now = clock?.now() ?? 0;
+      while (nextCheckpoint < checkpoints.length) {
+        const cp = checkpoints[nextCheckpoint];
+        if (!cp || cp.atTick > now) {
+          break;
+        }
+        options.scorer.advanceTo(cp.atTick * GAME_SECONDS_PER_TICK);
+        const backlog = admitted - completed;
+        const isFinal = nextCheckpoint === checkpoints.length - 1;
+        if (backlog !== 0) {
+          finishOutcome("failed", "backlog");
+          return;
+        }
+        if (options.scorer.reading().rolling < CORRECTNESS_FLOOR) {
+          finishOutcome("failed", "correctness");
+          return;
+        }
+        if (isFinal) {
+          finishOutcome("won", null);
+          return;
+        }
+        nextCheckpoint += 1;
+      }
+    });
+
     return { stop, whenStopped };
   } catch (error) {
     stop(); // partial teardown, so a half-built engine leaks nothing

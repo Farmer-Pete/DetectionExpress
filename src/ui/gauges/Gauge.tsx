@@ -12,16 +12,23 @@ interface GaugeProps {
   unit: string;
   /** A CSS color, always a palette token reference like `var(--a1)`. */
   fill: string;
+  /** Decimal places for the readout. Omitted rounds to a whole number. */
+  digits?: number;
   children?: ReactNode;
 }
 
 export function Gauge(props: GaugeProps) {
-  const fraction = Math.max(0, Math.min(1, props.value / props.max));
+  // A NaN or Infinity would render as text and break the fill width, so it reads
+  // as zero. A live gauge should never receive one, but this keeps a bad value
+  // from reaching the DOM.
+  const value = Number.isFinite(props.value) ? props.value : 0;
+  const fraction = Math.max(0, Math.min(1, value / props.max));
+  const readout = props.digits === undefined ? Math.round(value) : value.toFixed(props.digits);
   return (
     <div className="gauge">
       <div className="gauge-label">{props.label}</div>
       <div className="gauge-value">
-        {Math.round(props.value)}
+        {readout}
         <span className="gauge-unit">{props.unit}</span>
       </div>
       <div className="gauge-track">

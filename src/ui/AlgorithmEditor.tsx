@@ -1,19 +1,22 @@
 /**
  * The Algorithm editor: a textarea seeded with the store's source, a Run button,
- * and an error line bound to the store error. Editing writes the source back to
- * the store; Run asks the run controller to reload it. M2 keeps this minimal; the
- * briefing and richer feedback land in M3.
+ * an Apply Optimization button, and an error line bound to the store error. Editing
+ * writes the source back to the store; Run asks the run controller to reload it.
+ * Apply Optimization swaps the naive default for the incremental tally in one edit,
+ * the small change the player makes to survive the peak (GH3-PLAN.md section 13).
  *
  * While `sourceLocked`, an external source (the dev host watching a file) drives the
- * run: the textarea goes read-only and mirrors the pushed source, and the Run button
- * hides, since a manual reload would fight the watcher. This is a generic lock, not
- * dev code, so the static build keeps it (always unlocked there).
+ * run: the textarea goes read-only and mirrors the pushed source, and the Run and
+ * Apply Optimization buttons hide, since a manual reload or edit would fight the
+ * watcher. This is a generic lock, not dev code, so the static build keeps it
+ * (always unlocked there).
  *
  * "Download this Scenario" is generic too, so it ships in every build: it saves the
  * current source as `detection-express-<slug>.js`, the same filename the dev host
  * writes, so a player on the CDN can hand-carry the file into a local dev kit.
  */
 import { useGameStore } from "../game/store";
+import { optimizationSource } from "../sim/scenarios/kiosk-pin-attack/optimization";
 import { scenarioFileName } from "./scenarios";
 
 interface AlgorithmEditorProps {
@@ -49,9 +52,18 @@ export function AlgorithmEditor({ onRun, slug }: AlgorithmEditorProps) {
           Download this Scenario
         </button>
         {sourceLocked ? null : (
-          <button type="button" className="editor-run" onClick={onRun}>
-            Run
-          </button>
+          <>
+            <button
+              type="button"
+              className="editor-optimize"
+              onClick={() => setAlgorithmSource(optimizationSource)}
+            >
+              Apply Optimization
+            </button>
+            <button type="button" className="editor-run" onClick={onRun}>
+              Run
+            </button>
+          </>
         )}
       </div>
       <textarea

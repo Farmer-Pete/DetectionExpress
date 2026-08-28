@@ -23,6 +23,7 @@
     "knip": "knip",
     "verify:static": "bun scripts/verify-static.ts",
     "pack": "bun run build:devkit && bun pm pack --dry-run --ignore-scripts",
+    "m1:check": "bun run scripts/m1-calibrate-check.ts",
     "audit": "bun audit --audit-level=high",
     "prepack": "bun run build:devkit",
     "prepare": "lefthook install"

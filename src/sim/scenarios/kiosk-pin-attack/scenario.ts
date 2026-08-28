@@ -1,31 +1,32 @@
 /**
- * The kiosk-pin-attack Scenario. It composes the kiosk endpoint, preselects
- * victims, plans each victim's burst, then fills the timeline with fair benign
- * traffic. Every draw comes from the seeded `rng` and `faker`, so the same seed
- * always replays the same run.
+ * The kiosk-pin-attack Scenario. It composes the kiosk endpoint, plans one Attack
+ * per wave, then fills each wave with rising benign volume. Benign traffic is all
+ * successes, so only victims ever fail and the stream is always separable: any
+ * scoring error is a bug in the Rule, not the data. Every draw comes from the
+ * seeded `rng` and `faker`, so the same seed always replays the same run.
  *
- * Fairness is the point: benign accounts never reach the spec, so the stream is
- * always separable and any scoring error means a bug in the Rule, not the data.
+ * The waves make the squeeze: benign Events per tick climb wave over wave against
+ * the rule's fixed service rate, so a slow rule's Backlog outgrows a checkpoint.
  */
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
 import {
+  DRAIN_GAP_TICKS,
+  GAME_SECONDS_PER_TICK,
+  INTRO_TICKS,
   PIN_BRUTE_FORCE_THRESHOLD,
   PIN_BRUTE_FORCE_WINDOW_S,
-  SCENARIO_MINUTES,
-  THREAT_RATE,
+  WAVE_DURATION_TICKS,
+  WAVE_RATES,
 } from "../../../game/tuning";
 import type { Attack } from "../../attack";
 import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import { generateKiosk } from "../../endpoints/kiosk/internal";
-import type { GeneratedRun, Scenario } from "../../scenario";
-import { type AttackPlan, attackFromPlan, planAttacks } from "./attacks";
+import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../../scenario";
+import { attackFromPlan, planAttacks } from "./attacks";
 
-/** Accounts in the pool. THREAT_RATE of them become victims. */
+/** Accounts in the pool. One distinct victim per wave; the rest stay benign. */
 const ACCOUNT_COUNT = 40;
-/** Benign successes per account: a floor plus a seeded spread. */
-const SUCCESS_MIN = 10;
-const SUCCESS_SPREAD = 15;
 
 /** A planned Event before it is sorted and assigned its engine id. */
 interface Draft {
@@ -39,6 +40,25 @@ interface Draft {
   seq: number;
 }
 
+/**
+ * The wave ramp and the checkpoints, derived from the tuning schedule. Wave 1
+ * follows the intro; each later wave starts at the prior wave's checkpoint, so the
+ * waves are half-open and never overlap. Each checkpoint sits a drain gap past its
+ * wave's end; the last one is the final deadline.
+ */
+export function buildSchedule(): { waves: Wave[]; checkpoints: Checkpoint[] } {
+  const waves: Wave[] = [];
+  const checkpoints: Checkpoint[] = [];
+  let start = INTRO_TICKS;
+  WAVE_RATES.forEach((eventsPerTick, index) => {
+    waves.push({ startTick: start, durationTicks: WAVE_DURATION_TICKS, eventsPerTick });
+    const atTick = start + WAVE_DURATION_TICKS + DRAIN_GAP_TICKS;
+    checkpoints.push({ atTick, clearsThroughWave: index });
+    start = atTick; // the next wave starts at this checkpoint: no overlap, no gap-jump
+  });
+  return { waves, checkpoints };
+}
+
 /** Build a stable pool of distinct account names from the seeded faker. */
 function buildAccounts(faker: Faker): string[] {
   const accounts = new Set<string>();
@@ -48,11 +68,10 @@ function buildAccounts(faker: Faker): string[] {
   return [...accounts];
 }
 
-/** Pick the victims by shuffling the pool with the seeded rng and taking a share. */
-function selectVictims(accounts: string[], rng: () => number): string[] {
+/** Pick `count` distinct victims by shuffling the pool with the seeded rng. */
+function selectVictims(accounts: string[], rng: () => number, count: number): string[] {
   const order = [...accounts];
-  const victimCount = Math.round(THREAT_RATE * accounts.length);
-  for (let i = 0; i < victimCount; i++) {
+  for (let i = 0; i < count; i++) {
     const j = i + Math.floor(rng() * (order.length - i));
     const here = order[i];
     const there = order[j];
@@ -61,24 +80,19 @@ function selectVictims(accounts: string[], rng: () => number): string[] {
       order[j] = here;
     }
   }
-  return order.slice(0, victimCount);
+  return order.slice(0, count);
 }
 
 function generate(seed: number): GeneratedRun {
   const faker = new Faker({ locale: en });
   faker.seed(seed);
   const rng = randomLcg(seed);
-  const timelineSeconds = SCENARIO_MINUTES * 60;
 
+  const { waves, checkpoints } = buildSchedule();
   const accounts = buildAccounts(faker);
-  const victims = selectVictims(accounts, rng);
+  const victims = selectVictims(accounts, rng, waves.length);
   const victimSet = new Set(victims);
-  const plans = planAttacks(victims, rng, {
-    timelineSeconds,
-    windowSeconds: PIN_BRUTE_FORCE_WINDOW_S,
-    threshold: PIN_BRUTE_FORCE_THRESHOLD,
-  });
-  const planByAccount = new Map<string, AttackPlan>(plans.map((p) => [p.account, p]));
+  const plans = planAttacks(waves, victims, rng);
 
   const drafts: Draft[] = [];
   const draft = (
@@ -91,30 +105,24 @@ function generate(seed: number): GeneratedRun {
     drafts.push({ ts, account, outcome, attackId, payload, seq: drafts.length });
   };
 
-  // The bursts first: each victim's failures inside its window.
+  // Each victim's burst of failures, inside its wave and its window.
   for (const plan of plans) {
     for (const ts of plan.failTimestamps) {
       draft(ts, plan.account, "fail", plan.id);
     }
   }
 
-  // Then benign traffic for every account. Victims emit only successes, and only
-  // outside their window, so nothing combines with the burst. Non-victims fumble
-  // a few times, always kept below the threshold across the whole timeline.
-  for (const account of accounts) {
-    const plan = planByAccount.get(account);
-    const successes = SUCCESS_MIN + Math.floor(rng() * SUCCESS_SPREAD);
-    for (let i = 0; i < successes; i++) {
-      const ts = Math.floor(rng() * timelineSeconds);
-      if (plan && ts >= plan.window.startTs && ts <= plan.window.endTs) {
-        continue; // keep the victim's window pure burst
-      }
-      draft(ts, account, "success", null);
-    }
-    if (!victimSet.has(account)) {
-      const fumbles = Math.floor(rng() * PIN_BRUTE_FORCE_THRESHOLD); // 0..threshold-1
-      for (let i = 0; i < fumbles; i++) {
-        draft(Math.floor(rng() * timelineSeconds), account, "fail", null);
+  // Benign volume, all successes, emitted per wave with a carried fractional
+  // accumulator so a fractional rate spreads evenly instead of rounding per tick.
+  for (const wave of waves) {
+    let acc = 0;
+    const endTick = wave.startTick + wave.durationTicks;
+    for (let tick = wave.startTick; tick < endTick; tick++) {
+      acc += wave.eventsPerTick;
+      while (acc >= 1) {
+        acc -= 1;
+        const account = accounts[Math.floor(rng() * accounts.length)] ?? accounts[0] ?? "unknown";
+        draft(tick * GAME_SECONDS_PER_TICK, account, "success", null);
       }
     }
   }
@@ -138,7 +146,7 @@ function generate(seed: number): GeneratedRun {
 
   const attacks = plans.map((plan) => attackFromPlan(plan, eventIdsByAttack.get(plan.id) ?? []));
   assertFair(drafts, victimSet, attacks);
-  return { events, attacks };
+  return { events, attacks, checkpoints };
 }
 
 /**
@@ -217,7 +225,9 @@ const briefing =
   "Events, then write the Match Rule to catch that burst per account and " +
   "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
   "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
-  "Correctness falls.";
+  "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +
+  "slow Rule reads high and falls behind the rising waves, so apply the " +
+  "Optimization to lower that cost.";
 
 export const kioskPinAttack: Scenario = {
   id: "kiosk-pin-attack",

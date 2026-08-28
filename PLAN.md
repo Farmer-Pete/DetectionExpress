@@ -39,9 +39,9 @@ Update a box to `[x]` when its slice meets its "done when" test.
 |---|---|---|
 | 0. Living stream | The tech feels alive in the browser | Ingest and Sink nodes. Throughput and Backlog gauges. |
 | 1. Catch the signal | Writing a Rule to catch signals is satisfying | Parse and Match nodes. A Rule. Hidden Ground truth. Correctness gauge. |
-| 2. Keep up | Rising volume creates real pressure to optimize | A data ramp. The first Tool. Hard-fail limits. |
+| 2. Keep up | Rising volume creates real pressure to optimize | A data ramp. The first Optimization. Hard-fail limits. |
 | 3. The squeeze | Cost adds tension without fiddly busywork | The economy. SLA income. Build and running cost. |
-| 4. The twist | The hidden Side effect is a fair "aha", not a cheap trick | A Stress event. It exposes the Tool's Side effect. |
+| 4. The twist | The hidden Side effect is a fair "aha", not a cheap trick | A Stress event. It exposes the Optimization's Side effect. |
 | 5. Adapt or die | A Feature request forcing a rewrite is the best moment | The correlation request. Aggregate node and windows. Flexibility. |
 | 6. One real scenario | The full loop holds together and reads well | Waves and calm. Win by survival. Polish. |
 
@@ -76,10 +76,10 @@ The twist in Slice 4 is the make-or-break. Slices 0 through 3 lay the foundation
 ### Slice 2 — Keep up
 
 - Goal: prove that rising volume creates real pressure to optimize.
-- In scope: a data ramp that raises the event rate. Backlog grows under load. The first Tool: an incremental scan that processes only new Events to cut work. Hard-fail limits on Backlog and Correctness.
+- In scope: a data ramp that raises the event rate. Backlog grows under load. The first Optimization: an incremental scan that processes only new Events to cut work. Hard-fail limits on Backlog and Correctness.
 - Out of scope: cost, the Side effect reveal.
 - Note: the incremental scan quietly plants a Side effect. It skips late-arriving Events. We do not expose it yet.
-- Done when: the player feels the squeeze, applies the Tool, and survives a higher rate.
+- Done when: the player feels the squeeze, applies the Optimization, and survives a higher rate.
 
 ### Slice 3 — The squeeze
 

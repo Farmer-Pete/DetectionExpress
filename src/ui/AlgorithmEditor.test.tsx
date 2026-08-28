@@ -1,20 +1,40 @@
 import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useGameStore } from "../game/store";
+import { optimizationSource } from "../sim/scenarios/kiosk-pin-attack/optimization";
+import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 
 const SLUG = "kiosk-pin-attack";
 
 beforeEach(() => {
-  useGameStore.setState({ source: "export function match(){}", sourceLocked: false });
+  useGameStore.setState({ sourceLocked: false });
+  useGameStore.getState().setAlgorithmSource(referenceSource);
 });
 
 describe("AlgorithmEditor", () => {
+  it("starts on the naive default source", () => {
+    expect(useGameStore.getState().source).toBe(referenceSource);
+  });
+
   it("is editable with a Run button when the source is not locked", () => {
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
     const textarea = screen.getByRole("textbox");
     expect(textarea.hasAttribute("readonly")).toBe(false);
     expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+  });
+
+  it("swaps the source to the Optimization when Apply Optimization is clicked", () => {
+    render(<AlgorithmEditor onRun={() => undefined} slug={SLUG} />);
+    fireEvent.click(screen.getByRole("button", { name: /apply optimization/i }));
+    expect(useGameStore.getState().source).toBe(optimizationSource);
+  });
+
+  it("runs the current source when Run is clicked", () => {
+    let ran = 0;
+    render(<AlgorithmEditor onRun={() => (ran += 1)} slug={SLUG} />);
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+    expect(ran).toBe(1);
   });
 
   it("is read-only and hides the Run button while the source is locked", () => {

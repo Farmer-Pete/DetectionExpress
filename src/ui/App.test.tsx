@@ -245,7 +245,9 @@ describe("App dev wiring", () => {
     const button = await screen.findByRole("button", { name: "Edit in my IDE" });
     fireEvent.click(button);
 
-    const status = await screen.findByRole("status");
-    expect(status.textContent).toBe("The dev host is at capacity.");
+    // Scope to the message text: the HUD is also a role="status" region, so a bare
+    // findByRole("status") would race against the dev panel's error status.
+    const status = await screen.findByText("The dev host is at capacity.");
+    expect(status.getAttribute("role")).toBe("status");
   });
 });
