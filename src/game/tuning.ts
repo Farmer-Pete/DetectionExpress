@@ -45,12 +45,6 @@ export const PIN_BRUTE_FORCE_THRESHOLD = 5;
 /** The PIN brute-force detection window, in game seconds (5 minutes). */
 export const PIN_BRUTE_FORCE_WINDOW_S = 300;
 
-/** Share of accounts that see an Attack. */
-export const THREAT_RATE = 0.15;
-
-/** Timeline length, in game minutes. */
-export const SCENARIO_MINUTES = 30;
-
 /** The deterministic level seed for data generation. */
 export const LEVEL_SEED = 1337;
 
@@ -105,11 +99,59 @@ export const PROFILE_WARMUP_MS = 50;
 
 /**
  * The difficulty dial, in anchor-units per tick. `serviceRate = (C/A) * OMEGA`,
- * so a larger Omega gives every rule a higher records-per-tick rate. This is a
- * placeholder: M2's band test tunes it so the naive rate sits between Wave 2 and
- * Wave 3 arrival and the Optimization sits above the peak.
+ * so a larger Omega gives every rule a higher records-per-tick rate. The naive
+ * default rule measures at roughly one anchor-unit (C/A ~ 1), so its rate lands
+ * near OMEGA: between the Wave 2 (15) and Wave 3 (40) arrival, so it keeps up
+ * through Wave 2 and drowns at the peak. The Optimization measures many
+ * anchor-units, so its rate clears the peak. Locked by the band test (M2 seam 9).
  */
-export const OMEGA = 1;
+export const OMEGA = 20;
+
+/**
+ * Accounts the calibration corpus spreads its traffic over, mirrored by the
+ * band test's cost model. Kept here so the winnability test and the corpus agree
+ * on the window-fill the naive scan pays at peak density.
+ */
+export const CORPUS_ACCOUNTS = 12;
+
+/** Share of corpus Events that are wrong-PIN failures, the ones the detectors scan. */
+export const CORPUS_FAIL_SHARE = 0.5;
 
 /** The detection window in ticks (300 game seconds). The naive scan evicts past it. */
 export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TICK;
+
+/**
+ * Slice 2 "Keep up" — the squeeze (M2). The arrival rate rises in waves against a
+ * fixed per-rule service rate. These constants set the wave ramp and the
+ * checkpoints; the band test (M2 seam 9) locks them so the naive rule fails a
+ * checkpoint with margin and the Optimization clears every one with margin.
+ */
+
+/** Events per tick for each wave, low to high. Its length is the wave count. */
+export const WAVE_RATES: readonly number[] = [5, 15, 60];
+
+/** Number of waves. Derived from the rate schedule. */
+export const WAVE_COUNT = WAVE_RATES.length;
+
+/** The calm intro before Wave 1, in ticks (2 real seconds at CLOCK_HZ). */
+export const INTRO_TICKS = 120;
+
+/**
+ * The length of each wave, in ticks. Much longer than the drain gap on purpose: a
+ * rule that floods at the peak builds far more Backlog than it can clear inside the
+ * following gap, so it is still behind when the checkpoint reads it.
+ */
+export const WAVE_DURATION_TICKS = 240;
+
+/**
+ * The gap after each wave before its checkpoint, in ticks. Short on purpose: a
+ * fast rule drains the whole wave inside it, but the naive scan cannot, so the two
+ * separate at the checkpoint. Locked with the wave rates by the band test.
+ */
+export const DRAIN_GAP_TICKS = 45;
+
+/**
+ * The Correctness hard-fail line. A checkpoint whose rolling Correctness reads
+ * below this fails the run with reason "correctness".
+ */
+export const CORRECTNESS_FLOOR = 50;

@@ -56,6 +56,12 @@ type Outcome = "caught" | "missed" | "false";
 export interface Scorer {
   /** Fold one Event's Alerts, in order. Closes expired Attacks first. */
   record(alerts: Alert | Alert[] | null | undefined, env: PipeEvent): void;
+  /**
+   * Close every pending Attack whose window ended before `gameTs` as a miss,
+   * without a real Event. A checkpoint fires in a drain gap where no later Event
+   * exists, so it settles misses on demand before Correctness is read.
+   */
+  advanceTo(gameTs: number): void;
   /** Close every remaining pending Attack as a miss at end of stream. */
   finalize(): void;
   /** The current gauge and global counts. Never mutates scoring state. */
@@ -148,6 +154,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       for (const alert of alertList(alerts)) {
         scoreAlert(alert);
       }
+    },
+    advanceTo(gameTs) {
+      closeExpired(gameTs);
     },
     finalize() {
       for (const attack of attacks) {

@@ -8,13 +8,10 @@
  *
  * Pure and deterministic. No wall-clock, no allocation beyond the returned pair.
  */
+import type { ServiceRate } from "../../sim/service-governor";
 import { OMEGA, SERVICE_DEN } from "../tuning";
 
-/** Records per tick as a reduced rational. Both parts are positive safe integers. */
-export interface ServiceRate {
-  num: number;
-  den: number;
-}
+export type { ServiceRate };
 
 /** Greatest common divisor by Euclid's algorithm, on non-negative integers. */
 function gcd(a: number, b: number): number {

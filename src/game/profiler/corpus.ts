@@ -13,13 +13,7 @@ import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
 import { kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import { generateKiosk } from "../../sim/endpoints/kiosk/internal";
-import { GAME_SECONDS_PER_TICK } from "../tuning";
-
-/** Accounts the corpus spreads its traffic over. Few, so each account fails often. */
-const CORPUS_ACCOUNTS = 12;
-
-/** Share of Events that are wrong-PIN failures, the ones the detectors scan. */
-const FAIL_SHARE = 0.5;
+import { CORPUS_ACCOUNTS, CORPUS_FAIL_SHARE, GAME_SECONDS_PER_TICK } from "../tuning";
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {
@@ -62,7 +56,7 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
   for (let i = 0; i < size; i++) {
     const ts = Math.floor(i / eventsPerSecond);
     const account = accounts[Math.floor(rng() * accounts.length)] ?? accounts[0] ?? "unknown";
-    const outcome = rng() < FAIL_SHARE ? "fail" : "success";
+    const outcome = rng() < CORPUS_FAIL_SHARE ? "fail" : "success";
     const payload = kioskV1.format(generateKiosk({ rng, faker, ts, account, outcome }));
     events.push({ id: i, ts, endpoint: kioskV1.id, payload });
   }

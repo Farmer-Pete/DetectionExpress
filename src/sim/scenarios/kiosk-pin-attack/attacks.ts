@@ -1,10 +1,17 @@
 /**
- * Burst planning and Ground truth for the kiosk-pin-attack Scenario. Victims are
- * preselected and each gets one non-overlapping window, so a victim's traffic is
- * known before any benign Event is drawn. The scorer reads the resulting Attacks;
+ * Burst planning and Ground truth for the kiosk-pin-attack Scenario. One Attack
+ * sits inside each wave, on a distinct victim, so its evidence lands while the
+ * wave is active and never in a drain gap. Each burst fits inside one detection
+ * window, so the rule can always catch it. The scorer reads the resulting Attacks;
  * the Rule never sees them.
  */
+import {
+  GAME_SECONDS_PER_TICK,
+  PIN_BRUTE_FORCE_THRESHOLD,
+  SCAN_WINDOW_TICKS,
+} from "../../../game/tuning";
 import type { Attack } from "../../attack";
+import type { Wave } from "../../scenario";
 
 /** The pattern this Scenario reveals. Both the ground truth and the reference use it. */
 export const PIN_BRUTE_FORCE_REASON = "pin_brute_force";
@@ -18,48 +25,46 @@ export interface AttackPlan {
   failTimestamps: number[];
 }
 
-/** Inputs the planner needs from the Scenario's tuning. */
-export interface PlanConfig {
-  /** Timeline length in game seconds. Every window ends before this. */
-  timelineSeconds: number;
-  /** The detection window in game seconds; a burst spans well under it. */
-  windowSeconds: number;
-  /** Minimum failures a burst carries. */
-  threshold: number;
-}
+/** Ticks of clearance the burst leaves at each end of its wave. */
+const BURST_MARGIN_TICKS = 20;
 
 /**
- * Plan one burst per victim. The timeline is cut into one slot per victim so the
- * windows never overlap, and each burst sits early in its slot with room to
- * spare, so every window ends before the timeline does.
+ * Plan one burst per wave. The burst starts a margin into the wave and spans the
+ * lesser of the detection window and the wave, so every failure falls inside one
+ * window and inside the active wave. A wave with no victim (fewer victims than
+ * waves) gets no burst.
  */
 export function planAttacks(
+  waves: readonly Wave[],
   victims: readonly string[],
   rng: () => number,
-  config: PlanConfig,
 ): AttackPlan[] {
-  const slot = config.timelineSeconds / victims.length;
-  // Keep the burst inside its slot and well under the detection window, so the
-  // reference always sees the whole burst within one window.
-  const span = Math.min(config.windowSeconds - 60, slot - 40);
-  const margin = 20;
-
   const plans: AttackPlan[] = [];
-  victims.forEach((account, index) => {
+  waves.forEach((wave, index) => {
+    const account = victims[index];
+    if (account === undefined) {
+      return;
+    }
     // Between threshold and threshold + 3 failures: always enough, sometimes more.
-    const extra = Math.floor(rng() * 4);
-    const count = config.threshold + extra;
-    const base = index * slot + margin;
-    const gap = span / (count - 1);
+    const count = PIN_BRUTE_FORCE_THRESHOLD + Math.floor(rng() * 4);
+    const spanTicks = Math.min(
+      SCAN_WINDOW_TICKS - BURST_MARGIN_TICKS,
+      wave.durationTicks - 2 * BURST_MARGIN_TICKS,
+    );
+    const startTick = wave.startTick + BURST_MARGIN_TICKS;
+    const gap = spanTicks / (count - 1);
     const failTimestamps: number[] = [];
     for (let k = 0; k < count; k++) {
-      failTimestamps.push(Math.round(base + k * gap));
+      const tick = startTick + Math.round(k * gap);
+      failTimestamps.push(tick * GAME_SECONDS_PER_TICK);
     }
-    // The evenly-spaced burst starts at `base` and ends one full span later.
     plans.push({
       id: index + 1,
       account,
-      window: { startTs: Math.round(base), endTs: Math.round(base + span) },
+      window: {
+        startTs: startTick * GAME_SECONDS_PER_TICK,
+        endTs: (startTick + spanTicks) * GAME_SECONDS_PER_TICK,
+      },
       failTimestamps,
     });
   });

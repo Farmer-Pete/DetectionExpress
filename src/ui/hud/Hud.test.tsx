@@ -33,4 +33,33 @@ describe("Hud", () => {
     expect(screen.getByText("2 missed")).toBeDefined();
     expect(screen.getByText("1 false")).toBeDefined();
   });
+
+  it("reads Running before any outcome", () => {
+    render(<Hud />);
+    expect(screen.getByText("Running")).toBeDefined();
+  });
+
+  it("shows the win outcome", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), status: "won", failureReason: null },
+    });
+    render(<Hud />);
+    expect(screen.getByText("Won")).toBeDefined();
+  });
+
+  it("shows the loss and its reason", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "backlog" },
+    });
+    render(<Hud />);
+    expect(screen.getByText("Failed: Backlog overflowed")).toBeDefined();
+  });
+
+  it("shows the correctness loss reason", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "correctness" },
+    });
+    render(<Hud />);
+    expect(screen.getByText("Failed: Correctness too low")).toBeDefined();
+  });
 });

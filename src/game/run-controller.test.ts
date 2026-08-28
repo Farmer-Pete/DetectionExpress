@@ -1,16 +1,29 @@
 import { describe, expect, it } from "bun:test";
-import type { GeneratedRun, Scenario } from "../sim/scenario";
+import type { Checkpoint, GeneratedRun, Scenario } from "../sim/scenario";
+import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { LoadedAlgorithm } from "./algorithm";
 import type { EngineHandle, StartOptions } from "./engine";
-import { createRunController, type RuleErrorInfo, type RunControllerDeps } from "./run-controller";
+import {
+  createRunController,
+  type RuleErrorInfo,
+  type RunControllerDeps,
+  type ServiceRateHandle,
+} from "./run-controller";
 
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, match: () => null };
 
-const emptyRun: GeneratedRun = { events: [], attacks: [] };
+const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [] };
 const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };
 
 const graph = { nodes: [], edges: [] };
+
+const FIXED_RATE: ServiceRate = { num: 7, den: 1 };
+
+/** A profiler seam that resolves at once with a fixed rate: no worker, no timing. */
+function fixedServiceRate(rate: ServiceRate = FIXED_RATE): ServiceRateHandle {
+  return { rate: Promise.resolve(rate), cancel: () => undefined };
+}
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -46,6 +59,7 @@ function baseDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
     setSnapshot: () => undefined,
     setError: () => undefined,
     loadAlgorithm: async () => algo,
+    resolveServiceRate: () => fixedServiceRate(),
     start: () => fakeHandle(),
     ...over,
   };
@@ -151,6 +165,66 @@ describe("run controller", () => {
     stale.resolve(); // generation 1 completes late -> must be ignored
     await flush();
     expect(finishes).toBe(1); // only the live run's completion counted
+  });
+
+  it("passes the generated checkpoints into start unchanged (M2 seam 10)", async () => {
+    const checkpoints: Checkpoint[] = [
+      { atTick: 300, clearsThroughWave: 0 },
+      { atTick: 700, clearsThroughWave: 1 },
+    ];
+    const run: GeneratedRun = { events: [], attacks: [], checkpoints };
+    const seen: StartOptions[] = [];
+    const controller = createRunController(
+      baseDeps({
+        scenario: { id: "waved", briefing: "b", generate: () => run },
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.checkpoints).toBe(checkpoints); // the same array, untouched
+  });
+
+  it("injects the profiled service rate into start (M2)", async () => {
+    const seen: StartOptions[] = [];
+    const controller = createRunController(
+      baseDeps({
+        resolveServiceRate: () => fixedServiceRate({ num: 9, den: 4 }),
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen[0]?.serviceRate).toEqual({ num: 9, den: 4 });
+  });
+
+  it("cancels a stale profiler worker when a newer run supersedes it (M2)", async () => {
+    const cancels: number[] = [];
+    const rates = [deferred<ServiceRate>(), deferred<ServiceRate>()];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        resolveServiceRate: () => {
+          const index = call++;
+          return {
+            rate: rates[index]?.promise ?? Promise.resolve(FIXED_RATE),
+            cancel: () => cancels.push(index),
+          };
+        },
+      }),
+    );
+    controller.run(); // generation 1: its measurement is still pending
+    await flush();
+    controller.run(); // generation 2: supersedes 1, cancelling its worker
+    await flush();
+    expect(cancels).toContain(0); // the stale generation-1 worker was terminated
   });
 
   it("clears the error and resets the snapshot on a fresh run", async () => {

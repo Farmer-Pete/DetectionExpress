@@ -3,18 +3,26 @@ import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  GAME_SECONDS_PER_TICK,
+  INTRO_TICKS,
   LEVEL_SEED,
   PIN_BRUTE_FORCE_THRESHOLD,
   PIN_BRUTE_FORCE_WINDOW_S,
-  SCENARIO_MINUTES,
+  WAVE_COUNT,
+  WAVE_RATES,
 } from "../../../game/tuning";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
 import { buildReferenceAlgorithm, referenceSource } from "./reference";
-import { kioskPinAttack } from "./scenario";
+import { buildSchedule, kioskPinAttack } from "./scenario";
 
-const TIMELINE = SCENARIO_MINUTES * 60;
+/** The run ends at the final deadline: the last checkpoint's tick, in game seconds. */
+function deadlineSeconds(): number {
+  const checkpoints = buildSchedule().checkpoints;
+  const last = checkpoints[checkpoints.length - 1];
+  return (last?.atTick ?? 0) * GAME_SECONDS_PER_TICK;
+}
 
 /** Read an Event's kiosk-v1 payload, narrowing at the boundary. */
 function raw(ev: PipeEvent): RawKioskV1 {
@@ -80,11 +88,12 @@ describe("kioskPinAttack.generate", () => {
   it("gives every Attack a valid window and enough evidence", () => {
     const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const byId = new Map(events.map((ev) => [ev.id, ev]));
+    const deadline = deadlineSeconds();
     expect(attacks.length).toBeGreaterThan(0);
     for (const attack of attacks) {
       expect(attack.reason).toBe("pin_brute_force");
       expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
-      expect(attack.window.endTs).toBeLessThan(TIMELINE);
+      expect(attack.window.endTs).toBeLessThan(deadline);
       for (const id of attack.eventIds) {
         const ev = byId.get(id);
         expect(ev).toBeDefined();
@@ -163,6 +172,50 @@ describe("kioskPinAttack.generate", () => {
     expect(r.missed).toBe(0);
     expect(r.falseAlerts).toBe(0);
     expect(r.rolling).toBe(100);
+  });
+});
+
+describe("buildSchedule (M2 schedule invariant)", () => {
+  it("emits one wave per rate, half-open and rising, with no overlap", () => {
+    const { waves } = buildSchedule();
+    expect(waves.length).toBe(WAVE_COUNT);
+    expect(WAVE_COUNT).toBe(WAVE_RATES.length);
+    expect(waves[0]?.startTick).toBe(INTRO_TICKS); // the intro precedes Wave 1
+    let prevEnd = -1;
+    let prevRate = -1;
+    for (const wave of waves) {
+      expect(wave.durationTicks).toBeGreaterThan(0);
+      expect(wave.startTick).toBeGreaterThanOrEqual(prevEnd); // [start, end): no overlap
+      expect(wave.eventsPerTick).toBeGreaterThan(prevRate); // rates climb wave over wave
+      prevEnd = wave.startTick + wave.durationTicks;
+      prevRate = wave.eventsPerTick;
+    }
+  });
+
+  it("puts each checkpoint a drain gap past its wave, in tick order, next wave at/after it", () => {
+    const { waves, checkpoints } = buildSchedule();
+    expect(checkpoints.length).toBe(waves.length);
+    let prevTick = -1;
+    checkpoints.forEach((cp, i) => {
+      const wave = waves[i];
+      expect(wave).toBeDefined();
+      if (!wave) return;
+      expect(cp.clearsThroughWave).toBe(i);
+      expect(cp.atTick).toBeGreaterThan(wave.startTick + wave.durationTicks); // past the wave end
+      expect(cp.atTick).toBeGreaterThan(prevTick); // strictly ascending
+      const nextWave = waves[i + 1];
+      if (nextWave) {
+        expect(nextWave.startTick).toBeGreaterThanOrEqual(cp.atTick); // no wave admitted before it
+      }
+      prevTick = cp.atTick;
+    });
+  });
+
+  it("carries the checkpoints through into the generated run unchanged", () => {
+    const run = kioskPinAttack.generate(LEVEL_SEED);
+    expect(run.checkpoints).toEqual(buildSchedule().checkpoints);
+    // The final deadline clears the last wave.
+    expect(run.checkpoints[run.checkpoints.length - 1]?.clearsThroughWave).toBe(WAVE_COUNT - 1);
   });
 });
 

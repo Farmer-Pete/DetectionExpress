@@ -3,6 +3,7 @@ import { Clock, ManualDriver } from "../game/clock";
 import type { Alert } from "./alert";
 import { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import type { ServiceRate } from "./service-governor";
 import {
   NODE_TASKS,
   type NodeRuntime,
@@ -23,6 +24,26 @@ const idleClock: TaskClock = {
   gate: () => Promise.resolve(),
   sleep: () => Promise.resolve(),
 };
+
+/** A rate so fast the governor never sleeps at these counts, so Match timing is inert. */
+const FAST_RATE: ServiceRate = { num: 1_000_000, den: 1 };
+
+/** A no-op admit hook, for the tasks that do not exercise admission counting. */
+const noAdmit = (): void => undefined;
+
+/** A clock that records each sleep's tick count, so the governor charge is observable. */
+function recordingClock(): TaskClock & { sleeps: number[] } {
+  const sleeps: number[] = [];
+  return {
+    sleeps,
+    now: () => 0,
+    gate: () => Promise.resolve(),
+    sleep: (ticks: number) => {
+      sleeps.push(ticks);
+      return Promise.resolve();
+    },
+  };
+}
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 50; i++) {
@@ -95,7 +116,7 @@ describe("runIngest schedule", () => {
     const out = new Channel<PipeMessage>(100);
     const events = [ev(0, 0), ev(1, 0), ev(2, 10)]; // GAME_SECONDS_PER_TICK=2 -> dueTicks 0,0,5
     let i = 0;
-    guard(runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null)));
+    guard(runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null), noAdmit));
     await flush();
     expect(out.accepted).toBe(2); // both ts=0 Events are due at tick 0
 
@@ -119,7 +140,7 @@ describe("runIngest schedule", () => {
     const events = [ev(0, 0), ev(1, 0), ev(2, 2), ev(3, 4)]; // dueTicks 0,0,1,2
     let i = 0;
     let done = false;
-    runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null))
+    runIngest(out, clock, () => (i < events.length ? (events[i++] ?? null) : null), noAdmit)
       .then(() => {
         done = true;
       })
@@ -137,6 +158,29 @@ describe("runIngest schedule", () => {
     const marker = got[4];
     expect(marker !== undefined && isEndOfStream(marker)).toBe(true); // one marker, last
     expect(done).toBe(true); // Ingest returned after the marker
+    clock.stop();
+  });
+
+  it("calls onAdmit once per real Event, after its push, and never for the marker", async () => {
+    const driver = new ManualDriver();
+    const clock = new Clock(HZ, driver);
+    const out = new Channel<PipeMessage>(100);
+    const events = [ev(0, 0), ev(1, 0), ev(2, 0)]; // all due at tick 0
+    let admits = 0;
+    let i = 0;
+    guard(
+      runIngest(
+        out,
+        clock,
+        () => (i < events.length ? (events[i++] ?? null) : null),
+        () => {
+          admits += 1;
+        },
+      ),
+    );
+    await flush();
+    expect(admits).toBe(3); // one per real Event, none for the end-of-stream marker
+    expect(out.accepted).toBe(4); // three Events plus the marker entered the channel
     clock.stop();
   });
 });
@@ -219,7 +263,7 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     const alert: Alert = { reason: "pin_brute_force", at: 100, events: [1, 2] };
-    guard(runMatch(input, output, idleClock, () => alert, scorer));
+    guard(runMatch(input, output, idleClock, () => alert, scorer, FAST_RATE));
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
     expect(scorer.records).toHaveLength(1);
@@ -243,6 +287,7 @@ describe("runMatch", () => {
           return null;
         },
         stubScorer(),
+        FAST_RATE,
       ),
     );
     // The payload carries id/ts/endpoint that must NOT win over the envelope.
@@ -268,7 +313,7 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     let done = false;
-    runMatch(input, output, idleClock, () => null, scorer)
+    runMatch(input, output, idleClock, () => null, scorer, FAST_RATE)
       .then(() => {
         done = true;
       })
@@ -294,6 +339,7 @@ describe("runMatch", () => {
         throw new Error("boom in match");
       },
       stubScorer(),
+      FAST_RATE,
     ).catch((e: unknown) => {
       err = e;
     });
@@ -307,13 +353,42 @@ describe("runMatch", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     let err: unknown;
-    runMatch(input, output, idleClock, () => ({ nope: 1 }), stubScorer()).catch((e: unknown) => {
-      err = e;
-    });
+    runMatch(input, output, idleClock, () => ({ nope: 1 }), stubScorer(), FAST_RATE).catch(
+      (e: unknown) => {
+        err = e;
+      },
+    );
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
     expect(err instanceof RuleError && err.phase).toBe("match");
+  });
+
+  it("charges the governor per real Event, after record and before push, never on the marker", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const clock = recordingClock();
+    // 0.5 records per tick -> the governor sleeps two whole ticks per Event.
+    guard(runMatch(input, output, clock, () => null, stubScorer(), { num: 1, den: 2 }));
+    await input.push(ev(1, 0));
+    await input.push(ev(2, 0));
+    await input.push(ev(3, 0));
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(clock.sleeps).toEqual([2, 2, 2]); // one charge per Event, none for the marker
+  });
+
+  it("does not sleep when the rate is fast enough to owe no whole tick", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const clock = recordingClock();
+    // 20 records per tick: the first Events owe a zero-tick charge, so no sleep.
+    guard(runMatch(input, output, clock, () => null, stubScorer(), { num: 20, den: 1 }));
+    await input.push(ev(1, 0));
+    await input.push(ev(2, 0));
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(clock.sleeps).toEqual([]); // charge returned zero, so Match never slept
   });
 });
 
@@ -342,9 +417,11 @@ describe("NODE_TASKS registry", () => {
   const runtime: NodeRuntime = {
     clock: idleClock,
     onComplete: () => undefined,
+    onAdmit: () => undefined,
     algorithm: { normalize: (raw) => raw, match: () => null },
     scorer: { record: () => undefined, finalize: () => undefined },
     nextEvent: () => null,
+    serviceRate: FAST_RATE,
   };
   const noWiring = { input: undefined, output: undefined };
 
