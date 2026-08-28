@@ -32,8 +32,8 @@ import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import type { DevKitPanelProps } from "./DevKitPanel";
 import { Hud } from "./hud/Hud";
-import { levelSlug } from "./levels";
 import { Pipeline } from "./Pipeline";
+import { scenarioSlug } from "./scenarios";
 
 /** Builds a dev-host client from the deps the App wires. Injected in tests. */
 type DevClientFactory = (deps: DevHostClientDeps) => DevHostClient;
@@ -59,18 +59,24 @@ export function App({ controller, createDevClient }: AppProps = {}) {
   const devClientRef = useRef<DevHostClient | null>(null);
   const devFactoryRef = useRef<DevClientFactory | null>(null);
   const startClientRef = useRef<((factory: DevClientFactory) => void) | null>(null);
+  const loadClientRef = useRef<(() => void) | null>(null);
   const devSubscriberRef = useRef<((state: DevState) => void) | null>(null);
+  const lastDevStateRef = useRef<DevState | null>(null);
   const [Panel, setPanel] = useState<FunctionComponent<DevKitPanelProps> | null>(null);
 
-  const slug = levelSlug(kioskPinAttack.id);
+  const slug = scenarioSlug(kioskPinAttack.id);
 
+  // Cache the last dev state and forward it to the current subscriber. A state emitted
+  // before the async DevKitPanel has subscribed would otherwise be dropped, leaving the
+  // panel stuck in its off state; the cache lets `subscribe` replay it on arrival.
   const reportDev = useCallback((state: DevState): void => {
+    lastDevStateRef.current = state;
     devSubscriberRef.current?.(state);
   }, []);
 
   const buildDeps = useCallback(
     (): DevHostClientDeps => ({
-      levelSlug: slug,
+      scenarioSlug: slug,
       applySource: (text: string): void => {
         useGameStore.getState().setAlgorithmSource(text);
         controllerRef.current?.run();
@@ -85,6 +91,10 @@ export function App({ controller, createDevClient }: AppProps = {}) {
 
   const subscribeDevState = useCallback((listener: (state: DevState) => void): (() => void) => {
     devSubscriberRef.current = listener;
+    // Replay the cached state so a panel that subscribes after the event still sees it.
+    if (lastDevStateRef.current !== null) {
+      listener(lastDevStateRef.current);
+    }
     return () => {
       if (devSubscriberRef.current === listener) {
         devSubscriberRef.current = null;
@@ -106,6 +116,8 @@ export function App({ controller, createDevClient }: AppProps = {}) {
       try {
         const client = factory(buildDeps());
         devClientRef.current = client;
+        // Remember the factory only once a client is built, so a build that threw
+        // leaves it null and `ensureClient` re-runs the load rather than the dead factory.
         devFactoryRef.current = factory;
         client.connect();
       } catch {
@@ -114,11 +126,18 @@ export function App({ controller, createDevClient }: AppProps = {}) {
     };
     startClientRef.current = startClient;
 
-    if (createDevClient) {
-      startClient(createDevClient);
-    } else {
-      // Lazy, gate co-located with the flag const, so `dev-host-client` is stripped
-      // from the static build and is never a static input to the CDN bundle.
+    // Load and start the client. Injected in tests through `createDevClient`; otherwise
+    // a lazy import whose gate is co-located with the flag const, so `dev-host-client`
+    // is stripped from the static build. Re-runnable, so a later "Edit in my IDE" can
+    // retry after a failed load or build (the factory stays null until one succeeds).
+    const loadAndStart = (): void => {
+      if (cancelled) {
+        return;
+      }
+      if (createDevClient) {
+        startClient(createDevClient);
+        return;
+      }
       const pending = loadDevHostClient();
       if (pending !== null) {
         pending
@@ -133,7 +152,10 @@ export function App({ controller, createDevClient }: AppProps = {}) {
             }
           });
       }
-    }
+    };
+    loadClientRef.current = loadAndStart;
+
+    loadAndStart();
 
     return () => {
       cancelled = true;
@@ -142,6 +164,7 @@ export function App({ controller, createDevClient }: AppProps = {}) {
       devClientRef.current?.disconnect();
       devClientRef.current = null;
       startClientRef.current = null;
+      loadClientRef.current = null;
     };
   }, [controller, createDevClient, buildDeps, reportDev]);
 
@@ -164,14 +187,20 @@ export function App({ controller, createDevClient }: AppProps = {}) {
     };
   }, []);
 
-  // Rebuild the client if a "Stop editing" dropped it, so a later edit reconnects.
+  // Make sure a client exists before an edit. A "Stop editing" drops the client but
+  // keeps the known-good factory, so rebuild from it. A failed initial load or build
+  // leaves the factory null, so re-run the load (retrying the dynamic import) instead
+  // of no-opping forever.
   const ensureClient = (): void => {
-    if (devClientRef.current === null) {
-      const factory = devFactoryRef.current;
-      const start = startClientRef.current;
-      if (factory !== null && start !== null) {
-        start(factory);
-      }
+    if (devClientRef.current !== null) {
+      return;
+    }
+    const factory = devFactoryRef.current;
+    const start = startClientRef.current;
+    if (factory !== null && start !== null) {
+      start(factory);
+    } else {
+      loadClientRef.current?.();
     }
   };
 
@@ -181,8 +210,14 @@ export function App({ controller, createDevClient }: AppProps = {}) {
     if (client === null) {
       return;
     }
-    client.editInIde(slug, referenceSource).catch(() => {
-      reportDev({ status: "error", path: null, message: "Could not open the level file." });
+    client.editInIde(slug, referenceSource).catch((error: unknown) => {
+      // Surface the dev host's specific reason (cap, invalid name, symlink) when it
+      // gave one, falling back to a generic line only when it did not.
+      const message =
+        error instanceof Error && error.message.length > 0
+          ? error.message
+          : "Could not open the Scenario file.";
+      reportDev({ status: "error", path: null, message });
     });
   };
 

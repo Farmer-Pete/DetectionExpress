@@ -10,11 +10,11 @@
 // exposes its seams, so tests drive them without a socket.
 
 import { spawn as nodeSpawn } from "node:child_process";
-import { watch as nodeWatch } from "node:fs";
-import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
+import { watch as nodeWatch, readFileSync, realpathSync } from "node:fs";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 // --- Tuning constants -------------------------------------------------------
 
@@ -26,6 +26,7 @@ export const ALGORITHMS_DIR = "./algorithms";
 export const DEVHOST_MAX_SLUGS = 64;
 
 const DEVHOST_KEEPALIVE_MS = 15_000;
+const DEVHOST_BODY_LIMIT_BYTES = 1_000_000;
 const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
 const LOOPBACK = "127.0.0.1";
 
@@ -39,7 +40,7 @@ function isString(value) {
   return String(value) === value;
 }
 
-/** A logical level name is valid iff it is a string matching the slug pattern. */
+/** A scenario name is valid iff it is a string matching the slug pattern. */
 export function isValidSlug(name) {
   return isString(name) && SLUG_PATTERN.test(name);
 }
@@ -160,6 +161,13 @@ export function openInEditor(filePath, deps) {
     });
     if (child?.on) {
       child.on("error", (err) => onError(err?.message ?? String(err)));
+      // A spawn that launches but then exits nonzero (e.g. a headless xdg-open
+      // with no handler) never emits "error"; catch the failing exit too.
+      child.on("exit", (code) => {
+        if (code != null && code !== 0) {
+          onError(`opener exited with code ${code} (${filePath})`);
+        }
+      });
     }
     if (child?.unref) {
       child.unref();
@@ -245,10 +253,17 @@ export function createDevHost(config = {}) {
   const spawn = config.spawn ?? nodeSpawn;
   const platform = config.platform ?? process.platform;
   const watch = config.watch ?? nodeWatch;
-  const version = config.version ?? DEVHOST_VERSION;
+  const version = config.version ?? readPackageVersion();
   const maxSlugs = config.maxSlugs ?? DEVHOST_MAX_SLUGS;
   const debounceMs = config.debounceMs ?? DEVHOST_WATCH_DEBOUNCE_MS;
   const keepaliveMs = config.keepaliveMs ?? DEVHOST_KEEPALIVE_MS;
+  const bodyLimit = config.bodyLimit ?? DEVHOST_BODY_LIMIT_BYTES;
+  const readSource = config.readSource ?? ((filePath) => readWithRetry(filePath));
+  const onWatchError =
+    config.onWatchError ?? ((err) => console.error(`watch error: ${err?.message ?? err}`));
+  const onReadError =
+    config.onReadError ??
+    ((err, slug) => console.error(`watch read failed for ${slug}: ${err?.message ?? err}`));
   const timers = config.timers ?? {
     setTimeout,
     clearTimeout,
@@ -263,10 +278,13 @@ export function createDevHost(config = {}) {
     shuttingDown: false,
   };
 
-  /** slug -> slug state. Each level is independent. */
+  /** slug -> slug state. Each scenario is independent. */
   const slugs = new Map();
 
-  function getState(slug, activate) {
+  // Get or create the state for a slug. Creation never marks a scenario active:
+  // that happens only after activate() succeeds, so a failed activation cannot
+  // leak a slot against the cap.
+  function getState(slug) {
     let entry = slugs.get(slug);
     if (!entry) {
       entry = {
@@ -283,10 +301,20 @@ export function createDevHost(config = {}) {
       };
       slugs.set(slug, entry);
     }
-    if (activate) {
-      entry.active = true;
-    }
     return entry;
+  }
+
+  // Drop a slug's state when nothing is holding it: no live stream, not active,
+  // and no watcher or cached state to preserve. Keeps the events path bounded.
+  function maybeReap(entry) {
+    if (
+      entry.subscribers.size === 0 &&
+      !entry.active &&
+      entry.watcher == null &&
+      entry.cachedDefault == null
+    ) {
+      slugs.delete(entry.slug);
+    }
   }
 
   function activeCount() {
@@ -310,8 +338,15 @@ export function createDevHost(config = {}) {
   }
 
   function emit(entry, frame) {
-    for (const record of entry.subscribers) {
-      record.res.write(frame);
+    // Copy first: a failing write drops the dead subscriber mid-iteration.
+    for (const record of [...entry.subscribers]) {
+      try {
+        record.res.write(frame);
+      } catch {
+        // A dead socket rejects the write. Drop it and keep serving the rest.
+        entry.subscribers.delete(record);
+        timers.clearInterval(record.keepalive);
+      }
     }
   }
 
@@ -370,6 +405,17 @@ export function createDevHost(config = {}) {
     res.end(text);
   }
 
+  // A HostError carries a status and a message meant for the client, so relay it
+  // verbatim. Any other error is unexpected: its message may embed absolute
+  // local paths (Node fs errors do), so answer 500 with a generic message.
+  function respondError(res, err) {
+    if (err instanceof HostError) {
+      respondText(res, err.status, err.message);
+      return;
+    }
+    respondText(res, 500, "internal error");
+  }
+
   // --- Watch ----------------------------------------------------------------
 
   function startWatch(entry) {
@@ -384,6 +430,12 @@ export function createDevHost(config = {}) {
       }
       scheduleWatchTransition(entry);
     });
+    // A FSWatcher error is emitted as an "error" event; with no listener Node
+    // would throw it as an uncaught exception and crash the host. Log it and
+    // keep serving; the retained snapshot still covers reconnecting clients.
+    if (entry.watcher?.on) {
+      entry.watcher.on("error", (err) => onWatchError(err));
+    }
   }
 
   function scheduleWatchTransition(entry) {
@@ -408,15 +460,32 @@ export function createDevHost(config = {}) {
     let source = null;
     let missing = false;
     try {
-      source = await readWithRetry(filePath);
+      // Re-apply the symlink / non-regular guard on every re-read: a file
+      // swapped for a symlink must never be read and broadcast to the browser.
+      const stats = await lstat(filePath);
+      if (stats.isSymbolicLink() || !stats.isFile()) {
+        onReadError(
+          new HostError(403, "watched target is a symlink or non-regular"),
+          captured.slug,
+        );
+        return; // Do not read or broadcast the foreign target.
+      }
+      source = await readSource(filePath);
     } catch (err) {
       if (err?.code === "ENOENT") {
         missing = true;
       } else {
-        throw err;
+        // A non-ENOENT failure (e.g. EACCES) is surfaced, not silently dropped,
+        // so a stuck stream does not look "connected but frozen".
+        onReadError(err, captured.slug);
+        return;
       }
     }
     if (missing) {
+      // The file is gone: revert to the cached default and release the lock so
+      // /api/health drops the scenario and a later POST re-locks with an init.
+      entry.active = false;
+      entry.path = null;
       entry.retained = { slug: captured.slug, path: null, source: entry.cachedDefault };
       emit(entry, initFrame(captured.slug, null, entry.cachedDefault));
     } else {
@@ -470,9 +539,9 @@ export function createDevHost(config = {}) {
   async function handlePost(req, res) {
     let raw;
     try {
-      raw = await readBody(req);
+      raw = await readBody(req, bodyLimit);
     } catch (err) {
-      respondText(res, err?.status ?? 400, err?.message ?? "bad request");
+      respondError(res, err);
       return;
     }
     let body;
@@ -487,21 +556,32 @@ export function createDevHost(config = {}) {
       respondText(res, 400, "invalid name");
       return;
     }
-    const defaultSource = isString(body?.defaultSource) ? body.defaultSource : "";
+    if (!isString(body?.defaultSource)) {
+      respondText(res, 400, "defaultSource must be a string");
+      return;
+    }
+    const defaultSource = body.defaultSource;
 
     const existing = slugs.get(name);
     const alreadyActive = existing?.active === true;
     if (!alreadyActive && activeCount() >= maxSlugs) {
-      respondText(res, 503, `too many active levels (max ${maxSlugs})`);
+      respondText(res, 503, `too many active scenarios (max ${maxSlugs})`);
       return;
     }
 
-    const entry = getState(name, true);
+    const isNew = !slugs.has(name);
+    const entry = getState(name);
     try {
       const result = await entry.enqueueTransition(() => activate(entry, defaultSource));
+      entry.active = true; // Lock the slot only after activate() succeeds.
       respondJson(res, 200, result);
     } catch (err) {
-      respondText(res, err?.status ?? 500, err?.message ?? "activation failed");
+      // A failed activation must not leak a slot against the cap. If this POST
+      // created the entry and nothing else holds it, drop it entirely.
+      if (isNew && !entry.active && entry.subscribers.size === 0 && entry.watcher == null) {
+        slugs.delete(name);
+      }
+      respondError(res, err);
     }
   }
 
@@ -514,7 +594,13 @@ export function createDevHost(config = {}) {
       return;
     }
     const slug = slugValues[0];
-    const entry = getState(slug, false);
+    // Bound the events path too: a flood of distinct never-seen slugs must not
+    // grow the map without limit. A slug already tracked is always admitted.
+    if (!slugs.has(slug) && slugs.size >= maxSlugs) {
+      respondText(res, 503, `too many active scenarios (max ${maxSlugs})`);
+      return;
+    }
+    const entry = getState(slug);
 
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -533,11 +619,32 @@ export function createDevHost(config = {}) {
     const cleanup = () => {
       entry.subscribers.delete(record);
       timers.clearInterval(keepalive);
+      // Reap a never-activated slug once its last stream closes, so distinct
+      // open/close churn on the events path cannot leak entries.
+      maybeReap(entry);
     };
     res.on("close", cleanup);
+    // A socket error also ends the stream; without this listener the emitted
+    // error would go unhandled and its resources would leak until exit.
+    res.on("error", cleanup);
   }
 
   // --- Static serving -------------------------------------------------------
+
+  // The build root with every symlink resolved, memoized. Confinement compares
+  // realpath'd targets against this, so a symlinked temp root (e.g. macOS
+  // /var -> /private/var) does not falsely reject its own assets.
+  let canonicalBuildRoot = null;
+  async function canonicalRoot() {
+    if (canonicalBuildRoot == null) {
+      try {
+        canonicalBuildRoot = await realpath(buildRoot);
+      } catch {
+        canonicalBuildRoot = buildRoot;
+      }
+    }
+    return canonicalBuildRoot;
+  }
 
   async function serveFile(res, filePath, method) {
     let stats;
@@ -547,6 +654,20 @@ export function createDevHost(config = {}) {
       return false; // Missing: let the caller fall back to index.html.
     }
     if (stats.isSymbolicLink() || !stats.isFile()) {
+      respondText(res, 403, "forbidden");
+      return true;
+    }
+    // Confinement in depth: an intermediate symlinked directory can escape the
+    // root even when the final component is a regular file. Resolve the real
+    // path and confirm it still lives under the canonical build root.
+    const root = await canonicalRoot();
+    let real;
+    try {
+      real = await realpath(filePath);
+    } catch {
+      return false; // Vanished between lstat and realpath: treat as missing.
+    }
+    if (real !== root && !real.startsWith(root + path.sep)) {
       respondText(res, 403, "forbidden");
       return true;
     }
@@ -700,13 +821,16 @@ export function createDevHost(config = {}) {
 
 // --- Request body -----------------------------------------------------------
 
-async function readBody(req, limit = 1_000_000) {
+async function readBody(req, limit = DEVHOST_BODY_LIMIT_BYTES) {
   let size = 0;
   const parts = [];
   for await (const chunk of req) {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
     if (size > limit) {
+      // Destroy the request so the unread remainder is not left in the socket
+      // buffer, which on a keep-alive connection would desync the next request.
+      req.destroy?.();
       throw new HostError(413, "request body too large");
     }
     parts.push(buf);
@@ -721,6 +845,44 @@ function defaultBuildRoot() {
   // assets relative to the module, never the working directory.
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, "dist-devkit");
+}
+
+// --- Package version --------------------------------------------------------
+
+/**
+ * The package version, read from the package.json beside this bin at runtime so
+ * /api/health reports the real published version. Falls back to the constant if
+ * the file is missing or unreadable.
+ */
+function readPackageVersion() {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(path.resolve(here, "package.json"), "utf8"));
+    return isString(pkg?.version) ? pkg.version : DEVHOST_VERSION;
+  } catch {
+    return DEVHOST_VERSION;
+  }
+}
+
+// --- Direct-run detection ---------------------------------------------------
+
+/**
+ * True when this module is the program entrypoint. Resolves real paths on both
+ * sides before comparing, so a bin symlink (bunx, pnpm dlx) still matches the
+ * module it points at. Robust to realpath throwing on a vanished path.
+ */
+export function isRunDirectly(argv1, moduleUrl, realpath = realpathSync) {
+  if (argv1 == null) {
+    return false;
+  }
+  const resolve = (p) => {
+    try {
+      return realpath(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return resolve(argv1) === resolve(fileURLToPath(moduleUrl));
 }
 
 // --- Real listen wrapper ----------------------------------------------------
@@ -755,10 +917,8 @@ async function main() {
 }
 
 // Portable entry check: start only when run directly. import.meta.main is Node
-// v22.18+, so compare argv[1]'s file URL to this module's URL instead.
-const runDirectly =
-  process.argv[1] != null && pathToFileURL(process.argv[1]).href === import.meta.url;
-if (runDirectly) {
+// v22.18+, so compare real paths instead (see isRunDirectly).
+if (isRunDirectly(process.argv[1], import.meta.url)) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

@@ -15,4 +15,11 @@ describe("dev-flag", () => {
     const mod = await pending;
     expect(mod?.createDevHostClient).toBeInstanceOf(Function);
   });
+
+  // ARCHITECTURE.md: `src/game/` may import React only in the store. dev-flag lives in
+  // game/, so it must carry no `react` import — not even a type-only one.
+  it("does not import from react", async () => {
+    const source = await Bun.file(new URL("./dev-flag.ts", import.meta.url)).text();
+    expect(source).not.toMatch(/from\s+["']react["']/);
+  });
 });

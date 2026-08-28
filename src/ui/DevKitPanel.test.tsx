@@ -75,7 +75,35 @@ describe("DevKitPanel", () => {
   it("surfaces a host message on the status line", () => {
     const h = harness();
     render(<DevKitPanel {...h.props} />);
-    h.push({ status: "error", path: null, message: "Could not open the level file." });
-    expect(screen.getByRole("status").textContent).toBe("Could not open the level file.");
+    h.push({ status: "error", path: null, message: "Could not open the Scenario file." });
+    expect(screen.getByRole("status").textContent).toBe("Could not open the Scenario file.");
+  });
+
+  it("shows an in-flight 'Opening...' state and blocks a double-click", () => {
+    const h = harness();
+    render(<DevKitPanel {...h.props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit in my IDE" }));
+
+    const opening = screen.getByRole("button", { name: "Opening..." });
+    expect(opening.hasAttribute("disabled")).toBe(true);
+
+    // A second click on the in-flight button queues no duplicate request.
+    fireEvent.click(opening);
+    expect(h.edits()).toBe(1);
+
+    // Once the host answers over SSE, the panel leaves the in-flight state.
+    h.push({ status: "connected", path: "/algorithms/x.js", message: null });
+    expect(screen.getByRole("button", { name: "Stop editing" })).toBeDefined();
+  });
+
+  it("clears the in-flight state on an error so the edit can be retried", () => {
+    const h = harness();
+    render(<DevKitPanel {...h.props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit in my IDE" }));
+    expect(screen.getByRole("button", { name: "Opening..." })).toBeDefined();
+
+    h.push({ status: "error", path: null, message: "The dev host is at capacity." });
+    const retry = screen.getByRole("button", { name: "Edit in my IDE" });
+    expect(retry.hasAttribute("disabled")).toBe(false);
   });
 });

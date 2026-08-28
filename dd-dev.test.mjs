@@ -1,14 +1,16 @@
 // Host-side tests for dd-dev.mjs. These drive the request handler and the
-// exported seams directly, with injected fetch/spawn/listen/timers/exit and
-// temp dirs, so no unit test opens a real socket. A few integration tests use
-// real fs.watch on a temp dir; they stay fast and deterministic.
+// exported seams directly, with injected spawn/watch/listen/timers/exit and
+// temp dirs, so no unit test opens a real socket. Watch behavior is driven
+// through the injected `watch` seam (a fake watcher) against real temp files,
+// so the transition tests are deterministic and never wait on the OS.
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
 import {
   buildOpenPlan,
   changedFrame,
@@ -18,6 +20,7 @@ import {
   decodeSourceB64,
   encodeSourceB64,
   initFrame,
+  isRunDirectly,
   isValidSlug,
   listenWithPortWalk,
   mimeForExt,
@@ -92,6 +95,61 @@ function makeSpawn() {
     return { on() {}, unref() {} };
   };
   return { spawn, calls };
+}
+
+// A fake fs.watch factory. Each call records a watcher whose filesystem
+// callback and event listeners the test drives by hand, so watch behavior is
+// deterministic with no reliance on the OS delivering real change events.
+// `emit("error", ...)` mimics an EventEmitter: an unhandled "error" throws.
+function makeFakeWatch() {
+  const watchers = [];
+  const watch = (dir, listener) => {
+    const handlers = new Map();
+    const w = {
+      dir,
+      closed: false,
+      on(event, cb) {
+        const list = handlers.get(event) ?? [];
+        list.push(cb);
+        handlers.set(event, list);
+        return w;
+      },
+      emit(event, arg) {
+        const list = handlers.get(event) ?? [];
+        if (list.length === 0 && event === "error") {
+          throw arg; // Node's EventEmitter throws an unhandled "error".
+        }
+        for (const cb of list) {
+          cb(arg);
+        }
+      },
+      // Simulate the OS firing a change for `filename` under the watched dir.
+      trigger(eventType, filename) {
+        listener(eventType, filename);
+      },
+      close() {
+        w.closed = true;
+      },
+    };
+    watchers.push(w);
+    return w;
+  };
+  return { watch, watchers };
+}
+
+// A recording response whose write can be flipped to throw, to model a dead
+// socket that rejects further writes.
+function makeFlakyRes() {
+  const res = makeRes();
+  res.failWrite = false;
+  const realWrite = res.write.bind(res);
+  res.write = (chunk) => {
+    if (res.failWrite) {
+      throw new Error("EPIPE: write to a closed socket");
+    }
+    return realWrite(chunk);
+  };
+  return res;
 }
 
 let tmpRoot;
@@ -407,7 +465,8 @@ describe("API handler", () => {
     await host.handleRequest(req, res);
     const body = JSON.parse(res.body);
     expect(body.app).toBe("detection-express-devhost");
-    expect(body.version).toBe("1.0.0");
+    const pkg = JSON.parse(readFileSync(path.join(import.meta.dir, "package.json"), "utf8"));
+    expect(body.version).toBe(pkg.version);
     expect(body.activeSlugs).toEqual(["kiosk"]);
   });
 
@@ -577,11 +636,17 @@ describe("transition queue", () => {
   });
 });
 
-// --- Seams 8 + 13: watch and delete-revert (integration) -------------------
+// --- Seams 8 + 13: watch and delete-revert ---------------------------------
+//
+// These drive a fake watcher (the host's `watch` seam) so the transition logic
+// runs against real files on disk without depending on the OS delivering
+// change events. The `recreates` case is a real-fs smoke test off the watch
+// path: it only exercises create/delete/recreate, no watch frame.
 
 describe("watch and delete-revert", () => {
   it("fires an SSE frame on a temp-file-and-rename save", async () => {
-    const { host } = makeHost({ debounceMs: 20 });
+    const { watch, watchers } = makeFakeWatch();
+    const { host } = makeHost({ watch, debounceMs: 5 });
     const sub = subscribe(host, "kiosk");
     const res = await post(host, "kiosk", "original");
     const filePath = JSON.parse(res.body).path;
@@ -589,18 +654,21 @@ describe("watch and delete-revert", () => {
     const tmp = path.join(algorithmsDir, "tmp-save");
     await writeFile(tmp, "edited-source");
     await rename(tmp, filePath); // atomic rename over the watched file
+    watchers[0].trigger("rename", path.basename(filePath));
 
     const frame = await waitForFrame(sub, "changed", (d) => d.source === "edited-source");
     expect(frame.data.source).toBe("edited-source");
   });
 
   it("reverts to the cached default when the file is deleted", async () => {
-    const { host } = makeHost({ debounceMs: 20 });
+    const { watch, watchers } = makeFakeWatch();
+    const { host } = makeHost({ watch, debounceMs: 5 });
     const sub = subscribe(host, "kiosk");
     const res = await post(host, "kiosk", "the-default");
     const filePath = JSON.parse(res.body).path;
 
     rmSync(filePath);
+    watchers[0].trigger("rename", path.basename(filePath));
 
     // The cold-start init also has path null; wait for the revert with a source.
     const frame = await waitForFrame(sub, "init", (d) => d.path === null && d.source !== null);
@@ -612,7 +680,6 @@ describe("watch and delete-revert", () => {
     const first = await post(host, "kiosk", "the-default");
     const filePath = JSON.parse(first.body).path;
     rmSync(filePath);
-    await new Promise((r) => setTimeout(r, 60));
     const second = await post(host, "kiosk", "ignored-because-exists-logic");
     const body = JSON.parse(second.body);
     expect(body.existed).toBe(false);
@@ -624,11 +691,13 @@ describe("watch and delete-revert", () => {
 
 describe("retained snapshot", () => {
   it("gives a fresh connection the post-delete revert, not cold null", async () => {
-    const { host } = makeHost({ debounceMs: 20 });
+    const { watch, watchers } = makeFakeWatch();
+    const { host } = makeHost({ watch, debounceMs: 5 });
     const sub = subscribe(host, "kiosk");
     const res = await post(host, "kiosk", "the-default");
     const filePath = JSON.parse(res.body).path;
     rmSync(filePath);
+    watchers[0].trigger("rename", path.basename(filePath));
     await waitForFrame(sub, "init", (d) => d.path === null && d.source !== null);
 
     // A brand-new subscriber must still hear the revert, not cold null.
@@ -642,22 +711,25 @@ describe("retained snapshot", () => {
 
 describe("per-slug isolation", () => {
   it("delivers a save only to the matching slug's stream", async () => {
-    const { host } = makeHost({ debounceMs: 20 });
-    const subA = subscribe(host, "level-a");
-    const subB = subscribe(host, "level-b");
-    const resA = await post(host, "level-a", "a-default");
-    await post(host, "level-b", "b-default");
+    const { watch, watchers } = makeFakeWatch();
+    const { host } = makeHost({ watch, debounceMs: 5 });
+    const subA = subscribe(host, "scenario-a");
+    const subB = subscribe(host, "scenario-b");
+    const resA = await post(host, "scenario-a", "a-default");
+    await post(host, "scenario-b", "b-default");
 
     const filePathA = JSON.parse(resA.body).path;
     await writeFile(filePathA, "a-edited");
+    // watchers[0] belongs to scenario-a (activated first).
+    watchers[0].trigger("change", path.basename(filePathA));
 
     const frameA = await waitForFrame(subA, "changed", (d) => d.source === "a-edited");
     expect(frameA.data.source).toBe("a-edited");
 
     // Give any stray delivery a chance to land, then prove B stayed clean.
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 30));
     expect(subB.body).not.toContain(
-      encodeSourceB64(JSON.stringify({ slug: "level-a", source: "a-edited" })),
+      encodeSourceB64(JSON.stringify({ slug: "scenario-a", source: "a-edited" })),
     );
     for (const block of subB.body.split("\n\n").filter((f) => f.includes("data:"))) {
       const data = JSON.parse(
@@ -669,7 +741,7 @@ describe("per-slug isolation", () => {
             .trim(),
         ),
       );
-      expect(data.slug).toBe("level-b");
+      expect(data.slug).toBe("scenario-b");
     }
   });
 });
@@ -715,7 +787,8 @@ describe("resource lifecycle", () => {
       const sub = subscribe(host, "kiosk");
       expect(host.slugs.get("kiosk").subscribers.size).toBe(1);
       sub.emit("close");
-      expect(host.slugs.get("kiosk").subscribers.size).toBe(0);
+      // A never-activated slug is reaped once its last stream closes.
+      expect(host.slugs.get("kiosk")?.subscribers.size ?? 0).toBe(0);
     }
   });
 
@@ -735,6 +808,7 @@ describe("resource lifecycle", () => {
     expect((await post(host, "two")).statusCode).toBe(200);
     const over = await post(host, "three");
     expect(over.statusCode).toBe(503);
+    expect(over.body).toContain("scenario"); // domain wording, not "level"
     expect(host.activeSlugs().sort()).toEqual(["one", "two"]);
     // A re-activation of an existing slug is still allowed past the cap.
     expect((await post(host, "one")).statusCode).toBe(200);
@@ -797,6 +871,365 @@ describe("resource lifecycle", () => {
     host.shutdown();
     expect(cleared).toBe(true);
     expect(exited).toBe(0);
+  });
+});
+
+// --- Fix B2: direct-run detection through a symlinked bin --------------------
+
+describe("direct-run detection", () => {
+  const moduleUrl = new URL("./dd-dev.mjs", import.meta.url).href;
+  const modulePath = fileURLToPath(new URL("./dd-dev.mjs", import.meta.url));
+
+  it("is true when argv[1] is a symlink resolving to the module", () => {
+    const link = path.join(tmpRoot, "bin-link.mjs");
+    symlinkSync(modulePath, link);
+    expect(isRunDirectly(link, moduleUrl)).toBe(true);
+  });
+
+  it("is true when argv[1] is the module path itself", () => {
+    expect(isRunDirectly(modulePath, moduleUrl)).toBe(true);
+  });
+
+  it("is false for an unrelated argv[1] or a missing one", () => {
+    expect(isRunDirectly(path.join(tmpRoot, "other.js"), moduleUrl)).toBe(false);
+    expect(isRunDirectly(null, moduleUrl)).toBe(false);
+    expect(isRunDirectly(undefined, moduleUrl)).toBe(false);
+  });
+});
+
+// --- Fix M1: activation failure never leaks the slug cap ---------------------
+
+describe("activation failure rollback", () => {
+  // Pre-planting a symlink at the target path forces activate() to reject at
+  // its symlink guard, exercising a failed activation deterministically.
+  function plantSymlinkTarget(slug) {
+    const secret = path.join(tmpRoot, `secret-${slug}.js`);
+    writeFileSync(secret, "secret");
+    symlinkSync(secret, path.join(algorithmsDir, `detection-express-${slug}.js`));
+  }
+
+  it("does not count a slug whose activation fails and never exhausts the cap", async () => {
+    const { host } = makeHost({ maxSlugs: 2 });
+    plantSymlinkTarget("evil");
+    for (let i = 0; i < 5; i += 1) {
+      const res = await post(host, "evil", "x");
+      expect(res.statusCode).toBe(403);
+    }
+    // The failed slug is not tracked and not counted against the cap.
+    expect(host.slugs.has("evil")).toBe(false);
+    expect(host.activeSlugs()).toEqual([]);
+    // Two genuinely new slugs still fit within the cap.
+    expect((await post(host, "one", "x")).statusCode).toBe(200);
+    expect((await post(host, "two", "x")).statusCode).toBe(200);
+  });
+
+  it("keeps an existing active slug when a re-activation fails", async () => {
+    const { host } = makeHost();
+    await post(host, "kiosk", "first");
+    expect(host.activeSlugs()).toEqual(["kiosk"]);
+    // Swap the file for a symlink, then a re-POST fails its guard.
+    rmSync(path.join(algorithmsDir, "detection-express-kiosk.js"));
+    plantSymlinkTarget("kiosk");
+    const res = await post(host, "kiosk", "second");
+    expect(res.statusCode).toBe(403);
+    // The previously active slug is retained, still active.
+    expect(host.activeSlugs()).toEqual(["kiosk"]);
+  });
+});
+
+// --- Fix M2: the file watcher survives an emitted error ----------------------
+
+describe("watcher error handling", () => {
+  it("keeps the host alive and reports when the watcher emits an error", async () => {
+    const { watch, watchers } = makeFakeWatch();
+    const errors = [];
+    const { host } = makeHost({ watch, onWatchError: (err) => errors.push(err) });
+    await post(host, "kiosk", "x"); // activation installs the watcher
+    expect(watchers.length).toBe(1);
+    expect(() => watchers[0].emit("error", new Error("watch boom"))).not.toThrow();
+    expect(errors.length).toBe(1);
+    expect(errors[0].message).toBe("watch boom");
+  });
+});
+
+// --- Fix M3: SSE emit tolerates a dead subscriber ----------------------------
+
+describe("SSE dead-subscriber tolerance", () => {
+  it("drops a subscriber whose write throws and still emits to the rest", async () => {
+    const { host } = makeHost();
+    const good = subscribe(host, "kiosk");
+    const badReq = makeReq("GET", "/api/algorithm/events?slug=kiosk", GET_HEADERS);
+    const bad = makeFlakyRes();
+    await host.handleRequest(badReq, bad);
+    expect(host.slugs.get("kiosk").subscribers.size).toBe(2);
+
+    bad.failWrite = true;
+    const goodBefore = good.body.length;
+    await post(host, "kiosk", "src"); // activate() emits an init frame to all
+
+    // The dead subscriber is dropped; the healthy one still received the frame.
+    expect(host.slugs.get("kiosk").subscribers.size).toBe(1);
+    expect(good.body.length).toBeGreaterThan(goodBefore);
+  });
+
+  it("removes a subscriber when its SSE response emits an error", () => {
+    const { host } = makeHost();
+    const sub = subscribe(host, "kiosk");
+    expect(host.slugs.get("kiosk").subscribers.size).toBe(1);
+    sub.emit("error");
+    expect(host.slugs.get("kiosk")?.subscribers.size ?? 0).toBe(0);
+  });
+});
+
+// --- Fix M4: the events path is bounded and reaps idle slugs -----------------
+
+describe("events-path slug bounds", () => {
+  it("reaps a closed stream for a never-activated slug", () => {
+    const { host } = makeHost();
+    const sub = subscribe(host, "kiosk");
+    expect(host.slugs.has("kiosk")).toBe(true);
+    sub.emit("close");
+    expect(host.slugs.has("kiosk")).toBe(false);
+  });
+
+  it("stays bounded under a flood of distinct open-then-close streams", () => {
+    const { host } = makeHost({ maxSlugs: 3 });
+    for (let i = 0; i < 20; i += 1) {
+      const sub = subscribe(host, `flood-${i}`);
+      sub.emit("close");
+    }
+    expect(host.slugs.size).toBe(0);
+  });
+
+  it("rejects a new SSE slug past the cap with 503 and tracks no state", () => {
+    const { host } = makeHost({ maxSlugs: 2 });
+    subscribe(host, "a"); // held open
+    subscribe(host, "b"); // held open
+    const res = subscribe(host, "c");
+    expect(res.statusCode).toBe(503);
+    expect(host.slugs.has("c")).toBe(false);
+  });
+
+  it("keeps an active slug's entry even after its last stream closes", async () => {
+    const { host } = makeHost();
+    const sub = subscribe(host, "kiosk");
+    await post(host, "kiosk", "x"); // now active with a watcher
+    sub.emit("close");
+    expect(host.slugs.has("kiosk")).toBe(true);
+  });
+});
+
+// --- Fix M5: an intermediate symlink cannot escape the build root -----------
+
+describe("static confinement through intermediate symlinks", () => {
+  beforeEach(() => {
+    writeFileSync(path.join(buildRoot, "index.html"), "<html>index</html>");
+  });
+
+  it("rejects a request whose intermediate directory symlinks outside the root", async () => {
+    const { host } = makeHost();
+    const outside = path.join(tmpRoot, "outside");
+    mkdirSync(outside);
+    writeFileSync(path.join(outside, "secret.js"), "SECRET");
+    symlinkSync(outside, path.join(buildRoot, "pub")); // buildRoot/pub -> outside
+    const req = makeReq("GET", "/pub/secret.js", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res.body).not.toContain("SECRET");
+  });
+
+  it("still serves a genuine asset under the (possibly symlinked) temp root", async () => {
+    const { host } = makeHost();
+    writeFileSync(path.join(buildRoot, "app.js"), "console.log(1)");
+    const req = makeReq("GET", "/app.js", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("console.log(1)");
+  });
+});
+
+// --- Fixes M6 + M9: the watch re-read is guarded and surfaces errors ---------
+
+describe("watch re-read safety", () => {
+  it("does not broadcast when the watched file is swapped for a symlink", async () => {
+    const { watch, watchers } = makeFakeWatch();
+    const readErrors = [];
+    const { host } = makeHost({ watch, debounceMs: 5, onReadError: (err) => readErrors.push(err) });
+    const sub = subscribe(host, "kiosk");
+    const res = await post(host, "kiosk", "seed");
+    const filePath = JSON.parse(res.body).path;
+
+    const secret = path.join(tmpRoot, "secret.js");
+    writeFileSync(secret, "SECRET");
+    rmSync(filePath);
+    symlinkSync(secret, filePath); // swap the tracked file for a symlink
+
+    watchers[0].trigger("change", path.basename(filePath));
+    await new Promise((r) => setTimeout(r, 40));
+
+    // The foreign content is never framed to the browser.
+    expect(sub.body).not.toContain(
+      encodeSourceB64(JSON.stringify({ slug: "kiosk", source: "SECRET" })),
+    );
+    expect(readErrors.length).toBe(1);
+  });
+
+  it("surfaces a non-ENOENT read failure instead of silently dropping it", async () => {
+    const { watch, watchers } = makeFakeWatch();
+    const readErrors = [];
+    const eacces = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    const { host } = makeHost({
+      watch,
+      debounceMs: 5,
+      readSource: () => Promise.reject(eacces),
+      onReadError: (err) => readErrors.push(err),
+    });
+    const sub = subscribe(host, "kiosk");
+    const res = await post(host, "kiosk", "seed");
+    const before = sub.body.length;
+
+    watchers[0].trigger("change", path.basename(JSON.parse(res.body).path));
+    await new Promise((r) => setTimeout(r, 40));
+
+    expect(readErrors.some((e) => e.code === "EACCES")).toBe(true);
+    expect(sub.body.length).toBe(before); // no frame emitted on the failure
+  });
+});
+
+// --- Fix M10: openInEditor reports a nonzero child exit ----------------------
+
+describe("openInEditor exit handling", () => {
+  it("reports failure when the opener exits with a nonzero code", () => {
+    const handlers = new Map();
+    const spawn = () => ({
+      on(event, cb) {
+        handlers.set(event, cb);
+      },
+      unref() {},
+    });
+    let reported = null;
+    openInEditor("/tmp/x.js", { spawn, platform: "linux", onError: (r) => (reported = r) });
+    handlers.get("exit")(3, null);
+    expect(reported).toContain("3");
+  });
+
+  it("does not report failure on a clean (zero) exit", () => {
+    const handlers = new Map();
+    const spawn = () => ({
+      on(event, cb) {
+        handlers.set(event, cb);
+      },
+      unref() {},
+    });
+    let reported = null;
+    openInEditor("/tmp/x.js", { spawn, platform: "linux", onError: (r) => (reported = r) });
+    handlers.get("exit")(0, null);
+    expect(reported).toBeNull();
+  });
+});
+
+// --- Fix: delete-revert clears active/path so health drops the slug ----------
+
+describe("delete-revert bookkeeping", () => {
+  it("clears active and path on the delete revert", async () => {
+    const { watch, watchers } = makeFakeWatch();
+    const { host } = makeHost({ watch, debounceMs: 5 });
+    const sub = subscribe(host, "kiosk");
+    const res = await post(host, "kiosk", "the-default");
+    const filePath = JSON.parse(res.body).path;
+    expect(host.activeSlugs()).toEqual(["kiosk"]);
+
+    rmSync(filePath);
+    watchers[0].trigger("rename", path.basename(filePath));
+    await waitForFrame(sub, "init", (d) => d.path === null && d.source !== null);
+
+    expect(host.activeSlugs()).toEqual([]);
+    expect(host.slugs.get("kiosk").path).toBeNull();
+  });
+});
+
+// --- Fix: defaultSource must be a string -------------------------------------
+
+describe("defaultSource validation", () => {
+  it("rejects a missing or non-string defaultSource with 400 and writes no file", async () => {
+    const { host } = makeHost();
+    const cases = [
+      { name: "kiosk" },
+      { name: "kiosk", defaultSource: null },
+      { name: "kiosk", defaultSource: 123 },
+      { name: "kiosk", defaultSource: {} },
+    ];
+    for (const payload of cases) {
+      const req = makeReq("POST", "/api/algorithm", POST_HEADERS, JSON.stringify(payload));
+      const res = makeRes();
+      await host.handleRequest(req, res);
+      expect(res.statusCode).toBe(400);
+    }
+    expect(host.slugs.has("kiosk")).toBe(false);
+  });
+});
+
+// --- Fix: an oversized body is rejected and the request is destroyed ---------
+
+describe("oversized request body", () => {
+  it("rejects a body past the limit with 413 and destroys the request", async () => {
+    const { host } = makeHost({ bodyLimit: 8 });
+    const req = makeReq(
+      "POST",
+      "/api/algorithm",
+      POST_HEADERS,
+      JSON.stringify({ name: "kiosk", defaultSource: "far past the tiny limit" }),
+    );
+    let destroyed = false;
+    const realDestroy = req.destroy.bind(req);
+    req.destroy = () => {
+      destroyed = true;
+      return realDestroy();
+    };
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    expect(res.statusCode).toBe(413);
+    expect(destroyed).toBe(true);
+  });
+});
+
+// --- Fix: unexpected errors do not leak local paths --------------------------
+
+describe("error message hygiene", () => {
+  it("responds generically for an unexpected (non-HostError) failure", async () => {
+    // Point the algorithms dir at an existing file, so mkdir() throws a raw fs
+    // error whose message carries the absolute path.
+    const notADir = path.join(tmpRoot, "not-a-dir");
+    writeFileSync(notADir, "x");
+    const { host } = makeHost({ algorithmsDir: notADir });
+    const res = await post(host, "kiosk", "src");
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toBe("internal error");
+    expect(res.body).not.toContain(tmpRoot);
+  });
+});
+
+// --- Fix: health reports the real package version ----------------------------
+
+describe("health version", () => {
+  it("reflects the package.json version, not a hardcoded constant", async () => {
+    const { host } = makeHost();
+    const req = makeReq("GET", "/api/health", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    const body = JSON.parse(res.body);
+    const pkg = JSON.parse(readFileSync(path.join(import.meta.dir, "package.json"), "utf8"));
+    expect(body.version).toBe(pkg.version);
+  });
+
+  it("honors an explicit version override", async () => {
+    const { host } = makeHost({ version: "9.9.9" });
+    const req = makeReq("GET", "/api/health", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    expect(JSON.parse(res.body).version).toBe("9.9.9");
   });
 });
 

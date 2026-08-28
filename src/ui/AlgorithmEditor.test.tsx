@@ -35,10 +35,10 @@ describe("AlgorithmEditor", () => {
   it("keeps the Download button available even while the source is locked", () => {
     useGameStore.setState({ sourceLocked: true });
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
-    expect(screen.getByRole("button", { name: "Download this level" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Download this Scenario" })).toBeDefined();
   });
 
-  it("downloads the level as detection-express-<slug>.js", () => {
+  it("downloads the Scenario as detection-express-<slug>.js", () => {
     useGameStore.setState({ source: "// my algorithm" });
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
 
@@ -59,7 +59,7 @@ describe("AlgorithmEditor", () => {
     const revokeUrlSpy = spyOn(URL, "revokeObjectURL");
     revokeUrlSpy.mockImplementation(() => {});
 
-    fireEvent.click(screen.getByRole("button", { name: "Download this level" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download this Scenario" }));
 
     createSpy.mockRestore();
     createUrlSpy.mockRestore();

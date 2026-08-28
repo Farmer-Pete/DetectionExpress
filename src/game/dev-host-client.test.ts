@@ -41,6 +41,13 @@ class FakeEventSource implements EventSourceLike {
     }
   }
 
+  /** Deliver a named SSE frame with a raw (possibly malformed) `data` string. */
+  emitRaw(type: string, data: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data });
+    }
+  }
+
   /** Deliver a stream error. */
   emitError(): void {
     for (const listener of this.listeners.get("error") ?? []) {
@@ -78,7 +85,7 @@ function harness(overrides: Partial<DevHostClientDeps> = {}): Harness {
   };
 
   const client = createDevHostClient({
-    levelSlug: SLUG,
+    scenarioSlug: SLUG,
     applySource: (text) => applied.push(text),
     onState: (state) => states.push(state),
     fetch: fakeFetch,
@@ -155,11 +162,11 @@ describe("dev-host client", () => {
     expect(h.applied).toEqual([src]);
   });
 
-  it("drops a frame whose slug is not this client's level", () => {
+  it("drops a frame whose slug is not this client's Scenario", () => {
     const h = harness();
     h.client.connect();
-    h.source.emit("init", { slug: "other-level", path: "/x.js", source: "nope" });
-    h.source.emit("changed", { slug: "other-level", source: "nope" });
+    h.source.emit("init", { slug: "other-scenario", path: "/x.js", source: "nope" });
+    h.source.emit("changed", { slug: "other-scenario", source: "nope" });
     expect(h.applied).toEqual([]);
     expect(h.states.every((s) => s.path === null)).toBe(true);
   });
@@ -176,6 +183,32 @@ describe("dev-host client", () => {
     });
     // The saved source arrives over SSE, never from the POST reply.
     expect(h.applied).toEqual([]);
+  });
+
+  it("ignores a malformed frame instead of letting it throw in the tab", () => {
+    const h = harness();
+    h.client.connect();
+    // A frame whose data is not valid base64, and one that is base64 but not JSON.
+    expect(() => h.source.emitRaw("init", "@@@ not base64 @@@")).not.toThrow();
+    expect(() =>
+      h.source.emitRaw("changed", Buffer.from("not json", "utf8").toString("base64")),
+    ).not.toThrow();
+    expect(h.applied).toEqual([]);
+    // A good frame still applies after a bad one, so the stream is not wedged.
+    h.source.emit("changed", { slug: SLUG, source: "recovered" });
+    expect(h.applied).toEqual(["recovered"]);
+  });
+
+  it("surfaces the host's error text when editInIde fails a non-ok response", async () => {
+    const failFetch: FetchLike = async () =>
+      new Response("The dev host is at capacity.", {
+        status: 503,
+        headers: { "content-type": "text/plain" },
+      });
+    const h = harness({ fetch: failFetch });
+    await expect(h.client.editInIde(SLUG, "source")).rejects.toThrow(
+      "The dev host is at capacity.",
+    );
   });
 
   it("reports error on a stream error", () => {

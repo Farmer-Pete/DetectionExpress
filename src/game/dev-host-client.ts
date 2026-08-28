@@ -1,12 +1,12 @@
 /**
- * The dev-host client: the browser glue that subscribes to one level's Algorithm
+ * The dev-host client: the browser glue that subscribes to one Scenario's Algorithm
  * file over same-origin Server-Sent Events and pushes each saved source into the
  * run. It lives in `game/` because it touches the network; `sim/` stays pure. It is
  * referenced only under `DEV_KIT` and loaded by a dynamic import, so it is never a
  * static input to the CDN build.
  *
- * The stream is scoped by `?slug=<levelSlug>`, so a client hears only its own
- * level. SSE is ordered, so there is no fetch race and no abort guard; source flows
+ * The stream is scoped by `?slug=<scenarioSlug>`, so a client hears only its own
+ * Scenario. SSE is ordered, so there is no fetch race and no abort guard; source flows
  * through the one ordered channel. As defense in depth, the client still drops any
  * frame whose `slug` is not its own, and `disconnect()` marks the client disposed so
  * no late frame applies source after teardown.
@@ -15,7 +15,7 @@
 /** The dev state the panel renders. The App maps `path` to the store's lock. */
 export interface DevState {
   status: "off" | "connected" | "error";
-  /** The active file path, once the level file is created; null otherwise. */
+  /** The active file path, once the Scenario file is created; null otherwise. */
   path: string | null;
   message: string | null;
 }
@@ -33,8 +33,8 @@ export interface EventSourceLike {
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface DevHostClientDeps {
-  /** The level this client subscribes to. */
-  levelSlug: string;
+  /** The Scenario this client subscribes to. */
+  scenarioSlug: string;
   /** Push a source into the run: `setAlgorithmSource` then `run()`. */
   applySource: (text: string) => void;
   onState: (state: DevState) => void;
@@ -45,11 +45,11 @@ export interface DevHostClientDeps {
 }
 
 export interface DevHostClient {
-  /** Open `/api/algorithm/events?slug=<levelSlug>`. */
+  /** Open `/api/algorithm/events?slug=<scenarioSlug>`. */
   connect(): void;
   /** Close the stream, dispose, and drop any late callbacks. */
   disconnect(): void;
-  /** Create or activate the level file, open it in the OS editor, and start the watch. */
+  /** Create or activate the Scenario file, open it in the OS editor, and start the watch. */
   editInIde(name: string, defaultSource: string): Promise<{ path: string; existed: boolean }>;
 }
 
@@ -87,10 +87,25 @@ function isStringOrNull(value: unknown): value is string | null {
   return value === null || isString(value);
 }
 
+/**
+ * Decode, JSON-parse, and confirm an object from a frame's base64 data, or null on any
+ * malformed input. A bad base64 string or non-JSON body would otherwise throw inside
+ * the EventSource listener and surface as an uncaught error in the tab, so the error
+ * boundary lives here and each frame's decode is contained.
+ */
+function parseFrameObject(data: string): object | null {
+  try {
+    const value = JSON.parse(decodeFrameText(data));
+    return value instanceof Object ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Parse an `init` frame's base64 data into the retained snapshot, or null. */
 function asInitFrame(data: string): InitFrame | null {
-  const value = JSON.parse(decodeFrameText(data));
-  if (!(value instanceof Object) || !("slug" in value && "path" in value && "source" in value)) {
+  const value = parseFrameObject(data);
+  if (value === null || !("slug" in value && "path" in value && "source" in value)) {
     return null;
   }
   const { slug, path, source } = value;
@@ -102,8 +117,8 @@ function asInitFrame(data: string): InitFrame | null {
 
 /** Parse a `changed` frame's base64 data into a save, or null. */
 function asChangedFrame(data: string): ChangedFrame | null {
-  const value = JSON.parse(decodeFrameText(data));
-  if (!(value instanceof Object) || !("slug" in value && "source" in value)) {
+  const value = parseFrameObject(data);
+  if (value === null || !("slug" in value && "source" in value)) {
     return null;
   }
   const { slug, source } = value;
@@ -144,7 +159,7 @@ export function createDevHostClient(deps: DevHostClientDeps): DevHostClient {
       return;
     }
     const frame = asInitFrame(event.data);
-    if (frame === null || frame.slug !== deps.levelSlug) {
+    if (frame === null || frame.slug !== deps.scenarioSlug) {
       return; // defense: a foreign or malformed frame changes nothing
     }
     path = frame.path;
@@ -159,7 +174,7 @@ export function createDevHostClient(deps: DevHostClientDeps): DevHostClient {
       return;
     }
     const frame = asChangedFrame(event.data);
-    if (frame === null || frame.slug !== deps.levelSlug) {
+    if (frame === null || frame.slug !== deps.scenarioSlug) {
       return;
     }
     deps.applySource(frame.source);
@@ -174,7 +189,7 @@ export function createDevHostClient(deps: DevHostClientDeps): DevHostClient {
       if (disposed || stream !== null) {
         return;
       }
-      const url = `/api/algorithm/events?slug=${encodeURIComponent(deps.levelSlug)}`;
+      const url = `/api/algorithm/events?slug=${encodeURIComponent(deps.scenarioSlug)}`;
       stream = openStream(url);
       stream.addEventListener("init", handleInit);
       stream.addEventListener("changed", handleChanged);
@@ -194,6 +209,15 @@ export function createDevHostClient(deps: DevHostClientDeps): DevHostClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, defaultSource }),
       });
+      // The host returns its failure reason as a text/plain body (503 at capacity,
+      // 400 invalid name, 403 symlink). Surface that reason rather than blindly
+      // JSON-parsing an error body, so the panel shows the specific message.
+      if (!response.ok) {
+        const reason = (await response.text()).trim();
+        throw new Error(
+          reason.length > 0 ? reason : `The dev host rejected the request (${response.status}).`,
+        );
+      }
       return asEditReply(await response.json());
     },
   };

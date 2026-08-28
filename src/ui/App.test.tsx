@@ -6,7 +6,7 @@ import { useGameStore } from "../game/store";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { App } from "./App";
-import { levelSlug } from "./levels";
+import { scenarioSlug } from "./scenarios";
 
 // The zustand store is a singleton shared across test files, so reset the fields
 // this file reads before each test, or a leaked `sourceLocked` would hide the Run
@@ -127,7 +127,7 @@ describe("App dev wiring", () => {
     expect(controller.runs).toBe(runsBefore + 1);
   });
 
-  it("opens the level file in the IDE with the level slug and reference source", async () => {
+  it("opens the Scenario file in the IDE with the Scenario slug and reference source", async () => {
     const dev = fakeDevKit();
     render(<App controller={stubController()} createDevClient={dev.factory} />);
 
@@ -136,7 +136,73 @@ describe("App dev wiring", () => {
     fireEvent.click(button);
 
     expect(dev.editCalls).toEqual([
-      { name: levelSlug(kioskPinAttack.id), defaultSource: referenceSource },
+      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
     ]);
+  });
+
+  it("recovers a failed initial client build on a later Edit in my IDE click", async () => {
+    let attempts = 0;
+    let connects = 0;
+    const editCalls: Array<{ name: string; defaultSource: string }> = [];
+    const factory = (_deps: DevHostClientDeps): DevHostClient => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("the dev host client failed to build");
+      }
+      return {
+        connect() {
+          connects += 1;
+        },
+        disconnect() {},
+        async editInIde(name, defaultSource) {
+          editCalls.push({ name, defaultSource });
+          return { path: "/algorithms/detection-express-kiosk-pin-attack.js", existed: true };
+        },
+      };
+    };
+
+    render(<App controller={stubController()} createDevClient={factory} />);
+
+    // The first build threw, so no client connected yet, but the panel still mounts.
+    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
+    expect(connects).toBe(0);
+
+    fireEvent.click(button);
+
+    // The click re-ran the build, connected the fresh client, and opened the file.
+    expect(connects).toBe(1);
+    expect(editCalls).toEqual([
+      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
+    ]);
+  });
+
+  it("replays the last dev state to a panel that subscribes after the event", async () => {
+    const dev = fakeDevKit();
+    render(<App controller={stubController()} createDevClient={dev.factory} />);
+
+    // Emit a dev state before the async panel has mounted and subscribed. Without a
+    // replay of the cached state, the panel would stay in its off state.
+    act(() => dev.deps().onState({ status: "connected", path: "/algorithms/x.js", message: null }));
+
+    // Once the panel subscribes it replays the cached state and shows the active path.
+    expect(await screen.findByText("/algorithms/x.js")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Stop editing" })).toBeDefined();
+  });
+
+  it("surfaces the host's failure message when opening the Scenario file fails", async () => {
+    const factory = (_deps: DevHostClientDeps): DevHostClient => ({
+      connect() {},
+      disconnect() {},
+      async editInIde() {
+        throw new Error("The dev host is at capacity.");
+      },
+    });
+
+    render(<App controller={stubController()} createDevClient={factory} />);
+    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
+    fireEvent.click(button);
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toBe("The dev host is at capacity.");
   });
 });

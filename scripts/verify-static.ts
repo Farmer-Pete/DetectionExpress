@@ -10,10 +10,13 @@
  *    their dynamic imports behind the folded `DEV_KIT` const, so both modules drop out
  *    entirely. The metafile lists real inputs, so this is exact.
  * 2. Endpoint markers, by grepping the emitted JS: the dev-host endpoint strings
- *    `api/algorithm`, `algorithm/events`, and `EventSource` live only in
- *    `dev-host-client`, so none may appear. This does NOT grep `createDevHostClient`:
- *    that property name survives in App's inert, null-guarded call-site (it ships no
- *    dev behavior), so grepping it would false-fail. See 12-PLAN.md, "The build flag".
+ *    `api/algorithm` and `algorithm/events` live only in `dev-host-client`, so neither
+ *    may appear. The generic global `EventSource` is deliberately NOT a marker: any
+ *    dependency may reference it, so grepping it risks a false-positive CI failure. The
+ *    module-absence check (1) is the primary proof; these codebase-specific strings are
+ *    the backstop. This also does NOT grep `createDevHostClient`: that property name
+ *    survives in App's inert, null-guarded call-site (it ships no dev behavior), so
+ *    grepping it would false-fail. See 12-PLAN.md, "The build flag".
  *
  * Run it with `bun run verify:static`. It exits non-zero, with the leak named, when a
  * check fails. The build stays in memory, so it writes nothing to disk.
@@ -23,7 +26,7 @@
 const DEV_MODULE_INPUTS = ["dev-host-client", "DevKitPanel"];
 
 /** Dev-host endpoint strings that only `dev-host-client` carries. */
-const DEV_ENDPOINT_MARKERS = ["api/algorithm", "algorithm/events", "EventSource"];
+const DEV_ENDPOINT_MARKERS = ["api/algorithm", "algorithm/events"];
 
 /** The outcome of a verify run: clean, or a list of the leaks that failed it. */
 interface VerifyResult {

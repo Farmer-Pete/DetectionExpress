@@ -41,18 +41,21 @@ single local host.
   call-sites.
 - **`verify:static` proves the strip.** It rebuilds the static bundle in memory and
   fails if either dev module is an input of Bun's build metafile, or if the dev-host
-  endpoint strings (`api/algorithm`, `algorithm/events`, `EventSource`) appear in the
-  emitted JS. It runs in CI.
+  endpoint strings (`api/algorithm`, `algorithm/events`) appear in the emitted JS. It
+  runs in CI.
 - **One local host, same origin.** `dd-dev.mjs` is a zero-dependency Node-and-Bun script
   that serves the packaged dev build over loopback and manages the player's Algorithm
   files: create, watch, and open. Source flows to the browser over same-origin
-  Server-Sent Events, scoped per level by `?slug=`. The game learns the host is present
-  from the compile-time flag, not from a magic route.
-- **Distribution as a package.** `dd-dev.mjs` is the `bin` of the `detection-express`
-  package, with the dev build packed beside it under `dist-devkit`. A player runs
-  `bunx detection-express` (or `pnpm dlx`), opens the printed URL, and the whole edit
-  loop runs from cold. The host resolves its assets relative to itself, so it works from
-  any working directory.
+  Server-Sent Events, scoped per Scenario by `?slug=`. The game learns the host is
+  present from the compile-time flag, not from a magic route.
+- **Distribution: local now, published later.** `dd-dev.mjs` is the `bin` of the
+  `detection-express` package, with the dev build packed beside it under `dist-devkit`.
+  Today the developer runs it from the repo (`bun run build:devkit && bun dd-dev.mjs`)
+  and opens the printed URL. The package stays `private`; the public one-command
+  install (`bunx detection-express`) is a deferred follow-up, because `bunx` installs
+  from npm not git and a git install will not build the assets without trust — so an
+  npm publish is the clean route when we choose it. The host resolves its assets
+  relative to itself, so it works from any working directory.
 
 ## Consequences
 

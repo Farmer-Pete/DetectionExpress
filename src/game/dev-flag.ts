@@ -16,8 +16,7 @@
  * boundaries, so a gate in another module would not strip; keeping the gate beside
  * the const is what makes the strip exact.
  */
-import type { FunctionComponent } from "react";
-import type { DevKitPanelProps } from "../ui/DevKitPanel";
+import type { DevKitPanelModule } from "../ui/DevKitPanel";
 import type { DevHostClient, DevHostClientDeps } from "./dev-host-client";
 
 export const DEV_KIT: boolean = process.env.PUBLIC_DEV_KIT === "true";
@@ -33,11 +32,6 @@ export function loadDevHostClient(): Promise<DevHostClientModule> | null {
     return import("./dev-host-client");
   }
   return null;
-}
-
-/** The one export the App reads off the lazily loaded dev-kit panel module. */
-export interface DevKitPanelModule {
-  DevKitPanel: FunctionComponent<DevKitPanelProps>;
 }
 
 /**
