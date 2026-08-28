@@ -8,7 +8,14 @@ minimumReleaseAge = 604800
 # genuinely needed. Keep this list short and justify every entry.
 minimumReleaseAgeExcludes = []
 
+[serve.static]
+# The HTML dev server (`bun ./index.html`) inlines `process.env.PUBLIC_*` into the
+# frontend bundle. This is how the dev-kit flag (`process.env.PUBLIC_DEV_KIT`) reaches
+# the browser there, since the dev server ignores a CLI `--define`.
+env = "PUBLIC_*"
+
 [test]
-# Registers happy-dom, then wires DOM cleanup. Order matters: happy-dom must be
-# registered before Testing Library is imported.
-preload = ["./src/test/setup.ts", "./src/test/cleanup.ts"]
+# Sets PUBLIC_DEV_KIT in process.env, registers happy-dom, then wires DOM cleanup.
+# Order matters: the dev-kit flag must be set before dev-flag.ts loads, and happy-dom
+# must be registered before Testing Library is imported.
+preload = ["./src/test/dev-kit-flag.ts", "./src/test/setup.ts", "./src/test/cleanup.ts"]

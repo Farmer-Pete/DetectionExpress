@@ -3,16 +3,28 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "detection-express": "./dd-dev.mjs"
+  },
+  "files": [
+    "dd-dev.mjs",
+    "dist-devkit"
+  ],
   "scripts": {
-    "dev": "bun ./index.html",
-    "build": "tsc --noEmit && rm -rf dist && bun build ./index.html --minify --outdir dist && bun scripts/postbuild.ts",
+    "dev": "PUBLIC_DEV_KIT=false bun ./index.html",
+    "build": "bun run build:static",
+    "build:static": "tsc --noEmit && rm -rf dist && bun build ./index.html --define 'process.env.PUBLIC_DEV_KIT=\"false\"' --minify --outdir dist && bun scripts/postbuild.ts",
+    "build:devkit": "rm -rf dist-devkit && bun build ./index.html --define 'process.env.PUBLIC_DEV_KIT=\"true\"' --minify --outdir dist-devkit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./src",
-    "test:watch": "bun test ./src --watch",
+    "test": "bun test ./src ./dd-dev.test.mjs",
+    "test:watch": "bun test ./src ./dd-dev.test.mjs --watch",
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
+    "verify:static": "bun scripts/verify-static.ts",
+    "pack": "bun run build:devkit && bun pm pack --dry-run --ignore-scripts",
     "audit": "bun audit --audit-level=high",
+    "prepack": "bun run build:devkit",
     "prepare": "lefthook install"
   },
   "dependencies": {

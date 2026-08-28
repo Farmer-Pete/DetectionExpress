@@ -14,6 +14,7 @@ beforeEach(() => {
     source: referenceSource,
     seed: LEVEL_SEED,
     error: null,
+    sourceLocked: false,
   });
 });
 
@@ -66,5 +67,13 @@ describe("store", () => {
     useGameStore.getState().onEdgesChange([{ id: "e1", type: "select", selected: true }]);
     const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "e1");
     expect(edge?.selected).toBe(true);
+  });
+
+  it("starts unlocked and toggles the source lock through setSourceLocked", () => {
+    expect(useGameStore.getState().sourceLocked).toBe(false);
+    useGameStore.getState().setSourceLocked(true);
+    expect(useGameStore.getState().sourceLocked).toBe(true);
+    useGameStore.getState().setSourceLocked(false);
+    expect(useGameStore.getState().sourceLocked).toBe(false);
   });
 });

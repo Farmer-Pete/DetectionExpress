@@ -10,9 +10,15 @@ lerna-debug.log*
 # Dependencies and build output
 node_modules
 dist
+dist-static
+dist-devkit
 dist-ssr
 coverage
 *.local
+*.tgz
+
+# Dev-host output: Algorithm files the local host writes into the developer's cwd
+algorithms
 
 # TypeScript incremental build info
 *.tsbuildinfo

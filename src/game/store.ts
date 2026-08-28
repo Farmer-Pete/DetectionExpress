@@ -42,11 +42,18 @@ interface GameState {
   seed: number;
   /** The current run or Rule error, or null. The editor shows it. */
   error: RuleErrorInfo | null;
+  /**
+   * True while an external source drives the run (the dev host watches a file), so
+   * the editor locks its textarea. Generic, not dev-specific: the static build
+   * carries it too, always false and harmless.
+   */
+  sourceLocked: boolean;
   onNodesChange: OnNodesChange<PipelineNode>;
   onEdgesChange: OnEdgesChange;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
   setError: (error: RuleErrorInfo | null) => void;
+  setSourceLocked: (locked: boolean) => void;
 }
 
 const initialNodes: PipelineNode[] = [
@@ -69,11 +76,13 @@ export const useGameStore = create<GameState>((set) => ({
   source: referenceSource,
   seed: LEVEL_SEED,
   error: null,
+  sourceLocked: false,
   onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
   onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
   setSnapshot: (snapshot) => set({ snapshot }),
   setAlgorithmSource: (source) => set({ source }),
   setError: (error) => set({ error }),
+  setSourceLocked: (locked) => set({ sourceLocked: locked }),
 }));
 
 /** The store graph, mapped to the validator's shape for the engine. */
