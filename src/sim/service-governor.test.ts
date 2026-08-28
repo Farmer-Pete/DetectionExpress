@@ -76,6 +76,60 @@ describe("makeGovernor charge", () => {
   });
 });
 
+describe("makeGovernor charge equals the subtraction loop it replaced", () => {
+  // The reference the integer-division `charge` must match exactly: drain `num`
+  // from the accumulator one tick at a time. Both helpers carry `acc` so the test
+  // can compare the final accumulator, not just the tick counts.
+  function loopCharge(state: { acc: number }, num: number, den: number) {
+    state.acc += den;
+    let ticks = 0;
+    while (state.acc >= num) {
+      state.acc -= num;
+      ticks += 1;
+    }
+    return ticks;
+  }
+  function divCharge(state: { acc: number }, num: number, den: number) {
+    state.acc += den;
+    const ticks = Math.floor(state.acc / num);
+    state.acc -= ticks * num;
+    return ticks;
+  }
+
+  const rates: ServiceRate[] = [
+    { num: 1, den: 1 },
+    { num: 20, den: 1 },
+    { num: 500, den: 1 },
+    { num: 1, den: 2 },
+    { num: 9, den: 25 },
+    { num: 7, den: 3 },
+    { num: 333_333, den: 1_000_000 },
+  ];
+
+  it("matches the loop per charge, in final acc, and through the real governor", () => {
+    for (const rate of rates) {
+      const { num, den } = rate;
+      const loop = { acc: 0 };
+      const div = { acc: 0 };
+      const governor = makeGovernor(rate);
+      let loopTotal = 0;
+      let realTotal = 0;
+      for (let n = 1; n <= 3000; n++) {
+        const loopTicks = loopCharge(loop, num, den);
+        const divTicks = divCharge(div, num, den);
+        const realTicks = governor.charge();
+        expect(divTicks).toBe(loopTicks); // division equals the loop, per charge
+        expect(realTicks).toBe(loopTicks); // the shipped governor equals the loop
+        expect(div.acc).toBe(loop.acc); // and leaves the accumulator identical
+        expect(div.acc).toBeLessThan(num); // invariant 0 <= acc < num holds
+        loopTotal += loopTicks;
+        realTotal += realTicks;
+      }
+      expect(realTotal).toBe(loopTotal); // identical total sleep over the whole run
+    }
+  });
+});
+
 describe("makeGovernor rejects a bad rate", () => {
   it("rejects a non-finite numerator or denominator", () => {
     expect(() => makeGovernor({ num: Number.POSITIVE_INFINITY, den: 1 })).toThrow();

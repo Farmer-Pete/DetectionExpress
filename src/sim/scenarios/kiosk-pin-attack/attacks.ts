@@ -51,6 +51,13 @@ export function planAttacks(
       SCAN_WINDOW_TICKS - BURST_MARGIN_TICKS,
       wave.durationTicks - 2 * BURST_MARGIN_TICKS,
     );
+    // Defensive: the shipped tuning leaves spanTicks (130) far above count - 1
+    // (at most 7), so this never fires today. It guards a future wave short enough
+    // that the burst could not fit, which would make the timestamps non-increasing
+    // and reverse the Attack window.
+    if (spanTicks < count - 1) {
+      throw new RangeError("Wave is too short to contain a PIN brute-force burst.");
+    }
     const startTick = wave.startTick + BURST_MARGIN_TICKS;
     const gap = spanTicks / (count - 1);
     const failTimestamps: number[] = [];

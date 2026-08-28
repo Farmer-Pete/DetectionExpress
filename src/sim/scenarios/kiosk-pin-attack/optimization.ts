@@ -105,6 +105,11 @@ const THRESHOLD = 5;
 export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
   let queue: QueuedFail[] = [];
   let head = 0;
+  // Per-account state (counts, recent, firing) is not pruned when an account's
+  // count reaches zero. The scenario draws from a bounded account pool
+  // (CORPUS_ACCOUNTS), so these Maps stay small. An unbounded-account runtime, where
+  // a stream of ever-new accounts would grow them for the whole run, is a later-slice
+  // concern (#4).
   const counts = new Map<string, number>();
   const recent = new Map<string, number[]>();
   const firing = new Set<string>();

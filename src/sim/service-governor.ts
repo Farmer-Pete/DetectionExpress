@@ -39,11 +39,12 @@ export function makeGovernor(rate: ServiceRate): ServiceGovernor {
   return {
     charge() {
       acc += den;
-      let ticks = 0;
-      while (acc >= num) {
-        acc -= num;
-        ticks += 1;
-      }
+      // Integer division gives the same whole-tick count as draining `num` in a
+      // loop, in constant time. `acc + den` stays within the safe-integer bound
+      // (checked at build), so `floor(acc / num)` is exact and the invariant
+      // `0 <= acc < num` holds after the subtraction.
+      const ticks = Math.floor(acc / num);
+      acc -= ticks * num;
       return ticks;
     },
   };

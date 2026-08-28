@@ -122,6 +122,9 @@ const COMPACT_THRESHOLD = 1024;
 export function makeIncrementalTally(): Detector {
   let queue: QueuedFail[] = [];
   let head = 0;
+  // Per-account state (counts, firing) is not pruned when an account's count reaches
+  // zero. The scenario draws from a bounded account pool (CORPUS_ACCOUNTS), so these
+  // stay small; an unbounded-account runtime is a later-slice concern (#4).
   const counts = new Map<string, number>();
   const firing = new Set<string>();
   return {

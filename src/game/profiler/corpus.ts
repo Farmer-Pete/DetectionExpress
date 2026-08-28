@@ -67,6 +67,11 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
  * A forever iterator over the corpus. Each call returns the next Event with a
  * fresh monotonic id; each wrap shifts every ts forward by the whole span, so the
  * stream is unbounded and its time never runs backward.
+ *
+ * Every Event gets its own payload copy, never the shared source object. Player
+ * `normalize` may mutate its argument, so a shared reference would let one wrap's
+ * edit bleed into a later wrap and into the separate anchor run, skewing C/A. The
+ * copy is shallow because `RawKioskV1` is flat (all primitive fields).
  */
 export function loopingCorpus(corpus: Corpus): () => CorpusEvent {
   const base = corpus.events;
@@ -83,7 +88,7 @@ export function loopingCorpus(corpus: Corpus): () => CorpusEvent {
       id: id,
       ts: source.ts + wrap * corpus.spanSeconds,
       endpoint: source.endpoint,
-      payload: source.payload,
+      payload: { ...source.payload },
     };
     id++;
     index++;

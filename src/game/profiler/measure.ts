@@ -50,6 +50,9 @@ export function median(values: number[]): number {
  * elapsed time is never zero and the throughput is always finite.
  */
 export function timeBatch(runOnce: () => void, timer: Timer, minMs: number): Batch {
+  if (!Number.isFinite(minMs) || minMs <= 0) {
+    throw new RangeError(`timeBatch needs a finite, positive minMs, got ${minMs}`);
+  }
   const start = timer.now();
   let iterations = 0;
   let elapsed = 0;
@@ -70,6 +73,16 @@ export function measureThroughput(
   timer: Timer,
   config: MeasureConfig,
 ): number {
+  const { warmupMs, batchMs, batches } = config;
+  if (!Number.isFinite(warmupMs) || warmupMs <= 0) {
+    throw new RangeError(`measureThroughput needs a finite, positive warmupMs, got ${warmupMs}`);
+  }
+  if (!Number.isFinite(batchMs) || batchMs <= 0) {
+    throw new RangeError(`measureThroughput needs a finite, positive batchMs, got ${batchMs}`);
+  }
+  if (!Number.isInteger(batches) || batches < 1) {
+    throw new RangeError(`measureThroughput needs an integer batches >= 1, got ${batches}`);
+  }
   timeBatch(runOnce, timer, config.warmupMs); // warm the JIT, discard the reading
   const throughputs: number[] = [];
   for (let i = 0; i < config.batches; i++) {

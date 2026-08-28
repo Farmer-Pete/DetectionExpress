@@ -94,4 +94,28 @@ describe("measureThroughput", () => {
     });
     expect(throughput).toBeCloseTo(0.14, 12);
   });
+
+  it("rejects a bad config with a clear error before timing anything", () => {
+    let ran = 0;
+    const runOnce = () => {
+      ran++;
+    };
+    // batches: 0 would call median([]) and throw an opaque error deep in the run.
+    expect(() =>
+      measureThroughput(runOnce, scriptedTimer([0, 1, 2, 3]), {
+        warmupMs: 1,
+        batchMs: 1,
+        batches: 0,
+      }),
+    ).toThrow(/integer batches >= 1/);
+    // A non-finite floor would loop forever against a real timer.
+    expect(() =>
+      measureThroughput(runOnce, scriptedTimer([0, 1, 2, 3]), {
+        warmupMs: Number.POSITIVE_INFINITY,
+        batchMs: 1,
+        batches: 5,
+      }),
+    ).toThrow(/finite, positive warmupMs/);
+    expect(ran).toBe(0); // the guards fire before runOnce is ever called
+  });
 });
