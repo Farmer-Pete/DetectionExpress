@@ -21,8 +21,9 @@ import { RuleError } from "../sim/tasks";
 import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
 import { type EngineHandle, type StartOptions, start as startDefault } from "./engine";
 import { tabHidden } from "./profiler/guard";
-import { spawnProfilerWorker } from "./profiler/profile";
+import { profile, spawnProfilerWorker } from "./profiler/profile";
 import { serviceRateForCode } from "./profiler/quantize";
+import { adaptLoaded } from "./profiler/worker-support";
 import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
@@ -112,12 +113,40 @@ function parseCodePerAnchor(data: unknown): number | null {
 }
 
 /**
+ * The fallback service-rate seam: measure on the main thread. Correct, but it
+ * blocks for the profile's duration, so it is only used where a module Worker is
+ * unavailable (some dev servers and embedded browsers reject one). It loads the
+ * source, adapts it exactly as the worker does, profiles it, and quantizes.
+ */
+function mainThreadResolveServiceRate(source: string): ServiceRateHandle {
+  const rate = (async (): Promise<ServiceRate> => {
+    const loaded = await loadAlgorithmDefault(source);
+    // The hidden-tab defer exists for the Worker, whose timers are clamped while
+    // hidden. This synchronous main-thread measurement is not throttled by
+    // visibility, so it profiles regardless (hidden: false).
+    const outcome = profile(adaptLoaded(loaded), { hidden: false });
+    if (!outcome.ok) {
+      throw new Error(`the profiler deferred: ${outcome.deferred}`);
+    }
+    return serviceRateForCode(outcome.result.codePerAnchor);
+  })();
+  return { rate, cancel: () => {} };
+}
+
+/**
  * The production service-rate seam: spawn the profiler worker, measure the Rule off
  * the sim, and quantize `codePerAnchor * OMEGA`. `cancel` terminates the worker, so
- * a superseded run leaves none running.
+ * a superseded run leaves none running. If a module Worker cannot be constructed
+ * (an environment that forbids one), fall back to a main-thread measurement instead
+ * of failing the run.
  */
 function workerResolveServiceRate(source: string): ServiceRateHandle {
-  const worker = spawnProfilerWorker();
+  let worker: Worker;
+  try {
+    worker = spawnProfilerWorker();
+  } catch {
+    return mainThreadResolveServiceRate(source);
+  }
   const rate = new Promise<ServiceRate>((resolve, reject) => {
     worker.addEventListener("message", (event: MessageEvent) => {
       worker.terminate();
