@@ -33,8 +33,14 @@ knowledge_base:
     enabled: true
     # The rules CodeRabbit reviews against. These are the docs the repo already
     # maintains, so nothing is duplicated here. Edit the docs, not this file.
+    #
+    # A plain string entry is directory-scoped: its guidance applies to code in
+    # the doc's own directory tree. The root-level docs below therefore cover the
+    # whole repo already. The ADRs live under docs/adr, which holds no source, so
+    # they use the object form with applyTo to govern code repo-wide.
     filePatterns:
       - ARCHITECTURE.md       # sim/UI boundary and anti-slop gates
       - CONTEXT.md            # domain vocabulary
       - CLAUDE.md             # project instructions (also auto-detected)
-      - docs/adr/**/*.md      # architecture decision records
+      - files: "docs/adr/**/*.md"   # architecture decision records
+        applyTo: "**/*"             # ADRs govern code repo-wide, not just docs/adr
