@@ -130,6 +130,35 @@ describe("scorer", () => {
     expect(s.reading().missed).toBe(1);
   });
 
+  it("advanceTo closes an Attack whose window ended before the given time, with no Event", () => {
+    // No record() and no finalize(): a checkpoint firing in a drain gap must be
+    // able to settle a missed Attack on its own. See GH3-PLAN.md 6.8.
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.advanceTo(101); // watermark past endTs, so the window has closed
+    const r = s.reading();
+    expect(r.missed).toBe(1);
+    expect(r.caught).toBe(0);
+    expect(r.rolling).toBe(0);
+  });
+
+  it("advanceTo leaves an Attack pending while its window is still open", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.advanceTo(100); // endTs is not strictly before 100, so it stays pending
+    expect(s.reading().missed).toBe(0);
+    // A later Alert can still catch it, proving it was never resolved.
+    s.record(alert([10, 11], 100), at(100));
+    expect(s.reading().caught).toBe(1);
+  });
+
+  it("advanceTo is idempotent: it counts a miss once across repeated calls", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.advanceTo(101);
+    s.advanceTo(150);
+    s.advanceTo(200);
+    s.finalize();
+    expect(s.reading().missed).toBe(1);
+  });
+
   it("evicts old outcomes from the rolling ring", () => {
     // Three Attacks resolve caught, missed, missed in order. A window of two keeps
     // only the last two outcomes (missed, missed), so the gauge reads 0 while the

@@ -47,6 +47,27 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 8. **Game clock only.** Time is the game Clock's ticks. The sim and the scorer use game-time values only (Clock ticks, scheduled Event timestamps, a processed watermark). Never use wall-clock time (`Date.now`, `performance.now`, `setInterval` durations) in sim or scoring logic. Render animations may pace with `requestAnimationFrame`, but never feed wall time back into the sim.
 
+   **The one measured cost lives outside the sim (Slice 2).** The engine must know how much
+   work a player's Rule does per Event, and it cannot read that from the game Clock: a
+   synchronous `match()` fires no tick, so `now()` reads the same before and after it. So a
+   profiler measures the player's code throughput off the sim, normalizes it against a
+   detection-shaped anchor (`C/A`), and quantizes it to a fixed rational service rate. That
+   rate is the only cost the sim consumes, and it stays constant for the whole run. The
+   measurement runs in a Web Worker, with a main-thread fallback where a module Worker cannot
+   be constructed. Every wall-clock read (`performance.now`) lives in that profiler. The sim
+   loop still holds no wall-clock.
+
+   The trade: cross-machine determinism is relaxed. A seed is not the exact same challenge on
+   a fast box and a slow box, because the service rate is measured per machine. Per-machine
+   replay still holds, because the rate is fixed before the run starts. See
+   `docs/adr/0004-measured-cost-model.md` for the decision and its limits.
+
+   ```
+     edit time (Web Worker, off the sim)        run time (sim loop, game ticks)
+       measure C/A, quantize serviceRate   -->    charge a fixed cost per Event
+       performance.now lives here                 no wall-clock; ticks only
+   ```
+
 ## Folders for content
 
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and generates it once; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.

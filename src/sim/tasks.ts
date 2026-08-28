@@ -16,6 +16,7 @@ import { GAME_SECONDS_PER_TICK } from "../game/tuning";
 import type { Alert } from "./alert";
 import type { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import { makeGovernor, type ServiceRate } from "./service-governor";
 
 /** The slice of the Clock a task needs. The concrete Clock satisfies it. */
 export interface TaskClock {
@@ -83,11 +84,32 @@ function isPlainObject(value: unknown): value is object {
 }
 
 /** Accept the Rule's normalize result only when it is a plain object to forward. */
-function normalizedPayload(value: unknown): object {
+export function normalizedPayload(value: unknown): object {
   if (isPlainObject(value)) {
     return value;
   }
   throw new RuleError("normalize", "normalize must return a plain object.");
+}
+
+/** The engine-owned fields the Match view carries alongside the normalized payload. */
+export interface EngineFields {
+  id: number;
+  ts: number;
+  endpoint: string;
+}
+
+/**
+ * Build the flat Match view: the normalized payload spread first, then the engine
+ * fields, so a payload field named `id` cannot shadow the real id. The profiler
+ * reproduces this exact view, so both the runtime and the profiler call this.
+ */
+export function withEngineFields<T extends object>(
+  base: T,
+  id: number,
+  ts: number,
+  endpoint: string,
+): T & EngineFields {
+  return { ...base, id, ts, endpoint };
 }
 
 /** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
@@ -105,7 +127,7 @@ function isAlert(value: unknown): value is Alert {
 }
 
 /** Parse the Rule's match return into Alert | Alert[] | null, or reject it. */
-function matchResult(value: unknown): Alert | Alert[] | null {
+export function matchResult(value: unknown): Alert | Alert[] | null {
   if (value === null || value === undefined) {
     return null;
   }
@@ -134,13 +156,14 @@ export async function runIngest(
   out: Channel<PipeMessage>,
   clock: TaskClock,
   nextEvent: () => PipeEvent | null,
+  onAdmit: () => void,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
     const event = nextEvent();
     if (event === null) {
       await out.push(END_OF_STREAM); // the schedule ran out; close it once
-      return;
+      return; // the marker is never admitted: onAdmit is for real Events only
     }
     const dueTick = Math.round(event.ts / GAME_SECONDS_PER_TICK);
     const wait = dueTick - clock.now();
@@ -148,6 +171,7 @@ export async function runIngest(
       await clock.sleep(wait);
     }
     await out.push(event);
+    onAdmit(); // the Event has entered the Pipeline; the engine counts it admitted
   }
 }
 
@@ -182,9 +206,13 @@ export async function runNormalize(
 
 /**
  * The Match task: an Event -> run the Rule on a flat view and record its Alerts,
- * then forward the Event to the Sink. Engine fields win in the view, so a payload
- * field named `id` cannot shadow the real id. A marker -> call `scorer.finalize`,
- * forward the marker, then return.
+ * charge the rule's service time, then forward the Event to the Sink. Engine
+ * fields win in the view, so a payload field named `id` cannot shadow the real
+ * id. A marker -> call `scorer.finalize`, forward the marker, then return.
+ *
+ * The governor charges only real Events, never the marker. It runs after `record`
+ * and before `push`, so a slow rule holds each Event in service for whole ticks;
+ * the arrival rate then outruns the service rate and the Backlog climbs.
  */
 export async function runMatch(
   input: Channel<PipeMessage>,
@@ -192,7 +220,9 @@ export async function runMatch(
   clock: TaskClock,
   match: TaskAlgorithm["match"],
   scorer: TaskScorer,
+  serviceRate: ServiceRate,
 ): Promise<void> {
+  const governor = makeGovernor(serviceRate);
   for (;;) {
     await clock.gate();
     const message = await input.pull();
@@ -203,7 +233,7 @@ export async function runMatch(
     }
     const payload = message.payload;
     const base = payload instanceof Object ? payload : {};
-    const view = { ...base, id: message.id, ts: message.ts, endpoint: message.endpoint };
+    const view = withEngineFields(base, message.id, message.ts, message.endpoint);
     let result: unknown;
     try {
       result = match(view);
@@ -211,6 +241,10 @@ export async function runMatch(
       throw new RuleError("match", messageOf(error));
     }
     scorer.record(matchResult(result), message);
+    const ticks = governor.charge();
+    if (ticks > 0) {
+      await clock.sleep(ticks);
+    }
     await output.push(message);
   }
 }
@@ -247,14 +281,18 @@ export interface NodeWiring {
 /** The shared runtime a node task needs, apart from its own wiring. */
 export interface NodeRuntime {
   clock: TaskClock;
-  /** Called each time the Sink finishes an Event. Drives the Throughput gauge. */
+  /** Called each time the Sink finishes an Event. The engine counts completions. */
   onComplete: () => void;
+  /** Called each time Ingest admits a real Event. The engine counts admissions. */
+  onAdmit: () => void;
   /** The player's loaded Rule. */
   algorithm: TaskAlgorithm;
   /** The Correctness scorer; the Match task is its single writer. */
   scorer: TaskScorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   nextEvent: () => PipeEvent | null;
+  /** The quantized per-Event service rate the Match governor charges. */
+  serviceRate: ServiceRate;
 }
 
 /**
@@ -277,7 +315,12 @@ function requireChannel(
 }
 
 const ingestTask: NodeTask = (nodeId, wiring, runtime) =>
-  runIngest(requireChannel(wiring.output, nodeId, "output"), runtime.clock, runtime.nextEvent);
+  runIngest(
+    requireChannel(wiring.output, nodeId, "output"),
+    runtime.clock,
+    runtime.nextEvent,
+    runtime.onAdmit,
+  );
 
 const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
   runNormalize(
@@ -294,6 +337,7 @@ const matchTask: NodeTask = (nodeId, wiring, runtime) =>
     runtime.clock,
     runtime.algorithm.match,
     runtime.scorer,
+    runtime.serviceRate,
   );
 
 const sinkTask: NodeTask = (nodeId, wiring, runtime) =>

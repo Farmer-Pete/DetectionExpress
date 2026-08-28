@@ -18,4 +18,9 @@ describe("Briefing", () => {
     render(<Briefing text={kioskPinAttack.briefing} />);
     expect(screen.getByText(/five.*minutes|5.*minutes/i)).toBeDefined();
   });
+
+  it("explains the Compute gauge cost", () => {
+    render(<Briefing text={kioskPinAttack.briefing} />);
+    expect(screen.getByText(/Compute gauge/)).toBeDefined();
+  });
 });
