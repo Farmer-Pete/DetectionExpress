@@ -176,6 +176,49 @@ describe("App dev wiring", () => {
     ]);
   });
 
+  it("recovers a failed ASYNC client load with a single later Edit in my IDE click", async () => {
+    // Drive the async load path (a dynamic import in production) through the injected
+    // loader: it rejects once, then resolves the factory. F4: after the failed load the
+    // first click must both reconnect AND open, not silently reconnect and need a second.
+    let attempts = 0;
+    let connects = 0;
+    const editCalls: Array<{ name: string; defaultSource: string }> = [];
+    const client: DevHostClient = {
+      connect() {
+        connects += 1;
+      },
+      disconnect() {},
+      async editInIde(name, defaultSource) {
+        editCalls.push({ name, defaultSource });
+        return { path: "/algorithms/detection-express-kiosk-pin-attack.js", existed: true };
+      },
+    };
+    const loadDevClient = (): Promise<(deps: DevHostClientDeps) => DevHostClient> => {
+      attempts += 1;
+      if (attempts === 1) {
+        return Promise.reject(new Error("the dynamic import failed"));
+      }
+      return Promise.resolve(() => client);
+    };
+
+    render(<App controller={stubController()} loadDevClient={loadDevClient} />);
+
+    // The first (mount) load rejected, so nothing connected, but the panel still mounts.
+    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
+    expect(connects).toBe(0);
+    expect(attempts).toBe(1);
+
+    // One click retries the async load, connects the fresh client, and opens the file.
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(connects).toBe(1);
+    expect(editCalls).toEqual([
+      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
+    ]);
+  });
+
   it("replays the last dev state to a panel that subscribes after the event", async () => {
     const dev = fakeDevKit();
     render(<App controller={stubController()} createDevClient={dev.factory} />);

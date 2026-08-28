@@ -259,6 +259,9 @@ export function createDevHost(config = {}) {
   const keepaliveMs = config.keepaliveMs ?? DEVHOST_KEEPALIVE_MS;
   const bodyLimit = config.bodyLimit ?? DEVHOST_BODY_LIMIT_BYTES;
   const readSource = config.readSource ?? ((filePath) => readWithRetry(filePath));
+  // The static-asset read boundary, injectable like every other I/O seam so a test
+  // can observe exactly which path is read (see the F6 canonical-read test).
+  const readAsset = config.readAsset ?? ((filePath) => readFile(filePath));
   const onWatchError =
     config.onWatchError ?? ((err) => console.error(`watch error: ${err?.message ?? err}`));
   const onReadError =
@@ -290,6 +293,10 @@ export function createDevHost(config = {}) {
       entry = {
         slug,
         active: false,
+        // A slot reserved synchronously at POST admission, before activate() awaits,
+        // so two concurrent distinct-slug POSTs cannot both pass the cap check (F5).
+        // Counts toward the cap like `active`; released on activation failure.
+        reserved: false,
         path: null,
         cachedDefault: null,
         retained: { slug, path: null, source: null },
@@ -310,6 +317,7 @@ export function createDevHost(config = {}) {
     if (
       entry.subscribers.size === 0 &&
       !entry.active &&
+      !entry.reserved &&
       entry.watcher == null &&
       entry.cachedDefault == null
     ) {
@@ -317,10 +325,12 @@ export function createDevHost(config = {}) {
     }
   }
 
+  // The cap counts both live scenarios and slots reserved by an in-flight POST, so
+  // a reservation held across activate()'s await blocks a concurrent over-cap POST.
   function activeCount() {
     let count = 0;
     for (const entry of slugs.values()) {
-      if (entry.active) {
+      if (entry.active || entry.reserved) {
         count += 1;
       }
     }
@@ -470,6 +480,10 @@ export function createDevHost(config = {}) {
         );
         return; // Do not read or broadcast the foreign target.
       }
+      // F7 (accepted): the gap between this lstat and the read below is a residual
+      // symlink TOCTOU. Closing it would need O_NOFOLLOW; instead it is accepted for
+      // the loopback single-user threat model (it requires local write access to
+      // ./algorithms/ to win the race), so this is deliberate, not an oversight.
       source = await readSource(filePath);
     } catch (err) {
       if (err?.code === "ENOENT") {
@@ -505,9 +519,6 @@ export function createDevHost(config = {}) {
     }
     await mkdir(algorithmsDir, { recursive: true });
 
-    entry.generation += 1;
-    entry.cachedDefault = defaultSource;
-
     let existed;
     try {
       await writeFile(filePath, defaultSource, { flag: "wx" });
@@ -525,8 +536,19 @@ export function createDevHost(config = {}) {
       throw new HostError(403, "refusing a symlink or non-regular target");
     }
 
-    entry.path = filePath;
+    // F7 (accepted): reading the file right after the lstat guard is a residual
+    // symlink TOCTOU. It requires local write access to ./algorithms/ between the
+    // two calls, so it is a deliberate choice for the loopback single-user threat
+    // model, not an oversight. No O_NOFOLLOW is used.
     const source = await readFile(filePath, "utf8");
+
+    // Commit transient activation state only after every fallible step above has
+    // succeeded. A rejection (symlink guard, EACCES read, ...) then leaves
+    // cachedDefault null and the entry reapable, so a failed activation cannot
+    // wedge a dead entry that maybeReap refuses to collect (F1).
+    entry.generation += 1;
+    entry.cachedDefault = defaultSource;
+    entry.path = filePath;
     entry.retained = { slug: entry.slug, path: filePath, source };
     emit(entry, initFrame(entry.slug, filePath, source));
 
@@ -541,7 +563,13 @@ export function createDevHost(config = {}) {
     try {
       raw = await readBody(req, bodyLimit);
     } catch (err) {
+      // Write the response first, then stop reading. For an oversized body the 413
+      // must reach the client before the request is destroyed: destroying tears down
+      // the socket, so a destroy-before-respond loses the 413 entirely (F2).
       respondError(res, err);
+      if (err instanceof HostError && err.status === 413) {
+        req.destroy?.();
+      }
       return;
     }
     let body;
@@ -563,19 +591,32 @@ export function createDevHost(config = {}) {
     const defaultSource = body.defaultSource;
 
     const existing = slugs.get(name);
-    const alreadyActive = existing?.active === true;
-    if (!alreadyActive && activeCount() >= maxSlugs) {
+    // A slug already holding a slot (active, or reserved by another in-flight POST)
+    // is re-admitted past the cap; only a genuinely new slot is capped.
+    const alreadyCounts = existing != null && (existing.active || existing.reserved);
+    if (!alreadyCounts && activeCount() >= maxSlugs) {
       respondText(res, 503, `too many active scenarios (max ${maxSlugs})`);
       return;
     }
 
     const isNew = !slugs.has(name);
     const entry = getState(name);
+    // Reserve the slot synchronously, before activate() awaits, so a concurrent
+    // distinct-slug POST sees this slot counted and is refused past the cap (F5).
+    const reservedByUs = !entry.active && !entry.reserved;
+    if (reservedByUs) {
+      entry.reserved = true;
+    }
     try {
       const result = await entry.enqueueTransition(() => activate(entry, defaultSource));
       entry.active = true; // Lock the slot only after activate() succeeds.
+      entry.reserved = false; // Reservation graduates to an active slot.
       respondJson(res, 200, result);
     } catch (err) {
+      // Release our reservation so a failed activation never leaks a slot (F5).
+      if (reservedByUs) {
+        entry.reserved = false;
+      }
       // A failed activation must not leak a slot against the cap. If this POST
       // created the entry and nothing else holds it, drop it entirely.
       if (isNew && !entry.active && entry.subscribers.size === 0 && entry.watcher == null) {
@@ -608,21 +649,43 @@ export function createDevHost(config = {}) {
       Connection: "keep-alive",
     });
 
-    // Send the retained snapshot so a reconnect never misses a state change.
     const snap = entry.retained;
-    res.write(initFrame(snap.slug, snap.path, snap.source));
+    const record = { res, keepalive: null };
 
-    const keepalive = timers.setInterval(() => res.write(KEEPALIVE_COMMENT), keepaliveMs);
-    const record = { res, keepalive };
-    entry.subscribers.add(record);
-
-    const cleanup = () => {
+    const dropSubscriber = () => {
       entry.subscribers.delete(record);
-      timers.clearInterval(keepalive);
+      if (record.keepalive != null) {
+        timers.clearInterval(record.keepalive);
+        record.keepalive = null;
+      }
+    };
+    const cleanup = () => {
+      dropSubscriber();
       // Reap a never-activated slug once its last stream closes, so distinct
       // open/close churn on the events path cannot leak entries.
       maybeReap(entry);
     };
+
+    // The keepalive write is guarded exactly like emit(): a dead socket drops the
+    // subscriber instead of letting the throw escape the interval callback.
+    record.keepalive = timers.setInterval(() => {
+      try {
+        res.write(KEEPALIVE_COMMENT);
+      } catch {
+        cleanup();
+      }
+    }, keepaliveMs);
+    entry.subscribers.add(record);
+
+    // Send the retained snapshot so a reconnect never misses a state change. Guard
+    // this initial write the same way: a socket already dead between the headers and
+    // this frame drops the subscriber (and clears its keepalive) rather than throwing.
+    try {
+      res.write(initFrame(snap.slug, snap.path, snap.source));
+    } catch {
+      cleanup();
+    }
+
     res.on("close", cleanup);
     // A socket error also ends the stream; without this listener the emitted
     // error would go unhandled and its resources would leak until exit.
@@ -677,7 +740,10 @@ export function createDevHost(config = {}) {
       res.end();
       return true;
     }
-    const bytes = await readFile(filePath);
+    // Read the validated canonical path, not the original request path: an
+    // intermediate directory swapped for a symlink after the realpath check would
+    // otherwise let a read of `filePath` escape the confined root (F6).
+    const bytes = await readAsset(real);
     res.writeHead(200, { "Content-Type": mime, "Content-Length": bytes.length });
     res.end(bytes);
     return true;
@@ -754,7 +820,11 @@ export function createDevHost(config = {}) {
       }
       await handleStatic(req, res, url);
     } catch (err) {
-      respondText(res, err?.status ?? 500, err?.message ?? "internal error");
+      // Give the same generic-message treatment used everywhere else: a HostError's
+      // message is client-safe and passes through, but any other error (e.g. a raw
+      // fs EACCES from a static read) may embed absolute local paths, so it becomes a
+      // generic 500 with no path leaked (F3).
+      respondError(res, err);
     }
   }
 
@@ -821,21 +891,56 @@ export function createDevHost(config = {}) {
 
 // --- Request body -----------------------------------------------------------
 
-async function readBody(req, limit = DEVHOST_BODY_LIMIT_BYTES) {
-  let size = 0;
-  const parts = [];
-  for await (const chunk of req) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buf.length;
-    if (size > limit) {
-      // Destroy the request so the unread remainder is not left in the socket
-      // buffer, which on a keep-alive connection would desync the next request.
-      req.destroy?.();
-      throw new HostError(413, "request body too large");
-    }
-    parts.push(buf);
-  }
-  return Buffer.concat(parts).toString("utf8");
+function readBody(req, limit = DEVHOST_BODY_LIMIT_BYTES) {
+  // Event-based, not `for await`: throwing out of a `for await` loop invokes the
+  // async iterator's return(), which destroys the request stream before the caller
+  // can write the 413. Here an overflow only pauses the stream and rejects; the
+  // caller writes the 413 and then destroys, so the client actually receives it (F2).
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let settled = false;
+    const parts = [];
+    const cleanup = () => {
+      req.off?.("data", onData);
+      req.off?.("end", onEnd);
+      req.off?.("error", onError);
+    };
+    const onData = (chunk) => {
+      if (settled) {
+        return;
+      }
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buf.length;
+      if (size > limit) {
+        settled = true;
+        cleanup();
+        // Stop consuming without killing the socket: the caller responds first.
+        req.pause?.();
+        reject(new HostError(413, "request body too large"));
+        return;
+      }
+      parts.push(buf);
+    };
+    const onEnd = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(Buffer.concat(parts).toString("utf8"));
+    };
+    const onError = (err) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+  });
 }
 
 // --- Default build root -----------------------------------------------------

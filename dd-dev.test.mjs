@@ -5,7 +5,15 @@
 // so the transition tests are deterministic and never wait on the OS.
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -935,6 +943,56 @@ describe("activation failure rollback", () => {
     // The previously active slug is retained, still active.
     expect(host.activeSlugs()).toEqual(["kiosk"]);
   });
+
+  // F1: an SSE-created entry whose POST fails must not linger holding cachedDefault,
+  // or maybeReap can never collect it and repeated failures exhaust the events cap.
+  it("reaps a failed-activation entry once the SSE closes and never exhausts the cap", async () => {
+    const { host } = makeHost({ maxSlugs: 2 });
+    const target = path.join(algorithmsDir, "detection-express-evil.js");
+    for (let i = 0; i < 5; i += 1) {
+      // SSE-connect first (creates the entry), then a POST that fails its guard.
+      const sub = subscribe(host, "evil");
+      plantSymlinkTarget("evil");
+      const res = await post(host, "evil", "x");
+      expect(res.statusCode).toBe(403);
+      // The failed POST left cachedDefault null, so closing the SSE reaps the entry.
+      expect(host.slugs.get("evil").cachedDefault).toBeNull();
+      sub.emit("close");
+      expect(host.slugs.has("evil")).toBe(false);
+      rmSync(target); // clear the planted symlink for the next round
+    }
+    // The cap is intact: two genuine slugs still fit within it.
+    expect((await post(host, "one", "x")).statusCode).toBe(200);
+    expect((await post(host, "two", "x")).statusCode).toBe(200);
+  });
+});
+
+// --- F5: concurrent distinct-slug POSTs cannot exceed the cap ----------------
+
+describe("concurrent activation cap", () => {
+  function plantSymlinkTarget(slug) {
+    const secret = path.join(tmpRoot, `secret-${slug}.js`);
+    writeFileSync(secret, "secret");
+    symlinkSync(secret, path.join(algorithmsDir, `detection-express-${slug}.js`));
+  }
+
+  it("admits exactly one of two concurrent distinct-slug POSTs at cap 1", async () => {
+    const { host } = makeHost({ maxSlugs: 1 });
+    const [resA, resB] = await Promise.all([post(host, "alpha", "a"), post(host, "beta", "b")]);
+    const statuses = [resA.statusCode, resB.statusCode].sort();
+    expect(statuses).toEqual([200, 503]);
+    // Exactly one slug became active; the reservation blocked the second.
+    expect(host.activeSlugs().length).toBe(1);
+  });
+
+  it("frees the reserved slot when an activation fails", async () => {
+    const { host } = makeHost({ maxSlugs: 1 });
+    plantSymlinkTarget("evil");
+    expect((await post(host, "evil", "x")).statusCode).toBe(403);
+    // The released reservation frees the slot, so a genuine slug still fits at cap 1.
+    expect((await post(host, "good", "x")).statusCode).toBe(200);
+    expect(host.activeSlugs()).toEqual(["good"]);
+  });
 });
 
 // --- Fix M2: the file watcher survives an emitted error ----------------------
@@ -1047,6 +1105,51 @@ describe("static confinement through intermediate symlinks", () => {
     await host.handleRequest(req, res);
     expect(res.statusCode).toBe(200);
     expect(res.body).toBe("console.log(1)");
+  });
+
+  // F6: the read must target the canonicalized `real` path, not the original request
+  // path, so a swap of an intermediate directory after the realpath check cannot make
+  // the read escape the root.
+  it("reads the canonical realpath, not the raw request path", async () => {
+    writeFileSync(path.join(buildRoot, "app.js"), "asset");
+    // An in-root intermediate symlink: /via -> buildRoot, so /via/app.js resolves back
+    // to buildRoot/app.js. The request path keeps the symlink; `real` is canonical.
+    symlinkSync(buildRoot, path.join(buildRoot, "via"));
+    const reads = [];
+    const { host } = makeHost({
+      readAsset: (p) => {
+        reads.push(p);
+        return Promise.resolve(Buffer.from("asset"));
+      },
+    });
+    const req = makeReq("GET", "/via/app.js", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
+    expect(res.statusCode).toBe(200);
+    // The read used the symlink-resolved canonical path, not buildRoot/via/app.js.
+    expect(reads).toEqual([path.join(realpathSync(buildRoot), "app.js")]);
+  });
+});
+
+// --- Keepalive/init write isolation -----------------------------------------
+
+describe("SSE initial-write isolation", () => {
+  it("drops a subscriber whose initial snapshot write throws, clearing its keepalive", () => {
+    const cleared = [];
+    const timers = {
+      setTimeout,
+      clearTimeout,
+      setInterval: () => 777,
+      clearInterval: (id) => cleared.push(id),
+    };
+    const { host } = makeHost({ timers });
+    const req = makeReq("GET", "/api/algorithm/events?slug=kiosk", GET_HEADERS);
+    const res = makeFlakyRes();
+    res.failWrite = true; // the initial snapshot write throws
+    expect(() => host.handleRequest(req, res)).not.toThrow();
+    // No lingering subscriber, and its keepalive interval was cleared.
+    expect(host.slugs.get("kiosk")?.subscribers.size ?? 0).toBe(0);
+    expect(cleared).toContain(777);
   });
 });
 
@@ -1193,6 +1296,58 @@ describe("oversized request body", () => {
     expect(res.statusCode).toBe(413);
     expect(destroyed).toBe(true);
   });
+
+  // F2: the 413 must be written to the client BEFORE the request is destroyed, or
+  // destroying tears down the socket and the client never receives the response. A
+  // controlled request (not Readable.from, which auto-destroys) isolates the one
+  // destroy call the host makes, so the ordering assertion is exact.
+  it("writes the 413 to the client before destroying the request", async () => {
+    const { host } = makeHost({ bodyLimit: 8 });
+    const order = [];
+    const listeners = new Map();
+    const req = {
+      method: "POST",
+      url: "/api/algorithm",
+      headers: POST_HEADERS,
+      on(evt, cb) {
+        const list = listeners.get(evt) ?? [];
+        list.push(cb);
+        listeners.set(evt, list);
+        return req;
+      },
+      off(evt, cb) {
+        listeners.set(
+          evt,
+          (listeners.get(evt) ?? []).filter((f) => f !== cb),
+        );
+        return req;
+      },
+      pause() {},
+      destroy() {
+        order.push("destroy");
+      },
+    };
+    const emit = (evt, arg) => {
+      for (const cb of [...(listeners.get(evt) ?? [])]) {
+        cb(arg);
+      }
+    };
+    const res = makeRes();
+    const realWriteHead = res.writeHead.bind(res);
+    res.writeHead = (status, headers) => {
+      order.push(`respond:${status}`);
+      return realWriteHead(status, headers);
+    };
+
+    // handleRequest suspends at readBody with the listeners attached; feeding an
+    // over-limit chunk then drives the overflow path.
+    const done = host.handleRequest(req, res);
+    emit("data", Buffer.from("way past the tiny limit", "utf8"));
+    await done;
+
+    expect(res.statusCode).toBe(413);
+    expect(order).toEqual(["respond:413", "destroy"]);
+  });
 });
 
 // --- Fix: unexpected errors do not leak local paths --------------------------
@@ -1205,6 +1360,29 @@ describe("error message hygiene", () => {
     writeFileSync(notADir, "x");
     const { host } = makeHost({ algorithmsDir: notADir });
     const res = await post(host, "kiosk", "src");
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toBe("internal error");
+    expect(res.body).not.toContain(tmpRoot);
+  });
+
+  // F3: a raw fs error from a static read escapes serveFile and handleStatic and lands
+  // in the OUTER handleRequest catch. It must be sanitized there too, not echoed
+  // verbatim, since a Node fs error message embeds the absolute local path.
+  it("does not leak an absolute path when a static read fails in the outer catch", async () => {
+    writeFileSync(path.join(buildRoot, "app.js"), "console.log(1)");
+    const leakyPath = path.join(buildRoot, "app.js");
+    const { host } = makeHost({
+      // A read that rejects with a path-bearing fs error, reaching the outer catch.
+      readAsset: () =>
+        Promise.reject(
+          Object.assign(new Error(`EACCES: permission denied, open '${leakyPath}'`), {
+            code: "EACCES",
+          }),
+        ),
+    });
+    const req = makeReq("GET", "/app.js", GET_HEADERS);
+    const res = makeRes();
+    await host.handleRequest(req, res);
     expect(res.statusCode).toBe(500);
     expect(res.body).toBe("internal error");
     expect(res.body).not.toContain(tmpRoot);
