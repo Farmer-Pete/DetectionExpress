@@ -130,6 +130,11 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
       }
       recent.set(e.account, ids);
 
+      // Eviction assumes Events arrive in time order: it drains the queue front
+      // only forward, so a later Event that arrived early would slip past its
+      // window and drop from the tally. That in-order assumption is the seed a
+      // later slice (#5) reveals; the Slice-2 stream is in order, so it stays
+      // hidden and the tally stays correct (see GH3-PLAN.md 6.5).
       const cutoff = e.ts - WINDOW;
       while (head < queue.length) {
         const front = queue[head];

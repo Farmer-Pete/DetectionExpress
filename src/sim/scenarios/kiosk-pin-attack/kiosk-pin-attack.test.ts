@@ -219,6 +219,24 @@ describe("buildSchedule (M2 schedule invariant)", () => {
   });
 });
 
+describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () => {
+  it("emits every Event in non-decreasing ts across seeds, so Slice 2 has no late Event", () => {
+    // The Optimization's incremental tally evicts past its window on the in-order
+    // assumption (optimization.ts). Slice 2 must never emit a late or out-of-order
+    // Event, or that assumption — the seed a later slice (#5) reveals — would
+    // surface early and the tally would under-count. Lock the property here so the
+    // seed stays hidden and the tally stays correct this slice.
+    for (const seed of [LEVEL_SEED, 1, 42, 2026, 9999]) {
+      const { events } = kioskPinAttack.generate(seed);
+      let prev = Number.NEGATIVE_INFINITY;
+      for (const ev of events) {
+        expect(ev.ts).toBeGreaterThanOrEqual(prev);
+        prev = ev.ts;
+      }
+    }
+  });
+});
+
 describe("referenceSource", () => {
   it("imports lodash by absolute URL and exports the Rule", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');

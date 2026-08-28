@@ -225,7 +225,9 @@ const briefing =
   "Events, then write the Match Rule to catch that burst per account and " +
   "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
   "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
-  "Correctness falls.";
+  "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +
+  "slow Rule reads high and falls behind the rising waves, so apply the " +
+  "Optimization to drop it.";
 
 export const kioskPinAttack: Scenario = {
   id: "kiosk-pin-attack",

@@ -34,6 +34,15 @@ describe("Hud", () => {
     expect(screen.getByText("1 false")).toBeDefined();
   });
 
+  it("renders the Compute gauge with the per-rule cost from the snapshot", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), compute: 0.05 },
+    });
+    render(<Hud />);
+    expect(screen.getByText("Compute")).toBeDefined();
+    expect(screen.getByText("0.05")).toBeDefined();
+  });
+
   it("reads Running before any outcome", () => {
     render(<Hud />);
     expect(screen.getByText("Running")).toBeDefined();

@@ -1,15 +1,23 @@
 /** The HUD strip. Reads live sim values through primitive selectors, one per gauge. */
 
 import { useGameStore } from "../../game/store";
-import { CHANNEL_CAP } from "../../game/tuning";
+import { CHANNEL_CAP, OMEGA } from "../../game/tuning";
 import type { FailureReason, RunStatus } from "../../sim/snapshot";
 import { Gauge } from "../gauges/Gauge";
 
 /** The effective Backlog ceiling: the two upstream channels fill; the Sink drains at once. */
 const BACKLOG_MAX = 2 * CHANNEL_CAP;
 
-/** The Backlog fill ramps healthy -> warning -> danger with occupancy. */
-function backlogFill(fraction: number) {
+/**
+ * The Compute ceiling, in ticks per Event. The naive default rule measures at
+ * about one anchor-unit, so its service rate lands near OMEGA and its cost near
+ * `1 / OMEGA`. A full-scale of `2 / OMEGA` puts that naive cost mid-gauge, so the
+ * Optimization's far lower cost reads as a clear drop.
+ */
+const COMPUTE_MAX = 2 / OMEGA;
+
+/** A fill that ramps healthy -> warning -> danger as a fraction of the gauge's max. */
+function severityFill(fraction: number) {
   if (fraction >= 0.8) {
     return "var(--threat)";
   }
@@ -52,6 +60,7 @@ export function Hud() {
   const caught = useGameStore((state) => state.snapshot.correctness.caught);
   const missed = useGameStore((state) => state.snapshot.correctness.missed);
   const falseAlerts = useGameStore((state) => state.snapshot.correctness.falseAlerts);
+  const compute = useGameStore((state) => state.snapshot.compute);
   const status = useGameStore((state) => state.snapshot.status);
   const failureReason = useGameStore((state) => state.snapshot.failureReason);
   return (
@@ -62,7 +71,15 @@ export function Hud() {
         value={backlog}
         max={BACKLOG_MAX}
         unit=""
-        fill={backlogFill(backlog / BACKLOG_MAX)}
+        fill={severityFill(backlog / BACKLOG_MAX)}
+      />
+      <Gauge
+        label="Compute"
+        value={compute}
+        max={COMPUTE_MAX}
+        unit=""
+        digits={2}
+        fill={severityFill(compute / COMPUTE_MAX)}
       />
       <Gauge label="Correctness" value={rolling} max={100} unit="" fill={correctnessFill(rolling)}>
         <div className="gauge-counts">

@@ -110,12 +110,12 @@ _Avoid_: Game over, death, loss.
 
 ### Optimization
 
-**Tool**:
-A technique the player applies inside the Algorithm to raise Throughput or lower Cost. Examples: memoization, aggregation, batching, caching, indexing, windowing, parallelism, deduplication. The player writes a Tool as a construct in a Node's Rule code. Tools are shared, not bound to one Node. Each Tool has a Side effect that can break Correctness if the player ignores it.
-_Avoid_: Upgrade, lever, power-up, buff.
+**Optimization**:
+A technique the player applies inside the Algorithm to raise Throughput or lower Cost. Examples: memoization, aggregation, batching, caching, indexing, windowing, parallelism, deduplication. The player writes an Optimization as a construct in a Node's Rule code. Optimizations are shared, not bound to one Node. Each Optimization has a Side effect that can break Correctness if the player ignores it.
+_Avoid_: Tool, Upgrade, lever, power-up, buff.
 
 **Side effect**:
-The correctness risk a Tool introduces. Example: a cache can serve a stale answer. The player must handle it or pay in Correctness.
+The correctness risk an Optimization introduces. Example: a cache can serve a stale answer. The player must handle it or pay in Correctness.
 _Avoid_: Bug, drawback, penalty.
 
 **Stress event**:
