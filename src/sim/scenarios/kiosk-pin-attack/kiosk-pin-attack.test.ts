@@ -226,3 +226,18 @@ describe("referenceSource", () => {
     expect(referenceSource).toContain("export function match");
   });
 });
+
+describe("fairness invariants stay under the M2 wave data (M3 seam 15)", () => {
+  it("generates fair, separable runs across seeds without tripping assertFair", () => {
+    // assertFair and assertNoStrayThreshold run inside generate and throw on any
+    // violation, so a clean generate across seeds proves the invariants still hold
+    // with the wave schedule in place. See GH3-PLAN.md section 9 (M3 seam 15).
+    for (const seed of [LEVEL_SEED, 1, 42, 2026, 9999]) {
+      const run = kioskPinAttack.generate(seed);
+      expect(run.attacks.length).toBe(WAVE_RATES.length);
+      for (const attack of run.attacks) {
+        expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
+      }
+    }
+  });
+});
