@@ -965,6 +965,20 @@ describe("activation failure rollback", () => {
     expect((await post(host, "one", "x")).statusCode).toBe(200);
     expect((await post(host, "two", "x")).statusCode).toBe(200);
   });
+
+  // The SSE can close WHILE the POST is in flight (its maybeReap is skipped because
+  // the POST holds the reservation). The failed POST's own catch must then reap.
+  it("reaps a failed-activation entry even when the SSE closes during the in-flight POST", async () => {
+    const { host } = makeHost({ maxSlugs: 1 });
+    const sub = subscribe(host, "evil");
+    plantSymlinkTarget("evil");
+    const posting = post(host, "evil", "x");
+    sub.emit("close");
+    expect((await posting).statusCode).toBe(403);
+    expect(host.slugs.has("evil")).toBe(false);
+    // No leaked events-cap slot: a different slug still opens at cap 1.
+    expect(subscribe(host, "good").statusCode).toBe(200);
+  });
 });
 
 // --- F5: concurrent distinct-slug POSTs cannot exceed the cap ----------------

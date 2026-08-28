@@ -599,7 +599,6 @@ export function createDevHost(config = {}) {
       return;
     }
 
-    const isNew = !slugs.has(name);
     const entry = getState(name);
     // Reserve the slot synchronously, before activate() awaits, so a concurrent
     // distinct-slug POST sees this slot counted and is refused past the cap (F5).
@@ -617,11 +616,10 @@ export function createDevHost(config = {}) {
       if (reservedByUs) {
         entry.reserved = false;
       }
-      // A failed activation must not leak a slot against the cap. If this POST
-      // created the entry and nothing else holds it, drop it entirely.
-      if (isNew && !entry.active && entry.subscribers.size === 0 && entry.watcher == null) {
-        slugs.delete(name);
-      }
+      // Reap the entry when nothing else holds it. This covers both a
+      // POST-created entry and one an SSE created that has since closed (its own
+      // maybeReap was skipped while we held the reservation).
+      maybeReap(entry);
       respondError(res, err);
     }
   }
