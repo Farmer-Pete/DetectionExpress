@@ -1,6 +1,6 @@
 # Detection Express
 
-The player builds a detection Engine and runs it against a rising stream of sensor readings from a train station. New sensors, new record formats, and new threats keep arriving, and the player keeps re-architecting the Engine to handle them. The Engine strains, and the game is the ongoing adaptation.
+The player builds a detection Engine and runs it against a rising stream of sensor readings from a train station. New sensors, new reading formats, and new threats keep arriving, and the player keeps re-architecting the Engine to handle them. The Engine strains, and the game is the ongoing adaptation.
 
 The player runs the station watch. They do not stop anyone at the gate. They watch readings arrive from the station's sensors, spot the pattern that marks an intruder, and raise the alarm.
 
@@ -29,7 +29,7 @@ Player-authored logic inside a Node. The player writes it in a compact scripting
 _Avoid_: Query, filter, logic, code.
 
 **Event**:
-One sensor reading entering the Engine. It is a flat typed record. Its schema depends on its Endpoint.
+One sensor reading entering the Engine. It is flat and typed. Its schema depends on its Endpoint.
 _Avoid_: Record, message, log, item, signal.
 
 **Endpoint**:
@@ -119,5 +119,5 @@ The correctness risk a Tool introduces. Example: a cache can serve a stale answe
 _Avoid_: Bug, drawback, penalty.
 
 **Stress event**:
-A spike in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to log the same card. It turns a hidden flaw into a visible Correctness drop.
+A surge in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to log the same card. It turns a hidden flaw into a visible Correctness drop.
 _Avoid_: Attack, wave, test, spike.

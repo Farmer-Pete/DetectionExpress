@@ -45,7 +45,7 @@ export function App({ controller }: { controller?: RunController } = {}) {
     <div className="app">
       <header className="topbar">
         <h1>Detection Express</h1>
-        <span className="slice-tag">Slice 1 &mdash; Catch the signal</span>
+        <span className="slice-tag">Slice 1 &mdash; Spot the threat</span>
       </header>
       <Hud />
       <ReactFlowProvider>

@@ -1,4 +1,4 @@
-# Detection Express — Build Plan
+# Detection Express — Development Plan
 
 This plan delivers the vertical slice in small steps. Each slice is playable from Slice 1 on. Each slice tests one hypothesis about whether the game is fun. We stop and look after each one.
 
