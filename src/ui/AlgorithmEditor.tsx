@@ -68,6 +68,7 @@ export function AlgorithmEditor({ onRun, slug }: AlgorithmEditorProps) {
       </div>
       <textarea
         className="editor-code"
+        aria-label="Algorithm source"
         spellCheck={false}
         value={source}
         readOnly={sourceLocked}
