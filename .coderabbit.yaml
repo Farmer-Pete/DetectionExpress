@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+#
+# CodeRabbit AI review config. See GitHub issue #17.
+# This file holds SETTINGS only. The review RULES live in the docs listed under
+# knowledge_base.code_guidelines.filePatterns, so there is one source of truth.
+language: en-US
+
+reviews:
+  # Surface nits and minor suggestions too, not just major findings.
+  profile: assertive
+
+  # CodeRabbit submits a "changes requested" review when it has findings. It
+  # auto-approves once its comments are resolved, the latest commit is reviewed,
+  # and no pre-merge checks are failing. Branch protection ("require pull request
+  # review approval") then gates the merge. See the PR notes for that setup step.
+  request_changes_workflow: true
+
+  auto_review:
+    enabled: true            # review every ready PR
+    drafts: false            # skip work-in-progress drafts
+    base_branches:
+      - ".*"                 # any target branch, not just main
+
+  path_filters:
+    - "!dist/**"             # build output, not reviewed
+    - "!bun.lock"            # machine-managed lockfile
+
+  # No `tools:` block on purpose. All bundled linters stay enabled as a second
+  # layer of checks over CI (defense in depth).
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    # The rules CodeRabbit reviews against. These are the docs the repo already
+    # maintains, so nothing is duplicated here. Edit the docs, not this file.
+    #
+    # A plain string entry is directory-scoped: its guidance applies to code in
+    # the doc's own directory tree. The root-level docs below therefore cover the
+    # whole repo already. The ADRs live under docs/adr, which holds no source, so
+    # they use the object form with applyTo to govern code repo-wide.
+    filePatterns:
+      - ARCHITECTURE.md       # sim/UI boundary and anti-slop gates
+      - CONTEXT.md            # domain vocabulary
+      - CLAUDE.md             # project instructions (also auto-detected)
+      - files: "docs/adr/**/*.md"   # architecture decision records
+        applyTo: "**/*"             # ADRs govern code repo-wide, not just docs/adr
