@@ -8,11 +8,17 @@ import { measureThroughput, median, type Timer, timeBatch } from "./measure";
  * wall-clock. See GH3-PLAN.md section 9, M1 seam 2 (the timing half).
  */
 
-/** A timer that returns each reading in turn, holding the last one afterward. */
+/** A timer that returns each reading in turn, throwing once the script runs out. */
 function scriptedTimer(readings: number[]): Timer {
   let i = 0;
   return {
-    now: () => readings[i++] ?? readings[readings.length - 1] ?? 0,
+    now: () => {
+      const reading = readings[i++];
+      if (reading === undefined) {
+        throw new RangeError(`scriptedTimer exhausted after ${readings.length} readings`);
+      }
+      return reading;
+    },
   };
 }
 

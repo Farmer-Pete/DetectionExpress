@@ -292,16 +292,18 @@ describe("engine lifecycle: the run ends at the deadline, not at the marker", ()
   });
 
   it("absorbs a throwing terminal setSnapshot and still resolves", async () => {
+    let calls = 0;
     const h = launch({
       generator: scheduleOf([ev(0, 0)]),
       checkpoints: deadlineAt(2),
       setSnapshot: () => {
+        calls += 1;
         throw new Error("snapshot boom");
       },
     });
     await step(h.driver, 3);
     await h.handle.whenStopped; // resolves despite the throwing publish
-    expect(true).toBe(true);
+    expect(calls).toBeGreaterThan(0); // the engine kept publishing through the throw
   });
 });
 
@@ -330,6 +332,7 @@ describe("engine failure and stop paths", () => {
   });
 
   it("absorbs both a throwing terminal setSnapshot and a throwing onError", async () => {
+    let reported: unknown;
     const h = launch({
       generator: scheduleOf([ev(0, 0)]),
       checkpoints: deadlineAt(50),
@@ -342,13 +345,14 @@ describe("engine failure and stop paths", () => {
       setSnapshot: () => {
         throw new Error("snapshot boom");
       },
-      onError: () => {
+      onError: (error) => {
+        reported = error;
         throw new Error("reporter also boom");
       },
     });
     await step(h.driver, 3);
     await h.handle.whenStopped; // still resolves
-    expect(true).toBe(true);
+    expect(reported).toBeInstanceOf(RuleError); // onError saw the task failure first
   });
 
   it("publishes nothing on an explicit stop", async () => {
@@ -520,7 +524,7 @@ describe("engine terminal snapshot reaches the HUD (M2 seam 8)", () => {
 });
 
 describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
-  it("fails on Correctness via advanceTo, with no Event in the gap and no end of stream", () => {
+  it("fails on Correctness via advanceTo, with no Event in the gap and no end of stream", async () => {
     // One Attack whose window closes at ts 10 (tick 5). The rule never alerts, so
     // the Attack stays pending; every Event finishes before the checkpoint, so the
     // Backlog is clear. The checkpoint at tick 10 sits in a drain gap with no later
@@ -540,12 +544,10 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
       serviceRate: FAST_RATE, // Backlog clears well before the checkpoint
       checkpoints: deadlineAt(10),
     });
-    return step(h.driver, 11)
-      .then(() => h.handle.whenStopped)
-      .then(() => {
-        expect(h.last()?.status).toBe("failed");
-        expect(h.last()?.failureReason).toBe("correctness");
-        expect(h.last()?.correctness.missed).toBe(1); // settled by advanceTo, not EOS
-      });
+    await step(h.driver, 11);
+    await h.handle.whenStopped;
+    expect(h.last()?.status).toBe("failed");
+    expect(h.last()?.failureReason).toBe("correctness");
+    expect(h.last()?.correctness.missed).toBe(1); // settled by advanceTo, not EOS
   });
 });

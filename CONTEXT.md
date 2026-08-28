@@ -111,7 +111,7 @@ _Avoid_: Game over, death, loss.
 ### Optimization
 
 **Optimization**:
-A technique the player applies inside the Algorithm to raise Throughput or lower Cost. Examples: memoization, aggregation, batching, caching, indexing, windowing, parallelism, deduplication. The player writes an Optimization as a construct in a Node's Rule code. Optimizations are shared, not bound to one Node. Each Optimization has a Side effect that can break Correctness if the player ignores it.
+A technique the player applies inside the Algorithm to raise Throughput or lower Cost. Examples: memoization, aggregation, batching, caching, indexing, windowing, parallelism, deduplication. The player writes an Optimization as a construct in a Node's Rule script. Optimizations are shared, not bound to one Node. Each Optimization has a Side effect that can break Correctness if the player ignores it.
 _Avoid_: Tool, Upgrade, lever, power-up, buff.
 
 **Side effect**:

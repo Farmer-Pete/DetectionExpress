@@ -110,7 +110,7 @@ export const PROFILER_VERSION = 1;
  * The difficulty dial, in anchor-units per tick. `serviceRate = (C/A) * OMEGA`,
  * so a larger Omega gives every rule a higher records-per-tick rate. The naive
  * default rule measures at roughly one anchor-unit (C/A ~ 1), so its rate lands
- * near OMEGA: between the Wave 2 (15) and Wave 3 (40) arrival, so it keeps up
+ * near OMEGA: between the Wave 2 (15) and Wave 3 (60) arrival, so it keeps up
  * through Wave 2 and drowns at the peak. The Optimization measures many
  * anchor-units, so its rate clears the peak. Locked by the band test (M2 seam 9).
  */

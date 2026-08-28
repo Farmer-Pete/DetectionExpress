@@ -227,7 +227,7 @@ const briefing =
   "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
   "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +
   "slow Rule reads high and falls behind the rising waves, so apply the " +
-  "Optimization to drop it.";
+  "Optimization to lower that cost.";
 
 export const kioskPinAttack: Scenario = {
   id: "kiosk-pin-attack",

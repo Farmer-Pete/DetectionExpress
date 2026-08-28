@@ -69,6 +69,14 @@ describe.each([
     }
   });
 
+  it("keeps the detection window an integer multiple of the corpus span", () => {
+    // The exact-equality steady state below holds only when each wrap replays an
+    // identical window. Name that precondition so a ratio-breaking tuning change
+    // fails here instead of in the opaque equality assertions.
+    const spanSeconds = Math.ceil(CORPUS_SIZE / eventsPerSecond);
+    expect(SCAN_WINDOW_S % spanSeconds).toBe(0);
+  });
+
   it("settles: retained and per-wrap work are flat once the window is full", () => {
     // The window (300 s) spans about three corpus wraps (~100 s each), so state is
     // steady well before the sixth wrap. The last three wraps must match exactly.
