@@ -12,6 +12,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
+    "m1:check": "bun run scripts/m1-calibrate-check.ts",
     "audit": "bun audit --audit-level=high",
     "prepare": "lefthook install"
   },

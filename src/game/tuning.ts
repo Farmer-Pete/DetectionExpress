@@ -62,3 +62,54 @@ export const CORRECTNESS_W_FN = 3;
 
 /** A false Alert's weight in the score. */
 export const CORRECTNESS_W_FP = 1;
+
+/**
+ * Slice 2 "Keep up" tuning constants (see `GH3-PLAN.md`, section 8). M1 needs the
+ * measurement-engine set: the corpus size and density, the profiler's batch and
+ * median protocol, the service-rate quantization denominator, the difficulty dial
+ * Omega, and the detection window the naive scan evicts past. The squeeze (M2) and
+ * the Optimization (M3) add the wave schedule and the governor on top of these.
+ */
+
+/**
+ * The fixed denominator for the quantized rational service rate (records per
+ * tick = num/den). A large power-friendly denominator keeps the rounding error
+ * below one part per million before the fraction is reduced by its gcd.
+ */
+export const SERVICE_DEN = 1_000_000;
+
+/** Events in the calibration corpus the profiler times the player's code over. */
+export const CORPUS_SIZE = 1000;
+
+/**
+ * The corpus density, in Events per tick, at a representative peak wave. It is a
+ * parameter, not the final peak: the true peak couples to the M2 wave schedule,
+ * so the corpus fixes a representative worst case for the naive scan and leaves
+ * the exact value to the band test. Denser windows make the naive filter scan
+ * longer arrays, which is the worst-case (lowest) throughput we want to price.
+ */
+export const CORPUS_PEAK_EVENTS_PER_TICK = 20;
+
+/** The minimum wall time a profiler batch runs before it is measured, in ms. */
+export const PROFILE_BATCH_MS = 50;
+
+/** Batches per measure. The median of these is the reading, to reject an outlier. */
+export const PROFILE_BATCHES = 5;
+
+/**
+ * The warm-up the profiler runs and discards before it times a batch, in ms. A
+ * cold JIT measures slow, so the first stretch is thrown away (see section 11's
+ * JIT-warmth note).
+ */
+export const PROFILE_WARMUP_MS = 50;
+
+/**
+ * The difficulty dial, in anchor-units per tick. `serviceRate = (C/A) * OMEGA`,
+ * so a larger Omega gives every rule a higher records-per-tick rate. This is a
+ * placeholder: M2's band test tunes it so the naive rate sits between Wave 2 and
+ * Wave 3 arrival and the Optimization sits above the peak.
+ */
+export const OMEGA = 1;
+
+/** The detection window in ticks (300 game seconds). The naive scan evicts past it. */
+export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TICK;
