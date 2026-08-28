@@ -8,7 +8,7 @@
  *
  * The Scenario, the loaded Algorithm, the scorer, and the Ingest generator are all
  * injected by the run controller, so `sim/` stays pure and the engine never builds
- * them or sees a login field.
+ * them or reads a sensor field itself.
  */
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
@@ -65,7 +65,7 @@ function teardownStep(label: string, step: () => void): void {
   try {
     step();
   } catch (error) {
-    console.error(`Detection Dash: ${label} threw during teardown:`, error);
+    console.error(`Detection Express: ${label} threw during teardown:`, error);
   }
 }
 
@@ -239,7 +239,7 @@ export function start(options: StartOptions): EngineHandle {
       options.onError?.(error);
     } catch (handlerError) {
       // A reporter that throws is the caller's bug. Log it so teardown still holds.
-      console.error("Detection Dash onError handler threw:", handlerError);
+      console.error("Detection Express onError handler threw:", handlerError);
     }
   };
 

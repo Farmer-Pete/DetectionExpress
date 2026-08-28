@@ -1,4 +1,4 @@
-# Detection Dash — Build Plan
+# Detection Express — Build Plan
 
 This plan delivers the vertical slice in small steps. Each slice is playable from Slice 1 on. Each slice tests one hypothesis about whether the game is fun. We stop and look after each one.
 
@@ -6,9 +6,9 @@ Read `CONTEXT.md` for the vocabulary. This file holds the plan, not the glossary
 
 ## Setting and art
 
-- Name: Detection Dash.
-- Theme: cybersecurity, start to finish. The domain does not swap.
-- Art: an arcade look. Neon, fast, and loud. Think a SOC screen crossed with a coin-op cabinet.
+- Name: Detection Express.
+- Theme: a train station, start to finish. The domain does not swap.
+- Art: an arcade look. Neon, fast, and loud. Think a station departure board crossed with a coin-op cabinet.
 - Feel: the clean systems diagram stays readable underneath. The arcade skin adds score pops, juice, and drama on top.
 - Difficulty grows two ways. Add Endpoints with new data formats. Add new Hunts and Vulnerabilities to detect.
 
@@ -29,7 +29,7 @@ Update a box to `[x]` when its slice meets its "done when" test.
 - We grow the node set. We add a node only when a slice needs it.
 - Every slice from Slice 1 is playable. We can put it in front of someone and get a real reaction.
 - Cost is a foundation. It arrives before the twist.
-- The theme is cybersecurity throughout. We grow difficulty with new Endpoints, new data formats, new Hunts, and new Vulnerabilities.
+- The theme is the train station throughout. We grow difficulty with new Endpoints, new data formats, new Hunts, and new Vulnerabilities.
 - The prototype is done after Slice 6. That is one polished scenario.
 - Everything runs in the browser. Stack: TypeScript, React, and React Flow for the Pipeline. Plain TypeScript for the sim.
 
@@ -98,14 +98,14 @@ The twist in Slice 4 is the make-or-break. Slices 0 through 3 lay the foundation
 ### Slice 5 — Adapt or die
 
 - Goal: prove a new Hunt forcing a rewrite is the best moment, not a wall.
-- In scope: a new correlation Hunt. Example: alert only when a failed login is followed by a success from a new location. The player adds an Aggregate node and a stateful window. Flexibility is revealed. A rigid Algorithm forces a costly rewrite.
+- In scope: a new correlation Hunt. Example: alert only when a wrong PIN at the kiosk is followed by a valid tap from a new gate. The player adds an Aggregate node and a stateful window. Flexibility is revealed. A rigid Algorithm forces a costly rewrite.
 - Out of scope: full polish.
 - Done when: the player re-architects to serve the new Hunt and keeps the run alive.
 
 ### Slice 6 — One real scenario
 
 - Goal: prove the full loop holds together and reads well to other people.
-- In scope: the full security Scenario. Waves with calm windows. Win by surviving to the finish. Lose on Backlog overflow or Correctness collapse. The remaining nodes as the Scenario needs them. Visual and audio polish. A clean read of all four Resources.
+- In scope: the full station Scenario. Waves with calm windows. Win by surviving to the finish. Lose on Backlog overflow or Correctness collapse. The remaining nodes as the Scenario needs them. Visual and audio polish. A clean read of all four Resources.
 - Out of scope: more Domains, endless mode, campaign progression.
 - Done when: a new player finishes or loses one Scenario and understands why.
 

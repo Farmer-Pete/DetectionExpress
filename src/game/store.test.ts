@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { referenceSource } from "../sim/scenarios/brute-force-login/reference";
+import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";
 import { LEVEL_SEED } from "./tuning";

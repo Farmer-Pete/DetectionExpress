@@ -1,13 +1,15 @@
-# Detection Dash
+# Detection Express
 
-A real-time cybersecurity game. The player builds a detection engine, runs it against a rising stream of security events, and keeps re-architecting it as new endpoints, data formats, and threats arrive. The engine strains, and the game is the ongoing adaptation.
+The player builds a detection Engine and runs it against a rising stream of sensor readings from a train station. New sensors, new record formats, and new threats keep arriving, and the player keeps re-architecting the Engine to handle them. The Engine strains, and the game is the ongoing adaptation.
+
+The player runs the station watch. They do not stop anyone at the gate. They watch readings arrive from the station's sensors, spot the pattern that marks an intruder, and raise the alarm.
 
 ## Language
 
 ### Core
 
 **Engine**:
-The player-built system that detects threats in the event stream. Its structure is general, but the theme stays cybersecurity.
+The player-built system that detects threats in the reading stream. Its structure is general, but the theme stays the train station.
 _Avoid_: Pipeline (a Pipeline is one part of an Engine), machine, program.
 
 **Algorithm**:
@@ -27,11 +29,11 @@ Player-authored logic inside a Node. The player writes it in a compact scripting
 _Avoid_: Query, filter, logic, code.
 
 **Event**:
-One atomic record entering the Engine. It is a flat typed record. Its schema depends on its Endpoint.
+One sensor reading entering the Engine. It is a flat typed record. Its schema depends on its Endpoint.
 _Avoid_: Record, message, log, item, signal.
 
 **Endpoint**:
-A monitored source of security telemetry, such as a host, a server, a firewall, or a cloud service. Each Endpoint emits its own data format. Adding Endpoints is a main way the game grows harder.
+A sensor at the station, such as an account kiosk, a fare gate, a door reader, or a platform camera. Each Endpoint emits its own record format. Adding Endpoints is a main way the game grows harder.
 _Avoid_: Source, feed, input, device.
 
 **Alert**:
@@ -39,11 +41,11 @@ An object the Engine raises when the Algorithm decides a pattern is an Attack. I
 _Avoid_: Detection, hit, notification, flag.
 
 **Threat**:
-An Event that is part of a real Attack. On its own it can look ordinary. The Attack is the pattern across its Threats.
+An Event that is part of a real Attack. On its own it can look like an ordinary reading. The Attack is the pattern across its Threats.
 _Avoid_: signal, bad event.
 
 **Attack**:
-A real intrusion hidden in the stream. It is one or more Threats on an account inside a time span. A Hunt defines the pattern that reveals it. The Engine should raise one Alert per Attack. Catching it raises Correctness. Missing it lowers it.
+A real intrusion hidden in the stream, such as someone guessing a PIN at the account kiosk. It is one or more Threats on an account inside a time span. A Hunt defines the pattern that reveals it. The Engine should raise one Alert per Attack. Catching it raises Correctness. Missing it lowers it.
 _Avoid_: breach, incident, wave.
 
 **Ground truth**:
@@ -117,5 +119,5 @@ The correctness risk a Tool introduces. Example: a cache can serve a stale answe
 _Avoid_: Bug, drawback, penalty.
 
 **Stress event**:
-A spike in the stream that exposes an unhandled Side effect. Examples: a burst, a late event, a duplicate, two racing writers. It turns a hidden flaw into a visible Correctness drop.
+A spike in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to log the same card. It turns a hidden flaw into a visible Correctness drop.
 _Avoid_: Attack, wave, test, spike.

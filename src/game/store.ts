@@ -15,7 +15,7 @@ import {
 } from "@xyflow/react";
 import { create } from "zustand";
 import type { GraphEdge, GraphNode } from "../sim/graph";
-import { referenceSource } from "../sim/scenarios/brute-force-login/reference";
+import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { RuleErrorInfo } from "./run-controller";
 import { LEVEL_SEED } from "./tuning";

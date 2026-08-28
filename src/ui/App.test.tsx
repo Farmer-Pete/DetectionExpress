@@ -27,8 +27,8 @@ describe("App", () => {
   it("renders the heading, both gauges, and the Algorithm editor", () => {
     render(<App controller={stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
-    const heading = screen.getByRole("heading", { name: "Detection Dash" });
-    expect(heading.textContent).toBe("Detection Dash");
+    const heading = screen.getByRole("heading", { name: "Detection Express" });
+    expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Backlog")).toBeDefined();
     expect(screen.getByRole("button", { name: "Run" })).toBeDefined();

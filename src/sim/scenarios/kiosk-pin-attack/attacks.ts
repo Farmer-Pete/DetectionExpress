@@ -1,5 +1,5 @@
 /**
- * Burst planning and Ground truth for the brute-force-login Scenario. Victims are
+ * Burst planning and Ground truth for the kiosk-pin-attack Scenario. Victims are
  * preselected and each gets one non-overlapping window, so a victim's traffic is
  * known before any benign Event is drawn. The scorer reads the resulting Attacks;
  * the Rule never sees them.
@@ -7,7 +7,7 @@
 import type { Attack } from "../../attack";
 
 /** The pattern this Scenario reveals. Both the ground truth and the reference use it. */
-export const BRUTE_FORCE_REASON = "brute_force";
+export const PIN_BRUTE_FORCE_REASON = "pin_brute_force";
 
 /** One planned burst: its account, its window, and the failure times inside it. */
 export interface AttackPlan {
@@ -71,7 +71,7 @@ export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
   return {
     id: plan.id,
     account: plan.account,
-    reason: BRUTE_FORCE_REASON,
+    reason: PIN_BRUTE_FORCE_REASON,
     window: plan.window,
     eventIds,
   };

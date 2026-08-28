@@ -7,7 +7,7 @@
 /**
  * PipeEvent: the envelope the wire carries. The engine fields (`id`, `ts`,
  * `endpoint`) are readonly and stable; Normalize replaces only `payload` and
- * forwards a fresh envelope. `payload` is `RawAuthV1` at Ingest and the player's
+ * forwards a fresh envelope. `payload` is `RawKioskV1` at Ingest and the player's
  * own shape after Normalize, so it stays `unknown` at this boundary.
  *
  * There is no `truth` field here. Ground truth lives only in the scorer, so the

@@ -1,7 +1,8 @@
-# Detection Dash
+# Detection Express
 
-A real-time cybersecurity game. The player builds a detection engine, runs it against a rising
-stream of security events, and keeps re-architecting it as new threats arrive.
+A real-time detection game set in a train station. The player builds a detection engine,
+runs it against a rising stream of sensor readings, and keeps re-architecting it as new
+sensors, data formats, and threats arrive.
 
 ## Docs
 

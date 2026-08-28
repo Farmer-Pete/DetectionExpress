@@ -1,5 +1,5 @@
 /**
- * The brute-force-login Scenario. It composes the auth endpoint, preselects
+ * The kiosk-pin-attack Scenario. It composes the kiosk endpoint, preselects
  * victims, plans each victim's burst, then fills the timeline with fair benign
  * traffic. Every draw comes from the seeded `rng` and `faker`, so the same seed
  * always replays the same run.
@@ -10,14 +10,14 @@
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
 import {
-  BRUTE_FORCE_THRESHOLD,
-  BRUTE_FORCE_WINDOW_S,
+  PIN_BRUTE_FORCE_THRESHOLD,
+  PIN_BRUTE_FORCE_WINDOW_S,
   SCENARIO_MINUTES,
   THREAT_RATE,
 } from "../../../game/tuning";
 import type { Attack } from "../../attack";
-import { authV1, type RawAuthV1 } from "../../endpoints/auth/formats/auth-v1";
-import { generateAuth } from "../../endpoints/auth/internal";
+import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import { generateKiosk } from "../../endpoints/kiosk/internal";
 import type { GeneratedRun, Scenario } from "../../scenario";
 import { type AttackPlan, attackFromPlan, planAttacks } from "./attacks";
 
@@ -34,7 +34,7 @@ interface Draft {
   outcome: "success" | "fail";
   /** The owning Attack's id, or null for benign traffic. */
   attackId: number | null;
-  payload: RawAuthV1;
+  payload: RawKioskV1;
   /** Creation order, the stable tiebreak when two Events share a time. */
   seq: number;
 }
@@ -75,8 +75,8 @@ function generate(seed: number): GeneratedRun {
   const victimSet = new Set(victims);
   const plans = planAttacks(victims, rng, {
     timelineSeconds,
-    windowSeconds: BRUTE_FORCE_WINDOW_S,
-    threshold: BRUTE_FORCE_THRESHOLD,
+    windowSeconds: PIN_BRUTE_FORCE_WINDOW_S,
+    threshold: PIN_BRUTE_FORCE_THRESHOLD,
   });
   const planByAccount = new Map<string, AttackPlan>(plans.map((p) => [p.account, p]));
 
@@ -87,7 +87,7 @@ function generate(seed: number): GeneratedRun {
     outcome: "success" | "fail",
     attackId: number | null,
   ) => {
-    const payload = authV1.format(generateAuth({ rng, faker, ts, account, outcome }));
+    const payload = kioskV1.format(generateKiosk({ rng, faker, ts, account, outcome }));
     drafts.push({ ts, account, outcome, attackId, payload, seq: drafts.length });
   };
 
@@ -112,7 +112,7 @@ function generate(seed: number): GeneratedRun {
       draft(ts, account, "success", null);
     }
     if (!victimSet.has(account)) {
-      const fumbles = Math.floor(rng() * BRUTE_FORCE_THRESHOLD); // 0..threshold-1
+      const fumbles = Math.floor(rng() * PIN_BRUTE_FORCE_THRESHOLD); // 0..threshold-1
       for (let i = 0; i < fumbles; i++) {
         draft(Math.floor(rng() * timelineSeconds), account, "fail", null);
       }
@@ -121,7 +121,12 @@ function generate(seed: number): GeneratedRun {
 
   drafts.sort((a, b) => a.ts - b.ts || a.seq - b.seq);
 
-  const events = drafts.map((d, id) => ({ id, ts: d.ts, endpoint: authV1.id, payload: d.payload }));
+  const events = drafts.map((d, id) => ({
+    id,
+    ts: d.ts,
+    endpoint: kioskV1.id,
+    payload: d.payload,
+  }));
   const eventIdsByAttack = new Map<number, number[]>();
   drafts.forEach((d, id) => {
     if (d.attackId !== null) {
@@ -143,7 +148,7 @@ function generate(seed: number): GeneratedRun {
  */
 function assertFair(drafts: Draft[], victims: Set<string>, attacks: Attack[]): void {
   for (const attack of attacks) {
-    if (attack.eventIds.length < BRUTE_FORCE_THRESHOLD) {
+    if (attack.eventIds.length < PIN_BRUTE_FORCE_THRESHOLD) {
       throw new Error(`Attack ${attack.id} carries too little evidence.`);
     }
   }
@@ -157,7 +162,7 @@ function assertFair(drafts: Draft[], victims: Set<string>, attacks: Attack[]): v
 
 /**
  * The actual separability proof: no account's failures ever cross the
- * threshold inside any BRUTE_FORCE_WINDOW_S window, except as a victim's own
+ * threshold inside any PIN_BRUTE_FORCE_WINDOW_S window, except as a victim's own
  * Attack. Drafts arrive sorted by `ts`, so each account's failures are already
  * in time order; a two-pointer sweep over each account's failures finds the
  * worst window in one pass.
@@ -179,11 +184,11 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
     let start = 0;
     for (let end = 0; end < fails.length; end++) {
       const endTs = fails[end]?.ts ?? 0;
-      while (endTs - (fails[start]?.ts ?? 0) >= BRUTE_FORCE_WINDOW_S) {
+      while (endTs - (fails[start]?.ts ?? 0) >= PIN_BRUTE_FORCE_WINDOW_S) {
         start++;
       }
       const inThisWindow = fails.slice(start, end + 1);
-      if (inThisWindow.length < BRUTE_FORCE_THRESHOLD) {
+      if (inThisWindow.length < PIN_BRUTE_FORCE_THRESHOLD) {
         continue;
       }
       const insideAttack =
@@ -193,8 +198,8 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
         );
       if (!insideAttack) {
         throw new Error(
-          `Account ${account} crosses the brute-force threshold within a ` +
-            `${BRUTE_FORCE_WINDOW_S}s window outside any Attack.`,
+          `Account ${account} crosses the PIN brute-force threshold within a ` +
+            `${PIN_BRUTE_FORCE_WINDOW_S}s window outside any Attack.`,
         );
       }
     }
@@ -207,15 +212,15 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
  * per Attack is the actual skill being tested.
  */
 const briefing =
-  "This Hunt is brute-force login. Five or more failed logins on one account " +
-  "inside five minutes make an Attack. Normalize the raw auth Events, then " +
-  "write the Match Rule to catch that burst per account and raise one Alert " +
-  "per Attack, not one per failed login. Catch each Attack and Correctness " +
-  "climbs. Miss one, or fire extra Alerts on the same burst, and Correctness " +
-  "falls.";
+  "This Hunt is the kiosk PIN brute force. Five or more wrong PINs on one " +
+  "account inside five minutes make an Attack. Normalize the raw kiosk " +
+  "Events, then write the Match Rule to catch that burst per account and " +
+  "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
+  "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
+  "Correctness falls.";
 
-export const bruteForceLogin: Scenario = {
-  id: "brute-force-login",
+export const kioskPinAttack: Scenario = {
+  id: "kiosk-pin-attack",
   briefing,
   generate,
 };

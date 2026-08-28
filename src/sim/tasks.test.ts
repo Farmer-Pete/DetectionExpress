@@ -42,7 +42,7 @@ function guard(task: Promise<void>): void {
 }
 
 function ev(id: number, ts: number, payload: unknown = { u: "bob" }): PipeEvent {
-  return { id, ts, endpoint: "auth-v1", payload };
+  return { id, ts, endpoint: "kiosk-v1", payload };
 }
 
 function idOf(message: PipeMessage): number {
@@ -153,7 +153,7 @@ describe("runNormalize", () => {
     await input.push(ev(5, 100, { u: "bob" }));
     await flush();
     const out = await output.pull();
-    expect(out).toEqual({ id: 5, ts: 100, endpoint: "auth-v1", payload: { user: "bob" } });
+    expect(out).toEqual({ id: 5, ts: 100, endpoint: "kiosk-v1", payload: { user: "bob" } });
     input.close();
   });
 
@@ -218,7 +218,7 @@ describe("runMatch", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
-    const alert: Alert = { reason: "brute_force", at: 100, events: [1, 2] };
+    const alert: Alert = { reason: "pin_brute_force", at: 100, events: [1, 2] };
     guard(runMatch(input, output, idleClock, () => alert, scorer));
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
@@ -249,7 +249,7 @@ describe("runMatch", () => {
     await input.push({
       id: 7,
       ts: 200,
-      endpoint: "auth-v1",
+      endpoint: "kiosk-v1",
       payload: { id: 999, ts: 999, endpoint: "evil", user: "bob" },
     });
     await flush();
@@ -257,7 +257,7 @@ describe("runMatch", () => {
     if (isFlatView(seen)) {
       expect(seen.id).toBe(7); // the envelope id wins over the payload's 999
       expect(seen.ts).toBe(200);
-      expect(seen.endpoint).toBe("auth-v1");
+      expect(seen.endpoint).toBe("kiosk-v1");
       expect(seen.user).toBe("bob");
     }
     input.close();
