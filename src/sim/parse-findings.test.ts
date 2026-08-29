@@ -150,6 +150,13 @@ describe("parseFindings: rejects a bad alert core", () => {
   it("an unknown field on the alert", () => {
     expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1, extra: 1 } }]);
   });
+
+  it("a sparse eventIds array, since every() skips a hole", () => {
+    expectDetectReject([{ alert: { eventIds: new Array(2), reason: "r", at: 1 } }]);
+    const holed: unknown[] = [1];
+    holed[2] = 3;
+    expectDetectReject([{ alert: { eventIds: holed, reason: "r", at: 1 } }]);
+  });
 });
 
 describe("parseFindings: rejects a bad anchor and grouping", () => {
@@ -263,6 +270,17 @@ describe("parseFindings: rejects bad context and widgets", () => {
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
         context: [{ type: "table", columns: ["a", "b"], rows: [["only-one"]] }],
+      },
+    ]);
+  });
+
+  it("a sparse columns array, since every() skips a hole", () => {
+    const cols: unknown[] = ["a"];
+    cols[2] = "c";
+    expectDetectReject([
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        context: [{ type: "table", columns: cols, rows: [] }],
       },
     ]);
   });

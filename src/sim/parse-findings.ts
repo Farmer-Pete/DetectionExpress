@@ -68,6 +68,21 @@ function isStringOrNumber(value: unknown): value is string | number {
 }
 
 /**
+ * True when `values` has no holes and every element passes `predicate`. Plain
+ * `Array.prototype.every` skips a sparse hole and reports it as passing, so a
+ * sparse `eventIds` or `columns` array would validate as dense. This walks every
+ * index instead.
+ */
+function isDenseArrayOf(values: unknown[], predicate: (value: unknown) => boolean): boolean {
+  for (let index = 0; index < values.length; index += 1) {
+    if (!(index in values) || !predicate(values[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Reject any own key of `value` not named in `allowed`, so unknown fields fail.
  * The value is always a plain object the caller has just narrowed; the guard keeps
  * this a boundary helper without a broad `object` parameter.
@@ -184,9 +199,9 @@ function parseWidget(widget: unknown): void {
       if (
         !("columns" in widget) ||
         !Array.isArray(widget.columns) ||
-        !widget.columns.every(isString)
+        !isDenseArrayOf(widget.columns, isString)
       ) {
-        reject("A table widget needs a columns array of strings.");
+        reject("A table widget needs a dense columns array of strings.");
       }
       if (!("rows" in widget) || !Array.isArray(widget.rows)) {
         reject("A table widget needs a rows array.");
@@ -229,8 +244,8 @@ function parseAlert(alert: unknown): number[] {
   if (!("eventIds" in alert) || !Array.isArray(alert.eventIds) || alert.eventIds.length === 0) {
     reject("alert.eventIds must be a non-empty array.");
   }
-  if (!alert.eventIds.every(isEventId)) {
-    reject("alert.eventIds must hold non-negative finite integers.");
+  if (!isDenseArrayOf(alert.eventIds, isEventId)) {
+    reject("alert.eventIds must hold non-negative finite integers with no gaps.");
   }
   if (!("reason" in alert) || !isNonEmptyString(alert.reason)) {
     reject("alert.reason must be a non-empty string.");
