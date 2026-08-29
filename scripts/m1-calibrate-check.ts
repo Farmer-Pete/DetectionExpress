@@ -20,7 +20,7 @@ import {
   normalizeKiosk,
   SCAN_WINDOW_S,
 } from "../src/game/profiler/rules";
-import type { Alert } from "../src/sim/finding";
+import type { Finding } from "../src/sim/finding";
 
 /** A lighter protocol than production, so the harness finishes in a few seconds. */
 const HARNESS_CONFIG: MeasureConfig = { warmupMs: 40, batchMs: 40, batches: 3 };
@@ -40,9 +40,9 @@ function makePoorDetector(): Detector {
   const recent: MatchView[] = [];
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Alert | null {
+    step(event: MatchView): Finding[] {
       if (event.outcome !== "fail") {
-        return null;
+        return [];
       }
       recent.push(event);
       while (recent.length > 200) {
@@ -67,13 +67,13 @@ function makePoorDetector(): Detector {
       }
       if (count < THRESHOLD) {
         firing.delete(event.account);
-        return null;
+        return [];
       }
       if (firing.has(event.account)) {
-        return null;
+        return [];
       }
       firing.add(event.account);
-      return { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] };
+      return [{ alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] } }];
     },
     retained: () => recent.length,
   };
@@ -88,9 +88,9 @@ function makeBucketDetector(): Detector {
   const buckets = new Map<string, { fails: number[]; head: number }>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Alert | null {
+    step(event: MatchView): Finding[] {
       if (event.outcome !== "fail") {
-        return null;
+        return [];
       }
       const bucket = buckets.get(event.account) ?? { fails: [], head: 0 };
       bucket.fails.push(event.ts);
@@ -106,13 +106,13 @@ function makeBucketDetector(): Detector {
       const count = bucket.fails.length - bucket.head;
       if (count < THRESHOLD) {
         firing.delete(event.account);
-        return null;
+        return [];
       }
       if (firing.has(event.account)) {
-        return null;
+        return [];
       }
       firing.add(event.account);
-      return { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] };
+      return [{ alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] } }];
     },
     retained: () => {
       let total = 0;
@@ -133,7 +133,7 @@ function makeBucketDetector(): Detector {
 function makeHeavyDetector(): Detector {
   const inner = makeNaiveScan();
   return {
-    step(event: MatchView): Alert | null {
+    step(event: MatchView): Finding[] {
       const round = JSON.parse(JSON.stringify(event));
       const view: MatchView = {
         account: round.account,

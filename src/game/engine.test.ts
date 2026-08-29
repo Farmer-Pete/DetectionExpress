@@ -4,12 +4,13 @@ import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
+import { RuleError } from "../sim/rule-error";
 import type { Checkpoint } from "../sim/scenario";
 import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
-import { RuleError, type TaskAlgorithm } from "../sim/tasks";
+import type { TaskAlgorithm } from "../sim/tasks";
 import { ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
 import {
@@ -47,7 +48,7 @@ const FAST_RATE: ServiceRate = { num: 1_000_000, den: 1 };
 /** normalize is identity, match never fires: the pipeline runs, nothing scores. */
 const idleAlgorithm: TaskAlgorithm = {
   normalize: (raw) => raw,
-  match: () => null,
+  match: () => [],
 };
 
 /** A single final deadline at `atTick`. */
@@ -196,7 +197,7 @@ describe("engine integration with the reference Algorithm", () => {
     const algo = buildReferenceAlgorithm();
     return {
       normalize: (raw) => (isRawKioskV1(raw) ? algo.normalize(raw) : raw),
-      match: (view) => (isReferenceView(view) ? algo.match(view) : null),
+      match: (view) => (isReferenceView(view) ? algo.match(view) : []),
     };
   }
 

@@ -163,7 +163,12 @@ describe("kioskPinAttack.generate", () => {
     for (const ev of events) {
       const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      scorer.record(algo.match(view), ev);
+      // Fold Finding[] to Alert[] the same way runDetect does.
+      const alerts = algo
+        .match(view)
+        .filter((finding) => !finding.isPartial)
+        .map((finding) => finding.alert);
+      scorer.record(alerts, ev);
     }
     scorer.finalize();
 

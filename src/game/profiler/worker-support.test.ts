@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "../../sim/finding";
+import type { Finding } from "../../sim/finding";
 import type { EngineFields } from "../../sim/tasks";
 import type { LoadedAlgorithm } from "../algorithm";
 import { adaptLoaded, parseRequest } from "./worker-support";
@@ -45,7 +45,7 @@ describe("adaptLoaded", () => {
   const loaded: LoadedAlgorithm = {
     normalize: () => ({ account: "amy", terminal: "KIOSK-01", outcome: "fail" }),
     match: (v) =>
-      v instanceof Object ? { reason: "pin_brute_force", at: 5, eventIds: [1] } : null,
+      v instanceof Object ? [{ alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } }] : [],
   };
 
   it("passes the normalize result through as a plain object", () => {
@@ -57,24 +57,26 @@ describe("adaptLoaded", () => {
     });
   });
 
-  it("parses the match result into an Alert", () => {
+  it("parses the match result into findings", () => {
     const rule = adaptLoaded(loaded);
-    expect(rule.match(view())).toEqual({ reason: "pin_brute_force", at: 5, eventIds: [1] });
+    expect(rule.match(view())).toEqual([
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
+    ]);
   });
 
-  it("accepts an array of Alerts, like the run-time Match task (M2 review)", () => {
-    const alerts: Alert[] = [
-      { reason: "pin_brute_force", at: 5, eventIds: [1] },
-      { reason: "pin_brute_force", at: 6, eventIds: [2] },
+  it("accepts multiple findings, like the run-time Detect task (M2 review)", () => {
+    const findings: Finding[] = [
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
+      { alert: { reason: "pin_brute_force", at: 6, eventIds: [2] } },
     ];
-    const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, match: () => alerts };
+    const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, match: () => findings };
     const rule = adaptLoaded(arrayRule);
     expect(() => rule.match(view())).not.toThrow();
-    expect(rule.match(view())).toEqual(alerts);
+    expect(rule.match(view())).toEqual(findings);
   });
 
   it("throws when normalize returns a non-object", () => {
-    const bad: LoadedAlgorithm = { normalize: () => 42, match: () => null };
+    const bad: LoadedAlgorithm = { normalize: () => 42, match: () => [] };
     expect(() => adaptLoaded(bad).normalize({ t: 1, acct: "x", term: "y", res: "OK" })).toThrow();
   });
 });

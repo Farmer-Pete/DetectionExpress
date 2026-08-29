@@ -3,11 +3,11 @@ import { Clock, ManualDriver } from "../game/clock";
 import { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
 import type { Alert } from "./finding";
+import { RuleError } from "./rule-error";
 import type { ServiceRate } from "./service-governor";
 import {
   NODE_TASKS,
   type NodeRuntime,
-  RuleError,
   runIngest,
   runMatch,
   runNormalize,
@@ -263,13 +263,42 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     const alert: Alert = { reason: "pin_brute_force", at: 100, eventIds: [1, 2] };
-    guard(runMatch(input, output, idleClock, () => alert, scorer, FAST_RATE));
+    guard(runMatch(input, output, idleClock, () => [{ alert }], scorer, FAST_RATE));
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
     expect(scorer.records).toHaveLength(1);
-    expect(scorer.records[0]?.alerts).toBe(alert);
+    expect(scorer.records[0]?.alerts).toEqual([alert]); // the fold hands the scorer Alert[]
     expect(scorer.records[0]?.env.id).toBe(5);
     expect(idOf(await output.pull())).toBe(5); // Event forwarded to the Sink
+    input.close();
+  });
+
+  it("skips a partial finding, folding only the resolved alerts to the scorer", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const scorer = stubScorer();
+    const resolved: Alert = { reason: "pin_brute_force", at: 9, eventIds: [2] };
+    // A partial watch (isPartial) must not score in T1; only the resolved alert folds.
+    guard(
+      runMatch(
+        input,
+        output,
+        idleClock,
+        () => [
+          {
+            alert: { reason: "pin_brute_force", at: 8, eventIds: [1] },
+            eventId: 1,
+            isPartial: true,
+          },
+          { alert: resolved },
+        ],
+        scorer,
+        FAST_RATE,
+      ),
+    );
+    await input.push(ev(3, 0));
+    await flush();
+    expect(scorer.records[0]?.alerts).toEqual([resolved]);
     input.close();
   });
 
@@ -284,7 +313,7 @@ describe("runMatch", () => {
         idleClock,
         (view) => {
           seen = view;
-          return null;
+          return [];
         },
         stubScorer(),
         FAST_RATE,
@@ -313,7 +342,7 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     let done = false;
-    runMatch(input, output, idleClock, () => null, scorer, FAST_RATE)
+    runMatch(input, output, idleClock, () => [], scorer, FAST_RATE)
       .then(() => {
         done = true;
       })
@@ -346,10 +375,10 @@ describe("runMatch", () => {
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
-    expect(err instanceof RuleError && err.phase).toBe("match");
+    expect(err instanceof RuleError && err.phase).toBe("detect");
   });
 
-  it("turns a non-Alert match return into a structured error, not a crash", async () => {
+  it("turns a non-Finding match return into a structured error, not a crash", async () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     let err: unknown;
@@ -361,7 +390,7 @@ describe("runMatch", () => {
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
-    expect(err instanceof RuleError && err.phase).toBe("match");
+    expect(err instanceof RuleError && err.phase).toBe("detect");
   });
 
   it("charges the governor per real Event, after record and before push, never on the marker", async () => {
@@ -369,7 +398,7 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const clock = recordingClock();
     // 0.5 records per tick -> the governor sleeps two whole ticks per Event.
-    guard(runMatch(input, output, clock, () => null, stubScorer(), { num: 1, den: 2 }));
+    guard(runMatch(input, output, clock, () => [], stubScorer(), { num: 1, den: 2 }));
     await input.push(ev(1, 0));
     await input.push(ev(2, 0));
     await input.push(ev(3, 0));
@@ -383,7 +412,7 @@ describe("runMatch", () => {
     const output = new Channel<PipeMessage>(10);
     const clock = recordingClock();
     // 20 records per tick: the first Events owe a zero-tick charge, so no sleep.
-    guard(runMatch(input, output, clock, () => null, stubScorer(), { num: 20, den: 1 }));
+    guard(runMatch(input, output, clock, () => [], stubScorer(), { num: 20, den: 1 }));
     await input.push(ev(1, 0));
     await input.push(ev(2, 0));
     await input.push(END_OF_STREAM);

@@ -16,6 +16,8 @@ import { GAME_SECONDS_PER_TICK } from "../game/tuning";
 import type { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
 import type { Alert } from "./finding";
+import { parseFindings } from "./parse-findings";
+import { RuleError } from "./rule-error";
 import { makeGovernor, type ServiceRate } from "./service-governor";
 
 /** The slice of the Clock a task needs. The concrete Clock satisfies it. */
@@ -41,20 +43,6 @@ export interface TaskScorer {
   finalize: () => void;
 }
 
-/**
- * A structured Rule error. A throwing or bad-shaped `normalize`/`match` becomes
- * one of these, so the supervisor reports it cleanly through `onError` instead of
- * the raw player exception crashing the app.
- */
-export class RuleError extends Error {
-  readonly phase: "normalize" | "match";
-  constructor(phase: "normalize" | "match", message: string) {
-    super(message);
-    this.name = "RuleError";
-    this.phase = phase;
-  }
-}
-
 /** A readable message for a thrown value, with a source frame when it carries one. */
 function messageOf(error: unknown): string {
   if (error instanceof Error) {
@@ -62,11 +50,6 @@ function messageOf(error: unknown): string {
     return frame?.startsWith("at ") ? `${error.message} (${frame.slice(3)})` : error.message;
   }
   return String(error);
-}
-
-/** A string primitive, by its tag rather than a representation check. */
-function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
 }
 
 /**
@@ -110,38 +93,6 @@ export function withEngineFields<T extends object>(
   endpoint: string,
 ): T & EngineFields {
   return { ...base, id, ts, endpoint };
-}
-
-/** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
-function isAlert(value: unknown): value is Alert {
-  return (
-    value instanceof Object &&
-    "reason" in value &&
-    isString(value.reason) &&
-    "at" in value &&
-    Number.isFinite(value.at) &&
-    "eventIds" in value &&
-    Array.isArray(value.eventIds) &&
-    value.eventIds.every((event) => Number.isFinite(event))
-  );
-}
-
-/** Parse the Rule's match return into Alert | Alert[] | null, or reject it. */
-export function matchResult(value: unknown): Alert | Alert[] | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (Array.isArray(value)) {
-    if (value.every(isAlert)) {
-      return value;
-    }
-  } else if (isAlert(value)) {
-    return value;
-  }
-  throw new RuleError(
-    "match",
-    "match must return an Alert, an array of Alerts, null, or undefined.",
-  );
 }
 
 /**
@@ -238,9 +189,15 @@ export async function runMatch(
     try {
       result = match(view);
     } catch (error) {
-      throw new RuleError("match", messageOf(error));
+      throw new RuleError("detect", messageOf(error));
     }
-    scorer.record(matchResult(result), message);
+    // Parse the return at the boundary, then fold the resolved (non-partial)
+    // findings down to their Alerts. T1 never scores a partial; T2 moves this
+    // skip into the scorer when it folds Finding[] directly.
+    const alerts = parseFindings(result)
+      .filter((finding) => !finding.isPartial)
+      .map((finding) => finding.alert);
+    scorer.record(alerts, message);
     const ticks = governor.charge();
     if (ticks > 0) {
       await clock.sleep(ticks);

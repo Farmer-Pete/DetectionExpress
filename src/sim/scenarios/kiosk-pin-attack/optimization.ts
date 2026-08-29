@@ -17,7 +17,7 @@
  */
 
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
-import type { Alert } from "../../finding";
+import type { Finding } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /**
@@ -41,7 +41,7 @@ const counts = {}; // per-account in-window fail count
 const recent = {}; // per-account last THRESHOLD fail ids, the evidence to cite
 const firing = {};
 export function match(e) {
-  if (e.outcome !== "fail") return null;
+  if (e.outcome !== "fail") return [];
   queue.push({ account: e.account, ts: e.ts, id: e.id });
   counts[e.account] = (counts[e.account] ?? 0) + 1;
   const r = (recent[e.account] ??= []);
@@ -58,11 +58,11 @@ export function match(e) {
   }
   if ((counts[e.account] ?? 0) < THRESHOLD) {
     firing[e.account] = false;
-    return null;
+    return [];
   }
-  if (firing[e.account]) return null; // one Alert per burst; no duplicates
+  if (firing[e.account]) return []; // one Alert per burst; no duplicates
   firing[e.account] = true;
-  return { reason: "pin_brute_force", at: e.ts, eventIds: recent[e.account].slice() };
+  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: recent[e.account].slice() } }];
 }
 `;
 
@@ -82,7 +82,7 @@ interface MatchView extends NormalizedKiosk {
 
 export interface OptimizationAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(e: MatchView): Alert | null;
+  match(e: MatchView): Finding[];
 }
 
 /** One queued fail in the global expiry queue: its account, time, and id. */
@@ -125,7 +125,7 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
     },
     match(e) {
       if (e.outcome !== "fail") {
-        return null;
+        return [];
       }
       queue.push({ account: e.account, ts: e.ts, id: e.id });
       counts.set(e.account, (counts.get(e.account) ?? 0) + 1);
@@ -157,13 +157,13 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
 
       if ((counts.get(e.account) ?? 0) < THRESHOLD) {
         firing.delete(e.account);
-        return null;
+        return [];
       }
       if (firing.has(e.account)) {
-        return null; // one Alert per burst; no duplicates
+        return []; // one Alert per burst; no duplicates
       }
       firing.add(e.account);
-      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: [...ids] };
+      return [{ alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: [...ids] } }];
     },
   };
 }

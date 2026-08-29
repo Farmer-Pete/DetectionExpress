@@ -21,13 +21,12 @@ function fail(account: string, ts: number, id: number): MatchView {
   return { account, terminal: "KIOSK-01", outcome: "fail", id, ts, endpoint: "kiosk-v1" };
 }
 
-/** Feed a detector a whole stream and collect the times it raised an Alert. */
+/** Feed a detector a whole stream and collect the times it raised a finding. */
 function fireTimes(detector: Detector, stream: MatchView[]): number[] {
   const fires: number[] = [];
   for (const event of stream) {
-    const alert = detector.step(event);
-    if (alert !== null) {
-      fires.push(alert.at);
+    for (const finding of detector.step(event)) {
+      fires.push(finding.alert.at);
     }
   }
   return fires;

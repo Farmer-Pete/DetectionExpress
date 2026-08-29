@@ -37,8 +37,8 @@ describe("store", () => {
   });
 
   it("holds and clears the error through setError", () => {
-    useGameStore.getState().setError({ phase: "match", message: "boom" });
-    expect(useGameStore.getState().error).toEqual({ phase: "match", message: "boom" });
+    useGameStore.getState().setError({ phase: "detect", message: "boom" });
+    expect(useGameStore.getState().error).toEqual({ phase: "detect", message: "boom" });
     useGameStore.getState().setError(null);
     expect(useGameStore.getState().error).toBeNull();
   });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../sim/event";
-import type { Alert } from "../../sim/finding";
+import type { Finding } from "../../sim/finding";
 import type { GraphEdge, GraphNode } from "../../sim/graph";
 import { buildOptimizationAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/optimization";
 import { buildReferenceAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/reference";
@@ -259,7 +259,7 @@ interface KioskView {
 /** The in-process twin shape both the naive default and the tally satisfy. */
 interface KioskTwin {
   normalize(raw: RawKioskV1): { account: string; terminal: string; outcome: "success" | "fail" };
-  match(view: KioskView): Alert | null;
+  match(view: KioskView): Finding[];
 }
 
 function isTwinView(value: unknown): value is KioskView {
@@ -270,7 +270,7 @@ function isTwinView(value: unknown): value is KioskView {
 function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
   return {
     normalize: (raw) => (isRawKioskV1(raw) ? twin.normalize(raw) : raw),
-    match: (view) => (isTwinView(view) ? twin.match(view) : null),
+    match: (view) => (isTwinView(view) ? twin.match(view) : []),
   };
 }
 

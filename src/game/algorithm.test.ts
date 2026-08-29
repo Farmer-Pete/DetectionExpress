@@ -5,12 +5,12 @@ describe("adaptModule", () => {
   it("returns a working match and defaults normalize to identity when absent", () => {
     const algo = adaptModule({
       match: (event: { flag?: boolean }) =>
-        event.flag ? { reason: "r", at: 1, eventIds: [1] } : null,
+        event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
     });
     expect(algo.match instanceof Function).toBe(true);
     expect(algo.normalize("passthrough")).toBe("passthrough"); // identity default
-    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, eventIds: [1] });
-    expect(algo.match({ flag: false })).toBeNull();
+    expect(algo.match({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.match({ flag: false })).toEqual([]);
   });
 
   it("uses the module's normalize when it exports one", () => {
@@ -36,12 +36,12 @@ describe("loadAlgorithm", () => {
       Promise.resolve({
         normalize: (r: { x: number }) => ({ u: r.x }),
         match: (event: { flag?: boolean }) =>
-          event.flag ? { reason: "r", at: 1, eventIds: [1] } : null,
+          event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
       });
     const algo = await loadAlgorithm("ignored source", importSource);
     expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
-    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, eventIds: [1] });
-    expect(algo.match({ flag: false })).toBeNull();
+    expect(algo.match({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.match({ flag: false })).toEqual([]);
   });
 
   it("surfaces a syntax error the import source rejects with", async () => {
