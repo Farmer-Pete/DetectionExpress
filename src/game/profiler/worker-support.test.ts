@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import type { Alert } from "../../sim/alert";
 import type { EngineFields } from "../../sim/tasks";
 import type { LoadedAlgorithm } from "../algorithm";

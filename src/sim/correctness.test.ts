@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import type { Alert } from "./alert";
 import type { Attack } from "./attack";
 import { type Counts, createScorer, type ScorerConfig, score } from "./correctness";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { ORACLE_ROUNDS, oracleChecksum, xorshift32 } from "./oracle";
 
 // The locked checksum for oracleChecksum(1, 1000), captured from the kernel.

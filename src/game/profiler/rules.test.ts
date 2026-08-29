@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../tuning";
 import {
   type Detector,

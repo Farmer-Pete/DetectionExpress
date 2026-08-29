@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "bun:test";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";

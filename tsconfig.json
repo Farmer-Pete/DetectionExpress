@@ -4,7 +4,7 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["bun"],
+    "types": ["node"],
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
@@ -27,5 +27,5 @@
     "allowUnusedLabels": false,
     "erasableSyntaxOnly": true
   },
-  "include": ["src", "scripts"]
+  "include": ["src", "scripts", "vite.config.ts", "vitest.config.ts"]
 }

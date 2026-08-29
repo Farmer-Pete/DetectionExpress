@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../game/store";
 import { optimizationSource } from "../sim/scenarios/kiosk-pin-attack/optimization";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
@@ -66,7 +66,7 @@ describe("AlgorithmEditor", () => {
     // lifecycle so happy-dom does not need a real Blob URL implementation.
     const anchors: HTMLElement[] = [];
     const realCreateElement = document.createElement.bind(document);
-    const createSpy = spyOn(document, "createElement");
+    const createSpy = vi.spyOn(document, "createElement");
     createSpy.mockImplementation((tagName: string) => {
       const element = realCreateElement(tagName);
       if (tagName === "a") {
@@ -74,9 +74,9 @@ describe("AlgorithmEditor", () => {
       }
       return element;
     });
-    const createUrlSpy = spyOn(URL, "createObjectURL");
+    const createUrlSpy = vi.spyOn(URL, "createObjectURL");
     createUrlSpy.mockImplementation(() => "blob:test");
-    const revokeUrlSpy = spyOn(URL, "revokeObjectURL");
+    const revokeUrlSpy = vi.spyOn(URL, "revokeObjectURL");
     revokeUrlSpy.mockImplementation(() => {});
 
     fireEvent.click(screen.getByRole("button", { name: "Download this Scenario" }));

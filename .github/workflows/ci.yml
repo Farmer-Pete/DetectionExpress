@@ -15,47 +15,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
         with:
-          bun-version: 1.4.0
+          node-version: 26.5.1
+          cache: pnpm
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Lint and format check
-        run: bun run lint
+        run: pnpm run lint
 
       - name: Typecheck
-        run: bun run typecheck
+        run: pnpm run typecheck
 
       - name: Test
-        run: bun run test
+        run: pnpm run test
 
       - name: Build
-        run: bun run build
+        run: pnpm run build
 
       - name: Verify the static build carries no dev-kit code
-        run: bun run verify:static
+        run: pnpm run verify:static
 
       - name: Build the dev kit
-        run: bun run build:devkit
+        run: pnpm run build:devkit
+
+      - name: Verify the profiler worker is bundled and wired
+        run: pnpm run verify:worker-build
+
+      - name: Verify the dev-kit tarball is complete
+        run: pnpm run pack:check
 
       - name: Dead code check
-        run: bun run knip
+        run: pnpm run knip
 
-  # Second supply-chain layer. The bunfig.toml cooldown keeps fresh releases out;
+  # Second supply-chain layer. The pnpm-workspace.yaml cooldown keeps fresh releases out;
   # this catches versions with a known advisory (high or critical) that are already in the lockfile.
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
         with:
-          bun-version: 1.4.0
+          node-version: 26.5.1
+          cache: pnpm
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Security audit
-        run: bun run audit
+        run: pnpm run audit

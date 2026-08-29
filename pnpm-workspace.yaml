@@ -1,0 +1,10 @@
+# pnpm workspace + install settings (pnpm reads config keys from this file).
+#
+# Supply-chain cooldown. pnpm installs only npm versions published at least this
+# many minutes ago, so a freshly compromised release is caught and yanked before
+# it can enter our lockfile. 10080 minutes is 7 days (604800 s / 60).
+minimumReleaseAge: 10080
+
+# Escape hatch: package names here bypass the cooldown when a fresh version is
+# genuinely needed. Keep it empty; justify and revert every entry that is added.
+minimumReleaseAgeExclude: []
