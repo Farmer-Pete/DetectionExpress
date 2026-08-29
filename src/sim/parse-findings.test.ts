@@ -108,6 +108,13 @@ describe("parseFindings: rejects the return shape", () => {
     expectDetectReject({ eventIds: [1], reason: "r", at: 1 });
   });
 
+  it("a sparse array with a missing index, not just no finding", () => {
+    expectDetectReject(new Array(1));
+    const holed: unknown[] = [{ alert: { eventIds: [1], reason: "r", at: 1 } }];
+    holed[2] = { alert: { eventIds: [2], reason: "r", at: 2 } };
+    expectDetectReject(holed);
+  });
+
   it("a missing alert, and a non-object alert", () => {
     expectDetectReject([{}]);
     expectDetectReject([{ alert: 5 }]);

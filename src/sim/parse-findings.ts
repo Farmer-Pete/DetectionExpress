@@ -301,10 +301,19 @@ function isFinding(value: unknown): value is Finding {
  * Parse the Rule's `detect()` return into `Finding[]`, or throw. The return must
  * be an array; each element is validated exactly. On success the same array is
  * returned, now guaranteed to satisfy the `Finding` contract.
+ *
+ * A sparse array (a hole from `new Array(1)` or an elision like `[, x]`) is
+ * malformed, not "no finding". `filter` would silently skip a hole, so reject any
+ * gap first, then let `isFinding` narrow the dense array.
  */
 export function parseFindings(value: unknown): Finding[] {
   if (!Array.isArray(value)) {
     reject("detect must return an array of findings (use [] for no finding).");
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (!(index in value)) {
+      reject("detect returned a sparse array; every finding index must be present.");
+    }
   }
   return value.filter(isFinding);
 }
