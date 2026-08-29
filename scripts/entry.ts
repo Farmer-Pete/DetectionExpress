@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * True when this module is the process entry point (was run directly, not
- * imported). Replaces Bun's `import.meta.main`, which Node does not provide.
+ * imported). A portable check that does not rely on `import.meta.main`.
  *
  * Compares `argv[1]` against the module's own file, canonicalizing both with
  * realpath first so a bin symlink (`pnpm dlx`, an npm bin shim) still matches.

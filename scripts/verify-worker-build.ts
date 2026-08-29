@@ -1,7 +1,7 @@
 /**
  * verify:worker-build — prove Vite bundled and wired the profiler Web Worker.
  *
- * GH-22 was that Bun's HTML bundler never wired
+ * GH-22 was that the previous HTML bundler never wired
  * `new Worker(new URL("./worker.ts", import.meta.url), { type: "module" })`, so the
  * worker never loaded over http. Vite bundles it out of the box. This build-output
  * assertion proves that automatically: it builds each mode in memory and checks that
@@ -11,7 +11,7 @@
  * 2. some emitted chunk references that worker file by its hashed name.
  *
  * Together those prove the worker is a real, separately-emitted module that the main
- * bundle loads by URL — exactly what was missing under Bun. Vite emits the worker as
+ * bundle loads by URL — exactly what was missing before. Vite emits the worker as
  * an output asset (not a chunk), so the check scans both. The pure check
  * (`inspectWorkerWiring`) is unit-tested with synthetic files; the script runs it
  * against the real static and devkit builds.

@@ -38,8 +38,8 @@ import {
   resolveStaticPath,
 } from "./dd-dev.mjs";
 
-// This test file lives at the repo root; `here` is that directory. Replaces Bun's
-// `import.meta.dir`, which Node does not provide.
+// This test file lives at the repo root; `here` is that directory, derived from
+// `import.meta.url` (Node has no `import.meta.dir`).
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = 4321;

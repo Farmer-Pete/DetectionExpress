@@ -23,7 +23,7 @@ reviews:
 
   path_filters:
     - "!dist/**"             # build output, not reviewed
-    - "!bun.lock"            # machine-managed lockfile
+    - "!pnpm-lock.yaml"      # machine-managed lockfile
 
   # No `tools:` block on purpose. All bundled linters stay enabled as a second
   # layer of checks over CI (defense in depth).

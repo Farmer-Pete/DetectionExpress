@@ -27,34 +27,34 @@ into the public build.
 Ship one source that builds two deliverables, and distribute the dev build with a
 single local host.
 
-- **One flag, two builds.** `process.env.PUBLIC_DEV_KIT` splits them. It is a `PUBLIC_*`
-  env var, which Bun inlines into the frontend bundle at build time. `build:static`
-  defines it `"false"` for the CDN; `build:devkit` defines it `"true"` for the dev
-  build. `src/game/dev-flag.ts` reads it once as `export const DEV_KIT =
+- **One flag, two builds.** `process.env.PUBLIC_DEV_KIT` splits them. Vite inlines it
+  into the frontend bundle at build time through `define`. `build:static` defines it
+  `"false"` for the CDN; `build:devkit` defines it `"true"` for the dev build.
+  `src/game/dev-flag.ts` reads it once as `export const DEV_KIT =
   process.env.PUBLIC_DEV_KIT === "true"`. A property read is safe when unset, so an
   unconfigured build defaults to off.
-- **The gate is co-located with the const.** Bun folds `if (DEV_KIT)` only inside the
-  module that declares the const, so the dynamic imports of the dev-only modules live in
-  `dev-flag.ts` as `loadDevHostClient()` and `loadDevKitPanel()`. Bun evaluates the
+- **The gate is co-located with the const.** The bundler folds `if (DEV_KIT)` at the
+  const's use site, so the dynamic imports of the dev-only modules live in
+  `dev-flag.ts` as `loadDevHostClient()` and `loadDevKitPanel()`. Vite evaluates the
   branch to `false` in the static build and drops both `dev-host-client` and
   `DevKitPanel` from the bundle entirely. `App.tsx` keeps only inert, null-guarded
   call-sites.
 - **`verify:static` proves the strip.** It rebuilds the static bundle in memory and
-  fails if either dev module is an input of Bun's build metafile, or if the dev-host
-  endpoint strings (`api/algorithm`, `algorithm/events`) appear in the emitted JS. It
-  runs in CI.
-- **One local host, same origin.** `dd-dev.mjs` is a zero-dependency Node-and-Bun script
+  fails if either dev module is a rendered module of the static build's chunk graph, or
+  if the dev-host endpoint strings (`api/algorithm`, `algorithm/events`) appear in the
+  emitted JS. It runs in CI.
+- **One local host, same origin.** `dd-dev.mjs` is a zero-dependency Node script
   that serves the packaged dev build over loopback and manages the player's Algorithm
   files: create, watch, and open. Source flows to the browser over same-origin
   Server-Sent Events, scoped per Scenario by `?slug=`. The game learns the host is
   present from the compile-time flag, not from a magic route.
 - **Distribution: local now, published later.** `dd-dev.mjs` is the `bin` of the
   `detection-express` package, with the dev build packed beside it under `dist-devkit`.
-  Today the developer runs it from the repo (`bun run build:devkit && bun dd-dev.mjs`)
+  Today the developer runs it from the repo (`pnpm run build:devkit && node dd-dev.mjs`)
   and opens the printed URL. The package stays `private`; the public one-command
-  install (`bunx detection-express`) is a deferred follow-up, because `bunx` installs
-  from npm not git and a git install will not build the assets without trust — so an
-  npm publish is the clean route when we choose it. The host resolves its assets
+  install (`pnpm dlx detection-express`) is a deferred follow-up, because `pnpm dlx`
+  installs from npm not git and a git install will not build the assets without trust —
+  so an npm publish is the clean route when we choose it. The host resolves its assets
   relative to itself, so it works from any working directory.
 
 ## Consequences
@@ -66,7 +66,7 @@ Good:
   `localhost` never apply, because there is no cross-origin hop.
 - The public CDN build carries no dev-kit code. The metafile check makes that a
   build-time guarantee, not a hope.
-- The host adds no dependencies. It is one file on Node and Bun built-ins, so the supply
+- The host adds no dependencies. It is one file on Node built-ins, so the supply
   chain and the offline story stay intact.
 
 Costs and risks:
