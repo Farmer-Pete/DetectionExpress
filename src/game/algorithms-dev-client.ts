@@ -183,8 +183,9 @@ export function createAlgorithmsDevClient(deps: AlgorithmsDevClientDeps): Algori
     enter(): void {
       // Snapshot the in-game source ONCE. A re-entry over an already-persisted snapshot
       // (a forced reload) must keep the original, not overwrite it with the post-reload
-      // default text.
-      if (session.getItem(LOCAL_MODE_SNAPSHOT_KEY) === null) {
+      // default text. Gate on a VALID snapshot, not raw presence: a malformed value would
+      // otherwise skip the snapshot here and leave `stop()` with nothing to restore.
+      if (readSnapshot(session) === null) {
         const snapshot: LocalModeSnapshot = { source: store.getSource() };
         session.setItem(LOCAL_MODE_SNAPSHOT_KEY, JSON.stringify(snapshot));
       }

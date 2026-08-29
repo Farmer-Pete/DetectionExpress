@@ -97,9 +97,12 @@ Costs and limits:
 ## Reversal path
 
 The static build and the public site do not depend on any of this; the dev path is behind
-`import.meta.env.DEV` and tree-shakes out, which `verify:static` proves. To pull the local-IDE
-feature: delete `src/dev/algorithms-hmr.ts`, `src/game/algorithms-dev-client.ts`, and
-`src/game/algorithms-dev-flag.ts`, drop the `algorithmsHmr()` plugin and the dev wiring in
-`App.tsx`, and keep or remove `store.localAlgorithm` and the default engine as suits. The
-in-game editor keeps working throughout.
-</content>
+`import.meta.env.DEV` and tree-shakes out. `verify:static` proves the dev client, the plugin,
+and the `algo:` events are absent from the production bundle. The url-mode loader branch in
+`algorithm.ts` is still bundled, but it is unreachable in production: its only trigger,
+`store.localAlgorithm`, is set solely by the DEV-gated dev client, so production always runs
+the in-game source path. To pull the local-IDE feature: delete `src/dev/algorithms-hmr.ts`,
+`src/game/algorithms-dev-client.ts`, and `src/game/algorithms-dev-flag.ts`, drop the
+`algorithmsHmr()` plugin and the dev wiring in `App.tsx`, and keep or remove
+`store.localAlgorithm` and the default engine as suits. The in-game editor keeps working
+throughout.

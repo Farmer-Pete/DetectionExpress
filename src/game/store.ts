@@ -50,9 +50,9 @@ interface GameState {
   /** The current run or Rule error, or null. The editor shows it. */
   error: RuleErrorInfo | null;
   /**
-   * True while an external source drives the run (the dev host watches a file), so
-   * the editor locks its textarea. Generic, not dev-specific: the static build
-   * carries it too, always false and harmless.
+   * True while an external source drives the run (a local-IDE file, hot-reloaded by the
+   * algorithms-hmr plugin), so the editor locks its textarea. Generic, not dev-specific:
+   * the production build carries it too, always false and harmless.
    */
   sourceLocked: boolean;
   onNodesChange: OnNodesChange<PipelineNode>;

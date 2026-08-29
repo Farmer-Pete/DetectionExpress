@@ -5,15 +5,15 @@
  * Apply Optimization swaps the naive default for the incremental tally in one edit,
  * the small change the player makes to survive the peak (GH3-PLAN.md section 13).
  *
- * While `sourceLocked`, an external source (the dev host watching a file) drives the
- * run: the textarea goes read-only and mirrors the pushed source, and the Run and
- * Apply Optimization buttons hide, since a manual reload or edit would fight the
- * watcher. This is a generic lock, not dev code, so the static build keeps it
+ * While `sourceLocked`, a local-IDE file (hot-reloaded by the algorithms-hmr plugin)
+ * drives the run: the textarea goes read-only and mirrors the loaded source, and the Run
+ * and Apply Optimization buttons hide, since a manual reload or edit would fight the
+ * hot-reload. This is a generic lock, not dev code, so the production build keeps it
  * (always unlocked there).
  *
  * "Download this Scenario" is generic too, so it ships in every build: it saves the
- * current source as `detection-express-<slug>.js`, the same filename the dev host
- * writes, so a player on the CDN can hand-carry the file into a local dev kit.
+ * current source to a file, so a player can carry their engine into their own editor as a
+ * starting point for `src/algorithms/<slug>.ts`.
  */
 import { useGameStore } from "../game/store";
 import { optimizationSource } from "../sim/scenarios/kiosk-pin-attack/optimization";

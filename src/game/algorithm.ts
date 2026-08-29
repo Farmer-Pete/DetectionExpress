@@ -101,19 +101,34 @@ export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
 }
 
 /**
+ * Append a per-load nonce to a url-mode import URL, so each load is a distinct URL. The
+ * browser evaluates a module once per URL, so re-importing the same `?v=` URL returns the
+ * cached instance with its module-scope state intact. A re-entry (same version) or the
+ * main-thread profiler would then run against dirty state. The `?v=` version stays the
+ * rate-cache key; this nonce only forces a fresh module instance per load.
+ */
+export function freshModuleUrl(url: string, nonce: number): string {
+  return `${url}${url.includes("?") ? "&" : "?"}r=${nonce}`;
+}
+
+/** Per-load counter behind `freshModuleUrl`. Each url import gets a unique URL. */
+let importNonce = 0;
+
+/**
  * Import a `LoadTarget` as a real ES module. In url mode the browser imports the
- * Vite-served module URL directly (local-IDE mode; a cache-bust `?v=` makes a save a
- * fresh URL). In source mode it wraps the string as a Blob module and imports that.
- * Browser only: Node's ESM loader rejects `blob:` imports
- * (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Covered by the app in a real browser and the
- * manual worker smoke, not by a Node unit test.
+ * Vite-served module URL, freshened with a per-load nonce so each load is a new module
+ * instance and never a cached one with stale state. In source mode it wraps the string as
+ * a Blob module and imports that. Browser only: Node's ESM loader rejects `blob:` imports
+ * (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Covered by the app in a real browser and the manual
+ * worker smoke, not by a Node unit test.
  */
 const defaultImportSource: ImportSource = async (target) => {
   if (target.kind === "url") {
+    importNonce += 1;
     // `@vite-ignore`: keep this dynamic import out of Vite's static analysis. Otherwise
-    // Vite tracks the `?v=` module and full-reloads the page on every save, instead of
-    // letting the algorithms-hmr plugin suppress the reload and drive a seamless re-import.
-    return await import(/* @vite-ignore */ target.url);
+    // Vite tracks the module and full-reloads the page on every save, instead of letting
+    // the algorithms-hmr plugin suppress the reload and drive a seamless re-import.
+    return await import(/* @vite-ignore */ freshModuleUrl(target.url, importNonce));
   }
   const url = URL.createObjectURL(new Blob([target.source], { type: "text/javascript" }));
   try {

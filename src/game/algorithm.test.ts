@@ -2,11 +2,29 @@ import { describe, expect, it } from "vitest";
 import {
   type AlgorithmSource,
   adaptModule,
+  freshModuleUrl,
   type ImportSource,
   type LoadTarget,
   loadAlgorithm,
   toLoadTarget,
 } from "./algorithm";
+
+describe("freshModuleUrl", () => {
+  it("appends a nonce with & when the url already has a query", () => {
+    expect(freshModuleUrl("/src/algorithms/foo.ts?v=3", 7)).toBe("/src/algorithms/foo.ts?v=3&r=7");
+  });
+
+  it("appends a nonce with ? when the url has no query", () => {
+    expect(freshModuleUrl("/src/game/default-engine.ts", 2)).toBe(
+      "/src/game/default-engine.ts?r=2",
+    );
+  });
+
+  it("gives two loads at the same version distinct urls, so each is a fresh module", () => {
+    const url = "/src/algorithms/foo.ts?v=3";
+    expect(freshModuleUrl(url, 4)).not.toBe(freshModuleUrl(url, 5));
+  });
+});
 
 describe("adaptModule", () => {
   it("returns a working match and defaults normalize to identity when absent", () => {

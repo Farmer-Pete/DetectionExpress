@@ -27,6 +27,7 @@ import type { HmrContext, ModuleNode, Plugin, ViteDevServer, WebSocketClient } f
 import {
   buildChangedFrame,
   createVersionCounter,
+  isValidAlgorithmSlug,
   resolveActiveFile,
 } from "../game/algorithms-resolve.ts";
 
@@ -96,8 +97,8 @@ export function algorithmsHmr(): Plugin {
       // Bootstrap: resolve the asking client's slug and reply to that socket alone.
       server.ws.on(HELLO_EVENT, (data: unknown, client: WebSocketClient): void => {
         const slug = readHelloSlug(data);
-        if (slug === null) {
-          return;
+        if (slug === null || !isValidAlgorithmSlug(slug)) {
+          return; // ignore a malformed or invalid slug; never track it or touch the fs
         }
         subscribed.add(slug);
         pingSlug(client, slug, version.current());
