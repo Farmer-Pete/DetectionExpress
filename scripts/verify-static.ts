@@ -1,9 +1,12 @@
 /**
- * verify:static — prove the CDN (static) build carries no dev-kit code.
+ * verify:static — prove the two-mode `define` splits the dev-kit code cleanly: the
+ * CDN (static) build carries none of it, and the devkit build carries all of it.
  *
- * It rebuilds the static bundle in memory (`vite build --mode static`, with
- * `build.write: false` so nothing hits disk) and fails if any dev-kit code
- * survived. Two checks, one exact and one a backstop:
+ * It rebuilds BOTH bundles in memory (`vite build --mode static` / `--mode devkit`,
+ * each with `build.write: false` so nothing hits disk) and inspects their chunk
+ * graphs.
+ *
+ * Static build (`inspectStatic`), three checks:
  *
  * 1. Module absence, from the build's chunk graph: neither `dev-host-client` nor
  *    `DevKitPanel` may be a rendered module of any static chunk. The dev-flag
@@ -13,22 +16,38 @@
  *    `api/algorithm` and `algorithm/events` live only in `dev-host-client`, so
  *    neither may appear. The module-absence check (1) is the primary proof; these
  *    codebase-specific strings are the backstop.
+ * 3. Non-vacuous: the app entry module (`main.tsx`) must be a rendered module of
+ *    some chunk. Without this, a build that emitted zero chunks — or nothing at all —
+ *    would pass checks (1) and (2) trivially, proving nothing.
  *
- * The build is reduced to a plain `ChunkView[]` (fileName, module ids, code) so the
- * pass/fail logic (`inspectStatic`) is pure and unit-tested with synthetic chunks,
- * and `verifyStatic` takes the build as an injectable seam.
+ * Devkit build (`inspectDevkit`), one check: both `dev-host-client` and `DevKitPanel`
+ * MUST be rendered modules. This confirms the static-omits result is the `define`
+ * folding them out, not the code path having been deleted from both builds.
  *
- * Run with `pnpm run verify:static`. It exits non-zero, with the leak named, when a
- * check fails.
+ * Each build is reduced to a plain `ChunkView[]` (fileName, module ids, code) so the
+ * pass/fail logic (`inspectStatic`, `inspectDevkit`) is pure and unit-tested with
+ * synthetic chunks, and `verifyStatic` takes both builds as injectable seams.
+ *
+ * Run with `pnpm run verify:static`. It exits non-zero, with the leak or gap named,
+ * when a check fails.
  */
 import { build } from "vite";
 import { isMainModule } from "./entry";
 
-/** The dev modules that must never be a rendered module of the static bundle. */
+/**
+ * The dev modules that gate on `DEV_KIT`: absent from the static bundle, present in
+ * the devkit one.
+ */
 const DEV_MODULE_INPUTS = ["dev-host-client", "DevKitPanel"];
 
 /** Dev-host endpoint strings that only `dev-host-client` carries. */
 const DEV_ENDPOINT_MARKERS = ["api/algorithm", "algorithm/events"];
+
+/**
+ * The app entry module. Its presence proves the static build is non-vacuous — that
+ * it actually bundled the app, so the dev-module-absence result means something.
+ */
+const APP_ENTRY_INPUT = "main.tsx";
 
 /** A rendered JS chunk reduced to the fields the checks read. */
 export interface ChunkView {
@@ -64,17 +83,17 @@ function toChunkViews(result: Awaited<ReturnType<typeof build>>): ChunkView[] {
   return chunks;
 }
 
-/** Build the static bundle in memory and reduce it to chunk views. */
-async function buildStatic(): Promise<ChunkView[]> {
+/** Build one mode in memory and reduce it to chunk views. */
+async function buildMode(mode: "static" | "devkit"): Promise<ChunkView[]> {
   const result = await build({
-    mode: "static",
+    mode,
     logLevel: "silent",
     build: { write: false },
   });
   return toChunkViews(result);
 }
 
-/** The pure pass/fail logic: collect every dev-kit leak the chunks carry. */
+/** The pure pass/fail logic for the static build: no dev-kit leak, and non-vacuous. */
 export function inspectStatic(chunks: ChunkView[]): VerifyResult {
   const failures: string[] = [];
 
@@ -93,22 +112,55 @@ export function inspectStatic(chunks: ChunkView[]): VerifyResult {
     }
   }
 
+  if (!moduleIds.some((id) => id.includes(APP_ENTRY_INPUT))) {
+    failures.push(
+      `static build is vacuous: no chunk carries the app entry (expected a module matching "${APP_ENTRY_INPUT}")`,
+    );
+  }
+
   return { ok: failures.length === 0, failures };
 }
 
-/** Build (or take an injected build) and inspect it for dev-kit leaks. */
+/** The pure pass/fail logic for the devkit build: both dev modules must be present. */
+export function inspectDevkit(chunks: ChunkView[]): VerifyResult {
+  const failures: string[] = [];
+
+  const moduleIds = chunks.flatMap((chunk) => chunk.moduleIds);
+  for (const marker of DEV_MODULE_INPUTS) {
+    if (!moduleIds.some((id) => id.includes(marker))) {
+      failures.push(
+        `dev module "${marker}" is absent from the devkit build (expected it as a rendered module)`,
+      );
+    }
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
+/**
+ * Build (or take injected builds of) both modes and inspect each: the static build
+ * must carry no dev-kit code and be non-vacuous; the devkit build must carry all of
+ * it. Failures are prefixed with the mode they came from.
+ */
 export async function verifyStatic(
-  runBuild: () => Promise<ChunkView[]> = buildStatic,
+  runStaticBuild: () => Promise<ChunkView[]> = () => buildMode("static"),
+  runDevkitBuild: () => Promise<ChunkView[]> = () => buildMode("devkit"),
 ): Promise<VerifyResult> {
-  return inspectStatic(await runBuild());
+  const staticResult = inspectStatic(await runStaticBuild());
+  const devkitResult = inspectDevkit(await runDevkitBuild());
+  const failures = [
+    ...staticResult.failures.map((failure) => `[static] ${failure}`),
+    ...devkitResult.failures.map((failure) => `[devkit] ${failure}`),
+  ];
+  return { ok: failures.length === 0, failures };
 }
 
 if (isMainModule(process.argv[1], import.meta.url)) {
   const result = await verifyStatic();
   if (result.ok) {
-    console.log("verify:static — the CDN build carries no dev-kit code.");
+    console.log("verify:static — static carries no dev-kit code; devkit carries all of it.");
   } else {
-    console.error("verify:static — dev-kit code leaked into the static build:");
+    console.error("verify:static — the two-mode dev-kit split is wrong:");
     for (const failure of result.failures) {
       console.error(`  - ${failure}`);
     }

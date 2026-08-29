@@ -7,7 +7,10 @@
  *
  * - `package.json` and the `dd-dev.mjs` bin, with `dd-dev.mjs` executable (mode +x),
  * - `dist-devkit/index.html`,
- * - a hashed worker chunk (`dist-devkit/assets/worker-<hash>.js`), and
+ * - a hashed worker chunk (`dist-devkit/assets/worker-<hash>.js`),
+ * - the hashed dev-kit dynamic chunks (`dev-host-client-<hash>.js` and
+ *   `DevKitPanel-<hash>.js`), which are loaded by dynamic import — so `index.html`
+ *   never names them and the reference scan below cannot catch a missing one, and
  * - every asset the built `index.html` references (the entry JS, the CSS, favicon).
  *
  * The pure check (`checkPack`) is unit-tested with a synthetic file list; the script
@@ -23,6 +26,15 @@ import { isMainModule } from "./entry";
 
 const DEVKIT_DIR = "dist-devkit";
 const WORKER_CHUNK = /^dist-devkit\/assets\/worker-[A-Za-z0-9_-]+\.js$/;
+
+/** The dev-kit dynamic-import chunks the built app loads at runtime, by base name. */
+const DEV_CHUNKS: { label: string; pattern: RegExp }[] = [
+  {
+    label: "dev-host-client",
+    pattern: /^dist-devkit\/assets\/dev-host-client-[A-Za-z0-9_-]+\.js$/,
+  },
+  { label: "DevKitPanel", pattern: /^dist-devkit\/assets\/DevKitPanel-[A-Za-z0-9_-]+\.js$/ },
+];
 
 /** The parsed shape of `pnpm pack --dry-run --json`. */
 interface PackResult {
@@ -69,6 +81,13 @@ export function checkPack(
   }
   if (!packedFiles.some((file) => WORKER_CHUNK.test(file))) {
     failures.push(`no hashed worker chunk (${DEVKIT_DIR}/assets/worker-<hash>.js) in the tarball`);
+  }
+  for (const { label, pattern } of DEV_CHUNKS) {
+    if (!packedFiles.some((file) => pattern.test(file))) {
+      failures.push(
+        `no hashed dev-kit chunk (${DEVKIT_DIR}/assets/${label}-<hash>.js) in the tarball`,
+      );
+    }
   }
   for (const ref of referencedAssets(indexHtml)) {
     const packedPath = path.posix.join(DEVKIT_DIR, ref);

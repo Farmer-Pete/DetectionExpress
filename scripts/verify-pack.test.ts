@@ -16,6 +16,8 @@ const completeFiles = [
   "dist-devkit/assets/index-abc.js",
   "dist-devkit/assets/index-def.css",
   "dist-devkit/assets/worker-xyz.js",
+  "dist-devkit/assets/dev-host-client-jkl.js",
+  "dist-devkit/assets/DevKitPanel-mno.js",
 ];
 
 describe("referencedAssets", () => {
@@ -46,6 +48,20 @@ describe("checkPack", () => {
     const result = checkPack(withoutWorker, INDEX_HTML, true);
     expect(result.ok).toBe(false);
     expect(result.failures.join(" ")).toMatch(/worker/);
+  });
+
+  it("fails when the dev-host-client dynamic chunk is absent", () => {
+    const withoutDevHost = completeFiles.filter((f) => !f.includes("dev-host-client-"));
+    const result = checkPack(withoutDevHost, INDEX_HTML, true);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(" ")).toMatch(/dev-host-client/);
+  });
+
+  it("fails when the DevKitPanel dynamic chunk is absent", () => {
+    const withoutPanel = completeFiles.filter((f) => !f.includes("DevKitPanel-"));
+    const result = checkPack(withoutPanel, INDEX_HTML, true);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(" ")).toMatch(/DevKitPanel/);
   });
 
   it("fails when a referenced asset is not packed", () => {

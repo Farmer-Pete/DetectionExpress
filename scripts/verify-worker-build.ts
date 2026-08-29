@@ -8,13 +8,15 @@
  *
  * 1. a worker file is emitted (Vite emits the worker bundle as `worker-<hash>.js`),
  *    and
- * 2. some emitted chunk references that worker file by its hashed name.
+ * 2. an ENTRY chunk references that worker file by its hashed name.
  *
  * Together those prove the worker is a real, separately-emitted module that the main
- * bundle loads by URL — exactly what was missing before. Vite emits the worker as
- * an output asset (not a chunk), so the check scans both. The pure check
- * (`inspectWorkerWiring`) is unit-tested with synthetic files; the script runs it
- * against the real static and devkit builds.
+ * bundle loads by URL — exactly what was missing before. Requiring the reference to
+ * come from an entry chunk (not just any chunk) keeps the worker on the reachable
+ * graph: a mention buried in some orphan chunk that nothing loads would not prove the
+ * app wires the worker. Vite emits the worker as an output asset (not a chunk), so
+ * the check scans both. The pure check (`inspectWorkerWiring`) is unit-tested with
+ * synthetic files; the script runs it against the real static and devkit builds.
  *
  * Run with `pnpm run verify:worker-build`. Exits non-zero on a failure in either
  * build.
@@ -33,6 +35,8 @@ export interface EmittedFile {
   /** The JS source for a chunk; empty for a non-chunk asset (unused by the check). */
   content: string;
   isChunk: boolean;
+  /** True only for a chunk that is a static entry point (the reachable-graph root). */
+  isEntry: boolean;
 }
 
 /** The outcome of a check: clean, or the reasons it failed. */
@@ -51,9 +55,14 @@ function toEmittedFiles(result: Awaited<ReturnType<typeof build>>): EmittedFile[
     }
     for (const item of output.output) {
       if (item.type === "chunk") {
-        files.push({ fileName: item.fileName, content: item.code, isChunk: true });
+        files.push({
+          fileName: item.fileName,
+          content: item.code,
+          isChunk: true,
+          isEntry: item.isEntry,
+        });
       } else {
-        files.push({ fileName: item.fileName, content: "", isChunk: false });
+        files.push({ fileName: item.fileName, content: "", isChunk: false, isEntry: false });
       }
     }
   }
@@ -70,7 +79,7 @@ async function buildMode(mode: string): Promise<EmittedFile[]> {
   return toEmittedFiles(result);
 }
 
-/** The pure check: a worker file is emitted and referenced by an emitted chunk. */
+/** The pure check: a worker file is emitted and referenced by an ENTRY chunk. */
 export function inspectWorkerWiring(files: EmittedFile[]): VerifyResult {
   const worker = files.find((file) => WORKER_FILE.test(file.fileName));
   if (!worker) {
@@ -81,12 +90,13 @@ export function inspectWorkerWiring(files: EmittedFile[]): VerifyResult {
     (file) =>
       file !== worker &&
       file.isChunk &&
+      file.isEntry &&
       (file.content.includes(worker.fileName) || file.content.includes(workerBase)),
   );
   if (!referenced) {
     return {
       ok: false,
-      failures: [`worker file "${worker.fileName}" is emitted but no chunk references it`],
+      failures: [`worker file "${worker.fileName}" is emitted but no entry chunk references it`],
     };
   }
   return { ok: true, failures: [] };

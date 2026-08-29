@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -7,7 +8,9 @@ import { fileURLToPath } from "node:url";
  *
  * Compares `argv[1]` against the module's own file, canonicalizing both with
  * realpath first so a bin symlink (`pnpm dlx`, an npm bin shim) still matches.
- * Robust to realpath throwing on a vanished path: it falls back to the raw path.
+ * Robust to realpath throwing on a vanished path: it falls back to `path.resolve`,
+ * so a relative `argv[1]` is still absolutized before the compare (a raw-path
+ * fallback could misclassify a direct run as an import).
  */
 export function isMainModule(
   argv1: string | undefined,
@@ -21,7 +24,7 @@ export function isMainModule(
     try {
       return realpath(p);
     } catch {
-      return p;
+      return path.resolve(p);
     }
   };
   return resolve(argv1) === resolve(fileURLToPath(moduleUrl));
