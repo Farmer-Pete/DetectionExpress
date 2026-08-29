@@ -74,6 +74,17 @@ function assertTickRange(range: TickRange, label: string): void {
   }
 }
 
+/**
+ * Reject a fare or balance value that is not a whole, non-negative amount. Both the
+ * balance and the fare coefficients must be non-negative integers, so the computed
+ * fare and the running balance stay non-negative integers in whole currency units.
+ */
+function assertWholeAmount(value: number, label: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`rider: ${label} must be a non-negative integer.`);
+  }
+}
+
 /** Sample a whole number of ticks in `[min, max]` from the seeded rng. */
 function sampleTicks(range: TickRange, rng: () => number): number {
   return range.min + Math.floor(rng() * (range.max - range.min + 1));
@@ -120,6 +131,9 @@ function pickDestination(
 export function createRider(config: RiderConfig): Actor<FareGateReading, RiderEnv> {
   assertTickRange(config.jitterTicks, "jitterTicks");
   assertTickRange(config.dwellTicks, "dwellTicks");
+  assertWholeAmount(config.balance, "balance");
+  assertWholeAmount(config.fare.base, "fare.base");
+  assertWholeAmount(config.fare.perMinute, "fare.perMinute");
 
   let balance = config.balance;
   let state: RiderState = { kind: "outside", station: config.origin };
@@ -141,7 +155,12 @@ export function createRider(config: RiderConfig): Actor<FareGateReading, RiderEn
           balance,
         };
         state = { kind: "outside", station: state.dest };
-        return { readings: [reading], nextTick: tick + sampleTicks(config.dwellTicks, rng) };
+        // Floor the dwell at one tick so a sampled zero still strictly advances the
+        // scheduler, which rejects a reschedule that does not move past `tick`.
+        return {
+          readings: [reading],
+          nextTick: tick + Math.max(1, sampleTicks(config.dwellTicks, rng)),
+        };
       }
 
       // OUTSIDE: try to start a trip, if still within the window and able to afford one.

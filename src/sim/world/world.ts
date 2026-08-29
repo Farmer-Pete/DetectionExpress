@@ -6,61 +6,65 @@
  */
 import worldJson from "../../../docs/world/world.json";
 
-/** A trust layer, 0 (public) to 4 (the control floor). A door's grade is a zone's `trustLevel`. */
+/**
+ * A trust layer, 0 (public) to 4 (the control floor). A door's grade is a zone's
+ * `trustLevel`. Every field is `readonly`, and the parsed world is deep-frozen, so
+ * an actor can read the environment but never mutate it (see ADR-0007).
+ */
 interface Zone {
-  id: string;
-  name: string;
-  trustLevel: number;
-  area: string;
-  whoBelongs: string;
-  securityParallel: string;
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly trustLevel: number;
+  readonly area: string;
+  readonly whoBelongs: string;
+  readonly securityParallel: string;
+  readonly description: string;
 }
 
 /** A line: an ordered run of stations, the wire a rider tapping a fare gate reports. */
 interface Line {
-  id: string;
-  name: string;
-  color: string;
-  stations: string[];
-  loop: boolean;
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly color: string;
+  readonly stations: readonly string[];
+  readonly loop: boolean;
+  readonly description: string;
 }
 
 /** An undirected edge to a neighbor on a line, with its ride time in minutes. */
 interface Connection {
-  to: string;
-  line: string;
-  minutes: number;
+  readonly to: string;
+  readonly line: string;
+  readonly minutes: number;
 }
 
 /** A passenger stop. A station on two or more lines is an interchange. */
 interface Station {
-  id: string;
-  name: string;
-  lines: string[];
-  interchange: boolean;
-  connections: Connection[];
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly lines: readonly string[];
+  readonly interchange: boolean;
+  readonly connections: readonly Connection[];
+  readonly description: string;
 }
 
 /** A staff-only facility off the passenger map, near one station. */
 interface Site {
-  id: string;
-  name: string;
-  type: string;
-  zonesPresent: string[];
-  nearestStation: string;
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly zonesPresent: readonly string[];
+  readonly nearestStation: string;
+  readonly description: string;
 }
 
 /** The Operations Control Center: the one control-center location. */
 interface ControlCenter {
-  id: string;
-  name: string;
-  type: string;
-  zonesPresent: string[];
-  description: string;
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly zonesPresent: readonly string[];
+  readonly description: string;
 }
 
 /**
@@ -69,25 +73,28 @@ interface ControlCenter {
  * is `(location, name)`. This slice seeds only `site` and `control-center` doors.
  */
 interface Door {
-  location: string;
-  locationType: "site" | "control-center";
-  name: string;
-  zone: string;
+  readonly location: string;
+  readonly locationType: "site" | "control-center";
+  readonly name: string;
+  readonly zone: string;
 }
 
-/** The whole validated world. */
+/** The whole validated world. Deeply read-only: the environment never changes during a run. */
 export interface World {
-  zones: Zone[];
-  lines: Line[];
-  stations: Station[];
-  sites: Site[];
-  controlCenter: ControlCenter;
-  doors: Door[];
+  readonly zones: readonly Zone[];
+  readonly lines: readonly Line[];
+  readonly stations: readonly Station[];
+  readonly sites: readonly Site[];
+  readonly controlCenter: ControlCenter;
+  readonly doors: readonly Door[];
 }
 
-/** A string primitive, by its tag rather than a `typeof` representation check. */
+/**
+ * A string primitive. The tag check alone also passes a boxed `new String("x")`,
+ * which is an object, so the `instanceof String` clause excludes it.
+ */
 function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
+  return Object.prototype.toString.call(value) === "[object String]" && !(value instanceof String);
 }
 
 /** A finite number, the only numeric a travel time or trust level may be. */
@@ -95,15 +102,20 @@ function isFiniteNumber(value: unknown): value is number {
   return Number.isFinite(value);
 }
 
-/** A boolean primitive, by its tag. */
+/** A boolean primitive, by its tag. The `instanceof` clause excludes a boxed `Boolean`. */
 function isBoolean(value: unknown): value is boolean {
-  return Object.prototype.toString.call(value) === "[object Boolean]";
+  return (
+    Object.prototype.toString.call(value) === "[object Boolean]" && !(value instanceof Boolean)
+  );
 }
 
 /** An array of string primitives. */
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isString);
 }
+
+/** The site-type enum from `world.schema.json`. A site's `type` must be one of these. */
+const SITE_TYPES: readonly string[] = ["depot", "signal-cabin", "substation"];
 
 function parseZone(value: unknown): Zone {
   if (!(value instanceof Object)) {
@@ -135,6 +147,9 @@ function parseZone(value: unknown): Zone {
     )
   ) {
     throw new Error("world.zones: a zone field has the wrong type.");
+  }
+  if (!Number.isInteger(trustLevel) || trustLevel < 0 || trustLevel > 4) {
+    throw new Error(`world.zones: zone "${id}" trustLevel must be an integer in [0, 4].`);
   }
   return { id, name, trustLevel, area, whoBelongs, securityParallel, description };
 }
@@ -253,6 +268,9 @@ function parseSite(value: unknown): Site {
   ) {
     throw new Error("world.sites: a site field has the wrong type.");
   }
+  if (!SITE_TYPES.includes(type)) {
+    throw new Error(`world.sites: site "${id}" has unknown type "${type}".`);
+  }
   return { id, name, type, zonesPresent, nearestStation, description };
 }
 
@@ -283,6 +301,9 @@ function parseControlCenter(value: unknown): ControlCenter {
   ) {
     throw new Error("world.controlCenter: a field has the wrong type.");
   }
+  if (type !== "control-center") {
+    throw new Error(`world.controlCenter: type must be "control-center", got "${type}".`);
+  }
   return { id, name, type, zonesPresent, description };
 }
 
@@ -307,6 +328,20 @@ function parseDoor(value: unknown): Door {
   return { location, locationType, name, zone };
 }
 
+/**
+ * Recursively `Object.freeze` a value and every object it holds, so a runtime
+ * mutation of the shared world fails rather than silently breaking determinism.
+ */
+function deepFreeze(value: unknown): void {
+  if (!(value instanceof Object)) {
+    return;
+  }
+  Object.freeze(value);
+  for (const child of Object.values(value)) {
+    deepFreeze(child);
+  }
+}
+
 /** Throw on the first repeated id in a list, naming the collection. */
 function requireUniqueIds(ids: string[], label: string): void {
   const seen = new Set<string>();
@@ -319,7 +354,7 @@ function requireUniqueIds(ids: string[], label: string): void {
 }
 
 /** Prove the undirected station graph is one connected component. */
-function requireConnectedStationGraph(stations: Station[]): void {
+function requireConnectedStationGraph(stations: readonly Station[]): void {
   const start = stations[0]?.id;
   if (start === undefined) {
     return;
@@ -353,7 +388,7 @@ function requireConnectedStationGraph(stations: Station[]): void {
 }
 
 /** The zones a door's location offers, or undefined when the location does not resolve. */
-function zonesAtDoorLocation(world: World, door: Door): string[] | undefined {
+function zonesAtDoorLocation(world: World, door: Door): readonly string[] | undefined {
   if (door.locationType === "site") {
     return world.sites.find((site) => site.id === door.location)?.zonesPresent;
   }
@@ -458,6 +493,41 @@ function validateWorld(world: World): void {
 
   requireConnectedStationGraph(world.stations);
 
+  // Every consecutive pair in a line's ordered `stations` must share a reciprocal
+  // edge on that line, of equal weight, so `sharedLineRoute` and `lineMinutes` can
+  // walk the sequence. The loop line's sequence already returns to its start, so
+  // iterating consecutive pairs also covers its closing edge.
+  for (const line of world.lines) {
+    for (let index = 0; index + 1 < line.stations.length; index++) {
+      const here = line.stations[index];
+      const next = line.stations[index + 1];
+      if (here === undefined || next === undefined) {
+        continue;
+      }
+      const forward = stationById
+        .get(here)
+        ?.connections.find((edge) => edge.to === next && edge.line === line.id);
+      if (forward === undefined) {
+        throw new Error(
+          `world.lines: line "${line.id}" sequence "${here}"->"${next}" has no matching edge.`,
+        );
+      }
+      const back = stationById
+        .get(next)
+        ?.connections.find((edge) => edge.to === here && edge.line === line.id);
+      if (back === undefined) {
+        throw new Error(
+          `world.lines: line "${line.id}" sequence "${here}"->"${next}" has no reciprocal edge.`,
+        );
+      }
+      if (back.minutes !== forward.minutes) {
+        throw new Error(
+          `world.lines: line "${line.id}" sequence "${here}"<->"${next}" has unequal weights.`,
+        );
+      }
+    }
+  }
+
   for (const site of world.sites) {
     if (!stationById.has(site.nearestStation)) {
       throw new Error(
@@ -503,7 +573,7 @@ function validateWorld(world: World): void {
         `world.doors: door "${door.name}" zone "${door.zone}" is not present at "${door.location}".`,
       );
     }
-    const key = `${door.location} ${door.name}`;
+    const key = `${door.location}::${door.name}`;
     if (doorKeys.has(key)) {
       throw new Error(`world.doors: duplicate door key (${door.location}, ${door.name}).`);
     }
@@ -554,6 +624,7 @@ export function parseWorld(value: unknown): World {
     doors: doors.map(parseDoor),
   };
   validateWorld(world);
+  deepFreeze(world);
   return world;
 }
 

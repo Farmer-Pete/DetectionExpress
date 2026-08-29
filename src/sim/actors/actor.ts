@@ -33,8 +33,8 @@ interface ActResult<Reading> {
  */
 export interface Actor<Reading, Env> {
   readonly id: string;
-  /** The actor's first tick, used to seed its scheduler record. */
-  start(context: StartContext): number;
+  /** The actor's first tick, a non-negative integer, or `"dormant"` to never run. */
+  start(context: StartContext): number | "dormant";
   /** One transition at `tick`: emit readings, then reschedule or go dormant. */
   act(context: ActContext<Env>): ActResult<Reading>;
 }
@@ -137,6 +137,11 @@ export function runActors<Reading, Env>(input: RunActorsInput<Reading, Env>): Re
     const rng = randomLcg(seed);
     const seededPriority = rng();
     const nextTick = actor.start({ rng });
+    if (nextTick !== "dormant" && (!Number.isInteger(nextTick) || nextTick < 0)) {
+      throw new Error(
+        `runActors: actor "${actor.id}" started at ${nextTick}, which is not "dormant" or a non-negative integer.`,
+      );
+    }
     return { actor, rng, seededPriority, nextTick };
   });
 

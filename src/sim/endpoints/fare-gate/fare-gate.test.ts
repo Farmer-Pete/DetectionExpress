@@ -75,6 +75,16 @@ describe("isRawGatekeepGate", () => {
     expect(isRawGatekeepGate({ ...valid, STORED_VALUE: "250" })).toBe(false);
   });
 
+  it("rejects a boxed String, which is an object, not a string primitive", () => {
+    const boxed = new String("C09");
+    expect(isRawGatekeepGate({ ...valid, MEDIA_SERIAL: boxed })).toBe(false);
+  });
+
+  it("rejects a fractional or negative STORED_VALUE", () => {
+    expect(isRawGatekeepGate({ ...valid, STORED_VALUE: 250.5 })).toBe(false);
+    expect(isRawGatekeepGate({ ...valid, STORED_VALUE: -1 })).toBe(false);
+  });
+
   it("rejects a missing field and a non-object", () => {
     expect(
       isRawGatekeepGate({

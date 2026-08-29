@@ -18,4 +18,12 @@ describe("buildCards", () => {
       expect(card.id).toMatch(/^C\d{2,}$/);
     }
   });
+
+  it("rejects a count that is not a finite non-negative integer", () => {
+    expect(() => buildCards(Number.POSITIVE_INFINITY, randomLcg(1))).toThrow(
+      /non-negative integer/,
+    );
+    expect(() => buildCards(-1, randomLcg(1))).toThrow(/non-negative integer/);
+    expect(() => buildCards(3.5, randomLcg(1))).toThrow(/non-negative integer/);
+  });
 });

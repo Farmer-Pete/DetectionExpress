@@ -1,3 +1,4 @@
+import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
 import { type Actor, actorSeedHash, minutesToTicks, runActors } from "./actor";
 
@@ -92,6 +93,52 @@ describe("runActors guards", () => {
   it("rejects a non-integer or negative horizon", () => {
     expect(() => runActors({ actors: [], env: null, runSeed: 1, horizon: 1.5 })).toThrow(/horizon/);
     expect(() => runActors({ actors: [], env: null, runSeed: 1, horizon: -1 })).toThrow(/horizon/);
+  });
+
+  it("rejects a start tick that is not a non-negative integer", () => {
+    const startingAt = (at: number): Actor<Tap, null> => ({
+      id: "s",
+      start: () => at,
+      act: ({ tick }) => ({ readings: [{ id: "s", tick }], nextTick: "dormant" }),
+    });
+    for (const bad of [Number.NaN, 0.5, -1]) {
+      expect(() =>
+        runActors({ actors: [startingAt(bad)], env: null, runSeed: 1, horizon: 10 }),
+      ).toThrow(/started at/);
+    }
+  });
+
+  it("accepts a valid integer start", () => {
+    const valid: Actor<Tap, null> = {
+      id: "v",
+      start: () => 3,
+      act: ({ tick }) => ({ readings: [{ id: "v", tick }], nextTick: "dormant" }),
+    };
+    expect(runActors({ actors: [valid], env: null, runSeed: 1, horizon: 10 })).toHaveLength(1);
+  });
+});
+
+describe("runActors tie-break order", () => {
+  it("orders due records by (nextTick, seededPriority, actorId)", () => {
+    const runSeed = 42;
+    const ids = ["r1", "r2", "r3"];
+    // Independent oracle: each actor's seededPriority is the first draw of its own
+    // stream, and its stream is seeded by the (runSeed, id) hash. These ids do not
+    // collide on their base seed, so no rehash is involved.
+    const priority = new Map(ids.map((id) => [id, randomLcg(actorSeedHash(runSeed, id))()]));
+    const expected = [...ids].sort((a, b) => {
+      const pa = priority.get(a) ?? 0;
+      const pb = priority.get(b) ?? 0;
+      if (pa !== pb) {
+        return pa - pb;
+      }
+      return a < b ? -1 : 1;
+    });
+    // horizon 3 so only the tie at tick 0 fires: each pulse reschedules to tick 3,
+    // which is at the half-open horizon and does not run.
+    const out = runActors({ actors: tiedCast(), env: null, runSeed, horizon: 3 });
+    expect(out.map((tap) => tap.tick)).toEqual([0, 0, 0]);
+    expect(out.map((tap) => tap.id)).toEqual(expected);
   });
 });
 

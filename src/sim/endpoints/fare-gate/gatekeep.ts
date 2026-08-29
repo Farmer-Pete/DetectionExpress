@@ -55,9 +55,17 @@ export const gatekeepGate: Endpoint<FareGateReading, RawGatekeepGate> = {
   }),
 };
 
-/** A string primitive, by its tag rather than a `typeof` representation check. */
+/**
+ * A string primitive. The tag check alone also passes a boxed `new String("x")`,
+ * which is an object, so the `instanceof String` clause excludes it.
+ */
 function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
+  return Object.prototype.toString.call(value) === "[object String]" && !(value instanceof String);
+}
+
+/** A finite number, so a domain check can narrow it before a comparison. */
+function isFiniteNumber(value: unknown): value is number {
+  return Number.isFinite(value);
 }
 
 /**
@@ -81,6 +89,8 @@ export function isRawGatekeepGate(value: unknown): value is RawGatekeepGate {
     "GATE_RESULT" in value &&
     (value.GATE_RESULT === "PERMIT" || value.GATE_RESULT === "REJECT") &&
     "STORED_VALUE" in value &&
-    Number.isFinite(value.STORED_VALUE)
+    isFiniteNumber(value.STORED_VALUE) &&
+    Number.isInteger(value.STORED_VALUE) &&
+    value.STORED_VALUE >= 0
   );
 }

@@ -16,6 +16,9 @@ export interface Card {
  * stream is one rider's journey and never two interleaved.
  */
 export function buildCards(count: number, rng: () => number): Card[] {
+  if (!Number.isInteger(count) || count < 0) {
+    throw new Error(`buildCards: count must be a finite non-negative integer, got ${count}.`);
+  }
   const ids = new Set<string>();
   const span = Math.max(100, count * 4);
   while (ids.size < count) {
