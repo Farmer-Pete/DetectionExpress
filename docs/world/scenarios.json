@@ -141,7 +141,11 @@
     {
       "id": "night-shift",
       "name": "Night Shift",
-      "difficulty": { "stars": 1, "label": "Rookie", "shape": "threshold against a time schedule" },
+      "difficulty": {
+        "stars": 1,
+        "label": "Rookie",
+        "shape": "threshold against a time schedule"
+      },
       "sensors": ["door-reader"],
       "flavor": {
         "tagline": "The 2 a.m. badge is always the interesting one.",
@@ -192,8 +196,8 @@
       ]
     },
     {
-      "id": "door-rattler-sweep",
-      "name": "Door Rattler Sweep",
+      "id": "network-sweep",
+      "name": "Network Sweep",
       "difficulty": {
         "stars": 1,
         "label": "Rookie",
@@ -479,7 +483,11 @@
     {
       "id": "lazarus-card",
       "name": "Lazarus Card",
-      "difficulty": { "stars": 3, "label": "Seasoned", "shape": "per-account dormancy clock" },
+      "difficulty": {
+        "stars": 3,
+        "label": "Seasoned",
+        "shape": "per-account dormancy clock"
+      },
       "sensors": ["kiosk"],
       "flavor": {
         "tagline": "Back from the dead after ninety quiet days.",
@@ -548,7 +556,10 @@
         "briefing": "Every train movement should match a planned run. Compare each arrival and departure against the schedule. A movement with no matching plan is a flag. On a closed track it is worse. This is how you catch machines acting outside their approved work. It is an operational technology detection, not an office one."
       },
       "resources": [
-        { "title": "MITRE ATT&CK for ICS", "url": "https://attack.mitre.org/matrices/ics/" },
+        {
+          "title": "MITRE ATT&CK for ICS",
+          "url": "https://attack.mitre.org/matrices/ics/"
+        },
         {
           "title": "MITRE ATT&CK: Detection Strategies",
           "url": "https://attack.mitre.org/detectionstrategies/"
@@ -636,31 +647,6 @@
         {
           "title": "Kenton Brothers: Anti-passback and anti-tailgating",
           "url": "https://kentonbrothers.com/access-control/anti-passback-and-anti-tailgating-do-you-know-who-is-in-your-building/"
-        }
-      ]
-    },
-    {
-      "id": "ghost-crowd",
-      "name": "Ghost Crowd",
-      "difficulty": { "stars": 4, "label": "Expert", "shape": "anomaly baseline plus correlation" },
-      "sensors": ["kiosk"],
-      "flavor": {
-        "tagline": "The whole network is failing to log in at once.",
-        "intro": "Sign-in failures just spiked across every station at the same moment, and a few of them are quietly succeeding. This is not a bad morning. It is a botnet replaying stolen passwords at scale, and the wins are hiding in the flood. You need a sense of normal to see it."
-      },
-      "security": {
-        "realWorldConcept": "Credential stuffing.",
-        "briefing": "Attackers replay leaked username and password pairs by the thousand. Most fail. A few match and get in. Compare the failure rate to the station's normal level. A network-wide spike is the attack. The rare success in the noise is the real breach. This needs a baseline, which makes it hard.",
-        "mitre": ["T1110.004"]
-      },
-      "resources": [
-        {
-          "title": "Auth0: Detecting credential stuffing and MFA abuse",
-          "url": "https://auth0.com/blog/Log-Detections-Credential-Stuffing-MFA-Exploit-Prevention/"
-        },
-        {
-          "title": "MITRE ATT&CK: Credential Stuffing (T1110.004)",
-          "url": "https://attack.mitre.org/techniques/T1110/004/"
         }
       ]
     },
@@ -772,7 +758,10 @@
         "briefing": "Signals and switches take commands. Each command must come from an authorized operator and console. Join the command with the list of who and what is allowed to send it. A command from an unknown source is a flag. In operational systems this can be a safety event, so it ranks high. It is an ICS detection."
       },
       "resources": [
-        { "title": "MITRE ATT&CK for ICS", "url": "https://attack.mitre.org/matrices/ics/" },
+        {
+          "title": "MITRE ATT&CK for ICS",
+          "url": "https://attack.mitre.org/matrices/ics/"
+        },
         {
           "title": "Sigma: Correlation rules",
           "url": "https://sigmahq.io/docs/meta/correlations.html"
@@ -797,7 +786,10 @@
         "briefing": "Trains must keep a safe gap, called headway. Track the time between trains on one section. If the gap falls below the safe floor, raise a flag fast. Too little spacing risks a collision. This is a stateful check per track, and it is about safety, not just fraud."
       },
       "resources": [
-        { "title": "MITRE ATT&CK for ICS", "url": "https://attack.mitre.org/matrices/ics/" },
+        {
+          "title": "MITRE ATT&CK for ICS",
+          "url": "https://attack.mitre.org/matrices/ics/"
+        },
         {
           "title": "MITRE ATT&CK: Detection Strategies",
           "url": "https://attack.mitre.org/detectionstrategies/"
@@ -859,6 +851,35 @@
         {
           "title": "MITRE ATT&CK: Detection Strategies",
           "url": "https://attack.mitre.org/detectionstrategies/"
+        }
+      ]
+    },
+    {
+      "id": "ghost-crowd",
+      "name": "Ghost Crowd",
+      "difficulty": {
+        "stars": 5,
+        "label": "Nightmare",
+        "shape": "anomaly baseline plus correlation"
+      },
+      "sensors": ["kiosk"],
+      "flavor": {
+        "tagline": "The whole network is failing to log in at once.",
+        "intro": "Sign-in failures just spiked across every station at the same moment, and a few of them are quietly succeeding. This is not a bad morning. It is a botnet replaying stolen passwords at scale, and the wins are hiding in the flood. You need a sense of normal to see it."
+      },
+      "security": {
+        "realWorldConcept": "Credential stuffing.",
+        "briefing": "Attackers replay leaked username and password pairs by the thousand. Most fail. A few match and get in. Compare the failure rate to the station's normal level. A network-wide spike is the attack. The rare success in the noise is the real breach. This needs a baseline, which makes it hard.",
+        "mitre": ["T1110.004"]
+      },
+      "resources": [
+        {
+          "title": "Auth0: Detecting credential stuffing and MFA abuse",
+          "url": "https://auth0.com/blog/Log-Detections-Credential-Stuffing-MFA-Exploit-Prevention/"
+        },
+        {
+          "title": "MITRE ATT&CK: Credential Stuffing (T1110.004)",
+          "url": "https://attack.mitre.org/techniques/T1110/004/"
         }
       ]
     }
