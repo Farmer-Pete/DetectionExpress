@@ -22,6 +22,9 @@
  */
 import { ReactFlowProvider } from "@xyflow/react";
 import { type FunctionComponent, useCallback, useEffect, useRef, useState } from "react";
+import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
+import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
+import { localAlgorithmUrl } from "../game/algorithms-resolve";
 import { DEV_KIT, loadDevHostClient, loadDevKitPanel } from "../game/dev-flag";
 import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
 import { createRunController, type RunController } from "../game/run-controller";
@@ -42,9 +45,16 @@ function buildController(): RunController {
   return createRunController({
     scenario: kioskPinAttack,
     getGraph,
-    // The in-game editor flows as source mode. Local-IDE url mode has no producer
-    // yet (M2b's dev client adds it).
-    getAlgorithmSource: () => ({ kind: "source", source: useGameStore.getState().source }),
+    // The one discriminated input. A local override (set by the dev-only algorithms
+    // client) drives url mode; otherwise the in-game editor drives source mode.
+    getAlgorithmSource: () => {
+      const state = useGameStore.getState();
+      if (state.localAlgorithm !== null) {
+        const { path, version } = state.localAlgorithm;
+        return { kind: "url", path, version, url: localAlgorithmUrl(path, version) };
+      }
+      return { kind: "source", source: state.source };
+    },
     getSeed: () => useGameStore.getState().seed,
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,
@@ -72,6 +82,14 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
   const devSubscriberRef = useRef<((state: DevState) => void) | null>(null);
   const lastDevStateRef = useRef<DevState | null>(null);
   const [Panel, setPanel] = useState<FunctionComponent<DevKitPanelProps> | null>(null);
+
+  // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
+  // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
+  // build or under test (no `import.meta.hot`). Kept separate from the M2/M3 dev-host
+  // path above, which is retired in M3.
+  const algoClientRef = useRef<AlgorithmsDevClient | null>(null);
+  const [algoReady, setAlgoReady] = useState(false);
+  const [localMode, setLocalMode] = useState(false);
 
   const slug = scenarioSlug(kioskPinAttack.id);
 
@@ -227,6 +245,65 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
     };
   }, []);
 
+  // Build the dev-only local-IDE client on mount, behind the folded `import.meta.env.DEV`
+  // gate and a live HMR channel. On a forced reload (Vite reloads when the active file is
+  // deleted) the persisted snapshot re-enters local mode automatically. Dispose on unmount
+  // keeps the snapshot, so a reload can still resume.
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    const channel = devHotChannel();
+    if (channel === null) {
+      return; // no dev server (production build, or the test environment): no local mode
+    }
+    const loader = loadAlgorithmsDevClient();
+    if (loader === null) {
+      return;
+    }
+    let cancelled = false;
+    loader
+      .then((mod) => {
+        if (cancelled) {
+          return;
+        }
+        const client = mod.createAlgorithmsDevClient({
+          slug,
+          channel,
+          store: {
+            getSource: () => useGameStore.getState().source,
+            setSource: (source) => useGameStore.getState().setAlgorithmSource(source),
+            setLocalAlgorithm: (value) => useGameStore.getState().setLocalAlgorithm(value),
+            setSourceLocked: (locked) => useGameStore.getState().setSourceLocked(locked),
+          },
+          run: () => controllerRef.current?.run(),
+          session: window.sessionStorage,
+        });
+        algoClientRef.current = client;
+        if (client.resume()) {
+          setLocalMode(true); // a forced reload re-entered local mode
+        }
+        setAlgoReady(true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      algoClientRef.current?.dispose();
+      algoClientRef.current = null;
+    };
+  }, [slug]);
+
+  const onEnterLocalMode = (): void => {
+    algoClientRef.current?.enter();
+    setLocalMode(true);
+  };
+
+  const onStopLocalMode = (): void => {
+    algoClientRef.current?.stop();
+    controllerRef.current?.run(); // the restored in-game source drives the run again
+    setLocalMode(false);
+  };
+
   // Make sure a client exists before an edit, resolving to it. A "Stop editing" drops
   // the client but keeps the known-good factory, so rebuild from it synchronously. A
   // failed initial load or build leaves the factory null, so re-run the load (retrying
@@ -301,6 +378,19 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
       </ReactFlowProvider>
       <Briefing text={kioskPinAttack.briefing} />
       <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+      {algoReady ? (
+        <div className="local-ide">
+          {localMode ? (
+            <button type="button" onClick={onStopLocalMode}>
+              Stop editing
+            </button>
+          ) : (
+            <button type="button" onClick={onEnterLocalMode}>
+              Edit in IDE
+            </button>
+          )}
+        </div>
+      ) : null}
       {devEnabled && Panel !== null ? (
         <Panel
           onEditInIde={onEditInIde}

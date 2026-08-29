@@ -12,6 +12,7 @@ beforeEach(() => {
     edges: initial.edges,
     snapshot: emptySnapshot(),
     source: referenceSource,
+    localAlgorithm: null,
     seed: LEVEL_SEED,
     error: null,
     sourceLocked: false,
@@ -72,6 +73,17 @@ describe("store", () => {
     useGameStore.getState().onEdgesChange([{ id: "e1", type: "select", selected: true }]);
     const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "e1");
     expect(edge?.selected).toBe(true);
+  });
+
+  it("starts in source mode and holds a local override through setLocalAlgorithm", () => {
+    expect(useGameStore.getState().localAlgorithm).toBeNull();
+    useGameStore.getState().setLocalAlgorithm({ path: "/src/algorithms/kiosk.ts", version: 4 });
+    expect(useGameStore.getState().localAlgorithm).toEqual({
+      path: "/src/algorithms/kiosk.ts",
+      version: 4,
+    });
+    useGameStore.getState().setLocalAlgorithm(null);
+    expect(useGameStore.getState().localAlgorithm).toBeNull();
   });
 
   it("starts unlocked and toggles the source lock through setSourceLocked", () => {

@@ -38,6 +38,13 @@ interface GameState {
   snapshot: SimSnapshot;
   /** The player's Algorithm source. The editor edits it; the run controller loads it. */
   source: string;
+  /**
+   * The active local-IDE override, or null in in-game-editor (source) mode. Set by the
+   * dev-only algorithms client when a watched file changes; the App reads it to choose a
+   * url-mode `AlgorithmSource` over the in-game `source`. Dev-only in practice, but
+   * generic and harmless in the static build (always null).
+   */
+  localAlgorithm: { path: string; version: number } | null;
   /** The deterministic level seed for the run. */
   seed: number;
   /** The current run or Rule error, or null. The editor shows it. */
@@ -52,6 +59,7 @@ interface GameState {
   onEdgesChange: OnEdgesChange;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
+  setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
   setError: (error: RuleErrorInfo | null) => void;
   setSourceLocked: (locked: boolean) => void;
 }
@@ -74,6 +82,7 @@ export const useGameStore = create<GameState>((set) => ({
   edges: initialEdges,
   snapshot: emptySnapshot(),
   source: referenceSource,
+  localAlgorithm: null,
   seed: LEVEL_SEED,
   error: null,
   sourceLocked: false,
@@ -81,6 +90,7 @@ export const useGameStore = create<GameState>((set) => ({
   onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
   setSnapshot: (snapshot) => set({ snapshot }),
   setAlgorithmSource: (source) => set({ source }),
+  setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
 }));

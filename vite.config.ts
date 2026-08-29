@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { algorithmsHmr } from "./src/dev/algorithms-hmr.ts";
 
 /**
  * One source, two build modes.
@@ -34,7 +35,9 @@ function stripDevGuard(): Plugin {
 export default defineConfig(({ mode }) => {
   const devKit = mode === "devkit";
   return {
-    plugins: [react(), stripDevGuard()],
+    // `algorithmsHmr` is `apply: "serve"`, so it runs only on the dev server (the
+    // local-IDE hot-reload loop) and is inert in both builds.
+    plugins: [react(), stripDevGuard(), algorithmsHmr()],
     define: {
       "process.env.PUBLIC_DEV_KIT": devKit ? '"true"' : '"false"',
     },

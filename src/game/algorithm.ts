@@ -110,11 +110,15 @@ export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
  */
 const defaultImportSource: ImportSource = async (target) => {
   if (target.kind === "url") {
-    return await import(target.url); // a Vite-served module URL, imported directly
+    // `@vite-ignore`: keep this dynamic import out of Vite's static analysis. Otherwise
+    // Vite tracks the `?v=` module and full-reloads the page on every save, instead of
+    // letting the algorithms-hmr plugin suppress the reload and drive a seamless re-import.
+    return await import(/* @vite-ignore */ target.url);
   }
   const url = URL.createObjectURL(new Blob([target.source], { type: "text/javascript" }));
   try {
-    return await import(url);
+    // `@vite-ignore`: a blob: URL is not analyzable; silence the same Vite warning.
+    return await import(/* @vite-ignore */ url);
   } finally {
     URL.revokeObjectURL(url); // the module is resolved; the temporary URL is done
   }
