@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://detectionexpress.game/schemas/sensors.schema.json",
+  "title": "Station sensors",
+  "description": "Every sensor family the Engine ingests. Each carries one clean normalized shape and one raw shape per manufacturer that builds it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sensors"],
+  "properties": {
+    "sensors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sensor" }
+    }
+  },
+  "$defs": {
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "foundAt", "normalizedExample", "manufacturers"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z-]+$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "foundAt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["summary"],
+          "properties": {
+            "summary": { "type": "string" },
+            "zones": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Trust zone ids where this sensor sits."
+            },
+            "stations": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Station ids, or the string 'all'."
+            },
+            "sites": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Staff site or control-center ids."
+            }
+          }
+        },
+        "normalizedExample": {
+          "type": "object",
+          "description": "The clean internal shape the Engine normalizes every raw payload down to. This is the target the player's Normalize Rule aims for.",
+          "additionalProperties": true
+        },
+        "manufacturers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "description": "One to three vendors per sensor. Each shows the raw payload it emits, which differs from the others in key names and encodings.",
+          "items": { "$ref": "#/$defs/vendorVariant" }
+        }
+      }
+    },
+    "vendorVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manufacturerId", "model", "quirk", "exampleRaw"],
+      "properties": {
+        "manufacturerId": {
+          "type": "string",
+          "description": "Cross-reference manufacturers.json."
+        },
+        "model": { "type": "string" },
+        "quirk": {
+          "type": "string",
+          "description": "What is annoying about this vendor's payload, in one line."
+        },
+        "exampleRaw": {
+          "type": "object",
+          "description": "One raw event exactly as this vendor emits it. Same real-world reading as normalizedExample, spelled the vendor's way.",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}
