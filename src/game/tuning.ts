@@ -164,3 +164,18 @@ export const DRAIN_GAP_TICKS = 45;
  * below this fails the run with reason "correctness".
  */
 export const CORRECTNESS_FLOOR = 50;
+
+/**
+ * M0 (living metro, #87). The world loop steps the actor schedule ONE tick at a
+ * time; this many such steps run per clock tick. A positive integer, default 1, so
+ * the sim advances at CLOCK_HZ by default. Raising it speeds the world without
+ * touching the publish rate, which stays pinned to PUBLISH_HZ.
+ */
+export const SIM_TICKS_PER_CLOCK_TICK = 1;
+
+/**
+ * How many recent sim ticks of flashes the world snapshot carries. A flash older
+ * than this behind `nowTick` is pruned, so the flash list stays bounded on a
+ * perpetual run.
+ */
+export const FLASH_WINDOW_TICKS = 30;

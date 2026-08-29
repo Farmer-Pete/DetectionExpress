@@ -1,12 +1,20 @@
 /**
  * The actor engine: the shared state-machine types and the deterministic scheduler
  * from ADR-0007. An actor is a small typed FSM that reads the environment and its
- * own state and emits readings on a transition. `runActors` owns game time, seeds
- * each actor from the run seed and its id, and activates them in a fixed,
- * seed-derived order. It reads no wall clock (ARCHITECTURE rule 8).
+ * own state and emits readings on a transition.
+ *
+ * `createSchedule` owns game time. It seeds each startup actor from the run seed and
+ * its id, activates them in a fixed, seed-derived order, and then STEPS forward: a
+ * half-open `advanceTo(horizon)` runs every actor due below the horizon, `admit`
+ * lets a transient enter at runtime, and a dormant actor is evicted so a perpetual
+ * run stays bounded. `runActors` is a thin wrapper that runs one schedule straight
+ * to a horizon, for the batch path and its byte-identical readings. Neither reads a
+ * wall clock (ARCHITECTURE rule 8).
  */
 import { randomLcg } from "d3-random";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
+import type { Presence } from "../world/presence";
+import type { ActorView } from "../world-snapshot";
 
 /** The seeded input an actor reads to choose its first tick. */
 interface StartContext {
@@ -24,6 +32,11 @@ interface ActContext<Env> {
 interface ActResult<Reading> {
   readings: Reading[];
   nextTick: number | "dormant";
+  /**
+   * The actor's position after this transition. Additive and live-only: the batch
+   * path (`runActors`) reads only `readings` and `nextTick`, so it ignores this.
+   */
+  presence?: Presence;
 }
 
 /**
@@ -37,6 +50,56 @@ export interface Actor<Reading, Env> {
   start(context: StartContext): number | "dormant";
   /** One transition at `tick`: emit readings, then reschedule or go dormant. */
   act(context: ActContext<Env>): ActResult<Reading>;
+}
+
+/** One reading, tagged with the actor that emitted it and the tick it fired on. */
+interface TimedReading<Reading> {
+  reading: Reading;
+  actorId: string;
+  /** The tick this reading was emitted on. */
+  tick: number;
+}
+
+/**
+ * A single step's output. `readings` is in scheduled order, each carrying its own
+ * tick (a live step spans one tick, so they share it; a batch step may span many).
+ * `presences` and `dormant` are DELTAS: only the actors that acted or went dormant
+ * this step appear.
+ */
+export interface StepResult<Reading> {
+  readings: TimedReading<Reading>[];
+  presences: Map<string, Presence>;
+  dormant: string[];
+}
+
+/**
+ * A runtime admission for a transient actor. The spawner mints a fresh id, so
+ * `start()` returns a tick at or after the frontier. The engine records `kind` at
+ * admission and calls `initialPresence(firstTick)` once `admit` computes the tick.
+ */
+export interface Admission<Reading, Env> {
+  actor: Actor<Reading, Env>;
+  kind: ActorView["kind"];
+  initialPresence(firstTick: number): Presence;
+}
+
+/** The steppable schedule: half-open forward stepping, runtime admission, eviction. */
+export interface Schedule<Reading, Env> {
+  /** Run every actor due below `horizon`, forward only. Returns the step's delta. */
+  advanceTo(horizon: number): StepResult<Reading>;
+  /** Admit a transient. Returns its first tick, which must be at or after the frontier. */
+  admit(admission: Admission<Reading, Env>): number;
+  /** The first tick per non-dormant startup actor. Dormant starters are omitted. */
+  initialTicks(): ReadonlyMap<string, number>;
+  /** The live actor ids: startup non-evicted plus admitted, minus dormant. */
+  activeIds(): readonly string[];
+}
+
+/** Everything `createSchedule` needs, passed by name. */
+interface CreateScheduleInput<Reading, Env> {
+  actors: readonly Actor<Reading, Env>[];
+  env: Env;
+  runSeed: number;
 }
 
 /** Everything `runActors` needs, passed by name. */
@@ -53,6 +116,7 @@ interface ActorRecord<Reading, Env> {
   rng: () => number;
   seededPriority: number;
   nextTick: number | "dormant";
+  seed: number;
 }
 
 /**
@@ -108,77 +172,197 @@ function assignSeeds(runSeed: number, ids: string[]): Map<string, number> {
 }
 
 /**
- * Run the actors to the horizon and return every reading they emit, in emission
- * order. Deterministic: the same seed and actor set always yield the same readings,
- * under any permutation of the input array.
- *
- * It rejects a bad horizon and duplicate ids, seeds one rng per actor, draws each
- * `seededPriority` once, then repeatedly runs the due record with the earliest
- * `(nextTick, seededPriority, actorId)`. The horizon is half-open: a record at or
- * past it does not run. Every reschedule must strictly advance the tick or go
- * dormant, so the run always progresses.
+ * Resolve a fresh seed for one id against the live seed set, using the same `id#n`
+ * rehash as `assignSeeds`. A minted transient id never collides in practice, but a
+ * 32-bit collision against a live seed still resolves deterministically.
  */
-export function runActors<Reading, Env>(input: RunActorsInput<Reading, Env>): Reading[] {
-  const { actors, env, runSeed, horizon } = input;
-  if (!Number.isInteger(horizon) || horizon < 0) {
-    throw new Error("runActors: horizon must be a finite, non-negative integer.");
+function resolveSeed(runSeed: number, id: string, live: ReadonlySet<number>): number {
+  let seed = actorSeedHash(runSeed, id);
+  let attempt = 1;
+  while (live.has(seed)) {
+    seed = xmur3(`${runSeed}:${id}#${attempt}`);
+    attempt++;
   }
+  return seed;
+}
+
+/**
+ * Build one per-actor record in the locked construction order: one `randomLcg(seed)`,
+ * then `seededPriority` as the first draw from that stream, then `actor.start`. Only
+ * the seed source differs between startup seeding and runtime admission; this
+ * per-actor order is identical for both, so an actor's rng stream is fixed by its
+ * seed alone.
+ */
+function buildRecord<Reading, Env>(
+  actor: Actor<Reading, Env>,
+  seed: number,
+): ActorRecord<Reading, Env> {
+  const rng = randomLcg(seed);
+  const seededPriority = rng();
+  const nextTick = actor.start({ rng });
+  return { actor, rng, seededPriority, nextTick, seed };
+}
+
+/** True when a next tick is a valid non-negative integer (or `"dormant"`). */
+function isValidStart(nextTick: number | "dormant"): boolean {
+  return nextTick === "dormant" || (Number.isInteger(nextTick) && nextTick >= 0);
+}
+
+/**
+ * Build a steppable schedule over the startup actors. It rejects duplicate ids,
+ * seeds one rng per actor over the complete sorted id set, draws each
+ * `seededPriority` once, then calls `start()` to get the first tick. The frontier
+ * `F` begins at 0; `advanceTo` moves it forward and never back.
+ */
+export function createSchedule<Reading, Env>(
+  input: CreateScheduleInput<Reading, Env>,
+): Schedule<Reading, Env> {
+  const { actors, env, runSeed } = input;
   const ids = actors.map((actor) => actor.id);
   if (new Set(ids).size !== ids.length) {
-    throw new Error("runActors: two actors share an id.");
+    throw new Error("createSchedule: two actors share an id.");
   }
   const seeds = assignSeeds(runSeed, ids);
 
-  const records: ActorRecord<Reading, Env>[] = actors.map((actor) => {
+  const records = new Map<string, ActorRecord<Reading, Env>>();
+  const liveSeeds = new Set<number>();
+  const initialFirstTicks = new Map<string, number>();
+  // Every id ever seen, startup or admitted, kept for the whole run. It outlives
+  // eviction, so a retired id is never reused (the plan's whole-run id contract).
+  const seenIds = new Set<string>(ids);
+  for (const actor of actors) {
     const seed = seeds.get(actor.id);
     if (seed === undefined) {
-      throw new Error(`runActors: no seed for actor "${actor.id}".`);
+      throw new Error(`createSchedule: no seed for actor "${actor.id}".`);
     }
-    const rng = randomLcg(seed);
-    const seededPriority = rng();
-    const nextTick = actor.start({ rng });
-    if (nextTick !== "dormant" && (!Number.isInteger(nextTick) || nextTick < 0)) {
+    const record = buildRecord(actor, seed);
+    if (!isValidStart(record.nextTick)) {
       throw new Error(
-        `runActors: actor "${actor.id}" started at ${nextTick}, which is not "dormant" or a non-negative integer.`,
+        `createSchedule: actor "${actor.id}" started at ${record.nextTick}, which is not "dormant" or a non-negative integer.`,
       );
     }
-    return { actor, rng, seededPriority, nextTick };
-  });
-
-  const readings: Reading[] = [];
-  for (;;) {
-    let best: ActorRecord<Reading, Env> | null = null;
-    let bestTick = 0;
-    for (const record of records) {
-      const tick = record.nextTick;
-      if (tick === "dormant" || tick >= horizon) {
-        continue;
-      }
-      const wins =
-        best === null ||
-        tick < bestTick ||
-        (tick === bestTick &&
-          (record.seededPriority < best.seededPriority ||
-            (record.seededPriority === best.seededPriority && record.actor.id < best.actor.id)));
-      if (wins) {
-        best = record;
-        bestTick = tick;
-      }
+    // A startup actor that begins dormant never runs, so it is not retained as a
+    // live record or seed and never appears in `activeIds()`. Its id stays in
+    // `seenIds`, so it is still never reused.
+    if (record.nextTick !== "dormant") {
+      records.set(actor.id, record);
+      liveSeeds.add(seed);
+      initialFirstTicks.set(actor.id, record.nextTick);
     }
-    if (best === null) {
-      break;
-    }
-    const result = best.actor.act({ env, rng: best.rng, tick: bestTick });
-    for (const reading of result.readings) {
-      readings.push(reading);
-    }
-    const next = result.nextTick;
-    if (next !== "dormant" && (!Number.isInteger(next) || next <= bestTick)) {
-      throw new Error(
-        `runActors: actor "${best.actor.id}" rescheduled to ${next}, which does not strictly advance ${bestTick}.`,
-      );
-    }
-    best.nextTick = next;
   }
-  return readings;
+
+  let frontier = 0;
+
+  const advanceTo = (horizon: number): StepResult<Reading> => {
+    if (!Number.isInteger(horizon) || horizon < 0) {
+      throw new Error("advanceTo: horizon must be a finite, non-negative integer.");
+    }
+    if (horizon < frontier) {
+      throw new Error(`advanceTo: horizon ${horizon} is below the frontier ${frontier}.`);
+    }
+    const readings: TimedReading<Reading>[] = [];
+    const presences = new Map<string, Presence>();
+    const dormant: string[] = [];
+
+    for (;;) {
+      let best: ActorRecord<Reading, Env> | null = null;
+      let bestTick = 0;
+      for (const record of records.values()) {
+        const tick = record.nextTick;
+        if (tick === "dormant" || tick >= horizon) {
+          continue;
+        }
+        const wins =
+          best === null ||
+          tick < bestTick ||
+          (tick === bestTick &&
+            (record.seededPriority < best.seededPriority ||
+              (record.seededPriority === best.seededPriority && record.actor.id < best.actor.id)));
+        if (wins) {
+          best = record;
+          bestTick = tick;
+        }
+      }
+      if (best === null) {
+        break;
+      }
+      const result = best.actor.act({ env, rng: best.rng, tick: bestTick });
+      for (const reading of result.readings) {
+        readings.push({ reading, actorId: best.actor.id, tick: bestTick });
+      }
+      if (result.presence !== undefined) {
+        presences.set(best.actor.id, result.presence);
+      }
+      const next = result.nextTick;
+      if (next !== "dormant" && (!Number.isInteger(next) || next <= bestTick)) {
+        throw new Error(
+          `advanceTo: actor "${best.actor.id}" rescheduled to ${next}, which does not strictly advance ${bestTick}.`,
+        );
+      }
+      if (next === "dormant") {
+        records.delete(best.actor.id);
+        liveSeeds.delete(best.seed);
+        dormant.push(best.actor.id);
+      } else {
+        best.nextTick = next;
+      }
+    }
+
+    frontier = horizon;
+    return { readings, presences, dormant };
+  };
+
+  const admit = (admission: Admission<Reading, Env>): number => {
+    const { actor } = admission;
+    if (seenIds.has(actor.id)) {
+      throw new Error(`admit: actor id "${actor.id}" was already used; ids are never reused.`);
+    }
+    const seed = resolveSeed(runSeed, actor.id, liveSeeds);
+    const record = buildRecord(actor, seed);
+    if (record.nextTick === "dormant") {
+      throw new Error(
+        `admit: transient "${actor.id}" started dormant; it must start at a real tick.`,
+      );
+    }
+    if (!isValidStart(record.nextTick)) {
+      throw new Error(
+        `admit: transient "${actor.id}" started at ${record.nextTick}, which is not a non-negative integer.`,
+      );
+    }
+    if (record.nextTick < frontier) {
+      throw new Error(
+        `admit: transient "${actor.id}" starts at ${record.nextTick}, before the frontier ${frontier}.`,
+      );
+    }
+    records.set(actor.id, record);
+    liveSeeds.add(seed);
+    seenIds.add(actor.id);
+    return record.nextTick;
+  };
+
+  return {
+    advanceTo,
+    admit,
+    initialTicks: () => initialFirstTicks,
+    activeIds: () => [...records.keys()],
+  };
+}
+
+/**
+ * Run the actors to the horizon and return every reading they emit, in emission
+ * order. A thin wrapper over `createSchedule().advanceTo(horizon)`: it builds one
+ * schedule and steps it straight to the horizon, so the batch readings stay
+ * byte-identical to the pre-step scheduler. Deterministic under any permutation of
+ * the input array.
+ */
+export function runActors<Reading, Env>(input: RunActorsInput<Reading, Env>): Reading[] {
+  const { actors, env, runSeed, horizon } = input;
+  // Reject a bad horizon up front, before seeding or any actor's start(), so the
+  // batch path's observable behavior on invalid input matches the pre-step scheduler.
+  if (!Number.isInteger(horizon) || horizon < 0) {
+    throw new Error("runActors: horizon must be a finite, non-negative integer.");
+  }
+  const schedule = createSchedule({ actors, env, runSeed });
+  const step = schedule.advanceTo(horizon);
+  return step.readings.map((timed) => timed.reading);
 }
