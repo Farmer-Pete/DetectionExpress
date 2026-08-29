@@ -74,7 +74,8 @@ function rateFor(codePerAnchor: number, omega: number, skew: number): ServiceRat
 }
 
 // --- The abstract pipeline ---------------------------------------------------
-// A faithful integer model of the run: arrivals follow the wave schedule; XXX Events at the real governor's rate; a backpressure ceiling
+// A faithful integer model of the run: arrivals follow the wave schedule; the Detect
+// node completes Events at the real governor's rate; a backpressure ceiling
 // of 2 * CHANNEL_CAP caps how far admitted may lead completed, exactly as the two
 // bounded upstream Channels do (the Detect->Sink Channel stays near empty). The
 // checkpoint is read at the start-of-tick boundary, before that tick's service,

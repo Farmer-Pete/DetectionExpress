@@ -185,18 +185,20 @@ export async function runDetect(
     const payload = message.payload;
     const base = payload instanceof Object ? payload : {};
     const view = withEngineFields(base, message.id, message.ts, message.endpoint);
-    let result: unknown;
+    // Run detect() and parse its return inside one boundary, then fold the
+    // resolved (non-partial) findings down to their Alerts. Any throw, from the
+    // player's detect() or from the parser (a bad shape, or a deep-json
+    // RangeError), surfaces as one clean RuleError the supervisor can report. T1
+    // never scores a partial; T2 moves this skip into the scorer when it folds
+    // Finding[] directly.
+    let alerts: Alert[];
     try {
-      result = detect(view);
+      alerts = parseFindings(detect(view))
+        .filter((finding) => !finding.isPartial)
+        .map((finding) => finding.alert);
     } catch (error) {
       throw new RuleError("detect", messageOf(error));
     }
-    // Parse the return at the boundary, then fold the resolved (non-partial)
-    // findings down to their Alerts. T1 never scores a partial; T2 moves this
-    // skip into the scorer when it folds Finding[] directly.
-    const alerts = parseFindings(result)
-      .filter((finding) => !finding.isPartial)
-      .map((finding) => finding.alert);
     scorer.record(alerts, message);
     const ticks = governor.charge();
     if (ticks > 0) {

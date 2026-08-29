@@ -298,3 +298,49 @@ describe("parseFindings: rejects a bad json value", () => {
     expectDetectReject(withJson(cyclic));
   });
 });
+
+describe("parseFindings: hardening against untrusted input", () => {
+  const withJson = (value: unknown) => [
+    {
+      alert: { eventIds: [1], reason: "r", at: 1 },
+      context: [{ type: "json", value }],
+    },
+  ];
+
+  it("rejects a json value nested past the depth cap, not a stack overflow", () => {
+    let deep: unknown = 0;
+    for (let i = 0; i < 300; i++) {
+      deep = [deep];
+    }
+    expectDetectReject(withJson(deep));
+  });
+
+  it("rejects a boxed String reason that would slip past the scorer", () => {
+    // Object("r") is a boxed String wrapper: same tag as a primitive, but an object.
+    expectDetectReject([{ alert: { eventIds: [1], reason: Object("r"), at: 1 } }]);
+  });
+
+  it("rejects a boxed Number as a kv value", () => {
+    expectDetectReject([
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        context: [{ type: "kv", entries: [{ label: "a", value: Object(5) }] }],
+      },
+    ]);
+  });
+
+  it("rejects a non-finite kv value or table cell", () => {
+    expectDetectReject([
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        context: [{ type: "kv", entries: [{ label: "a", value: Number.NaN }] }],
+      },
+    ]);
+    expectDetectReject([
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        context: [{ type: "table", columns: ["a"], rows: [[Number.POSITIVE_INFINITY]] }],
+      },
+    ]);
+  });
+});

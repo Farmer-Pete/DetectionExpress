@@ -348,7 +348,7 @@ describe("run controller worker seam (M2 review 1, 2, 5)", () => {
     );
     controller.run();
     await flush();
-    workers[0]?.emitMessage({ ok: false, error: "match must return an Alert" });
+    workers[0]?.emitMessage({ ok: false, error: "detect must return an array of findings" });
     await flush();
     expect(phases).toContain("profile");
     expect(started).toBe(0);

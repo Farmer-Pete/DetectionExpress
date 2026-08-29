@@ -16,13 +16,19 @@ function reject(message: string): never {
   throw new RuleError("detect", message);
 }
 
-/** A primitive, by its tag rather than a representation check (mirrors `tasks.ts`). */
+/**
+ * A primitive string, by its tag (mirrors `tasks.ts`). The `instanceof Object`
+ * guard rejects a boxed `new String(...)` and a `Symbol.toStringTag`-spoofed
+ * object, both of which share the tag but are not the primitive the contract
+ * promises. A boxed value would pass the parser and then fail the scorer's
+ * strict-equality reason match, silently mis-scoring.
+ */
 function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
+  return !(value instanceof Object) && Object.prototype.toString.call(value) === "[object String]";
 }
 
 function isNumber(value: unknown): value is number {
-  return Object.prototype.toString.call(value) === "[object Number]";
+  return !(value instanceof Object) && Object.prototype.toString.call(value) === "[object Number]";
 }
 
 function isBoolean(value: unknown): value is boolean {
@@ -52,9 +58,13 @@ function isNonEmptyString(value: unknown): value is string {
   return isString(value) && value.length > 0;
 }
 
-/** A string or a number: the primitive a kv value or a table cell may hold. */
+/**
+ * A string or a finite number: the primitive a kv value or a table cell may hold.
+ * Non-finite numbers are rejected here too, matching the json rule, so a shared
+ * scenario file stays serialization-safe (`JSON.stringify` coerces NaN to null).
+ */
 function isStringOrNumber(value: unknown): value is string | number {
-  return isString(value) || isNumber(value);
+  return isString(value) || (isNumber(value) && Number.isFinite(value));
 }
 
 /**
@@ -74,15 +84,27 @@ function rejectUnknownKeys(value: unknown, allowed: string[], where: string): vo
 }
 
 /**
+ * The deepest a json widget value may nest. A `context` rides on a shared, and so
+ * untrusted, scenario file, so a hand-crafted deep chain must reject cleanly rather
+ * than overflow the call stack with a raw `RangeError`.
+ */
+const MAX_JSON_DEPTH = 100;
+
+/**
  * Assert a value is JSON-serializable. Walks by hand rather than trusting
  * `JSON.stringify`, which silently coerces `NaN` to null and drops `undefined`
  * and functions inside arrays. The cycle guard is a recursion STACK, held in a
  * WeakSet: an object is added before its children are walked and removed after,
  * so a shared but non-cyclic reference like `{ a: x, b: x }` is accepted while a
- * true cycle is rejected. Only arrays and plain objects descend; a Date, Map, or
- * class instance is rejected rather than passing as an empty object.
+ * true cycle is rejected. `depth` caps the nesting at `MAX_JSON_DEPTH`, so a deep
+ * non-cyclic chain rejects with a RuleError instead of overflowing the stack. Only
+ * arrays and plain objects descend; a Date, Map, or class instance is rejected
+ * rather than passing as an empty object.
  */
-function assertJsonValue(value: unknown, stack: WeakSet<object>): void {
+function assertJsonValue(value: unknown, stack: WeakSet<object>, depth: number): void {
+  if (depth > MAX_JSON_DEPTH) {
+    reject(`A json widget value nests deeper than ${MAX_JSON_DEPTH} levels.`);
+  }
   if (value === null || isBoolean(value) || isString(value)) {
     return;
   }
@@ -98,7 +120,7 @@ function assertJsonValue(value: unknown, stack: WeakSet<object>): void {
     }
     stack.add(value);
     for (const element of value) {
-      assertJsonValue(element, stack);
+      assertJsonValue(element, stack, depth + 1);
     }
     stack.delete(value);
     return;
@@ -109,7 +131,7 @@ function assertJsonValue(value: unknown, stack: WeakSet<object>): void {
     }
     stack.add(value);
     for (const child of Object.values(value)) {
-      assertJsonValue(child, stack);
+      assertJsonValue(child, stack, depth + 1);
     }
     stack.delete(value);
     return;
@@ -190,7 +212,7 @@ function parseWidget(widget: unknown): void {
       if (!("value" in widget)) {
         reject("A json widget needs a value.");
       }
-      assertJsonValue(widget.value, new WeakSet());
+      assertJsonValue(widget.value, new WeakSet(), 0);
       return;
     }
     default:
