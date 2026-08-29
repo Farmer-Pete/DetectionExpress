@@ -15,8 +15,9 @@
  * it imports lodash by URL, the way a player would. `buildOptimizationAlgorithm` is
  * the in-process twin the deterministic tests run: the same logic with no import.
  */
-import type { Alert } from "../../alert";
+
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import type { Alert } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /**
@@ -61,7 +62,7 @@ export function match(e) {
   }
   if (firing[e.account]) return null; // one Alert per burst; no duplicates
   firing[e.account] = true;
-  return { reason: "pin_brute_force", at: e.ts, events: recent[e.account].slice() };
+  return { reason: "pin_brute_force", at: e.ts, eventIds: recent[e.account].slice() };
 }
 `;
 
@@ -162,7 +163,7 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         return null; // one Alert per burst; no duplicates
       }
       firing.add(e.account);
-      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, events: [...ids] };
+      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: [...ids] };
     },
   };
 }

@@ -5,11 +5,11 @@ describe("adaptModule", () => {
   it("returns a working match and defaults normalize to identity when absent", () => {
     const algo = adaptModule({
       match: (event: { flag?: boolean }) =>
-        event.flag ? { reason: "r", at: 1, events: [1] } : null,
+        event.flag ? { reason: "r", at: 1, eventIds: [1] } : null,
     });
     expect(algo.match instanceof Function).toBe(true);
     expect(algo.normalize("passthrough")).toBe("passthrough"); // identity default
-    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, events: [1] });
+    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, eventIds: [1] });
     expect(algo.match({ flag: false })).toBeNull();
   });
 
@@ -36,11 +36,11 @@ describe("loadAlgorithm", () => {
       Promise.resolve({
         normalize: (r: { x: number }) => ({ u: r.x }),
         match: (event: { flag?: boolean }) =>
-          event.flag ? { reason: "r", at: 1, events: [1] } : null,
+          event.flag ? { reason: "r", at: 1, eventIds: [1] } : null,
       });
     const algo = await loadAlgorithm("ignored source", importSource);
     expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
-    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, events: [1] });
+    expect(algo.match({ flag: true })).toEqual({ reason: "r", at: 1, eventIds: [1] });
     expect(algo.match({ flag: false })).toBeNull();
   });
 

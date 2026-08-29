@@ -6,8 +6,9 @@
  * is the in-process twin the deterministic tests run: the same logic with no
  * import, so it needs no network and no loader. Both raise one Alert per Attack.
  */
-import type { Alert } from "../../alert";
+
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import type { Alert } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /** The editor default and the browser run. Imports lodash by URL, like a player. */
@@ -33,7 +34,7 @@ export function match(e) {
   }
   if (firing[e.account]) return null; // one Alert per burst; no duplicates
   firing[e.account] = true;
-  return { reason: "pin_brute_force", at: e.ts, events: fails[e.account].map((x) => x.id) };
+  return { reason: "pin_brute_force", at: e.ts, eventIds: fails[e.account].map((x) => x.id) };
 }
 `;
 
@@ -91,7 +92,7 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
         return null; // one Alert per burst; no duplicates
       }
       firing.add(e.account);
-      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, events: kept.map((x) => x.id) };
+      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: kept.map((x) => x.id) };
     },
   };
 }

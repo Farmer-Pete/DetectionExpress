@@ -13,8 +13,9 @@
  *
  * Pure, deterministic, game-time only. No wall-clock, no ground-truth access.
  */
-import type { Alert } from "../../sim/alert";
+
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { Alert } from "../../sim/finding";
 import { PIN_BRUTE_FORCE_REASON } from "../../sim/scenarios/kiosk-pin-attack/attacks";
 import { GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "../tuning";
 
@@ -90,7 +91,7 @@ export function makeNaiveScan(): Detector {
         return null;
       }
       firing.add(event.account);
-      return { reason: REASON, at: event.ts, events: kept.map((record) => record.id) };
+      return { reason: REASON, at: event.ts, eventIds: kept.map((record) => record.id) };
     },
     retained(): number {
       let total = 0;
@@ -156,7 +157,7 @@ export function makeIncrementalTally(): Detector {
         return null;
       }
       firing.add(event.account);
-      return { reason: REASON, at: event.ts, events: [event.id] };
+      return { reason: REASON, at: event.ts, eventIds: [event.id] };
     },
     retained(): number {
       return queue.length - head;

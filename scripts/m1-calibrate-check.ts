@@ -20,7 +20,7 @@ import {
   normalizeKiosk,
   SCAN_WINDOW_S,
 } from "../src/game/profiler/rules";
-import type { Alert } from "../src/sim/alert";
+import type { Alert } from "../src/sim/finding";
 
 /** A lighter protocol than production, so the harness finishes in a few seconds. */
 const HARNESS_CONFIG: MeasureConfig = { warmupMs: 40, batchMs: 40, batches: 3 };
@@ -73,7 +73,7 @@ function makePoorDetector(): Detector {
         return null;
       }
       firing.add(event.account);
-      return { reason: "pin_brute_force", at: event.ts, events: [event.id] };
+      return { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] };
     },
     retained: () => recent.length,
   };
@@ -112,7 +112,7 @@ function makeBucketDetector(): Detector {
         return null;
       }
       firing.add(event.account);
-      return { reason: "pin_brute_force", at: event.ts, events: [event.id] };
+      return { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] };
     },
     retained: () => {
       let total = 0;

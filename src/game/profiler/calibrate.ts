@@ -13,8 +13,8 @@
  * never sees real time. See GH3-PLAN.md sections 5.1, 6.5, and 7.
  */
 
-import type { Alert } from "../../sim/alert";
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { Alert } from "../../sim/finding";
 import { type EngineFields, withEngineFields } from "../../sim/tasks";
 import { makeAnchor } from "./anchor";
 import { type Corpus, loopingCorpus } from "./corpus";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "../../sim/alert";
+import type { Alert } from "../../sim/finding";
 import type { EngineFields } from "../../sim/tasks";
 import type { LoadedAlgorithm } from "../algorithm";
 import { adaptLoaded, parseRequest } from "./worker-support";
@@ -44,7 +44,8 @@ function view(): KioskFlatView {
 describe("adaptLoaded", () => {
   const loaded: LoadedAlgorithm = {
     normalize: () => ({ account: "amy", terminal: "KIOSK-01", outcome: "fail" }),
-    match: (v) => (v instanceof Object ? { reason: "pin_brute_force", at: 5, events: [1] } : null),
+    match: (v) =>
+      v instanceof Object ? { reason: "pin_brute_force", at: 5, eventIds: [1] } : null,
   };
 
   it("passes the normalize result through as a plain object", () => {
@@ -58,13 +59,13 @@ describe("adaptLoaded", () => {
 
   it("parses the match result into an Alert", () => {
     const rule = adaptLoaded(loaded);
-    expect(rule.match(view())).toEqual({ reason: "pin_brute_force", at: 5, events: [1] });
+    expect(rule.match(view())).toEqual({ reason: "pin_brute_force", at: 5, eventIds: [1] });
   });
 
   it("accepts an array of Alerts, like the run-time Match task (M2 review)", () => {
     const alerts: Alert[] = [
-      { reason: "pin_brute_force", at: 5, events: [1] },
-      { reason: "pin_brute_force", at: 6, events: [2] },
+      { reason: "pin_brute_force", at: 5, eventIds: [1] },
+      { reason: "pin_brute_force", at: 6, eventIds: [2] },
     ];
     const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, match: () => alerts };
     const rule = adaptLoaded(arrayRule);

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "../../sim/alert";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../sim/event";
+import type { Alert } from "../../sim/finding";
 import type { GraphEdge, GraphNode } from "../../sim/graph";
 import { buildOptimizationAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/optimization";
 import { buildReferenceAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/reference";

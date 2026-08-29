@@ -13,9 +13,9 @@
  * concrete Clock from `game/`.
  */
 import { GAME_SECONDS_PER_TICK } from "../game/tuning";
-import type { Alert } from "./alert";
 import type { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import type { Alert } from "./finding";
 import { makeGovernor, type ServiceRate } from "./service-governor";
 
 /** The slice of the Clock a task needs. The concrete Clock satisfies it. */
@@ -120,9 +120,9 @@ function isAlert(value: unknown): value is Alert {
     isString(value.reason) &&
     "at" in value &&
     Number.isFinite(value.at) &&
-    "events" in value &&
-    Array.isArray(value.events) &&
-    value.events.every((event) => Number.isFinite(event))
+    "eventIds" in value &&
+    Array.isArray(value.eventIds) &&
+    value.eventIds.every((event) => Number.isFinite(event))
   );
 }
 

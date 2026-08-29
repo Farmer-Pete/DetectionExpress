@@ -67,7 +67,7 @@ describe("calibrate", () => {
     const arrayRule: ProfilerRule<NormalizedKiosk> = {
       normalize: normalizeKiosk,
       match: (v) =>
-        v.outcome === "fail" ? [{ reason: "pin_brute_force", at: v.ts, events: [v.id] }] : [],
+        v.outcome === "fail" ? [{ reason: "pin_brute_force", at: v.ts, eventIds: [v.id] }] : [],
     };
     // If the profiler rejected arrays it would throw here; reaching a finite
     // reading is the assertion that it prices the array shape like the runtime.

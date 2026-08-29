@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Clock, ManualDriver } from "../game/clock";
-import type { Alert } from "./alert";
 import { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import type { Alert } from "./finding";
 import type { ServiceRate } from "./service-governor";
 import {
   NODE_TASKS,
@@ -262,7 +262,7 @@ describe("runMatch", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
-    const alert: Alert = { reason: "pin_brute_force", at: 100, events: [1, 2] };
+    const alert: Alert = { reason: "pin_brute_force", at: 100, eventIds: [1, 2] };
     guard(runMatch(input, output, idleClock, () => alert, scorer, FAST_RATE));
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();

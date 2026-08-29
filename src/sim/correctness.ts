@@ -9,9 +9,10 @@
  * outcomes feeds the gauge, so a Rule edit shows within a window. Both run
  * through `score`. An empty ring reads 100.
  */
-import type { Alert } from "./alert";
+
 import type { Attack } from "./attack";
 import type { PipeEvent } from "./event";
+import type { Alert } from "./finding";
 
 /** The global tallies behind the score of record. */
 export interface Counts {
@@ -124,7 +125,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     // Count distinct cited ids per owning Attack: the size of each intersection.
     const hits = new Map<number, number>();
     const seen = new Set<number>();
-    for (const eventId of alert.events) {
+    for (const eventId of alert.eventIds) {
       if (seen.has(eventId)) {
         continue;
       }

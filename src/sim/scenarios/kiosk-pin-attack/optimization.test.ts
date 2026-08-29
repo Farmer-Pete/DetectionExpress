@@ -75,7 +75,7 @@ describe("buildOptimizationAlgorithm", () => {
       });
       if (alert && !Array.isArray(alert)) {
         alerts += 1;
-        if (alert.events.length < PIN_BRUTE_FORCE_THRESHOLD) {
+        if (alert.eventIds.length < PIN_BRUTE_FORCE_THRESHOLD) {
           citedEnough = false;
         }
       }
