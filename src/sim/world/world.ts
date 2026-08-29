@@ -151,6 +151,9 @@ function parseZone(value: unknown): Zone {
   if (!Number.isInteger(trustLevel) || trustLevel < 0 || trustLevel > 4) {
     throw new Error(`world.zones: zone "${id}" trustLevel must be an integer in [0, 4].`);
   }
+  if (!/^z[0-4]$/.test(id)) {
+    throw new Error(`world.zones: zone id "${id}" must match ^z[0-4]$.`);
+  }
   return { id, name, trustLevel, area, whoBelongs, securityParallel, description };
 }
 

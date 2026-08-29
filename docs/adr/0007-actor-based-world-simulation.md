@@ -90,7 +90,7 @@ Generate every sensor's telemetry from an actor-based simulation, written in Typ
 
 The whole model in one picture:
 
-```
+```text
    SEED (one integer)
      |
      v
@@ -359,7 +359,7 @@ actors keep their guards, none of them can produce these patterns, so the ground
 
 Planned module layout, grown over several tickets:
 
-```
+```text
    src/sim/world/       environment: parseWorld, distanceTable, doorGrade, timetable (later)
    src/sim/actors/      the FSM engine + scheduler, then rider, staff, train, operator, host
    src/sim/entities/    seeded id pools: card, badge, account, and so on

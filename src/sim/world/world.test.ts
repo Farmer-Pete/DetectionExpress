@@ -177,6 +177,12 @@ describe("parseWorld", () => {
     expect(() => parseWorld(bad)).toThrow(/trustLevel must be an integer/);
   });
 
+  it("throws on a zone id outside the ^z[0-4]$ domain", () => {
+    const bad = cloneWorld();
+    bad.zones[0].id = "z9";
+    expect(() => parseWorld(bad)).toThrow(/zone id "z9" must match/);
+  });
+
   it("throws on an unknown site type", () => {
     const bad = cloneWorld();
     bad.sites[0].type = "banana";

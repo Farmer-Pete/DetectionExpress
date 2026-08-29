@@ -209,3 +209,31 @@ describe("createRider validates its tick ranges", () => {
     ).toThrow(/dwellTicks/);
   });
 });
+
+describe("createRider validates its window", () => {
+  it("rejects a NaN endTick, which would let `tick >= endTick` always fail", () => {
+    expect(() => createRider({ ...base, window: { startTick: 0, endTick: Number.NaN } })).toThrow(
+      /window/,
+    );
+  });
+
+  it("rejects a fractional startTick", () => {
+    expect(() => createRider({ ...base, window: { startTick: 1.5, endTick: 10 } })).toThrow(
+      /window/,
+    );
+  });
+
+  it("rejects a negative bound", () => {
+    expect(() => createRider({ ...base, window: { startTick: -1, endTick: 10 } })).toThrow(
+      /window/,
+    );
+  });
+
+  it("rejects a startTick past its endTick", () => {
+    expect(() => createRider({ ...base, window: { startTick: 10, endTick: 5 } })).toThrow(/window/);
+  });
+
+  it("accepts a valid window", () => {
+    expect(() => createRider({ ...base, window: { startTick: 0, endTick: 10 } })).not.toThrow();
+  });
+});

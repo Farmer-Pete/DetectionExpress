@@ -75,6 +75,25 @@ function assertTickRange(range: TickRange, label: string): void {
 }
 
 /**
+ * Reject a window whose bounds are not non-negative integers or whose start is
+ * past its end, so `tick >= endTick` is a reachable, well-ordered stop condition
+ * rather than a comparison a NaN or reversed bound can defeat.
+ */
+function assertTickWindow(window: { startTick: number; endTick: number }): void {
+  if (
+    !Number.isInteger(window.startTick) ||
+    !Number.isInteger(window.endTick) ||
+    window.startTick < 0 ||
+    window.endTick < 0 ||
+    window.startTick > window.endTick
+  ) {
+    throw new Error(
+      "rider: window must have non-negative integer startTick and endTick with startTick <= endTick.",
+    );
+  }
+}
+
+/**
  * Reject a fare or balance value that is not a whole, non-negative amount. Both the
  * balance and the fare coefficients must be non-negative integers, so the computed
  * fare and the running balance stay non-negative integers in whole currency units.
@@ -131,6 +150,7 @@ function pickDestination(
 export function createRider(config: RiderConfig): Actor<FareGateReading, RiderEnv> {
   assertTickRange(config.jitterTicks, "jitterTicks");
   assertTickRange(config.dwellTicks, "dwellTicks");
+  assertTickWindow(config.window);
   assertWholeAmount(config.balance, "balance");
   assertWholeAmount(config.fare.base, "fare.base");
   assertWholeAmount(config.fare.perMinute, "fare.perMinute");
