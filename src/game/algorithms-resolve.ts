@@ -18,8 +18,9 @@
 /** The one legal slug shape. No `/`, no `.`, so it cannot escape `src/algorithms/`. */
 const ALGORITHM_SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
 
-/** The player-override directory, as a root-relative URL prefix. */
-const ALGORITHMS_DIR = "/src/algorithms";
+/** The player-override directory, as a root-relative URL prefix. The dev plugin derives its
+ * filesystem subdirectory from this, so the URL path and the watched path cannot drift. */
+export const ALGORITHMS_DIR = "/src/algorithms";
 
 /** The committed fallback engine, loaded when a slug has no override on disk. */
 export const DEFAULT_ENGINE_PATH = "/src/game/default-engine.ts";

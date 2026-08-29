@@ -63,6 +63,15 @@ class FakeChannel implements HotChannelLike {
   }
 }
 
+/**
+ * A channel whose `off` never removes a listener. A re-subscribe therefore leaves the old
+ * epoch's listener registered, so the generation guard — not the unsubscribe — is the only
+ * thing that can drop a stale frame. Used to exercise the guard in isolation.
+ */
+class KeepAllChannel extends FakeChannel {
+  override off(): void {}
+}
+
 /** The recorded state a fake store exposes to assertions, alongside its setters. */
 interface FakeStoreState {
   source: string;
@@ -200,9 +209,10 @@ describe("algorithms dev client", () => {
   });
 
   it("drops a stale frame from a superseded generation after a re-subscribe", () => {
-    // A channel that keeps every listener registered (no `off`) proves the generation
-    // guard, not the unsubscribe, is what drops the stale frame.
-    const channel = new FakeChannel();
+    // A channel whose `off` never removes a listener keeps the epoch-1 listener registered
+    // after the re-subscribe, so the generation guard (not the unsubscribe) is what drops
+    // the stale frame.
+    const channel = new KeepAllChannel();
     const h = harness({ channel });
     h.client.enter(); // epoch 1
     h.client.stop();

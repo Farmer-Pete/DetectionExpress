@@ -25,6 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { HmrContext, ModuleNode, Plugin, ViteDevServer, WebSocketClient } from "vite";
 import {
+  ALGORITHMS_DIR,
   buildChangedFrame,
   createVersionCounter,
   isValidAlgorithmSlug,
@@ -33,7 +34,9 @@ import {
 
 const HELLO_EVENT = "algo:hello";
 const CHANGED_EVENT = "algo:changed";
-const ALGORITHMS_SUBDIR = "src/algorithms";
+// The filesystem subdirectory, derived from the shared root-relative URL prefix
+// (`/src/algorithms`) so the watched path and the resolver's served path cannot drift.
+const ALGORITHMS_SUBDIR = ALGORITHMS_DIR.slice(1);
 
 /** A string primitive, by its tag rather than a `typeof` representation check. */
 function isString(value: unknown): value is string {

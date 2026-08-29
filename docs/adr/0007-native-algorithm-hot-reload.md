@@ -45,7 +45,7 @@ Serve TypeScript algorithms as native Vite modules, hot-reloaded, on one dev ser
   engine) and replies `algo:changed { slug, path, version }`. On any change it re-resolves and
   pings. The client re-imports the versioned URL and runs the module.
 
-```
+```text
   player saves src/algorithms/<slug>.ts
         │  Vite recompiles (esbuild strips types)
         v
