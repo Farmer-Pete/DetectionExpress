@@ -42,7 +42,9 @@ function buildController(): RunController {
   return createRunController({
     scenario: kioskPinAttack,
     getGraph,
-    getSource: () => useGameStore.getState().source,
+    // The in-game editor flows as source mode. Local-IDE url mode has no producer
+    // yet (M2b's dev client adds it).
+    getAlgorithmSource: () => ({ kind: "source", source: useGameStore.getState().source }),
     getSeed: () => useGameStore.getState().seed,
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,

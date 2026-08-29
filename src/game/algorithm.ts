@@ -1,22 +1,54 @@
 /**
- * The Algorithm module loader. It wraps the player's source as a Blob module and
- * imports it, so a normal ES module (including absolute-URL library imports like
- * `https://esm.sh/lodash`) just works. Bare and relative specifiers are
- * unsupported: the browser has no import map for a Blob module.
+ * The Algorithm module loader. It imports the player's Rule as a real ES module
+ * two ways behind one seam: a Vite-served module URL (local-IDE mode), imported
+ * directly, or a runtime source string (the in-game editor), wrapped as a Blob
+ * module first. Either way a normal ES module (including absolute-URL library
+ * imports like `https://esm.sh/lodash`) just works. Bare and relative specifiers
+ * are unsupported for a Blob module: the browser has no import map for it.
  *
  * The loader is split in two so the validation logic is testable off the browser:
  *
  * - `adaptModule` is the pure part — it validates the loaded module and defaults a
  *   missing `normalize` to identity. It takes a plain object, so tests drive it with
  *   no blob import.
- * - `loadAlgorithm` is the thin browser shell — it imports the source through an
+ * - `loadAlgorithm` is the thin browser shell — it imports a `LoadTarget` through an
  *   injectable `importSource`, then hands the module to `adaptModule`. The default
- *   `importSource` does the blob import, which is browser only (Node's ESM loader
- *   rejects `blob:` URLs). Tests inject a fake `importSource` instead.
+ *   `importSource` imports the URL (url mode) or does the blob import (source mode),
+ *   which is browser only (Node's ESM loader rejects `blob:` URLs). Tests inject a
+ *   fake `importSource` instead.
  *
  * Browser only, and potentially effectful: the player's own browser runs whatever
  * they import. The engine injects deterministic Rules for its own tests.
  */
+
+/**
+ * The controller's one input, discriminated by mode (86-PLAN.md "One controller
+ * input"). It carries everything the run, the profiler, and the calibration cache
+ * need, for both modes:
+ *
+ * - `url` — local-IDE mode. `url = path + "?v=" + version`, where `version` is the
+ *   dev plugin's monotonic counter. `path` and `version` are the cache identity; the
+ *   `url` is what the loader and profiler import.
+ * - `source` — the in-game editor. The runtime source string, blob-imported.
+ */
+export type AlgorithmSource =
+  | { kind: "url"; path: string; version: number; url: string }
+  | { kind: "source"; source: string };
+
+/**
+ * What the loader and the profiler actually import: a served module URL, or a
+ * runtime source string. Derived from an `AlgorithmSource` by `toLoadTarget`, which
+ * drops the cache-only `path`/`version`. This is also the profiler Worker request's
+ * discriminated payload, so the minimal shape crosses the postMessage boundary.
+ */
+export type LoadTarget = { kind: "url"; url: string } | { kind: "source"; source: string };
+
+/** Reduce an `AlgorithmSource` to the minimal `LoadTarget` the loader and profiler import. */
+export function toLoadTarget(algorithmSource: AlgorithmSource): LoadTarget {
+  return algorithmSource.kind === "url"
+    ? { kind: "url", url: algorithmSource.url }
+    : { kind: "source", source: algorithmSource.source };
+}
 
 /**
  * The loaded Rule the engine runs. Both callables return an untyped value: the
@@ -34,8 +66,8 @@ export interface AlgorithmModule {
   normalize?: unknown;
 }
 
-/** Imports the player's source and resolves to its module namespace. */
-export type ImportSource = (source: string) => Promise<AlgorithmModule>;
+/** Imports a `LoadTarget` (a module URL or a source string) and resolves to its namespace. */
+export type ImportSource = (target: LoadTarget) => Promise<AlgorithmModule>;
 
 /** A one-argument callable. `instanceof Function` proves an export is callable. */
 function asCallable(value: unknown): ((arg: unknown) => unknown) | null {
@@ -69,12 +101,18 @@ export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
 }
 
 /**
- * Import the player's source as a Blob module. Browser only: Node's ESM loader
- * rejects `blob:` imports (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Covered by the app in
- * a real browser and the manual worker smoke, not by a Node unit test.
+ * Import a `LoadTarget` as a real ES module. In url mode the browser imports the
+ * Vite-served module URL directly (local-IDE mode; a cache-bust `?v=` makes a save a
+ * fresh URL). In source mode it wraps the string as a Blob module and imports that.
+ * Browser only: Node's ESM loader rejects `blob:` imports
+ * (`ERR_UNSUPPORTED_ESM_URL_SCHEME`). Covered by the app in a real browser and the
+ * manual worker smoke, not by a Node unit test.
  */
-const defaultImportSource: ImportSource = async (source) => {
-  const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+const defaultImportSource: ImportSource = async (target) => {
+  if (target.kind === "url") {
+    return await import(target.url); // a Vite-served module URL, imported directly
+  }
+  const url = URL.createObjectURL(new Blob([target.source], { type: "text/javascript" }));
   try {
     return await import(url);
   } finally {
@@ -82,10 +120,10 @@ const defaultImportSource: ImportSource = async (source) => {
   }
 };
 
-/** Load and adapt the player's Algorithm. The blob import is injectable for tests. */
+/** Load and adapt the player's Algorithm. The import is injectable for tests. */
 export async function loadAlgorithm(
-  source: string,
+  target: LoadTarget,
   importSource: ImportSource = defaultImportSource,
 ): Promise<LoadedAlgorithm> {
-  return adaptModule(await importSource(source));
+  return adaptModule(await importSource(target));
 }
