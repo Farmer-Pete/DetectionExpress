@@ -34,8 +34,8 @@ export interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view a Match rule reads: the normalized payload plus engine fields. */
-export interface MatchView extends NormalizedKiosk {
+/** The flat view a Detect rule reads: the normalized payload plus engine fields. */
+export interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -47,7 +47,7 @@ export interface MatchView extends NormalizedKiosk {
  * the profiler's bounded-corpus test asserts it stays within one window.
  */
 export interface Detector {
-  step(event: MatchView): Finding[];
+  step(event: KioskDetectView): Finding[];
   retained(): number;
 }
 
@@ -75,7 +75,7 @@ export function makeNaiveScan(): Detector {
   const fails = new Map<string, FailRecord[]>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Finding[] {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
         return [];
       }
@@ -131,7 +131,7 @@ export function makeIncrementalTally(): Detector {
   const counts = new Map<string, number>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Finding[] {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
         return [];
       }

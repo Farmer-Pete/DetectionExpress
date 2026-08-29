@@ -12,7 +12,7 @@ import {
   type ServiceRateHandle,
 } from "./run-controller";
 
-const algo: LoadedAlgorithm = { normalize: (raw) => raw, match: () => [] };
+const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
 const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [] };
 const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };

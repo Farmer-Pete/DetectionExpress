@@ -167,7 +167,7 @@ body {
   box-shadow: 0 0 14px color-mix(in srgb, var(--a4) 27%, transparent);
 }
 
-.node-match {
+.node-detect {
   border-color: var(--a2);
   box-shadow: 0 0 14px color-mix(in srgb, var(--a2) 27%, transparent);
 }
@@ -211,7 +211,7 @@ body {
   background: var(--a4);
 }
 
-.node-match .react-flow__handle {
+.node-detect .react-flow__handle {
   background: var(--a2);
 }
 

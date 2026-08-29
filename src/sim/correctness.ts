@@ -1,7 +1,7 @@
 /**
  * The Correctness scorer: an attack-level, threat-keyed match of Alerts against
  * Ground truth. It is mechanism only; it knows nothing about the kiosk or any
- * scenario semantics. The Match node is its single writer, feeding it Events in
+ * scenario semantics. The Detect node is its single writer, feeding it Events in
  * order, so scoring is one ordered fold with no race. The sampler only reads
  * `reading()`; it never changes scoring state.
  *

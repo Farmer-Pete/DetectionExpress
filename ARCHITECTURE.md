@@ -49,7 +49,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
    **The one measured cost lives outside the sim (Slice 2).** The engine must know how much
    work a player's Rule does per Event, and it cannot read that from the game Clock: a
-   synchronous `match()` fires no tick, so `now()` reads the same before and after it. So a
+   synchronous `detect()` fires no tick, so `now()` reads the same before and after it. So a
    profiler measures the player's code throughput off the sim, normalizes it against a
    detection-shaped anchor (`C/A`), and quantizes it to a fixed rational service rate. That
    rate is the only cost the sim consumes, and it stays constant for the whole run. The

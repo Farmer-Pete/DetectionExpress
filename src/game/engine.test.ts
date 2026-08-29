@@ -26,13 +26,13 @@ import {
 const NODES: GraphNode[] = [
   { id: "ingest", kind: "ingest" },
   { id: "normalize", kind: "normalize" },
-  { id: "match", kind: "match" },
+  { id: "detect", kind: "detect" },
   { id: "sink", kind: "sink" },
 ];
 const EDGES: GraphEdge[] = [
   { id: "e1", source: "ingest", target: "normalize" },
-  { id: "e2", source: "normalize", target: "match" },
-  { id: "e3", source: "match", target: "sink" },
+  { id: "e2", source: "normalize", target: "detect" },
+  { id: "e3", source: "detect", target: "sink" },
 ];
 
 const SCORER_CONFIG: ScorerConfig = {
@@ -45,10 +45,10 @@ const SCORER_CONFIG: ScorerConfig = {
 /** A rate so fast the governor never sleeps: the pipeline drains as fast as it fills. */
 const FAST_RATE: ServiceRate = { num: 1_000_000, den: 1 };
 
-/** normalize is identity, match never fires: the pipeline runs, nothing scores. */
+/** normalize is identity, detect never fires: the pipeline runs, nothing scores. */
 const idleAlgorithm: TaskAlgorithm = {
   normalize: (raw) => raw,
-  match: () => [],
+  detect: () => [],
 };
 
 /** A single final deadline at `atTick`. */
@@ -78,7 +78,7 @@ function ev(id: number, ts: number, payload: unknown = { acct: "x" }): PipeEvent
   return { id, ts, endpoint: "kiosk-v1", payload };
 }
 
-/** The normalized record the reference match reads, after Normalize runs. */
+/** The normalized record the reference detect reads, after Normalize runs. */
 interface ReferenceView {
   account: string;
   terminal: string;
@@ -151,7 +151,7 @@ describe("engine start guards", () => {
     const driver = new SpyDriver();
     expect(() =>
       start({
-        getGraph: () => ({ nodes: [{ id: "x", kind: "detect" }], edges: [] }),
+        getGraph: () => ({ nodes: [{ id: "x", kind: "bogus" }], edges: [] }),
         setSnapshot: () => undefined,
         algorithm: idleAlgorithm,
         scorer: createScorer([], SCORER_CONFIG),
@@ -192,12 +192,12 @@ describe("engine start guards", () => {
 describe("engine integration with the reference Algorithm", () => {
   // Adapt the reference twin (typed to its concrete records) to the engine's
   // untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it kiosk-v1
-  // payloads, and Normalize produces the record the reference match expects.
+  // payloads, and Normalize produces the record the reference detect expects.
   function referenceTaskAlgorithm(): TaskAlgorithm {
     const algo = buildReferenceAlgorithm();
     return {
       normalize: (raw) => (isRawKioskV1(raw) ? algo.normalize(raw) : raw),
-      match: (view) => (isReferenceView(view) ? algo.match(view) : []),
+      detect: (view) => (isReferenceView(view) ? algo.detect(view) : []),
     };
   }
 
@@ -237,7 +237,7 @@ describe("engine integration with the reference Algorithm", () => {
     expect(snap).toBeDefined();
     if (!snap) return;
     expect(Object.keys(snap.edges).sort()).toEqual(["e1", "e2", "e3"]);
-    expect(Object.keys(snap.nodes).sort()).toEqual(["ingest", "match", "normalize", "sink"]);
+    expect(Object.keys(snap.nodes).sort()).toEqual(["detect", "ingest", "normalize", "sink"]);
     expect(snap.backlog).toBe(0); // sum of all channels, drained by the deadline
     expect(snap.admitted).toBe(snap.completed); // every admitted Event completed
   });
@@ -313,8 +313,8 @@ describe("engine failure and stop paths", () => {
     const errors: unknown[] = [];
     const throwing: TaskAlgorithm = {
       normalize: (raw) => raw,
-      match: () => {
-        throw new Error("boom in match");
+      detect: () => {
+        throw new Error("boom in detect");
       },
     };
     const h = launch({
@@ -339,8 +339,8 @@ describe("engine failure and stop paths", () => {
       checkpoints: deadlineAt(50),
       algorithm: {
         normalize: (raw) => raw,
-        match: () => {
-          throw new Error("boom in match");
+        detect: () => {
+          throw new Error("boom in detect");
         },
       },
       setSnapshot: () => {
@@ -425,9 +425,9 @@ describe("engine failure and stop paths", () => {
 });
 
 describe("engine backpressure ceiling (M2 seam 5)", () => {
-  it("saturates the Backlog near 2 * CHANNEL_CAP with the Match->Sink channel near empty", async () => {
+  it("saturates the Backlog near 2 * CHANNEL_CAP with the Detect->Sink channel near empty", async () => {
     // A flood of Events due now, against a slow service rate. The two upstream
-    // channels fill to cap; the Match->Sink channel stays near empty because the
+    // channels fill to cap; the Detect->Sink channel stays near empty because the
     // Sink drains at once, so the total Backlog tops out near 2 * CHANNEL_CAP.
     let nextId = 0;
     const h = launch({

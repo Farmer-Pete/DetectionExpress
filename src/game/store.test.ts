@@ -21,7 +21,7 @@ beforeEach(() => {
 describe("store", () => {
   it("seeds the four-node chain the validator accepts", () => {
     const graph = getGraph();
-    expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "normalize", "match", "sink"]);
+    expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "normalize", "detect", "sink"]);
     expect(graph.edges).toHaveLength(3);
   });
 
@@ -32,8 +32,8 @@ describe("store", () => {
   });
 
   it("edits the Algorithm source through setAlgorithmSource", () => {
-    useGameStore.getState().setAlgorithmSource("export function match(){ return null; }");
-    expect(useGameStore.getState().source).toContain("return null");
+    useGameStore.getState().setAlgorithmSource("export function detect(){ return []; }");
+    expect(useGameStore.getState().source).toContain("return []");
   });
 
   it("holds and clears the error through setError", () => {

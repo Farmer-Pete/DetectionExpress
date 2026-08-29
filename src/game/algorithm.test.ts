@@ -2,31 +2,31 @@ import { describe, expect, it } from "vitest";
 import { adaptModule, type ImportSource, loadAlgorithm } from "./algorithm";
 
 describe("adaptModule", () => {
-  it("returns a working match and defaults normalize to identity when absent", () => {
+  it("returns a working detect and defaults normalize to identity when absent", () => {
     const algo = adaptModule({
-      match: (event: { flag?: boolean }) =>
+      detect: (event: { flag?: boolean }) =>
         event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
     });
-    expect(algo.match instanceof Function).toBe(true);
+    expect(algo.detect instanceof Function).toBe(true);
     expect(algo.normalize("passthrough")).toBe("passthrough"); // identity default
-    expect(algo.match({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
-    expect(algo.match({ flag: false })).toEqual([]);
+    expect(algo.detect({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.detect({ flag: false })).toEqual([]);
   });
 
   it("uses the module's normalize when it exports one", () => {
     const algo = adaptModule({
       normalize: (r: { x: number }) => ({ u: r.x }),
-      match: () => null,
+      detect: () => [],
     });
     expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
   });
 
-  it("rejects a module that exports no match function", () => {
-    expect(() => adaptModule({})).toThrow(/match/i);
+  it("rejects a module that exports no detect function", () => {
+    expect(() => adaptModule({})).toThrow(/detect/i);
   });
 
   it("rejects a normalize export that is present but not a function", () => {
-    expect(() => adaptModule({ match: () => null, normalize: 5 })).toThrow(/normalize/i);
+    expect(() => adaptModule({ detect: () => [], normalize: 5 })).toThrow(/normalize/i);
   });
 });
 
@@ -35,13 +35,13 @@ describe("loadAlgorithm", () => {
     const importSource: ImportSource = () =>
       Promise.resolve({
         normalize: (r: { x: number }) => ({ u: r.x }),
-        match: (event: { flag?: boolean }) =>
+        detect: (event: { flag?: boolean }) =>
           event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
       });
     const algo = await loadAlgorithm("ignored source", importSource);
     expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
-    expect(algo.match({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
-    expect(algo.match({ flag: false })).toEqual([]);
+    expect(algo.detect({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.detect({ flag: false })).toEqual([]);
   });
 
   it("surfaces a syntax error the import source rejects with", async () => {

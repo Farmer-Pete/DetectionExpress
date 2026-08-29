@@ -74,10 +74,9 @@ function rateFor(codePerAnchor: number, omega: number, skew: number): ServiceRat
 }
 
 // --- The abstract pipeline ---------------------------------------------------
-// A faithful integer model of the run: arrivals follow the wave schedule; the
-// Match node completes Events at the real governor's rate; a backpressure ceiling
+// A faithful integer model of the run: arrivals follow the wave schedule; XXX Events at the real governor's rate; a backpressure ceiling
 // of 2 * CHANNEL_CAP caps how far admitted may lead completed, exactly as the two
-// bounded upstream Channels do (the Match->Sink Channel stays near empty). The
+// bounded upstream Channels do (the Detect->Sink Channel stays near empty). The
 // checkpoint is read at the start-of-tick boundary, before that tick's service,
 // so an Event completing on the checkpoint tick counts as still outstanding.
 
@@ -115,7 +114,7 @@ function simulate(rate: ServiceRate): SimResult {
   let scheduledCum = 0;
   let admitted = 0;
   let completed = 0;
-  let matchFreeAt = 1; // the next tick Match may pull, given its governor sleeps
+  let detectFreeAt = 1; // the next tick Detect may pull, given its governor sleeps
   let maxBacklog = 0;
   let nextCheckpoint = 0;
 
@@ -147,12 +146,12 @@ function simulate(rate: ServiceRate): SimResult {
     admitted = Math.min(scheduledCum, completed + ceiling);
 
     // Serve as many Events as the governor allows this tick.
-    while (tick >= matchFreeAt && admitted > completed) {
+    while (tick >= detectFreeAt && admitted > completed) {
       const sleep = governor.charge();
       completed += 1;
       admitted = Math.min(scheduledCum, completed + ceiling);
       if (sleep > 0) {
-        matchFreeAt = tick + sleep; // busy through the sleep, resuming later
+        detectFreeAt = tick + sleep; // busy through the sleep, resuming later
         break;
       }
     }
@@ -231,13 +230,13 @@ describe("winnability at the shipped tuning (nominal, skew 1)", () => {
 const NODES: GraphNode[] = [
   { id: "ingest", kind: "ingest" },
   { id: "normalize", kind: "normalize" },
-  { id: "match", kind: "match" },
+  { id: "detect", kind: "detect" },
   { id: "sink", kind: "sink" },
 ];
 const EDGES: GraphEdge[] = [
   { id: "e1", source: "ingest", target: "normalize" },
-  { id: "e2", source: "normalize", target: "match" },
-  { id: "e3", source: "match", target: "sink" },
+  { id: "e2", source: "normalize", target: "detect" },
+  { id: "e3", source: "detect", target: "sink" },
 ];
 const REAL_SCORER_CONFIG: ScorerConfig = {
   threshold: PIN_BRUTE_FORCE_THRESHOLD,
@@ -246,7 +245,7 @@ const REAL_SCORER_CONFIG: ScorerConfig = {
   wFp: CORRECTNESS_W_FP,
 };
 
-/** The normalized record the twin match reads, after Normalize runs. */
+/** The normalized record the twin detect reads, after Normalize runs. */
 interface KioskView {
   account: string;
   terminal: string;
@@ -259,7 +258,7 @@ interface KioskView {
 /** The in-process twin shape both the naive default and the tally satisfy. */
 interface KioskTwin {
   normalize(raw: RawKioskV1): { account: string; terminal: string; outcome: "success" | "fail" };
-  match(view: KioskView): Finding[];
+  detect(view: KioskView): Finding[];
 }
 
 function isTwinView(value: unknown): value is KioskView {
@@ -270,7 +269,7 @@ function isTwinView(value: unknown): value is KioskView {
 function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
   return {
     normalize: (raw) => (isRawKioskV1(raw) ? twin.normalize(raw) : raw),
-    match: (view) => (isTwinView(view) ? twin.match(view) : []),
+    detect: (view) => (isTwinView(view) ? twin.detect(view) : []),
   };
 }
 

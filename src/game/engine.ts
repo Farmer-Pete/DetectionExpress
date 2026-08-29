@@ -1,6 +1,6 @@
 /**
  * The engine wires the graph into a running pipeline: a Clock, one channel per
- * edge, a node task per node, a governed Match, and a sampler that publishes one
+ * edge, a node task per node, a governed Detect, and a sampler that publishes one
  * atomic snapshot at PUBLISH_HZ. It owns a deadline-driven lifecycle: a
  * transactional `start`, checkpoints evaluated at the start-of-tick boundary, a
  * single-stop supervisor, a synchronous idempotent `stop`, and a terminal deferred
@@ -56,7 +56,7 @@ export interface StartOptions {
   scorer: Scorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   generator: () => PipeEvent | null;
-  /** The quantized per-Event service rate the Match governor charges. */
+  /** The quantized per-Event service rate the Detect governor charges. */
   serviceRate: ServiceRate;
   /** The wave boundaries plus the final deadline, in tick order. */
   checkpoints: Checkpoint[];
@@ -323,7 +323,7 @@ export function start(options: StartOptions): EngineHandle {
     clock = new Clock(CLOCK_HZ, driver);
 
     // One bounded channel per edge. The chain has three edges: Ingest->Normalize,
-    // Normalize->Match, Match->Sink.
+    // Normalize->Detect, Detect->Sink.
     const channelMap = new Map<string, Channel<PipeMessage>>();
     for (const edge of graph.edges) {
       channelMap.set(edge.id, new Channel<PipeMessage>(CHANNEL_CAP));
@@ -355,7 +355,7 @@ export function start(options: StartOptions): EngineHandle {
       }
       return task(node.id, wiringFor(node.id, graph.edges, channelMap), runtime).catch(fail);
     });
-    // The marker draining ends every task cleanly; the Match task already finalized
+    // The marker draining ends every task cleanly; the Detect task already finalized
     // Correctness. The run does NOT end here: it waits for the final deadline.
     void Promise.allSettled(tasks);
 

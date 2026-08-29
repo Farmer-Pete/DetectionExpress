@@ -2,8 +2,8 @@
  * The profiler orchestration. It times three throughputs over the looping corpus
  * with one measurement protocol and one injected timer:
  *
- * - C = events/playerMs: the player's match on the flat view, the same view the
- *   Match task builds at run time.
+ * - C = events/playerMs: the player's detect on the flat view, the same view the
+ *   Detect task builds at run time.
  * - A = events/anchorMs: the frozen detection-shaped anchor.
  * - O: the oracle's raw integer speed, kept only as profiler health.
  *
@@ -24,14 +24,14 @@ import { normalizeKiosk } from "./rules";
 
 /**
  * A rule the profiler prices: normalize a raw payload into some object shape `N`,
- * then match the flat view (that shape plus the engine fields). The runtime only
- * requires normalize to yield a plain object and detect to yield `Finding[]`, so
- * the profiler prices the same contract: `N` defaults to a bare object and match
- * returns the parsed findings.
+ * then detect over the flat view (that shape plus the engine fields). The runtime
+ * only requires normalize to yield a plain object and detect to yield `Finding[]`,
+ * so the profiler prices the same contract: `N` defaults to a bare object and
+ * detect returns the parsed findings.
  */
 export interface ProfilerRule<N extends object = object> {
   normalize(raw: RawKioskV1): N;
-  match(view: N & EngineFields): Finding[];
+  detect(view: N & EngineFields): Finding[];
 }
 
 /** The profiler's reading: the code speed and the machine-health probe. */
@@ -67,7 +67,7 @@ export function calibrate<N extends object>(
     const view = withEngineFields(normalized, event.id, event.ts, event.endpoint);
     // The profiler needs a work sink, not the findings themselves; a rule's work
     // is the number of findings it returns ([] counts as none).
-    sink += rule.match(view).length;
+    sink += rule.detect(view).length;
   };
 
   const anchorNext = loopingCorpus(corpus);

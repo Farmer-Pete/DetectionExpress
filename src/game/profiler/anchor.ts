@@ -9,7 +9,7 @@
  * difficulty would move with the default. Pure, deterministic, game-time only.
  */
 
-import type { MatchView } from "./rules";
+import type { KioskDetectView } from "./rules";
 import { SCAN_WINDOW_S } from "./rules";
 
 /** One retained fail the anchor scan keeps in the window. */
@@ -24,10 +24,10 @@ interface AnchorRecord {
  * running checksum. The checksum is returned so the work is consumed and the JIT
  * cannot elide it. Successes do no work, so only detection-shaped cost is timed.
  */
-export function makeAnchor(): (view: MatchView) => number {
+export function makeAnchor(): (view: KioskDetectView) => number {
   const recent = new Map<string, AnchorRecord[]>();
   let checksum = 0;
-  return (view: MatchView): number => {
+  return (view: KioskDetectView): number => {
     if (view.outcome === "fail") {
       const arr = recent.get(view.account) ?? [];
       arr.push({ id: view.id, ts: view.ts });

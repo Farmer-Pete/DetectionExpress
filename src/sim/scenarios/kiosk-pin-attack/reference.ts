@@ -22,7 +22,7 @@ export function normalize(raw) {
 }
 const fails = {};
 const firing = {};
-export function match(e) {
+export function detect(e) {
   const WINDOW = 300; // 5 minutes in game seconds
   if (e.outcome !== "fail") return [];
   const f = (fails[e.account] ??= []);
@@ -45,8 +45,8 @@ interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view Match hands the Rule: the normalized payload plus engine fields. */
-interface MatchView extends NormalizedKiosk {
+/** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
+interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -54,7 +54,7 @@ interface MatchView extends NormalizedKiosk {
 
 export interface ReferenceAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(e: MatchView): Finding[];
+  detect(e: KioskDetectView): Finding[];
 }
 
 /**
@@ -76,7 +76,7 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
         outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
       };
     },
-    match(e) {
+    detect(e) {
       if (e.outcome !== "fail") {
         return [];
       }

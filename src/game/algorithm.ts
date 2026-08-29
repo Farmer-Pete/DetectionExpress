@@ -20,17 +20,17 @@
 
 /**
  * The loaded Rule the engine runs. Both callables return an untyped value: the
- * Match task parses the return at its boundary. `normalize` defaults to identity
+ * Detect task parses the return at its boundary. `normalize` defaults to identity
  * when the module omits it.
  */
 export interface LoadedAlgorithm {
   normalize: (raw: unknown) => unknown;
-  match: (event: unknown) => unknown;
+  detect: (event: unknown) => unknown;
 }
 
 /** The exports we read off the player's module. Both may be missing or non-functions. */
 export interface AlgorithmModule {
-  match?: unknown;
+  detect?: unknown;
   normalize?: unknown;
 }
 
@@ -47,13 +47,13 @@ function asCallable(value: unknown): ((arg: unknown) => unknown) | null {
 
 /**
  * Validate a loaded module and adapt it into the Rule the engine runs. Pure: no
- * blob, no import, no DOM. Throws when `match` is missing or `normalize` is present
+ * blob, no import, no DOM. Throws when `detect` is missing or `normalize` is present
  * but not a function.
  */
 export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
-  const match = asCallable(loaded.match);
-  if (!match) {
-    throw new Error("The Algorithm must export a `match` function.");
+  const detect = asCallable(loaded.detect);
+  if (!detect) {
+    throw new Error("The Algorithm must export a `detect` function.");
   }
   let normalize: (raw: unknown) => unknown;
   if (loaded.normalize === undefined) {
@@ -65,7 +65,7 @@ export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
     }
     normalize = callable;
   }
-  return { normalize, match };
+  return { normalize, detect };
 }
 
 /**

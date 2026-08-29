@@ -40,7 +40,7 @@ let head = 0;
 const counts = {}; // per-account in-window fail count
 const recent = {}; // per-account last THRESHOLD fail ids, the evidence to cite
 const firing = {};
-export function match(e) {
+export function detect(e) {
   if (e.outcome !== "fail") return [];
   queue.push({ account: e.account, ts: e.ts, id: e.id });
   counts[e.account] = (counts[e.account] ?? 0) + 1;
@@ -73,8 +73,8 @@ interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view Match hands the Rule: the normalized payload plus engine fields. */
-interface MatchView extends NormalizedKiosk {
+/** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
+interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -82,7 +82,7 @@ interface MatchView extends NormalizedKiosk {
 
 export interface OptimizationAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(e: MatchView): Finding[];
+  detect(e: KioskDetectView): Finding[];
 }
 
 /** One queued fail in the global expiry queue: its account, time, and id. */
@@ -123,7 +123,7 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
       };
     },
-    match(e) {
+    detect(e) {
       if (e.outcome !== "fail") {
         return [];
       }

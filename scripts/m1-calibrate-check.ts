@@ -13,7 +13,7 @@ import type { MeasureConfig } from "../src/game/profiler/measure";
 import { buildDefaultCorpus, performanceTimer } from "../src/game/profiler/profile";
 import {
   type Detector,
-  type MatchView,
+  type KioskDetectView,
   makeIncrementalTally,
   makeNaiveScan,
   type NormalizedKiosk,
@@ -29,7 +29,7 @@ const THRESHOLD = 5;
 
 /** Wrap a detector as the rule the calibrator prices. */
 function ruleOf(detector: Detector): ProfilerRule<NormalizedKiosk> {
-  return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
+  return { normalize: normalizeKiosk, detect: (view) => detector.step(view) };
 }
 
 /**
@@ -37,10 +37,10 @@ function ruleOf(detector: Detector): ProfilerRule<NormalizedKiosk> {
  * a nested loop, wasting O(n^2) work before it decides. Correct, but slow.
  */
 function makePoorDetector(): Detector {
-  const recent: MatchView[] = [];
+  const recent: KioskDetectView[] = [];
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Finding[] {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
         return [];
       }
@@ -88,7 +88,7 @@ function makeBucketDetector(): Detector {
   const buckets = new Map<string, { fails: number[]; head: number }>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Finding[] {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
         return [];
       }
@@ -133,9 +133,9 @@ function makeBucketDetector(): Detector {
 function makeHeavyDetector(): Detector {
   const inner = makeNaiveScan();
   return {
-    step(event: MatchView): Finding[] {
+    step(event: KioskDetectView): Finding[] {
       const round = JSON.parse(JSON.stringify(event));
-      const view: MatchView = {
+      const view: KioskDetectView = {
         account: round.account,
         terminal: round.terminal,
         outcome: round.outcome,
