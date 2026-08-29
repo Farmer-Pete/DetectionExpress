@@ -16,7 +16,7 @@ Run this smoke by hand after any change to `algorithms-hmr.ts`,
 
 ## Steps
 
-1. `pnpm run dev` (the normal Vite dev server; `PUBLIC_DEV_KIT` unset). The
+1. `pnpm run dev` (the only Vite dev server). The
    `detection-express:algorithms-hmr` plugin loads on `apply: "serve"`.
 2. Open the app. The run starts on the in-game editor source (source mode).
 3. Click **Edit in IDE**. The in-game editor locks. The client sends `algo:hello`; the

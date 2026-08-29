@@ -1,12 +1,10 @@
 /**
  * The dev-only gate and loader for the local-IDE algorithms client (86-PLAN.md M2b).
- * It mirrors `dev-flag.ts`: the `if (import.meta.env.DEV)` guard is co-located with the
- * dynamic import, so Vite folds `import.meta.env.DEV` to `false` in the production build
- * and eliminates both this import and the whole `algorithms-dev-client` module. The
- * production bundle carries none of it.
- *
- * `import.meta.env.DEV` replaces the old `PUBLIC_DEV_KIT` switch for this path; the M3
- * host retirement migrates the rest. No React import: this lives in `game/`.
+ * The `if (import.meta.env.DEV)` guard is co-located with the dynamic import, so Vite
+ * folds `import.meta.env.DEV` to `false` in the production build and eliminates both
+ * this import and the whole `algorithms-dev-client` module. The production bundle
+ * carries none of it, and `verify:static` asserts that. `import.meta.env.DEV` is the
+ * one dev/production switch. No React import: this lives in `game/`.
  */
 import type { AlgorithmsDevClientModule, HotChannelLike } from "./algorithms-dev-client";
 
@@ -30,8 +28,8 @@ export function devHotChannel(): HotChannelLike | null {
 
 /**
  * The algorithms-dev-client module when running under the dev server, or null in the
- * production build. The gate is co-located with the const `import`, exactly as
- * `dev-flag.ts`, so the bundler strips the client from the static build.
+ * production build. The gate is co-located with the const `import`, so the bundler
+ * strips the client from the production build.
  */
 export function loadAlgorithmsDevClient(): Promise<AlgorithmsDevClientModule> | null {
   if (import.meta.env.DEV) {

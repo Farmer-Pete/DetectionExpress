@@ -4,18 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "packageManager": "pnpm@10.29.3",
-  "bin": {
-    "detection-express": "./dd-dev.mjs"
-  },
-  "files": [
-    "dd-dev.mjs",
-    "dist-devkit"
-  ],
   "scripts": {
     "dev": "vite",
-    "build": "pnpm run build:static",
-    "build:static": "tsc --noEmit && vite build --mode static",
-    "build:devkit": "vite build --mode devkit",
+    "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,10 +15,8 @@
     "knip": "knip",
     "verify:static": "tsx scripts/verify-static.ts",
     "verify:worker-build": "tsx scripts/verify-worker-build.ts",
-    "pack:check": "tsx scripts/verify-pack.ts",
     "m1:check": "tsx scripts/m1-calibrate-check.ts",
     "audit": "pnpm audit --audit-level=high",
-    "prepack": "pnpm run build:devkit",
     "prepare": "lefthook install"
   },
   "dependencies": {
