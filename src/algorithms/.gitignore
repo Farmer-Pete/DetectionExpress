@@ -1,0 +1,6 @@
+# Player Algorithm files live here, dev-only. The local IDE flow writes them and Vite
+# hot-reloads them. The whole folder is ignored so no player file is committed by
+# accident. The checked-in default engine lives at src/game/default-engine.ts, outside
+# this folder, so anti-slop lint still covers it.
+*
+!.gitignore
