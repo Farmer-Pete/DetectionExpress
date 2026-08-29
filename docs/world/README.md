@@ -19,9 +19,12 @@ so an editor can validate it as you type.
 
 ## How they connect
 
-The files reference each other by id. Nothing is duplicated across files.
+The files reference each other by id. Descriptive text lives in one place only. The
+sensor-to-vendor link is the one relationship stored in both directions: `sensors.json` names the
+`manufacturerId` on each sensor, and `manufacturers.json` names the sensor ids in each vendor's
+`makes`. Adding a sensor means editing both sides, so keep them in sync.
 
-```
+```text
  scenarios.json ── sensors[] ──▶ sensors.json ── manufacturerId ──▶ manufacturers.json
         │                             │
         └── (reads the map) ──▶ world.json ◀── foundAt.zones / stations / sites ──┘

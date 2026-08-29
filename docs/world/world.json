@@ -97,7 +97,8 @@
       "interchange": true,
       "connections": [
         { "to": "har", "line": "red", "minutes": 3 },
-        { "to": "cen", "line": "red", "minutes": 2 }
+        { "to": "cen", "line": "red", "minutes": 2 },
+        { "to": "cen", "line": "blue", "minutes": 2 }
       ],
       "description": "Where the Red and Blue lines shake hands. Two lines, one very confused tourist map, three buskers."
     },
@@ -108,9 +109,11 @@
       "interchange": true,
       "connections": [
         { "to": "mkt", "line": "red", "minutes": 2 },
+        { "to": "mkt", "line": "blue", "minutes": 2 },
         { "to": "riv", "line": "red", "minutes": 3 },
         { "to": "prk", "line": "blue", "minutes": 4 },
-        { "to": "jct", "line": "green", "minutes": 3 }
+        { "to": "jct", "line": "green", "minutes": 3 },
+        { "to": "jct", "line": "circle", "minutes": 3 }
       ],
       "description": "The beating heart. Four lines cross here. If Central sneezes, the whole network catches a cold."
     },
@@ -167,7 +170,8 @@
       "interchange": true,
       "connections": [
         { "to": "sum", "line": "green", "minutes": 5 },
-        { "to": "cen", "line": "green", "minutes": 3 }
+        { "to": "cen", "line": "green", "minutes": 3 },
+        { "to": "cen", "line": "circle", "minutes": 3 }
       ],
       "description": "Where Green meets the Circle. Trains loiter here and schedules come to die."
     }

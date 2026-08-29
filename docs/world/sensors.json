@@ -23,7 +23,7 @@
           "model": "Gatekeep AccessPoint 200",
           "quirk": "ISO timestamp string and loud SCREAMING_SNAKE keys. You parse a date before you can do anything.",
           "exampleRaw": {
-            "EVENT_TIME": "2026-08-29T02:14:03Z",
+            "EVENT_TIME": "2025-08-29T02:14:03Z",
             "ACCOUNT_ID": "river.k",
             "STATION_CODE": "HAR",
             "TERMINAL_NO": "K3",
@@ -69,7 +69,7 @@
           "model": "Gatekeep TurnKey 5",
           "quirk": "Direction is the word ENTRY or EXIT, result is PERMIT or REJECT, and the card is a MEDIA_SERIAL.",
           "exampleRaw": {
-            "EVENT_TIME": "2026-08-29T02:14:03Z",
+            "EVENT_TIME": "2025-08-29T02:14:03Z",
             "MEDIA_SERIAL": "C09",
             "STATION_CODE": "CEN",
             "LINE_ID": "RED",
@@ -81,7 +81,7 @@
         {
           "manufacturerId": "veritap",
           "model": "VeriTap FlowGate",
-          "quirk": "Balance is in integer cents, not currency units. 250 here is not 250, it is 2.50.",
+          "quirk": "Balance is in integer cents, not currency units. 25000 here is 250.00, the same balance the others write as 250.",
           "exampleRaw": {
             "ts": 1756433643000,
             "mediaToken": "C09",
@@ -89,7 +89,7 @@
             "line": "red",
             "dir": "in",
             "res": "ok",
-            "balanceCents": 250
+            "balanceCents": 25000
           }
         },
         {
@@ -135,7 +135,7 @@
             "mediaToken": "4111XXXX0001",
             "stn": "END",
             "tvmId": "T7",
-            "amountCents": 100,
+            "amountCents": 10000,
             "txnType": "TOPUP"
           }
         }
@@ -165,7 +165,7 @@
           "model": "Gatekeep DoorWatch",
           "quirk": "The badge holder is CARD_HOLDER, the decision is GRANTED or DENIED, and the zone is bare like Z4 with no lowercase.",
           "exampleRaw": {
-            "EVENT_TIME": "2026-08-29T02:14:03Z",
+            "EVENT_TIME": "2025-08-29T02:14:03Z",
             "CARD_HOLDER": "B204",
             "SITE_CODE": "OCC",
             "DOOR_NAME": "MAIN",

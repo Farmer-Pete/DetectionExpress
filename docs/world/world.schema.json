@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["zones", "lines", "stations", "sites", "controlCenter"],
   "properties": {
+    "$schema": { "type": "string" },
     "zones": {
       "type": "array",
       "description": "The trust ladder. A zone is a layer of access, not a place on the map. Every site stacks several zones.",

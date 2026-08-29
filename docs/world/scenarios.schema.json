@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["difficultyScale", "scenarios"],
   "properties": {
+    "$schema": { "type": "string" },
     "difficultyScale": {
       "type": "array",
       "description": "The five difficulty tiers and the detection logic shape each one implies.",

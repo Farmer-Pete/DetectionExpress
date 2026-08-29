@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["sensors"],
   "properties": {
+    "$schema": { "type": "string" },
     "sensors": {
       "type": "array",
       "items": { "$ref": "#/$defs/sensor" }
