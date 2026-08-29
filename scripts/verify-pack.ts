@@ -108,7 +108,9 @@ if (isMainModule(process.argv[1], import.meta.url)) {
   const parsed: PackResult = JSON.parse(raw);
   const packedFiles = parsed.files.map((file) => file.path);
   const indexHtml = readFileSync(path.join(DEVKIT_DIR, "index.html"), "utf8");
-  const binExecutable = (statSync("dd-dev.mjs").mode & 0o111) !== 0;
+  // Windows Node reports no POSIX execute bits. pack:check runs on macOS/Linux
+  // (local and CI), so treat the bin as executable on win32 rather than false-fail.
+  const binExecutable = process.platform === "win32" || (statSync("dd-dev.mjs").mode & 0o111) !== 0;
 
   const result = checkPack(packedFiles, indexHtml, binExecutable);
   if (result.ok) {
