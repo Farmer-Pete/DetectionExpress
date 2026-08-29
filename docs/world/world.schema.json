@@ -5,7 +5,7 @@
   "description": "The metro network the player defends: its trust zones, lines, stations, staff sites, and the control center.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["zones", "lines", "stations", "sites", "controlCenter"],
+  "required": ["zones", "lines", "stations", "sites", "controlCenter", "doors"],
   "properties": {
     "$schema": { "type": "string" },
     "zones": {
@@ -27,7 +27,12 @@
       "description": "Staff-only facilities off the passenger map: depots, signal cabins, substations.",
       "items": { "$ref": "#/$defs/site" }
     },
-    "controlCenter": { "$ref": "#/$defs/controlCenter" }
+    "controlCenter": { "$ref": "#/$defs/controlCenter" },
+    "doors": {
+      "type": "array",
+      "description": "Access-controlled doors. Each guards one zone at a site or the control center; its grade is that zone's trust level, derived not stored.",
+      "items": { "$ref": "#/$defs/door" }
+    }
   },
   "$defs": {
     "zone": {
@@ -133,6 +138,28 @@
         "type": { "type": "string", "const": "control-center" },
         "zonesPresent": { "type": "array", "items": { "type": "string" } },
         "description": { "type": "string" }
+      }
+    },
+    "door": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["location", "locationType", "name", "zone"],
+      "properties": {
+        "location": {
+          "type": "string",
+          "description": "The id of the site or control center the door sits at."
+        },
+        "locationType": {
+          "type": "string",
+          "enum": ["site", "control-center"],
+          "description": "Which list `location` resolves against."
+        },
+        "name": { "type": "string", "description": "The door name, e.g. MAIN." },
+        "zone": {
+          "type": "string",
+          "pattern": "^z[0-4]$",
+          "description": "The zone the door guards. Its grade is that zone's trust level."
+        }
       }
     }
   }
