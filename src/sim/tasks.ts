@@ -4,18 +4,20 @@
  * a pause holds every task at its next turn, and a stop unwinds it through a
  * rejected wait. No abort code lives here.
  *
- * The pipeline is the locked chain Ingest -> Normalize -> Match -> Sink. Ingest
+ * The pipeline is the locked chain Ingest -> Normalize -> Detect -> Sink. Ingest
  * plays a seeded schedule and closes it with a single end-of-stream marker. The
  * marker rides the same FIFO all the way through, so every task ends cleanly and
- * in order (Match after `finalize`, Sink after consuming it).
+ * in order (Detect after `finalize`, Sink after consuming it).
  *
  * The tasks depend only on a minimal clock contract, so `sim/` never imports the
  * concrete Clock from `game/`.
  */
 import { GAME_SECONDS_PER_TICK } from "../game/tuning";
-import type { Alert } from "./alert";
 import type { Channel } from "./channel";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
+import type { Alert } from "./finding";
+import { parseFindings } from "./parse-findings";
+import { RuleError } from "./rule-error";
 import { makeGovernor, type ServiceRate } from "./service-governor";
 
 /** The slice of the Clock a task needs. The concrete Clock satisfies it. */
@@ -27,32 +29,18 @@ export interface TaskClock {
 
 /**
  * The player's loaded Rule, as the tasks call it. Injected by the run controller.
- * Both return an untyped value: the player owns the code, so the Match task parses
+ * Both return an untyped value: the player owns the code, so the Detect task parses
  * their return at this boundary before handing it to the scorer.
  */
 export interface TaskAlgorithm {
   normalize: (raw: unknown) => unknown;
-  match: (e: unknown) => unknown;
+  detect: (e: unknown) => unknown;
 }
 
-/** The scorer surface the Match task drives. The full scorer also reads. */
+/** The scorer surface the Detect task drives. The full scorer also reads. */
 export interface TaskScorer {
   record: (alerts: Alert | Alert[] | null | undefined, env: PipeEvent) => void;
   finalize: () => void;
-}
-
-/**
- * A structured Rule error. A throwing or bad-shaped `normalize`/`match` becomes
- * one of these, so the supervisor reports it cleanly through `onError` instead of
- * the raw player exception crashing the app.
- */
-export class RuleError extends Error {
-  readonly phase: "normalize" | "match";
-  constructor(phase: "normalize" | "match", message: string) {
-    super(message);
-    this.name = "RuleError";
-    this.phase = phase;
-  }
 }
 
 /** A readable message for a thrown value, with a source frame when it carries one. */
@@ -62,11 +50,6 @@ function messageOf(error: unknown): string {
     return frame?.startsWith("at ") ? `${error.message} (${frame.slice(3)})` : error.message;
   }
   return String(error);
-}
-
-/** A string primitive, by its tag rather than a representation check. */
-function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
 }
 
 /**
@@ -91,7 +74,7 @@ export function normalizedPayload(value: unknown): object {
   throw new RuleError("normalize", "normalize must return a plain object.");
 }
 
-/** The engine-owned fields the Match view carries alongside the normalized payload. */
+/** The engine-owned fields the Detect view carries alongside the normalized payload. */
 export interface EngineFields {
   id: number;
   ts: number;
@@ -99,7 +82,7 @@ export interface EngineFields {
 }
 
 /**
- * Build the flat Match view: the normalized payload spread first, then the engine
+ * Build the flat Detect view: the normalized payload spread first, then the engine
  * fields, so a payload field named `id` cannot shadow the real id. The profiler
  * reproduces this exact view, so both the runtime and the profiler call this.
  */
@@ -110,38 +93,6 @@ export function withEngineFields<T extends object>(
   endpoint: string,
 ): T & EngineFields {
   return { ...base, id, ts, endpoint };
-}
-
-/** A structural Alert check: reject a return the scorer cannot fold, by shape and type. */
-function isAlert(value: unknown): value is Alert {
-  return (
-    value instanceof Object &&
-    "reason" in value &&
-    isString(value.reason) &&
-    "at" in value &&
-    Number.isFinite(value.at) &&
-    "events" in value &&
-    Array.isArray(value.events) &&
-    value.events.every((event) => Number.isFinite(event))
-  );
-}
-
-/** Parse the Rule's match return into Alert | Alert[] | null, or reject it. */
-export function matchResult(value: unknown): Alert | Alert[] | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-  if (Array.isArray(value)) {
-    if (value.every(isAlert)) {
-      return value;
-    }
-  } else if (isAlert(value)) {
-    return value;
-  }
-  throw new RuleError(
-    "match",
-    "match must return an Alert, an array of Alerts, null, or undefined.",
-  );
 }
 
 /**
@@ -205,7 +156,7 @@ export async function runNormalize(
 }
 
 /**
- * The Match task: an Event -> run the Rule on a flat view and record its Alerts,
+ * The Detect task: an Event -> run the Rule on a flat view and record its Alerts,
  * charge the rule's service time, then forward the Event to the Sink. Engine
  * fields win in the view, so a payload field named `id` cannot shadow the real
  * id. A marker -> call `scorer.finalize`, forward the marker, then return.
@@ -214,11 +165,11 @@ export async function runNormalize(
  * and before `push`, so a slow rule holds each Event in service for whole ticks;
  * the arrival rate then outruns the service rate and the Backlog climbs.
  */
-export async function runMatch(
+export async function runDetect(
   input: Channel<PipeMessage>,
   output: Channel<PipeMessage>,
   clock: TaskClock,
-  match: TaskAlgorithm["match"],
+  detect: TaskAlgorithm["detect"],
   scorer: TaskScorer,
   serviceRate: ServiceRate,
 ): Promise<void> {
@@ -234,13 +185,21 @@ export async function runMatch(
     const payload = message.payload;
     const base = payload instanceof Object ? payload : {};
     const view = withEngineFields(base, message.id, message.ts, message.endpoint);
-    let result: unknown;
+    // Run detect() and parse its return inside one boundary, then fold the
+    // resolved (non-partial) findings down to their Alerts. Any throw, from the
+    // player's detect() or from the parser (a bad shape, or a deep-json
+    // RangeError), surfaces as one clean RuleError the supervisor can report. T1
+    // never scores a partial; T2 moves this skip into the scorer when it folds
+    // Finding[] directly.
+    let alerts: Alert[];
     try {
-      result = match(view);
+      alerts = parseFindings(detect(view))
+        .filter((finding) => !finding.isPartial)
+        .map((finding) => finding.alert);
     } catch (error) {
-      throw new RuleError("match", messageOf(error));
+      throw new RuleError("detect", messageOf(error));
     }
-    scorer.record(matchResult(result), message);
+    scorer.record(alerts, message);
     const ticks = governor.charge();
     if (ticks > 0) {
       await clock.sleep(ticks);
@@ -287,11 +246,11 @@ export interface NodeRuntime {
   onAdmit: () => void;
   /** The player's loaded Rule. */
   algorithm: TaskAlgorithm;
-  /** The Correctness scorer; the Match task is its single writer. */
+  /** The Correctness scorer; the Detect task is its single writer. */
   scorer: TaskScorer;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   nextEvent: () => PipeEvent | null;
-  /** The quantized per-Event service rate the Match governor charges. */
+  /** The quantized per-Event service rate the Detect governor charges. */
   serviceRate: ServiceRate;
 }
 
@@ -330,12 +289,12 @@ const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
     runtime.algorithm.normalize,
   );
 
-const matchTask: NodeTask = (nodeId, wiring, runtime) =>
-  runMatch(
+const detectTask: NodeTask = (nodeId, wiring, runtime) =>
+  runDetect(
     requireChannel(wiring.input, nodeId, "input"),
     requireChannel(wiring.output, nodeId, "output"),
     runtime.clock,
-    runtime.algorithm.match,
+    runtime.algorithm.detect,
     runtime.scorer,
     runtime.serviceRate,
   );
@@ -351,6 +310,6 @@ const sinkTask: NodeTask = (nodeId, wiring, runtime) =>
 export const NODE_TASKS = new Map<string, NodeTask>([
   ["ingest", ingestTask],
   ["normalize", normalizeTask],
-  ["match", matchTask],
+  ["detect", detectTask],
   ["sink", sinkTask],
 ]);

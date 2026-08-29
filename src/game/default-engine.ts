@@ -2,15 +2,15 @@
  * The default detection engine: the example a player starts from. It is the typed
  * twin of `referenceSource` (the in-game editor's default text) — the same PIN
  * brute-force logic, but a real TypeScript module with imported types instead of a
- * runtime source string. It exports `normalize` and `match` on the current
- * contract.
+ * runtime source string. It exports `normalize` and `detect` on the current
+ * contract: `detect` returns a `Finding[]`, empty when nothing fires.
  *
  * State lives at module scope, so a fresh import replays a run cleanly, the way
  * reloading the source module would. A test that reuses the module drives it in a
  * single pass.
  */
-import type { Alert } from "../sim/alert";
 import type { RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "../sim/finding";
 
 /** The shape Normalize produces from a raw kiosk Event. */
 interface NormalizedKiosk {
@@ -19,8 +19,8 @@ interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view Match reads: the normalized payload plus the engine's fields. */
-interface MatchView extends NormalizedKiosk {
+/** The flat view Detect reads: the normalized payload plus the engine's fields. */
+interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -41,9 +41,9 @@ export function normalize(raw: RawKioskV1): NormalizedKiosk {
   };
 }
 
-export function match(e: MatchView): Alert | null {
+export function detect(e: KioskDetectView): Finding[] {
   if (e.outcome !== "fail") {
-    return null;
+    return [];
   }
   const f = fails.get(e.account) ?? [];
   f.push({ id: e.id, ts: e.ts });
@@ -51,11 +51,11 @@ export function match(e: MatchView): Alert | null {
   fails.set(e.account, kept);
   if (kept.length < THRESHOLD) {
     firing.delete(e.account);
-    return null;
+    return [];
   }
   if (firing.has(e.account)) {
-    return null; // one Alert per burst; no duplicates
+    return []; // one Finding per burst; no duplicates
   }
   firing.add(e.account);
-  return { reason: "pin_brute_force", at: e.ts, events: kept.map((x) => x.id) };
+  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: kept.map((x) => x.id) } }];
 }

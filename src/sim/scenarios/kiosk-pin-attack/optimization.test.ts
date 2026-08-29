@@ -31,7 +31,7 @@ describe("optimizationSource", () => {
   it("imports lodash by absolute URL and exports the Rule, like a player would", () => {
     expect(optimizationSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
     expect(optimizationSource).toContain("export function normalize");
-    expect(optimizationSource).toContain("export function match");
+    expect(optimizationSource).toContain("export function detect");
   });
 });
 
@@ -49,7 +49,12 @@ describe("buildOptimizationAlgorithm", () => {
     for (const ev of events) {
       const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      scorer.record(algo.match(view), ev);
+      // Fold Finding[] to Alert[] the same way runDetect does.
+      const alerts = algo
+        .detect(view)
+        .filter((finding) => !finding.isPartial)
+        .map((finding) => finding.alert);
+      scorer.record(alerts, ev);
     }
     scorer.finalize();
 
@@ -65,7 +70,7 @@ describe("buildOptimizationAlgorithm", () => {
     let alerts = 0;
     let citedEnough = true;
     for (let i = 0; i < PIN_BRUTE_FORCE_THRESHOLD + 3; i++) {
-      const alert = algo.match({
+      const findings = algo.detect({
         account: "amy",
         terminal: "KIOSK-01",
         outcome: "fail",
@@ -73,9 +78,9 @@ describe("buildOptimizationAlgorithm", () => {
         ts: i * 10,
         endpoint: "kiosk-v1",
       });
-      if (alert && !Array.isArray(alert)) {
+      for (const finding of findings) {
         alerts += 1;
-        if (alert.events.length < PIN_BRUTE_FORCE_THRESHOLD) {
+        if (finding.alert.eventIds.length < PIN_BRUTE_FORCE_THRESHOLD) {
           citedEnough = false;
         }
       }

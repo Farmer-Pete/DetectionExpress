@@ -2,7 +2,7 @@
  * Graph validation. The store graph is the single source of topology; the engine
  * reads it, validates it, and only then allocates channels and starts tasks.
  *
- * Slice 1 locks one shape: the ordered linear chain ingest -> normalize -> match
+ * Slice 1 locks one shape: the ordered linear chain ingest -> normalize -> detect
  * -> sink (four nodes, three edges). Anything else (an unknown kind, a missing
  * node, a branch, a cycle, a wrong count, a duplicate id, a backward edge) throws
  * a clear error before allocation.
@@ -23,14 +23,14 @@ export interface GraphEdge {
 
 /** The validated wiring the engine builds from: ids in chain order. */
 export interface LinearChain {
-  /** Node ids, ordered ingest, normalize, match, sink. */
+  /** Node ids, ordered ingest, normalize, detect, sink. */
   nodeIds: string[];
   /** Edge ids, ordered along the chain. */
   edgeIds: string[];
 }
 
 /** The chain's kinds, in the order the pipeline runs them. */
-const CHAIN_ORDER = ["ingest", "normalize", "match", "sink"] as const;
+const CHAIN_ORDER = ["ingest", "normalize", "detect", "sink"] as const;
 const KNOWN_KINDS = new Set<string>(CHAIN_ORDER);
 
 export function validateLinearChain(nodes: GraphNode[], edges: GraphEdge[]): LinearChain {

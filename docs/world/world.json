@@ -208,5 +208,14 @@
     "type": "control-center",
     "zonesPresent": ["z2", "z3", "z4"],
     "description": "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost."
-  }
+  },
+  "doors": [
+    { "location": "dep", "locationType": "site", "name": "STORE", "zone": "z2" },
+    { "location": "dep", "locationType": "site", "name": "YARD", "zone": "z3" },
+    { "location": "sig", "locationType": "site", "name": "CABIN", "zone": "z3" },
+    { "location": "sub", "locationType": "site", "name": "ROOM", "zone": "z3" },
+    { "location": "occ", "locationType": "control-center", "name": "OFFICE", "zone": "z2" },
+    { "location": "occ", "locationType": "control-center", "name": "OPS", "zone": "z3" },
+    { "location": "occ", "locationType": "control-center", "name": "MAIN", "zone": "z4" }
+  ]
 }

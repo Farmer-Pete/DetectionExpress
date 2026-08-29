@@ -163,7 +163,12 @@ describe("kioskPinAttack.generate", () => {
     for (const ev of events) {
       const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      scorer.record(algo.match(view), ev);
+      // Fold Finding[] to Alert[] the same way runDetect does.
+      const alerts = algo
+        .detect(view)
+        .filter((finding) => !finding.isPartial)
+        .map((finding) => finding.alert);
+      scorer.record(alerts, ev);
     }
     scorer.finalize();
 
@@ -241,7 +246,7 @@ describe("referenceSource", () => {
   it("imports lodash by absolute URL and exports the Rule", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
     expect(referenceSource).toContain("export function normalize");
-    expect(referenceSource).toContain("export function match");
+    expect(referenceSource).toContain("export function detect");
   });
 });
 

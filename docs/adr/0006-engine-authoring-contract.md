@@ -268,5 +268,5 @@ the richness in the return shape instead.
 ## Housekeeping note
 
 Resolved. Two ADR files once shared the number 0004. `0004-local-dev-kit.md` was renumbered
-to `0007-native-algorithm-hot-reload.md` (which also revised its decision), leaving
+to `0008-native-algorithm-hot-reload.md` (which also revised its decision), leaving
 `0004-measured-cost-model.md` as the only 0004. This closed issue #85.

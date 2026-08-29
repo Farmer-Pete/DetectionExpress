@@ -1,4 +1,4 @@
-import type { AlertReason } from "./alert";
+import type { AlertReason } from "./finding";
 
 /**
  * Attack: a real intrusion hidden in the stream (see `CONTEXT.md`). This slice's

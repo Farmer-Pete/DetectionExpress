@@ -49,7 +49,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
    **The one measured cost lives outside the sim (Slice 2).** The engine must know how much
    work a player's Rule does per Event, and it cannot read that from the game Clock: a
-   synchronous `match()` fires no tick, so `now()` reads the same before and after it. So a
+   synchronous `detect()` fires no tick, so `now()` reads the same before and after it. So a
    profiler measures the player's code throughput off the sim, normalizes it against a
    detection-shaped anchor (`C/A`), and quantizes it to a fixed rational service rate. That
    rate is the only cost the sim consumes, and it stays constant for the whole run. The
@@ -73,7 +73,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and generates it once; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.
 - `src/sim/scenarios/` holds one folder per Scenario. A Scenario composes Endpoints, drives the intent timeline, injects Attacks, and records the Ground truth. Pure logic, no React.
 - The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
-- Two ways to author it. The in-game editor holds a JavaScript source string. Or a player edits a real TypeScript module at `src/algorithms/<slug>.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine lives at `src/game/default-engine.ts`. See `docs/adr/0007-native-algorithm-hot-reload.md`.
+- Two ways to author it. The in-game editor holds a JavaScript source string. Or a player edits a real TypeScript module at `src/algorithms/<slug>.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine lives at `src/game/default-engine.ts`. See `docs/adr/0008-native-algorithm-hot-reload.md`.
 
 ## Toolchain
 

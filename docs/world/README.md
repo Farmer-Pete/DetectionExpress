@@ -1,9 +1,10 @@
 # The Detection Express world
 
 This folder documents the world the game is set in: the metro network, its sensors, the
-vendors who build those sensors, and the 30 hunts (scenarios) the player works through. It is
-design reference, not runtime code. The `src/sim/` scenarios stay the source of truth for what
-actually runs.
+vendors who build those sensors, and the 30 hunts (scenarios) the player works through. The sim
+imports `world.json` at runtime and validates it through `parseWorld`, so that file is live data,
+not just reference. The `src/sim/` scenarios stay the source of truth for what a run actually
+plays.
 
 ## The files
 

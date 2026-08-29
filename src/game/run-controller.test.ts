@@ -12,7 +12,7 @@ import {
   type ServiceRateHandle,
 } from "./run-controller";
 
-const algo: LoadedAlgorithm = { normalize: (raw) => raw, match: () => null };
+const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
 const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [] };
 const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };
@@ -322,7 +322,7 @@ describe("run controller loader and profiler seam derive from one AlgorithmSourc
     const loaded: LoadTarget[] = [];
     const controller = createRunController(
       workerDeps({
-        getAlgorithmSource: () => sourceMode("export const match = () => null"),
+        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
         loadAlgorithm: async (target) => {
           loaded.push(target);
           return algo;
@@ -336,10 +336,10 @@ describe("run controller loader and profiler seam derive from one AlgorithmSourc
     );
     controller.run();
     await flush();
-    expect(loaded).toEqual([{ kind: "source", source: "export const match = () => null" }]);
+    expect(loaded).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
     expect(workers[0]?.posted[0]?.target).toEqual({
       kind: "source",
-      source: "export const match = () => null",
+      source: "export const detect = () => []",
     });
     workers[0]?.emitMessage(OK_OUTCOME);
     await flush();
@@ -368,7 +368,7 @@ describe("run controller loader and profiler seam derive from one AlgorithmSourc
     const targets: LoadTarget[] = [];
     const controller = createRunController(
       workerDeps({
-        getAlgorithmSource: () => sourceMode("export const match = () => null"),
+        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
         spawnProfilerWorker: () => {
           throw new Error("module Worker forbidden here");
         },
@@ -380,7 +380,7 @@ describe("run controller loader and profiler seam derive from one AlgorithmSourc
     );
     controller.run();
     await flush();
-    expect(targets).toEqual([{ kind: "source", source: "export const match = () => null" }]);
+    expect(targets).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
   });
 });
 
@@ -543,7 +543,7 @@ describe("run controller worker seam (M2 review 1, 2, 5)", () => {
     );
     controller.run();
     await flush();
-    workers[0]?.emitMessage({ ok: false, error: "match must return an Alert" });
+    workers[0]?.emitMessage({ ok: false, error: "detect must return an array of findings" });
     await flush();
     expect(phases).toContain("profile");
     expect(started).toBe(0);

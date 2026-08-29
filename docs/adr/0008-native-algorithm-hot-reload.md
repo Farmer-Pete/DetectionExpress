@@ -1,4 +1,4 @@
-# ADR 0007 — Native algorithm hot-reload on one dev server
+# ADR 0008 — Native algorithm hot-reload on one dev server
 
 - Status: Accepted
 - Date: 2026-08-29

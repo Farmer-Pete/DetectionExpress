@@ -41,4 +41,4 @@ You write the Algorithm that catches the threat. There are two ways.
   so your files never get committed. The checked-in example is `src/game/default-engine.ts`.
 
 `pnpm run typecheck` checks your algorithm too, so a type error fails locally the same way your
-editor flags it. See `docs/adr/0007-native-algorithm-hot-reload.md` for how it works.
+editor flags it. See `docs/adr/0008-native-algorithm-hot-reload.md` for how it works.

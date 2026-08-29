@@ -6,7 +6,7 @@ import type { Timer } from "./measure";
 import { makeNaiveScan, type NormalizedKiosk, normalizeKiosk } from "./rules";
 
 /**
- * The profiler orchestration: warm, measure the player's match throughput C, the
+ * The profiler orchestration: warm, measure the player's detect throughput C, the
  * anchor A, and the oracle O over the looping corpus, and return codePerAnchor =
  * C/A and oracleScore = O. The composition (which reading divides which) is pinned
  * with a stub measure; the real timing path is covered by the harness, not CI.
@@ -16,7 +16,7 @@ import { makeNaiveScan, type NormalizedKiosk, normalizeKiosk } from "./rules";
 /** A rule the profiler prices: the shared normalize plus a detector's step. */
 function naiveRule(): ProfilerRule<NormalizedKiosk> {
   const detector = makeNaiveScan();
-  return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
+  return { normalize: normalizeKiosk, detect: (view) => detector.step(view) };
 }
 
 /** A timer that advances a fixed step on every read, so batches end deterministically. */
@@ -62,12 +62,14 @@ describe("calibrate", () => {
 
   it("prices a rule that returns an array of Alerts without throwing (M2 review)", () => {
     const corpus = buildCorpus(LEVEL_SEED, 100, CORPUS_PEAK_EVENTS_PER_TICK);
-    // A rule whose match returns an Alert[] runs fine in the run-time Match task;
+    // A rule whose detect returns Finding[] runs fine in the run-time Detect task;
     // the profiler must price it the same way rather than rejecting the array.
     const arrayRule: ProfilerRule<NormalizedKiosk> = {
       normalize: normalizeKiosk,
-      match: (v) =>
-        v.outcome === "fail" ? [{ reason: "pin_brute_force", at: v.ts, events: [v.id] }] : [],
+      detect: (v) =>
+        v.outcome === "fail"
+          ? [{ alert: { reason: "pin_brute_force", at: v.ts, eventIds: [v.id] } }]
+          : [],
     };
     // If the profiler rejected arrays it would throw here; reaching a finite
     // reading is the assertion that it prices the array shape like the runtime.

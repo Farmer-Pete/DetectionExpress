@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../tuning";
 import {
   type Detector,
-  type MatchView,
+  type KioskDetectView,
   makeIncrementalTally,
   makeNaiveScan,
   normalizeKiosk,
@@ -16,18 +16,17 @@ import {
  * different speeds. See GH3-PLAN.md sections 6.5 and 9, M1 seam 3.
  */
 
-/** A fail Event on an account at a game-second time, in the flat match view. */
-function fail(account: string, ts: number, id: number): MatchView {
+/** A fail Event on an account at a game-second time, in the flat detect view. */
+function fail(account: string, ts: number, id: number): KioskDetectView {
   return { account, terminal: "KIOSK-01", outcome: "fail", id, ts, endpoint: "kiosk-v1" };
 }
 
-/** Feed a detector a whole stream and collect the times it raised an Alert. */
-function fireTimes(detector: Detector, stream: MatchView[]): number[] {
+/** Feed a detector a whole stream and collect the times it raised a finding. */
+function fireTimes(detector: Detector, stream: KioskDetectView[]): number[] {
   const fires: number[] = [];
   for (const event of stream) {
-    const alert = detector.step(event);
-    if (alert !== null) {
-      fires.push(alert.at);
+    for (const finding of detector.step(event)) {
+      fires.push(finding.alert.at);
     }
   }
   return fires;

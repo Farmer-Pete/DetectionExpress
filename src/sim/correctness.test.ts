@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "./alert";
 import type { Attack } from "./attack";
 import { type Counts, createScorer, type ScorerConfig, score } from "./correctness";
 import type { PipeEvent } from "./event";
+import type { Alert } from "./finding";
 
 const REASON = "pin_brute_force";
 
@@ -25,8 +25,8 @@ function at(ts: number): PipeEvent {
   return { id: 0, ts, endpoint: "kiosk-v1", payload: null };
 }
 
-function alert(events: number[], ts: number, reason = REASON): Alert {
-  return { reason, at: ts, events };
+function alert(eventIds: number[], ts: number, reason = REASON): Alert {
+  return { reason, at: ts, eventIds };
 }
 
 function cfg(over: Partial<ScorerConfig> = {}): ScorerConfig {
