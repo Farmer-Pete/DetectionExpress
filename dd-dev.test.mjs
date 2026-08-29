@@ -1,10 +1,11 @@
+// @vitest-environment node
+//
 // Host-side tests for dd-dev.mjs. These drive the request handler and the
 // exported seams directly, with injected spawn/watch/listen/timers/exit and
 // temp dirs, so no unit test opens a real socket. Watch behavior is driven
 // through the injected `watch` seam (a fake watcher) against real temp files,
 // so the transition tests are deterministic and never wait on the OS.
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -14,11 +15,12 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { rename, writeFile } from "node:fs/promises";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildOpenPlan,
   changedFrame,
@@ -35,6 +37,10 @@ import {
   openInEditor,
   resolveStaticPath,
 } from "./dd-dev.mjs";
+
+// This test file lives at the repo root; `here` is that directory, derived from
+// `import.meta.url` (Node has no `import.meta.dir`).
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = 4321;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -473,7 +479,7 @@ describe("API handler", () => {
     await host.handleRequest(req, res);
     const body = JSON.parse(res.body);
     expect(body.app).toBe("detection-express-devhost");
-    const pkg = JSON.parse(readFileSync(path.join(import.meta.dir, "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(path.join(here, "package.json"), "utf8"));
     expect(body.version).toBe(pkg.version);
     expect(body.activeSlugs).toEqual(["kiosk"]);
   });
@@ -484,7 +490,7 @@ describe("API handler", () => {
     const body = JSON.parse(res.body);
     expect(body.existed).toBe(false);
     expect(body.path).toBe(path.join(algorithmsDir, "detection-express-kiosk.js"));
-    const onDisk = await Bun.file(body.path).text();
+    const onDisk = await readFile(body.path, "utf8");
     expect(onDisk).toBe("const x = 1;");
     expect(calls[0].command).toBe("open");
     expect(calls[0].args).toEqual([body.path]);
@@ -496,7 +502,7 @@ describe("API handler", () => {
     const res = await post(host, "kiosk", "second");
     const body = JSON.parse(res.body);
     expect(body.existed).toBe(true);
-    expect(await Bun.file(body.path).text()).toBe("first");
+    expect(await readFile(body.path, "utf8")).toBe("first");
   });
 
   it("caches defaultSource by slug for the delete revert", async () => {
@@ -691,7 +697,7 @@ describe("watch and delete-revert", () => {
     const second = await post(host, "kiosk", "ignored-because-exists-logic");
     const body = JSON.parse(second.body);
     expect(body.existed).toBe(false);
-    expect(await Bun.file(filePath).text()).toBe("ignored-because-exists-logic");
+    expect(await readFile(filePath, "utf8")).toBe("ignored-because-exists-logic");
   });
 });
 
@@ -1412,7 +1418,7 @@ describe("health version", () => {
     const res = makeRes();
     await host.handleRequest(req, res);
     const body = JSON.parse(res.body);
-    const pkg = JSON.parse(readFileSync(path.join(import.meta.dir, "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(path.join(here, "package.json"), "utf8"));
     expect(body.version).toBe(pkg.version);
   });
 

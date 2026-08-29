@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { nextHeat, occupancy } from "./heat";
 
 const THRESHOLD = 0.5;

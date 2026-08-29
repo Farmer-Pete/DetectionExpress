@@ -28,7 +28,7 @@ export interface EventSourceLike {
 
 /**
  * The subset of `fetch` the client needs. The global `fetch` is assignable to it,
- * and a test fake need not carry Bun's extra `fetch.preconnect` member.
+ * and a test fake need not carry the global `fetch`'s extra members.
  */
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 

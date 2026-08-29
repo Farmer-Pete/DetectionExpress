@@ -1,4 +1,6 @@
-import { describe, expect, it } from "bun:test";
+// @vitest-environment node
+import { readFile } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
 import { DEV_KIT, loadDevHostClient } from "./dev-flag";
 
 // The test preload (src/test/dev-kit-flag.ts) sets `PUBLIC_DEV_KIT` in process.env, so
@@ -19,7 +21,7 @@ describe("dev-flag", () => {
   // ARCHITECTURE.md: `src/game/` may import React only in the store. dev-flag lives in
   // game/, so it must carry no `react` import — not even a type-only one.
   it("does not import from react", async () => {
-    const source = await Bun.file(new URL("./dev-flag.ts", import.meta.url)).text();
+    const source = await readFile(new URL("./dev-flag.ts", import.meta.url), "utf8");
     expect(source).not.toMatch(/from\s+["']react["']/);
   });
 });

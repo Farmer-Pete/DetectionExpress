@@ -12,19 +12,20 @@ sensors, data formats, and threats arrive.
 
 ## Stack
 
-TypeScript and React. Bun is the whole toolchain: runtime, package manager, test
-runner, and bundler. The sim is plain TypeScript. No Vite (see
-`docs/adr/0001-all-bun-drop-vite.md`).
+TypeScript and React on a Node toolchain: Node 26.5.1 runtime, pnpm as the package
+manager, Vite as the dev server and bundler, Vitest as the test runner. The sim is
+plain TypeScript. See `docs/adr/0005-node-toolchain-drop-bun.md` for the toolchain
+decision.
 
 ## Develop
 
 ```bash
-bun install       # install dependencies and git hooks
-bun run dev       # start the dev server
-bun run test      # run the test suite
-bun run typecheck # type-check the project
-bun run lint      # Biome lint and format check (includes anti-slop rules)
-bun run format    # apply Biome fixes
-bun run knip      # find dead code and unused dependencies
-bun run build     # production build
+pnpm install       # install dependencies and git hooks
+pnpm run dev       # start the dev server
+pnpm run test      # run the test suite
+pnpm run typecheck # type-check the project
+pnpm run lint      # Biome lint and format check (includes anti-slop rules)
+pnpm run format    # apply Biome fixes
+pnpm run knip      # find dead code and unused dependencies
+pnpm run build     # production build
 ```

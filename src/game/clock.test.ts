@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { Clock, ClockStoppedError, ManualDriver, type TickDriver } from "./clock";
 
 /** Drain the microtask queue without any real timer. */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import type { Alert } from "../sim/alert";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";

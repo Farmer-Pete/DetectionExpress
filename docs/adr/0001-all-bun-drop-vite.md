@@ -1,7 +1,12 @@
 # ADR 0001 — Use Bun for the whole toolchain, drop Vite
 
-- Status: Accepted
+- Status: Superseded by [ADR 0005](0005-node-toolchain-drop-bun.md)
 - Date: 2026-08-26
+
+> Superseded on 2026-08-28. Bun's HTML bundler never wired the profiler Web Worker
+> (GH-22), so the toolchain moved to Node, Vite, and Vitest. This ADR's "reversal
+> path" is the route that was taken; ADR 0005 records the decision. The context
+> below is kept as history.
 
 ## Context
 

@@ -5,7 +5,7 @@
  * a stable ordering. The absolute numbers vary run to run; that is expected. See
  * GH3-PLAN.md section 13.
  *
- * Run: `bun run m1:check`.
+ * Run: `pnpm run m1:check`.
  */
 
 import { calibrate, type ProfilerRule } from "../src/game/profiler/calibrate";

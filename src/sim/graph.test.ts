@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { type GraphEdge, type GraphNode, validateLinearChain } from "./graph";
 
 /** The canonical four-node chain: ingest -> normalize -> match -> sink. */

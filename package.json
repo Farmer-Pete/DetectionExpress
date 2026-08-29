@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@10.29.3",
   "bin": {
     "detection-express": "./dd-dev.mjs"
   },
@@ -11,21 +12,22 @@
     "dist-devkit"
   ],
   "scripts": {
-    "dev": "PUBLIC_DEV_KIT=false bun ./index.html",
-    "build": "bun run build:static",
-    "build:static": "tsc --noEmit && rm -rf dist && bun build ./index.html --define 'process.env.PUBLIC_DEV_KIT=\"false\"' --minify --outdir dist && bun scripts/postbuild.ts",
-    "build:devkit": "rm -rf dist-devkit && bun build ./index.html --define 'process.env.PUBLIC_DEV_KIT=\"true\"' --minify --outdir dist-devkit",
+    "dev": "vite",
+    "build": "pnpm run build:static",
+    "build:static": "tsc --noEmit && vite build --mode static",
+    "build:devkit": "vite build --mode devkit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test ./src ./dd-dev.test.mjs",
-    "test:watch": "bun test ./src ./dd-dev.test.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
-    "verify:static": "bun scripts/verify-static.ts",
-    "pack": "bun run build:devkit && bun pm pack --dry-run --ignore-scripts",
-    "m1:check": "bun run scripts/m1-calibrate-check.ts",
-    "audit": "bun audit --audit-level=high",
-    "prepack": "bun run build:devkit",
+    "verify:static": "tsx scripts/verify-static.ts",
+    "verify:worker-build": "tsx scripts/verify-worker-build.ts",
+    "pack:check": "tsx scripts/verify-pack.ts",
+    "m1:check": "tsx scripts/m1-calibrate-check.ts",
+    "audit": "pnpm audit --audit-level=high",
+    "prepack": "pnpm run build:devkit",
     "prepare": "lefthook install"
   },
   "dependencies": {
@@ -39,14 +41,18 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10",
-    "@happy-dom/global-registrator": "^20.0.0",
     "@testing-library/react": "^16.3.2",
-    "@types/bun": "^1.2.0",
     "@types/d3-random": "^3.0.4",
+    "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "happy-dom": "^20.11.6",
     "knip": "^6.32.2",
     "lefthook": "^2.1.10",
-    "typescript": "~6.0.2"
+    "tsx": "^4.23.12",
+    "typescript": "~6.0.2",
+    "vite": "8.2.2",
+    "vitest": "^4.1.11"
   }
 }

@@ -1,5 +1,5 @@
 /**
- * The profiler worker's real logic, kept pure and importable so bun tests
+ * The profiler worker's real logic, kept pure and importable so the tests
  * exercise it without a live worker. It parses the inbound request at the message
  * boundary and adapts a loaded (untyped) player module into the typed ProfilerRule
  * the calibrator prices, validating the module's returns the same way the Match

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { Clock, ManualDriver } from "../game/clock";
 import type { Alert } from "./alert";
 import { Channel } from "./channel";

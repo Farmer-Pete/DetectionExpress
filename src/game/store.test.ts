@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "vitest";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";

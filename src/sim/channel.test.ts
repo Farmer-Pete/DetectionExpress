@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { Channel, ChannelClosedError } from "./channel";
 
 /** Drain the microtask queue without any real timer. */

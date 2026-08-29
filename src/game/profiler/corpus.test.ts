@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { isRawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import { CORPUS_PEAK_EVENTS_PER_TICK, CORPUS_SIZE, LEVEL_SEED } from "../tuning";
 import { buildCorpus, loopingCorpus } from "./corpus";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,

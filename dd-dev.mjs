@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // dd-dev.mjs - the Detection Express local dev host.
 //
-// One zero-dependency file, Node and Bun built-ins only. It serves the packaged
+// One zero-dependency file, Node built-ins only. It serves the packaged
 // dev build over loopback, and manages the player's Algorithm files: create,
 // watch, and open. Source flows to the browser over same-origin Server-Sent
 // Events. See 12-PLAN.md, "The host".
@@ -77,7 +77,7 @@ export function initFrame(slug, filePath, source) {
   return `event: init\ndata: ${data}\n\n`;
 }
 
-// --- MIME map (every Bun-emitted asset type) --------------------------------
+// --- MIME map (every Vite-emitted asset type) -------------------------------
 
 const MIME_BY_EXT = new Map([
   [".js", "text/javascript"],
@@ -971,7 +971,7 @@ function readPackageVersion() {
 
 /**
  * True when this module is the program entrypoint. Resolves real paths on both
- * sides before comparing, so a bin symlink (bunx, pnpm dlx) still matches the
+ * sides before comparing, so a bin symlink (pnpm dlx, an npm bin shim) still matches the
  * module it points at. Robust to realpath throwing on a vanished path.
  */
 export function isRunDirectly(argv1, moduleUrl, realpath = realpathSync) {

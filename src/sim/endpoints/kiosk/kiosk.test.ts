@@ -1,6 +1,6 @@
-import { describe, expect, it } from "bun:test";
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
+import { describe, expect, it } from "vitest";
 import { referenceAlgorithm } from "../../scenarios/kiosk-pin-attack/reference";
 import type { GenContext } from "../endpoint";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "./formats/kiosk-v1";

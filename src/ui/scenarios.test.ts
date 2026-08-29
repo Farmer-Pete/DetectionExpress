@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { SCENARIO_SLUGS, scenarioFileName, scenarioSlug } from "./scenarios";
 
 const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;

@@ -76,13 +76,18 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 ## Toolchain
 
-- **Bun** is the whole toolchain: runtime, package manager, test runner, and bundler.
-- Dev server: `bun ./index.html`. Production build: `bun build ./index.html`.
-- We do not use Vite. See `docs/adr/0001-all-bun-drop-vite.md` for the decision and its reversal path.
+- **Node** (26.5.1, pinned in `.nvmrc` and CI) is the runtime. **pnpm** (10.29.3) is the
+  package manager, with a 7-day install cooldown in `pnpm-workspace.yaml`.
+- **Vite** is the dev server and bundler. Dev server: `pnpm run dev`. Builds:
+  `pnpm run build:static` (to `dist`) and `pnpm run build:devkit` (to `dist-devkit`).
+  Vite bundles the profiler Web Worker and serves it over http in every mode.
+- **Vitest** (happy-dom) is the test runner; **tsx** runs the TypeScript scripts.
+- See `docs/adr/0005-node-toolchain-drop-bun.md` for the move to Node, and
+  `docs/adr/0001-all-bun-drop-vite.md` (Superseded) for the Bun era it reverses.
 
 ## Testing
 
-- The test runner is `bun test` (see `bunfig.toml` for the happy-dom preload).
+- The test runner is `vitest` (happy-dom environment; see `vitest.config.ts`).
 - Test the transforms, the `Channel`, and the rate and heat math as pure functions. They need no DOM.
 - Keep real time out of the tests. Give the Sink an injectable delay, not a real clock. Drive the `Channel` by hand and assert on counts, rates, and heat.
 - Test React parts with `@testing-library/react`. happy-dom provides the DOM.

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "bun:test";
 import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
 import { emptySnapshot } from "../../sim/snapshot";
 import { Hud } from "./Hud";
