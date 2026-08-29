@@ -58,8 +58,9 @@ so allowing it would only create a failure mode. The contract is synchronous by 
 
 ## The types
 
-These land verbatim in `src/sim/finding.ts`. Types only, no runtime. The parser that enforces
-them at the boundary is T1's job, and the rules below are its spec.
+These land in `src/sim/finding.ts`, with doc comments the block below omits for brevity. Types
+only, no runtime. The parser that enforces them at the boundary is T1's job, and the rules below
+are its spec.
 
 ```typescript
 /** Each Scenario names its own reasons. The scorer matches them by value. */
@@ -129,9 +130,9 @@ export interface DetectView {
 /** The player's detect callable. One Event view in, Findings out. Synchronous. */
 export type Detect = (event: DetectView) => Finding[];
 
-/** The player's Algorithm module contract, as the engine loads it. */
+/** The player's Algorithm module. `normalize` is optional; the loader defaults it to identity. */
 export interface Algorithm {
-  normalize: (raw: unknown) => unknown;
+  normalize?: (raw: unknown) => unknown;
   detect: Detect;
 }
 ```
@@ -160,17 +161,21 @@ the scorer folds it. These rules are the spec, and they are normative. T1 implem
 tests.
 
 - The return must be an array. A non-array is a `detect` RuleError.
-- Each element needs an `alert` object. Its `eventIds` must be a non-empty array of finite
-  integers. Its `reason` must be a non-empty string. Its `at` must be a finite number.
-- If `eventId` is present, it must be a finite integer and a member of `alert.eventIds`.
-- If `subjectType` is present, it must be a string, and `eventId` must be present too.
+- Each element needs an `alert` object. Its `eventIds` must be a non-empty array of non-negative
+  finite integers. Its `reason` must be a non-empty string. Its `at` must be a finite number.
+- If `eventId` is present, it must be a non-negative finite integer and a member of
+  `alert.eventIds`.
+- If `subjectType` is present, it must be a non-empty string, and `eventId` must be present too.
+  The parser checks the string only. That it names a real field on the anchor record, and that
+  the resolved value is a primitive, is a runtime and UI concern, not a shape check here.
 - If `context` is present, it must be an array of valid Widgets.
 - If `isPartial` is present, it must be a boolean.
 - A partial (`isPartial: true`) requires `eventId`.
 - Each `Widget` must have a known `type`, and every field of that widget is validated exactly.
   A `text` widget needs a string `text`. A `kv` widget needs an `entries` array of
   `{ label: string, value: string | number }`. A `table` widget needs string `columns` and
-  `rows` of string-or-number cells. A `json` widget needs a `value` that is JSON-serializable.
+  `rows` of string-or-number cells, and every row length must equal the `columns` length, so the
+  table is rectangular. A `json` widget needs a `value` that is JSON-serializable.
 - A `json` value is rejected if it holds a non-finite number, a cycle, or an unsupported type
   such as a function, `undefined`, or a `BigInt`.
 - Unknown top-level fields on a Finding, an Alert, or a Widget are rejected.
@@ -203,7 +208,7 @@ change.
 
 The rename from `match` to `detect` is repo-wide, not three files. T1 starts with one sweep:
 
-```
+```text
 grep -rniE '\bmatch\b|matchResult|MatchNode|RuleError' src/ tools/ docs/ ARCHITECTURE.md CONTEXT.md
 ```
 

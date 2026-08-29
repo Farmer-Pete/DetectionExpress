@@ -1,3 +1,12 @@
+/**
+ * Type-level contract test for `./finding`.
+ *
+ * The compiler enforces these assertions, not the runner. `vitest.config.ts` sets no
+ * `typecheck.enabled`, so under `vitest run` the `expectTypeOf` and `@ts-expect-error`
+ * lines are runtime no-ops and the file passes either way. The real gate is `tsc --noEmit`
+ * (the `typecheck` script, run in CI): a wrong assertion or an unused `@ts-expect-error`
+ * fails the compile. That failure is what proves the contract holds.
+ */
 import { describe, expectTypeOf, it } from "vitest";
 import type {
   Alert,
@@ -77,9 +86,13 @@ describe("Finding type contract", () => {
     expectTypeOf<Detect>().returns.not.toEqualTypeOf<Promise<Finding[]>>();
   });
 
-  it("types Algorithm as normalize plus detect", () => {
+  it("types Algorithm as detect plus an optional normalize", () => {
     expectTypeOf<Algorithm>().toHaveProperty("detect").toEqualTypeOf<Detect>();
     expectTypeOf<Algorithm>().toHaveProperty("normalize");
+    // normalize is optional: the loader defaults an omitted one to identity, so a
+    // detect-only module is a valid Algorithm.
+    const detectOnly: Algorithm = { detect: () => [] };
+    expectTypeOf(detectOnly).toExtend<Algorithm>();
   });
 
   it("rejects a Finding with no alert", () => {

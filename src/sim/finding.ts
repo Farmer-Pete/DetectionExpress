@@ -97,8 +97,11 @@ export interface DetectView {
 /** The player's detect callable. One Event view in, Findings out. Synchronous. */
 export type Detect = (event: DetectView) => Finding[];
 
-/** The player's Algorithm module contract, as the engine loads it. */
+/**
+ * The player's Algorithm module, as authored. `normalize` is optional: the loader
+ * defaults an omitted `normalize` to identity, so a detect-only module is valid.
+ */
 export interface Algorithm {
-  normalize: (raw: unknown) => unknown;
+  normalize?: (raw: unknown) => unknown;
   detect: Detect;
 }
