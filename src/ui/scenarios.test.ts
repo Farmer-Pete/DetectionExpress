@@ -30,7 +30,7 @@ describe("scenarios", () => {
     expect(() => scenarioSlug("no-such-scenario")).toThrow();
   });
 
-  it("builds the on-disk Algorithm filename the editor's download uses for a slug", () => {
-    expect(scenarioFileName("kiosk-pin-attack")).toBe("detection-express-kiosk-pin-attack.js");
+  it("builds the src/algorithms/<slug>.ts filename the editor's download uses", () => {
+    expect(scenarioFileName("kiosk-pin-attack")).toBe("kiosk-pin-attack.ts");
   });
 });
