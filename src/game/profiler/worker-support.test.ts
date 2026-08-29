@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "../../sim/alert";
+import type { Finding } from "../../sim/finding";
 import type { EngineFields } from "../../sim/tasks";
 import type { LoadedAlgorithm } from "../algorithm";
 import { adaptLoaded, parseRequest } from "./worker-support";
@@ -8,12 +8,12 @@ import { adaptLoaded, parseRequest } from "./worker-support";
  * The worker's real logic, kept pure so it is unit-tested without a live worker:
  * parse the inbound request, and adapt a loaded (untyped) player module into the
  * rule the calibrator prices, parsing its returns at the boundary with the SAME
- * helpers the run-time Match task uses. See GH3-PLAN.md section 6.5.
+ * helpers the run-time Detect task uses. See GH3-PLAN.md section 6.5.
  */
 describe("parseRequest", () => {
   it("accepts a well-formed profile request", () => {
-    expect(parseRequest({ source: "export const match = () => null", hidden: false })).toEqual({
-      source: "export const match = () => null",
+    expect(parseRequest({ source: "export const detect = () => []", hidden: false })).toEqual({
+      source: "export const detect = () => []",
       hidden: false,
     });
   });
@@ -24,7 +24,7 @@ describe("parseRequest", () => {
   });
 });
 
-/** A flat Match view: the engine fields plus the normalized kiosk fields a rule reads. */
+/** A flat Detect view: the engine fields plus the normalized kiosk fields a rule reads. */
 interface KioskFlatView extends EngineFields {
   account: string;
   terminal: string;
@@ -44,7 +44,8 @@ function view(): KioskFlatView {
 describe("adaptLoaded", () => {
   const loaded: LoadedAlgorithm = {
     normalize: () => ({ account: "amy", terminal: "KIOSK-01", outcome: "fail" }),
-    match: (v) => (v instanceof Object ? { reason: "pin_brute_force", at: 5, events: [1] } : null),
+    detect: (v) =>
+      v instanceof Object ? [{ alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } }] : [],
   };
 
   it("passes the normalize result through as a plain object", () => {
@@ -56,24 +57,26 @@ describe("adaptLoaded", () => {
     });
   });
 
-  it("parses the match result into an Alert", () => {
+  it("parses the detect result into findings", () => {
     const rule = adaptLoaded(loaded);
-    expect(rule.match(view())).toEqual({ reason: "pin_brute_force", at: 5, events: [1] });
+    expect(rule.detect(view())).toEqual([
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
+    ]);
   });
 
-  it("accepts an array of Alerts, like the run-time Match task (M2 review)", () => {
-    const alerts: Alert[] = [
-      { reason: "pin_brute_force", at: 5, events: [1] },
-      { reason: "pin_brute_force", at: 6, events: [2] },
+  it("accepts multiple findings, like the run-time Detect task (M2 review)", () => {
+    const findings: Finding[] = [
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
+      { alert: { reason: "pin_brute_force", at: 6, eventIds: [2] } },
     ];
-    const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, match: () => alerts };
+    const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => findings };
     const rule = adaptLoaded(arrayRule);
-    expect(() => rule.match(view())).not.toThrow();
-    expect(rule.match(view())).toEqual(alerts);
+    expect(() => rule.detect(view())).not.toThrow();
+    expect(rule.detect(view())).toEqual(findings);
   });
 
   it("throws when normalize returns a non-object", () => {
-    const bad: LoadedAlgorithm = { normalize: () => 42, match: () => null };
+    const bad: LoadedAlgorithm = { normalize: () => 42, detect: () => [] };
     expect(() => adaptLoaded(bad).normalize({ t: 1, acct: "x", term: "y", res: "OK" })).toThrow();
   });
 });

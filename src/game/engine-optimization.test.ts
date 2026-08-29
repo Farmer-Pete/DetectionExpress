@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Alert } from "../sim/alert";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
+import type { Finding } from "../sim/finding";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { buildOptimizationAlgorithm } from "../sim/scenarios/kiosk-pin-attack/optimization";
 import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
@@ -34,13 +34,13 @@ import {
 const NODES: GraphNode[] = [
   { id: "ingest", kind: "ingest" },
   { id: "normalize", kind: "normalize" },
-  { id: "match", kind: "match" },
+  { id: "detect", kind: "detect" },
   { id: "sink", kind: "sink" },
 ];
 const EDGES: GraphEdge[] = [
   { id: "e1", source: "ingest", target: "normalize" },
-  { id: "e2", source: "normalize", target: "match" },
-  { id: "e3", source: "match", target: "sink" },
+  { id: "e2", source: "normalize", target: "detect" },
+  { id: "e3", source: "detect", target: "sink" },
 ];
 
 const SCORER_CONFIG: ScorerConfig = {
@@ -55,7 +55,7 @@ const NAIVE_RATE: ServiceRate = { num: 20, den: 1 };
 /** A rate well above the peak arrival: the Optimization keeps up and wins. */
 const OPTIMIZATION_RATE: ServiceRate = { num: 300, den: 1 };
 
-/** The normalized record the twin match reads, after Normalize runs. */
+/** The normalized record the twin detect reads, after Normalize runs. */
 interface KioskView {
   account: string;
   terminal: string;
@@ -68,7 +68,7 @@ interface KioskView {
 /** The in-process twin shape both the naive default and the Optimization satisfy. */
 interface KioskTwin {
   normalize(raw: RawKioskV1): { account: string; terminal: string; outcome: "success" | "fail" };
-  match(view: KioskView): Alert | null;
+  detect(view: KioskView): Finding[];
 }
 
 function isKioskView(value: unknown): value is KioskView {
@@ -79,7 +79,7 @@ function isKioskView(value: unknown): value is KioskView {
 function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
   return {
     normalize: (raw) => (isRawKioskV1(raw) ? twin.normalize(raw) : raw),
-    match: (view) => (isKioskView(view) ? twin.match(view) : null),
+    detect: (view) => (isKioskView(view) ? twin.detect(view) : []),
   };
 }
 

@@ -27,7 +27,7 @@ import { LEVEL_SEED } from "./tuning";
  * through the Pipeline.
  */
 type NodeMeta = {
-  kind: "ingest" | "normalize" | "match" | "sink";
+  kind: "ingest" | "normalize" | "detect" | "sink";
 };
 
 type PipelineNode = Node<NodeMeta>;
@@ -59,14 +59,14 @@ interface GameState {
 const initialNodes: PipelineNode[] = [
   { id: "ingest", type: "ingest", position: { x: 40, y: 140 }, data: { kind: "ingest" } },
   { id: "normalize", type: "normalize", position: { x: 260, y: 140 }, data: { kind: "normalize" } },
-  { id: "match", type: "match", position: { x: 480, y: 140 }, data: { kind: "match" } },
+  { id: "detect", type: "detect", position: { x: 480, y: 140 }, data: { kind: "detect" } },
   { id: "sink", type: "sink", position: { x: 700, y: 140 }, data: { kind: "sink" } },
 ];
 
 const initialEdges: Edge[] = [
   { id: "e1", source: "ingest", target: "normalize", type: "stream" },
-  { id: "e2", source: "normalize", target: "match", type: "stream" },
-  { id: "e3", source: "match", target: "sink", type: "stream" },
+  { id: "e2", source: "normalize", target: "detect", type: "stream" },
+  { id: "e3", source: "detect", target: "sink", type: "stream" },
 ];
 
 export const useGameStore = create<GameState>((set) => ({

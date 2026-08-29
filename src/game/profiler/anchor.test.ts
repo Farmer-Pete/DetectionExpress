@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeAnchor } from "./anchor";
-import type { MatchView } from "./rules";
+import type { KioskDetectView } from "./rules";
 
 /**
  * The anchor is the difficulty baseline: a fixed, array-and-garbage-shaped scan
@@ -9,7 +9,7 @@ import type { MatchView } from "./rules";
  * into the machine-independent C/A. It is frozen: it never tracks whatever rule
  * ships. See GH3-PLAN.md section 7.
  */
-function fail(account: string, ts: number, id: number): MatchView {
+function fail(account: string, ts: number, id: number): KioskDetectView {
   return { account, terminal: "KIOSK-01", outcome: "fail", id, ts, endpoint: "kiosk-v1" };
 }
 

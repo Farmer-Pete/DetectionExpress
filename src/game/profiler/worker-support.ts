@@ -2,10 +2,11 @@
  * The profiler worker's real logic, kept pure and importable so the tests
  * exercise it without a live worker. It parses the inbound request at the message
  * boundary and adapts a loaded (untyped) player module into the typed ProfilerRule
- * the calibrator prices, validating the module's returns the same way the Match
+ * the calibrator prices, validating the module's returns the same way the Detect
  * task does. The worker file itself (worker.ts) is a thin shell over these.
  */
-import { matchResult, normalizedPayload } from "../../sim/tasks";
+import { parseFindings } from "../../sim/parse-findings";
+import { normalizedPayload } from "../../sim/tasks";
 import type { LoadedAlgorithm } from "../algorithm";
 import type { ProfilerRule } from "./calibrate";
 
@@ -36,14 +37,14 @@ export function parseRequest(data: unknown): ProfileRequest {
 
 /**
  * Adapt a loaded player module into the rule the calibrator prices. The profiler
- * reproduces the run-time Match boundary exactly, so it parses the module's untyped
- * returns with the same helpers the Match task uses: `normalizedPayload` accepts
- * any plain object, and `matchResult` accepts an Alert, an array of Alerts, null,
- * or undefined. A rule that runs at run time therefore profiles without diverging.
+ * reproduces the run-time Detect boundary exactly, so it parses the module's untyped
+ * returns with the same helpers the Detect task uses: `normalizedPayload` accepts
+ * any plain object, and `parseFindings` enforces the `Finding[]` contract. A rule
+ * that runs at run time therefore profiles without diverging.
  */
 export function adaptLoaded(algorithm: LoadedAlgorithm): ProfilerRule {
   return {
     normalize: (raw) => normalizedPayload(algorithm.normalize(raw)),
-    match: (view) => matchResult(algorithm.match(view)),
+    detect: (view) => parseFindings(algorithm.detect(view)),
   };
 }

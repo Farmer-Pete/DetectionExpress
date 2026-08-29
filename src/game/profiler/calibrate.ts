@@ -2,8 +2,8 @@
  * The profiler orchestration. It times three throughputs over the looping corpus
  * with one measurement protocol and one injected timer:
  *
- * - C = events/playerMs: the player's match on the flat view, the same view the
- *   Match task builds at run time.
+ * - C = events/playerMs: the player's detect on the flat view, the same view the
+ *   Detect task builds at run time.
  * - A = events/anchorMs: the frozen detection-shaped anchor.
  * - O: the oracle's raw integer speed, kept only as profiler health.
  *
@@ -13,8 +13,8 @@
  * never sees real time. See GH3-PLAN.md sections 5.1, 6.5, and 7.
  */
 
-import type { Alert } from "../../sim/alert";
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "../../sim/finding";
 import { type EngineFields, withEngineFields } from "../../sim/tasks";
 import { makeAnchor } from "./anchor";
 import { type Corpus, loopingCorpus } from "./corpus";
@@ -24,14 +24,14 @@ import { normalizeKiosk } from "./rules";
 
 /**
  * A rule the profiler prices: normalize a raw payload into some object shape `N`,
- * then match the flat view (that shape plus the engine fields). The runtime only
- * requires normalize to yield a plain object and match to yield an Alert, an array
- * of Alerts, null, or undefined, so the profiler prices the same contract: `N`
- * defaults to a bare object and match accepts every runtime shape.
+ * then detect over the flat view (that shape plus the engine fields). The runtime
+ * only requires normalize to yield a plain object and detect to yield `Finding[]`,
+ * so the profiler prices the same contract: `N` defaults to a bare object and
+ * detect returns the parsed findings.
  */
 export interface ProfilerRule<N extends object = object> {
   normalize(raw: RawKioskV1): N;
-  match(view: N & EngineFields): Alert | Alert[] | null;
+  detect(view: N & EngineFields): Finding[];
 }
 
 /** The profiler's reading: the code speed and the machine-health probe. */
@@ -44,19 +44,6 @@ export interface CalibrationResult {
 
 /** The measurement protocol, injectable so tests can stub the timing. */
 export type MeasureFn = (runOnce: () => void, timer: Timer, config: MeasureConfig) => number;
-
-/**
- * The work one match result represents, as a plain count the sink folds in. The
- * profiler only needs a work sink, not the scored Alerts, so an array counts as
- * its length, a single Alert as one, and null as none. This mirrors the runtime,
- * which accepts an Alert, an array of Alerts, null, or undefined from a rule.
- */
-function matchWork(result: Alert | Alert[] | null): number {
-  if (result === null) {
-    return 0;
-  }
-  return Array.isArray(result) ? result.length : 1;
-}
 
 /**
  * Measure `rule` over `corpus` and return codePerAnchor and oracleScore. Each of
@@ -78,7 +65,9 @@ export function calibrate<N extends object>(
     const event = playerNext();
     const normalized = rule.normalize(event.payload);
     const view = withEngineFields(normalized, event.id, event.ts, event.endpoint);
-    sink += matchWork(rule.match(view));
+    // The profiler needs a work sink, not the findings themselves; a rule's work
+    // is the number of findings it returns ([] counts as none).
+    sink += rule.detect(view).length;
   };
 
   const anchorNext = loopingCorpus(corpus);

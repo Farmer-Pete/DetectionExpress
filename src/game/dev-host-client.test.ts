@@ -132,10 +132,10 @@ describe("dev-host client", () => {
     h.source.emit("init", {
       slug: SLUG,
       path: "/algorithms/x.js",
-      source: "export function match(){}",
+      source: "export function detect(){}",
     });
     expect(h.states.at(-1)?.path).toBe("/algorithms/x.js");
-    expect(h.applied).toEqual(["export function match(){}"]);
+    expect(h.applied).toEqual(["export function detect(){}"]);
   });
 
   it("reverts and unlocks on a delete init that carries the cached default", () => {
@@ -157,7 +157,7 @@ describe("dev-host client", () => {
   it("round-trips Unicode and newlines through the frame decoder", () => {
     const h = harness();
     h.client.connect();
-    const src = "// café\nexport function match(e){ return e; }\n";
+    const src = "// café\nexport function detect(e){ return e; }\n";
     h.source.emit("changed", { slug: SLUG, source: src });
     expect(h.applied).toEqual([src]);
   });

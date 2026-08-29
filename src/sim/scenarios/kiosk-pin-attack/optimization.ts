@@ -15,8 +15,9 @@
  * it imports lodash by URL, the way a player would. `buildOptimizationAlgorithm` is
  * the in-process twin the deterministic tests run: the same logic with no import.
  */
-import type { Alert } from "../../alert";
+
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /**
@@ -39,8 +40,8 @@ let head = 0;
 const counts = {}; // per-account in-window fail count
 const recent = {}; // per-account last THRESHOLD fail ids, the evidence to cite
 const firing = {};
-export function match(e) {
-  if (e.outcome !== "fail") return null;
+export function detect(e) {
+  if (e.outcome !== "fail") return [];
   queue.push({ account: e.account, ts: e.ts, id: e.id });
   counts[e.account] = (counts[e.account] ?? 0) + 1;
   const r = (recent[e.account] ??= []);
@@ -57,11 +58,11 @@ export function match(e) {
   }
   if ((counts[e.account] ?? 0) < THRESHOLD) {
     firing[e.account] = false;
-    return null;
+    return [];
   }
-  if (firing[e.account]) return null; // one Alert per burst; no duplicates
+  if (firing[e.account]) return []; // one Alert per burst; no duplicates
   firing[e.account] = true;
-  return { reason: "pin_brute_force", at: e.ts, events: recent[e.account].slice() };
+  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: recent[e.account].slice() } }];
 }
 `;
 
@@ -72,8 +73,8 @@ interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view Match hands the Rule: the normalized payload plus engine fields. */
-interface MatchView extends NormalizedKiosk {
+/** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
+interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -81,7 +82,7 @@ interface MatchView extends NormalizedKiosk {
 
 export interface OptimizationAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(e: MatchView): Alert | null;
+  detect(e: KioskDetectView): Finding[];
 }
 
 /** One queued fail in the global expiry queue: its account, time, and id. */
@@ -122,9 +123,9 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
       };
     },
-    match(e) {
+    detect(e) {
       if (e.outcome !== "fail") {
-        return null;
+        return [];
       }
       queue.push({ account: e.account, ts: e.ts, id: e.id });
       counts.set(e.account, (counts.get(e.account) ?? 0) + 1);
@@ -156,13 +157,13 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
 
       if ((counts.get(e.account) ?? 0) < THRESHOLD) {
         firing.delete(e.account);
-        return null;
+        return [];
       }
       if (firing.has(e.account)) {
-        return null; // one Alert per burst; no duplicates
+        return []; // one Alert per burst; no duplicates
       }
       firing.add(e.account);
-      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, events: [...ids] };
+      return [{ alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: [...ids] } }];
     },
   };
 }

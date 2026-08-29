@@ -14,7 +14,7 @@ import { makeNaiveScan, type NormalizedKiosk, normalizeKiosk } from "./rules";
  */
 function naiveRule(): ProfilerRule<NormalizedKiosk> {
   const detector = makeNaiveScan();
-  return { normalize: normalizeKiosk, match: (view) => detector.step(view) };
+  return { normalize: normalizeKiosk, detect: (view) => detector.step(view) };
 }
 
 function steppingTimer(step: number): Timer {

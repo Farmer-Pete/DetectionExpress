@@ -222,7 +222,7 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
 const briefing =
   "This Hunt is the kiosk PIN brute force. Five or more wrong PINs on one " +
   "account inside five minutes make an Attack. Normalize the raw kiosk " +
-  "Events, then write the Match Rule to catch that burst per account and " +
+  "Events, then write the Detect Rule to catch that burst per account and " +
   "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
   "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
   "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +

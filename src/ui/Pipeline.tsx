@@ -8,15 +8,15 @@ import { Background, type EdgeTypes, type NodeTypes, ReactFlow } from "@xyflow/r
 import "@xyflow/react/dist/style.css";
 import { useGameStore } from "../game/store";
 import { StreamEdge } from "./edges/StreamEdge";
+import { DetectNode } from "./nodes/DetectNode";
 import { IngestNode } from "./nodes/IngestNode";
-import { MatchNode } from "./nodes/MatchNode";
 import { NormalizeNode } from "./nodes/NormalizeNode";
 import { SinkNode } from "./nodes/SinkNode";
 
 const nodeTypes: NodeTypes = {
   ingest: IngestNode,
   normalize: NormalizeNode,
-  match: MatchNode,
+  detect: DetectNode,
   sink: SinkNode,
 };
 const edgeTypes: EdgeTypes = { stream: StreamEdge };

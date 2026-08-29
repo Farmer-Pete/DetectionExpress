@@ -13,8 +13,9 @@
  *
  * Pure, deterministic, game-time only. No wall-clock, no ground-truth access.
  */
-import type { Alert } from "../../sim/alert";
+
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "../../sim/finding";
 import { PIN_BRUTE_FORCE_REASON } from "../../sim/scenarios/kiosk-pin-attack/attacks";
 import { GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "../tuning";
 
@@ -33,8 +34,8 @@ export interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view a Match rule reads: the normalized payload plus engine fields. */
-export interface MatchView extends NormalizedKiosk {
+/** The flat view a Detect rule reads: the normalized payload plus engine fields. */
+export interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -46,7 +47,7 @@ export interface MatchView extends NormalizedKiosk {
  * the profiler's bounded-corpus test asserts it stays within one window.
  */
 export interface Detector {
-  step(event: MatchView): Alert | null;
+  step(event: KioskDetectView): Finding[];
   retained(): number;
 }
 
@@ -74,9 +75,9 @@ export function makeNaiveScan(): Detector {
   const fails = new Map<string, FailRecord[]>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Alert | null {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
-        return null;
+        return [];
       }
       const arr = fails.get(event.account) ?? [];
       arr.push({ id: event.id, ts: event.ts });
@@ -84,13 +85,15 @@ export function makeNaiveScan(): Detector {
       fails.set(event.account, kept);
       if (kept.length < THRESHOLD) {
         firing.delete(event.account);
-        return null;
+        return [];
       }
       if (firing.has(event.account)) {
-        return null;
+        return [];
       }
       firing.add(event.account);
-      return { reason: REASON, at: event.ts, events: kept.map((record) => record.id) };
+      return [
+        { alert: { reason: REASON, at: event.ts, eventIds: kept.map((record) => record.id) } },
+      ];
     },
     retained(): number {
       let total = 0;
@@ -128,9 +131,9 @@ export function makeIncrementalTally(): Detector {
   const counts = new Map<string, number>();
   const firing = new Set<string>();
   return {
-    step(event: MatchView): Alert | null {
+    step(event: KioskDetectView): Finding[] {
       if (event.outcome !== "fail") {
-        return null;
+        return [];
       }
       queue.push({ account: event.account, ts: event.ts, id: event.id });
       counts.set(event.account, (counts.get(event.account) ?? 0) + 1);
@@ -150,13 +153,13 @@ export function makeIncrementalTally(): Detector {
       const count = counts.get(event.account) ?? 0;
       if (count < THRESHOLD) {
         firing.delete(event.account);
-        return null;
+        return [];
       }
       if (firing.has(event.account)) {
-        return null;
+        return [];
       }
       firing.add(event.account);
-      return { reason: REASON, at: event.ts, events: [event.id] };
+      return [{ alert: { reason: REASON, at: event.ts, eventIds: [event.id] } }];
     },
     retained(): number {
       return queue.length - head;

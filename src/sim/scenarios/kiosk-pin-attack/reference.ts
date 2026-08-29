@@ -6,8 +6,9 @@
  * is the in-process twin the deterministic tests run: the same logic with no
  * import, so it needs no network and no loader. Both raise one Alert per Attack.
  */
-import type { Alert } from "../../alert";
+
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /** The editor default and the browser run. Imports lodash by URL, like a player. */
@@ -21,19 +22,19 @@ export function normalize(raw) {
 }
 const fails = {};
 const firing = {};
-export function match(e) {
+export function detect(e) {
   const WINDOW = 300; // 5 minutes in game seconds
-  if (e.outcome !== "fail") return null;
+  if (e.outcome !== "fail") return [];
   const f = (fails[e.account] ??= []);
   f.push({ id: e.id, ts: e.ts });
   fails[e.account] = f.filter((x) => x.ts > e.ts - WINDOW);
   if (fails[e.account].length < 5) {
     firing[e.account] = false;
-    return null;
+    return [];
   }
-  if (firing[e.account]) return null; // one Alert per burst; no duplicates
+  if (firing[e.account]) return []; // one Alert per burst; no duplicates
   firing[e.account] = true;
-  return { reason: "pin_brute_force", at: e.ts, events: fails[e.account].map((x) => x.id) };
+  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: fails[e.account].map((x) => x.id) } }];
 }
 `;
 
@@ -44,8 +45,8 @@ interface NormalizedKiosk {
   outcome: "success" | "fail";
 }
 
-/** The flat view Match hands the Rule: the normalized payload plus engine fields. */
-interface MatchView extends NormalizedKiosk {
+/** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
+interface KioskDetectView extends NormalizedKiosk {
   id: number;
   ts: number;
   endpoint: string;
@@ -53,7 +54,7 @@ interface MatchView extends NormalizedKiosk {
 
 export interface ReferenceAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  match(e: MatchView): Alert | null;
+  detect(e: KioskDetectView): Finding[];
 }
 
 /**
@@ -75,9 +76,9 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
         outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
       };
     },
-    match(e) {
+    detect(e) {
       if (e.outcome !== "fail") {
-        return null;
+        return [];
       }
       const f = fails.get(e.account) ?? [];
       f.push({ id: e.id, ts: e.ts });
@@ -85,13 +86,15 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
       fails.set(e.account, kept);
       if (kept.length < THRESHOLD) {
         firing.delete(e.account);
-        return null;
+        return [];
       }
       if (firing.has(e.account)) {
-        return null; // one Alert per burst; no duplicates
+        return []; // one Alert per burst; no duplicates
       }
       firing.add(e.account);
-      return { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, events: kept.map((x) => x.id) };
+      return [
+        { alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: kept.map((x) => x.id) } },
+      ];
     },
   };
 }

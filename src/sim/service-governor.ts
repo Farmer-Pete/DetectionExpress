@@ -1,6 +1,6 @@
 /**
  * The service governor: the integer accumulator that charges a rule's run-time
- * cost as whole Clock ticks, with no float drift. The Match task charges one
+ * cost as whole Clock ticks, with no float drift. The Detect task charges one
  * Event at a time; the governor decides how many ticks to sleep before the next.
  *
  * `serviceRate = num/den` records per tick (positive safe integers). Each Event
