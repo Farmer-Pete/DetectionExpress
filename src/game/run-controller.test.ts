@@ -69,10 +69,31 @@ function baseDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
     getSeed: () => 1,
     setSnapshot: () => undefined,
     setError: () => undefined,
+    setRunPending: () => undefined,
     loadAlgorithm: async () => algo,
     resolveServiceRate: () => fixedServiceRate(),
     start: () => fakeHandle(),
     ...over,
+  };
+}
+
+/** A fake engine handle whose stop calls are counted, with a controllable completion. */
+function spyHandle(whenStopped: Promise<void> = new Promise(() => undefined)): {
+  handle: EngineHandle;
+  stops: number;
+} {
+  const state = { stops: 0 };
+  const handle: EngineHandle = {
+    stop: () => {
+      state.stops += 1;
+    },
+    whenStopped,
+  };
+  return {
+    handle,
+    get stops() {
+      return state.stops;
+    },
   };
 }
 
@@ -283,6 +304,239 @@ describe("run controller", () => {
     expect(cleared).toBe(true);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]?.correctness.rolling).toBe(100); // emptySnapshot reset
+  });
+
+  it("keeps the live engine running when a later load fails (dry-run before teardown)", async () => {
+    const live = spyHandle();
+    const phases: string[] = [];
+    let source = "good";
+    let loadCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(source),
+        loadAlgorithm: async () => {
+          if (loadCall++ === 0) return algo;
+          throw new Error("bad syntax");
+        },
+        start: () => live.handle,
+        setError: (e) => {
+          if (e) phases.push(e.phase);
+        },
+      }),
+    );
+    controller.run(); // first run starts the live engine
+    await flush();
+    source = "broken";
+    controller.run(); // a broken edit: the load fails
+    await flush();
+    expect(phases).toContain("load");
+    expect(live.stops).toBe(0); // the live engine was never stopped
+  });
+
+  it("keeps the live engine running when a later profile fails (dry-run before teardown)", async () => {
+    const live = spyHandle();
+    const phases: string[] = [];
+    let source = "good";
+    let profileCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(source),
+        resolveServiceRate: () => {
+          if (profileCall++ === 0) return fixedServiceRate();
+          return { rate: Promise.reject(new Error("profile boom")), cancel: () => undefined };
+        },
+        start: () => live.handle,
+        setError: (e) => {
+          if (e) phases.push(e.phase);
+        },
+      }),
+    );
+    controller.run(); // first run starts the live engine and caches its rate
+    await flush();
+    source = "changed"; // a new source, so the rate is re-measured and fails
+    controller.run();
+    await flush();
+    expect(phases).toContain("profile");
+    expect(live.stops).toBe(0); // the live engine was never stopped
+  });
+
+  it("stops the old engine, THEN starts the new one, on a successful validate", async () => {
+    const events: string[] = [];
+    const old = spyHandle();
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          if (call++ === 0) {
+            events.push("start-old");
+            const handle: EngineHandle = {
+              stop: () => events.push("stop-old"),
+              whenStopped: new Promise(() => undefined),
+            };
+            return handle;
+          }
+          events.push("start-new");
+          return old.handle;
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    controller.run();
+    await flush();
+    expect(events).toEqual(["start-old", "stop-old", "start-new"]);
+  });
+
+  it("keeps ownership of the live engine after a failed Apply, so a later good Apply stops it once", async () => {
+    const live = spyHandle();
+    const snapshots: SimSnapshot[] = [];
+    let source = "good";
+    let loadCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(source),
+        loadAlgorithm: async () => {
+          // first (live) load ok, second (bad Apply) throws, third (good Apply) ok
+          if (loadCall++ === 1) throw new Error("bad syntax");
+          return algo;
+        },
+        start: () => live.handle,
+        setSnapshot: (s) => snapshots.push(s),
+      }),
+    );
+    controller.run(); // start the live engine
+    await flush();
+    expect(snapshots).toHaveLength(1);
+    source = "broken";
+    controller.run(); // failed Apply: load throws
+    await flush();
+    expect(snapshots).toHaveLength(1); // the snapshot did not change
+    expect(live.stops).toBe(0); // the live engine kept running
+    source = "good-again";
+    controller.run(); // good Apply: commit stops the original handle exactly once
+    await flush();
+    expect(live.stops).toBe(1);
+  });
+
+  it("keeps ownership of the live engine after a failed Apply, so a later dispose stops it once", async () => {
+    const live = spyHandle();
+    let source = "good";
+    let loadCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(source),
+        loadAlgorithm: async () => {
+          if (loadCall++ === 1) throw new Error("bad syntax");
+          return algo;
+        },
+        start: () => live.handle,
+      }),
+    );
+    controller.run();
+    await flush();
+    source = "broken";
+    controller.run(); // failed Apply
+    await flush();
+    expect(live.stops).toBe(0);
+    controller.dispose(); // dispose still owns and stops the live engine
+    expect(live.stops).toBe(1);
+  });
+
+  it("fires onFinished when the live engine completes during a failing preflight (handle identity)", async () => {
+    let finishes = 0;
+    const done = deferred<void>();
+    const live = spyHandle(done.promise);
+    let source = "good";
+    let loadCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(source),
+        loadAlgorithm: async () => {
+          if (loadCall++ === 1) throw new Error("bad syntax");
+          return algo;
+        },
+        start: () => live.handle,
+        onFinished: () => {
+          finishes += 1;
+        },
+      }),
+    );
+    controller.run(); // the live engine starts
+    await flush();
+    source = "broken";
+    controller.run(); // a dry-run that fails at load, bumping the generation
+    await flush();
+    done.resolve(); // the live engine completes naturally during/after the failed preflight
+    await flush();
+    expect(finishes).toBe(1); // completion keys on handle identity, not the generation
+  });
+
+  it("drives runPending true then false on a successful run", async () => {
+    const pending: boolean[] = [];
+    const controller = createRunController(
+      baseDeps({
+        setRunPending: (v) => pending.push(v),
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(pending).toEqual([true, false]);
+  });
+
+  it("clears runPending when a run fails at load", async () => {
+    const pending: boolean[] = [];
+    const controller = createRunController(
+      baseDeps({
+        loadAlgorithm: async () => {
+          throw new Error("bad syntax");
+        },
+        setRunPending: (v) => pending.push(v),
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(pending).toEqual([true, false]);
+  });
+
+  it("does not let a superseded run clear a newer run's runPending", async () => {
+    const pending: boolean[] = [];
+    const loads = [deferred<LoadedAlgorithm>(), deferred<LoadedAlgorithm>()];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        loadAlgorithm: () => loads[call++]?.promise ?? Promise.resolve(algo),
+        setRunPending: (v) => pending.push(v),
+      }),
+    );
+    controller.run(); // generation 1, pending true
+    controller.run(); // generation 2, pending true
+    loads[0]?.resolve(algo); // the stale generation-1 load resolves
+    await flush();
+    // the stale run must NOT have cleared the flag the live run owns
+    expect(pending).toEqual([true, true]);
+    loads[1]?.resolve(algo); // the live generation-2 run resolves and clears it
+    await flush();
+    expect(pending).toEqual([true, true, false]);
+  });
+
+  it("clears runPending when dispose interrupts an in-flight run", async () => {
+    const pending: boolean[] = [];
+    const load = deferred<LoadedAlgorithm>();
+    const controller = createRunController(
+      baseDeps({
+        loadAlgorithm: () => load.promise,
+        setRunPending: (v) => pending.push(v),
+      }),
+    );
+    controller.run(); // pending true, load still in flight
+    await flush();
+    expect(pending).toEqual([true]);
+    controller.dispose(); // dispose clears it directly
+    expect(pending).toEqual([true, false]);
+    load.resolve(algo); // the in-flight run resolves after dispose, and stays silent
+    await flush();
+    expect(pending).toEqual([true, false]); // the guarded finally did not clear it again
   });
 });
 
@@ -514,6 +768,7 @@ function workerDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
     getSeed: () => 1,
     setSnapshot: () => undefined,
     setError: () => undefined,
+    setRunPending: () => undefined,
     loadAlgorithm: async () => algo,
     start: () => fakeHandle(),
     ...over,
