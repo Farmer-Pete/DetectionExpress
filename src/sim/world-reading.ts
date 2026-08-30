@@ -11,20 +11,39 @@
  */
 import type { FareGateReading } from "./endpoints/fare-gate/gatekeep";
 import type { DistanceTable } from "./world/distance";
+import type { Timetable } from "./world/timetable";
 import type { World } from "./world/world";
 
 /**
- * A discriminated reading tagged by its sensor id (distinct from a vendor
- * `Endpoint.id`). M0 has one arm; M2..M6 add tvm, kiosk, door, camera, train,
- * console, and relay arms as their actors land.
+ * The train-tracker family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: a train arriving at (`arr`) or leaving (`dep`) a station, and on
+ * which track. `ts` is in game seconds; `track` is a deterministic per-segment id.
  */
-export type WorldReading = { sensor: "fare-gate"; reading: FareGateReading };
+interface TrainReading {
+  /** Game seconds. */
+  ts: number;
+  train: string;
+  line: string;
+  station: string;
+  event: "arr" | "dep";
+  track: string;
+}
+
+/**
+ * A discriminated reading tagged by its sensor id (distinct from a vendor
+ * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm. M3..M6 add tvm,
+ * kiosk, door, camera, console, and relay arms as their actors land.
+ */
+export type WorldReading =
+  | { sensor: "fare-gate"; reading: FareGateReading }
+  | { sensor: "train-tracker"; reading: TrainReading };
 
 /** The read-only environment every live actor reads. It grows per milestone. */
 export interface WorldEnv {
   world: World;
   distances: DistanceTable;
-  // M2 adds:  timetable: Timetable;
+  /** The derived train timetable. M2 adds it; riders ignore it, the train rides it. */
+  timetable: Timetable;
   // M6 adds:  consoles: readonly Console[];  destinations: readonly string[];
 }
 

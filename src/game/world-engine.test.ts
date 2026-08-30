@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, Admission } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import { distanceTable } from "../sim/world/distance";
 import { gateNodeId } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
+import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
 import type { WorldSnapshot } from "../sim/world-snapshot";
@@ -17,7 +19,7 @@ import {
 } from "./tuning";
 import { startWorld, type WorldFixture } from "./world-engine";
 
-const env: WorldEnv = { world, distances: distanceTable(world) };
+const env: WorldEnv = { world, distances: distanceTable(world), timetable: buildTimetable(world) };
 
 /** No-op visibility so the loop never pauses on a hidden document in tests. */
 const noVisibility = (): (() => void) => () => undefined;
@@ -344,6 +346,87 @@ describe("world engine bounded cost", () => {
     handle.stop();
     // One flash per tick, pruned to the window, so it never grows without bound.
     expect(maxFlashes).toBeLessThanOrEqual(FLASH_WINDOW_TICKS + 1);
+  });
+});
+
+/** The four persistent train fixtures, one per line, exactly as the controller builds them. */
+function trainFixtures(): WorldFixture[] {
+  const timetable = env.timetable;
+  return world.lines.map((line, index): WorldFixture => {
+    const schedule = timetable.line(line.id);
+    const origin = schedule.stops[0] ?? line.id;
+    return {
+      actor: createTrain({ id: `T${index + 1}`, line: line.id, startTick: schedule.startTick }),
+      kind: "train",
+      initialPresence: (firstTick) => initialTrainPresence(origin, firstTick, line.id),
+    };
+  });
+}
+
+describe("world engine trains", () => {
+  it("seeds exactly one persistent train per line and counts them", () => {
+    let last: WorldSnapshot | undefined;
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: trainFixtures(),
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => {
+        last = snapshot;
+      },
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 200);
+    handle.stop();
+    const trains = (last?.actors ?? []).filter((view) => view.kind === "train");
+    expect(trains.map((view) => view.id).sort()).toEqual(["T1", "T2", "T3", "T4"]);
+    expect(last?.counts.trains).toBe(4);
+  });
+
+  it("seeds a train's presence from its first tick, parked at its origin before it departs", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: trainFixtures(),
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    // The Circle train (T4) launches later than the first publish, so it still sits at
+    // its origin, seeded from initialTicks() via initialPresence(firstTick).
+    tick(driver, 3);
+    handle.stop();
+    const circle = snapshots[0]?.actors.find((view) => view.id === "T4");
+    expect(circle?.presence).toEqual({
+      kind: "at",
+      node: "cen",
+      fromTick: 0,
+      untilTick: 180,
+      rail: { line: "circle", from: 0, to: 0 },
+    });
+  });
+
+  it("flashes a train-tracker reading at the station node", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: trainFixtures(),
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 200);
+    handle.stop();
+    const flashes = snapshots.flatMap((snapshot) => snapshot.flashes);
+    const trainFlashes = flashes.filter((flash) => flash.kind === "train");
+    expect(trainFlashes.length).toBeGreaterThan(0);
+    // The Red train departs Harbor at tick 0, so a train flash lands on the "har" node.
+    expect(trainFlashes.some((flash) => flash.node === "har")).toBe(true);
   });
 });
 

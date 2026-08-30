@@ -20,7 +20,7 @@ export interface ActorView {
 /** A short, fading mark the view draws at a node when a sensor fires. */
 export interface FlashEvent {
   id: number;
-  kind: "tap" | "topup" | "signin" | "grant" | "deny" | "door" | "command" | "packet";
+  kind: "tap" | "topup" | "signin" | "grant" | "deny" | "door" | "command" | "packet" | "train";
   node: MapNodeId;
   atTick: number;
 }

@@ -13,7 +13,8 @@
 import { useEffect, useRef } from "react";
 import { CLOCK_HZ, FLASH_LIFE_TICKS } from "../../game/tuning";
 import { useWorldStore } from "../../game/world-store";
-import { metroLayout, type Point } from "../../sim/world/layout";
+import { metroLayout, metroLines, type Point } from "../../sim/world/layout";
+import type { Presence } from "../../sim/world/presence";
 import { world } from "../../sim/world/world";
 import type { FlashEvent, WorldSnapshot } from "../../sim/world-snapshot";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./design";
@@ -21,6 +22,7 @@ import { presencePoint } from "./interpolate";
 
 /** The rider dot color (`--ink`) and the flash token per firing sensor kind. */
 const INK = "#fbd57b";
+const TRAIN_FILL = "#cfe3ea";
 const FLASH_COLOR: Record<FlashEvent["kind"], string> = {
   tap: "#f2a900",
   topup: "#90be6d",
@@ -30,6 +32,7 @@ const FLASH_COLOR: Record<FlashEvent["kind"], string> = {
   door: "#577590",
   command: "#f94144",
   packet: "#f8961e",
+  train: TRAIN_FILL,
 };
 
 /** The flash ring grows from this radius to this over the flash's life (design units). */
@@ -39,6 +42,25 @@ const FLASH_RING_MAX = 18;
 /** A rider is fully opaque while moving, slightly dimmed while waiting or dwelling. */
 const RIDER_MOVING_ALPHA = 1;
 const RIDER_DWELL_ALPHA = 0.85;
+
+/** The train pill, per view notes section 4: 22 x 11 design units, stroke width 2.5. */
+const TRAIN_W = 22;
+const TRAIN_H = 11;
+const TRAIN_STROKE = 2.5;
+
+/**
+ * A train rides ON its line's OFFSET polyline (the same path MetroMap draws), not the
+ * raw straight line between station centers. Each line's polyline points are indexed by
+ * position, so a presence's `rail` (a from/to point index) resolves to the exact drawn
+ * segment. Indexing by point, not by (line, station), is what lets a loop distinguish
+ * its repeated station (the Circle's cen appears at both ends of its polyline).
+ */
+const POINTS_BY_LINE = new Map<string, readonly Point[]>(
+  metroLines(world).map((poly) => [poly.id, poly.points]),
+);
+
+/** Each train's line color, keyed by its id (T1..T4 = world lines in order). */
+const TRAIN_COLOR_BY_ID = new Map(world.lines.map((line, index) => [`T${index + 1}`, line.color]));
 
 /** A uniform design-space -> canvas transform: fit and center, never stretch. */
 interface View {
@@ -54,6 +76,80 @@ function fit(width: number, height: number): View {
     offsetX: (width - DESIGN_WIDTH * scale) / 2,
     offsetY: (height - DESIGN_HEIGHT * scale) / 2,
   };
+}
+
+const ORIGIN: Point = { x: 0, y: 0 };
+
+/** The clamped `[0,1]` progress of a moving presence at `renderNow`. */
+function movingFraction(fromTick: number, untilTick: number, renderNow: number): number {
+  const span = untilTick - fromTick;
+  const raw = span <= 0 ? 1 : (renderNow - fromTick) / span;
+  return Math.max(0, Math.min(1, raw));
+}
+
+/**
+ * Where a train sits and which way it faces at `renderNow`. It reads the presence's
+ * `rail` metadata and rides the exact drawn polyline segment: a moving train slides from
+ * the segment's near point to its far point and faces that direction; a dwelling train
+ * rests on the far (arrival) point, keeping the same tangent so it does not rotate or
+ * snap when it stops. Without rail metadata it falls back to the station node.
+ */
+function trainPlacement(
+  presence: Presence,
+  layout: ReadonlyMap<string, Point>,
+  renderNow: number,
+): { point: Point; angle: number } {
+  const rail = presence.rail;
+  if (rail !== undefined) {
+    const points = POINTS_BY_LINE.get(rail.line) ?? [];
+    const a = points[rail.from] ?? ORIGIN;
+    const b = points[rail.to] ?? ORIGIN;
+    const t =
+      presence.kind === "moving"
+        ? movingFraction(presence.fromTick, presence.untilTick, renderNow)
+        : 1;
+    const still = a.x === b.x && a.y === b.y;
+    return {
+      point: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t },
+      angle: still ? 0 : Math.atan2(b.y - a.y, b.x - a.x),
+    };
+  }
+  if (presence.kind === "at") {
+    return { point: layout.get(presence.node) ?? ORIGIN, angle: 0 };
+  }
+  const from = layout.get(presence.from) ?? ORIGIN;
+  const to = layout.get(presence.to) ?? ORIGIN;
+  const t = movingFraction(presence.fromTick, presence.untilTick, renderNow);
+  return {
+    point: { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t },
+    angle: Math.atan2(to.y - from.y, to.x - from.x),
+  };
+}
+
+function drawTrain(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  point: Point,
+  angle: number,
+  color: string,
+): void {
+  const cx = view.offsetX + point.x * view.scale;
+  const cy = view.offsetY + point.y * view.scale;
+  const w = TRAIN_W * view.scale;
+  const h = TRAIN_H * view.scale;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  // A rounded rect: the pill shape from view notes section 4. `roundRect` is standard in
+  // every current browser; the layer is a no-op under test (happy-dom has no 2d context).
+  ctx.roundRect(-w / 2, -h / 2, w, h, h / 2);
+  ctx.fillStyle = TRAIN_FILL;
+  ctx.fill();
+  ctx.lineWidth = TRAIN_STROKE * view.scale;
+  ctx.strokeStyle = color;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawRider(ctx: CanvasRenderingContext2D, view: View, point: Point): void {
@@ -125,8 +221,16 @@ export function ActorLayer() {
       const view = fit(width, height);
       ctx.clearRect(0, 0, width, height);
 
-      ctx.fillStyle = INK;
       for (const actor of snapshot.actors) {
+        if (actor.kind === "train") {
+          // A train rides its line's offset polyline, rotated to face its travel
+          // direction, stroked in its line color.
+          const color = TRAIN_COLOR_BY_ID.get(actor.id) ?? TRAIN_FILL;
+          const { point, angle } = trainPlacement(actor.presence, layout, renderNow);
+          drawTrain(ctx, view, point, angle, color);
+          continue;
+        }
+        ctx.fillStyle = INK;
         // Dim a waiting or dwelling rider; a moving rider is fully opaque.
         ctx.globalAlpha = actor.presence.kind === "moving" ? RIDER_MOVING_ALPHA : RIDER_DWELL_ALPHA;
         drawRider(ctx, view, presencePoint(actor.presence, layout, renderNow));

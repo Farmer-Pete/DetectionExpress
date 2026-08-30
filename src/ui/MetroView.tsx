@@ -49,12 +49,25 @@ function tapsPerMinute(log: readonly TimedWorldReading[], nowTick: number): numb
   return log.filter((entry) => entry.reading.sensor === "fare-gate" && entry.tick > cutoff).length;
 }
 
-/** One event-log row's human-readable message from a normalized reading. */
-function logMessage(entry: TimedWorldReading): string {
-  const reading = entry.reading.reading;
-  const place = stationName.get(reading.station) ?? reading.station;
-  const detail = reading.direction === "in" ? "tap in" : "tap out";
-  return `fare gate, ${place}, ${detail} (bal ${reading.balance})`;
+/** One event-log row: its sensor chip code and color, and its human-readable message. */
+function logRow(entry: TimedWorldReading): { code: string; color: string; text: string } {
+  const reading = entry.reading;
+  if (reading.sensor === "train-tracker") {
+    const place = stationName.get(reading.reading.station) ?? reading.reading.station;
+    const detail = reading.reading.event === "arr" ? "arrive" : "depart";
+    return {
+      code: "T",
+      color: "var(--s-train)",
+      text: `train tracker, ${place}, ${reading.reading.train} ${detail} (${reading.reading.line})`,
+    };
+  }
+  const place = stationName.get(reading.reading.station) ?? reading.reading.station;
+  const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
+  return {
+    code: "G",
+    color: "var(--s-gate)",
+    text: `fare gate, ${place}, ${detail} (bal ${reading.reading.balance})`,
+  };
 }
 
 function Header() {
@@ -121,6 +134,14 @@ function Legend() {
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--ink)" }} />
         rider
       </div>
+      <div className="metro-legend-row">
+        {/* A rounded-rect swatch matching the train's real pill glyph (#cfe3ea). */}
+        <span
+          className="metro-swatch metro-swatch-train"
+          style={{ background: "var(--s-train)", borderRadius: "3px" }}
+        />
+        train
+      </div>
       <div className="metro-legend-head">Sensors</div>
       {LEGEND_SENSORS.map((sensor) => (
         <div className="metro-legend-row" key={sensor.code}>
@@ -141,17 +162,20 @@ function EventLog() {
     <aside className="metro-log">
       <div className="metro-log-head">Event log</div>
       <div className="metro-log-body">
-        {rows.map((entry, index) => (
-          <div className="metro-log-row" key={`${entry.tick}-${entry.actorId ?? index}`}>
-            <span className="metro-log-time">
-              {(entry.tick * GAME_SECONDS_PER_TICK).toFixed(1)}s
-            </span>
-            <span className="metro-chip-swatch" style={{ background: "var(--s-gate)" }}>
-              G
-            </span>
-            <span className="metro-log-msg">{logMessage(entry)}</span>
-          </div>
-        ))}
+        {rows.map((entry, index) => {
+          const row = logRow(entry);
+          return (
+            <div className="metro-log-row" key={`${entry.tick}-${entry.actorId ?? index}`}>
+              <span className="metro-log-time">
+                {(entry.tick * GAME_SECONDS_PER_TICK).toFixed(1)}s
+              </span>
+              <span className="metro-chip-swatch" style={{ background: row.color }}>
+                {row.code}
+              </span>
+              <span className="metro-log-msg">{row.text}</span>
+            </div>
+          );
+        })}
       </div>
     </aside>
   );

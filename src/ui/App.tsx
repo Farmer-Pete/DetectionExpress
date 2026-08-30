@@ -35,7 +35,6 @@ import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
-import type { WorldEnv } from "../sim/world-reading";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import type { DevKitPanelProps } from "./DevKitPanel";
@@ -50,8 +49,8 @@ type DevClientFactory = (deps: DevHostClientDeps) => DevHostClient;
 /** Which mode is on screen. Only the visible mode's loop runs. */
 type View = "pipeline" | "metro";
 
-/** The world env is fixed data, built once for the world controller. */
-const worldEnv: WorldEnv = { world, distances: distanceTable(world) };
+/** The station distances are fixed data, built once for the world controller. */
+const worldDistances = distanceTable(world);
 
 function buildController(): RunController {
   return createRunController({
@@ -66,10 +65,11 @@ function buildController(): RunController {
 
 function buildWorldController(): WorldRunController {
   return createWorldRunController({
-    // M1 has no persistent fixtures (trains land in M2); the cast is all transient
-    // riders from the seeded spawner the controller builds.
+    // The controller derives the timetable and builds the four trains (T1..T4) as
+    // persistent fixtures; there are no other fixtures yet (M6 adds operators and hosts).
+    world,
+    distances: worldDistances,
     getFixtures: () => [],
-    env: worldEnv,
     getSeed: () => useGameStore.getState().seed,
     setWorldSnapshot: useWorldStore.getState().setWorldSnapshot,
     getSpeed: worldSpeed,

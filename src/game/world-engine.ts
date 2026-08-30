@@ -201,6 +201,15 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
           atTick: entry.tick,
         });
         nextFlashId += 1;
+      } else if (entry.reading.sensor === "train-tracker") {
+        // A train arriving at or leaving a station flashes on the station node itself.
+        flashes.push({
+          id: nextFlashId,
+          kind: "train",
+          node: entry.reading.reading.station,
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
       }
       // Keep the reading for the event log, bounded to the retention window.
       recentLog.push(entry);

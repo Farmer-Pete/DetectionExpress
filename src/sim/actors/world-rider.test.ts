@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
 import { distanceTable } from "../world/distance";
+import { buildTimetable } from "../world/timetable";
 import { world } from "../world/world";
 import type { WorldEnv, WorldReading } from "../world-reading";
 import { createSchedule } from "./actor";
@@ -9,7 +10,16 @@ import type { RiderTripConfig } from "./rider-core";
 import { createWorldRider, initialRiderPresence } from "./world-rider";
 
 const distances = distanceTable(world);
-const env: WorldEnv = { world, distances };
+const env: WorldEnv = { world, distances, timetable: buildTimetable(world) };
+
+/** The tap direction of a reading, narrowed off the discriminated union (world riders emit only fare-gate). */
+function directionOf(timed: { reading: WorldReading } | undefined): "in" | "out" | undefined {
+  if (timed === undefined) {
+    return undefined;
+  }
+  const reading = timed.reading;
+  return reading.sensor === "fare-gate" ? reading.reading.direction : undefined;
+}
 
 const HORIZON = 1000;
 
@@ -73,7 +83,7 @@ describe("createWorldRider", () => {
     const readings = schedule.advanceTo(HORIZON).readings;
     readings.forEach((timed, index) => {
       expect(timed.reading.sensor).toBe("fare-gate");
-      expect(timed.reading.reading.direction).toBe(index % 2 === 0 ? "in" : "out");
+      expect(directionOf(timed)).toBe(index % 2 === 0 ? "in" : "out");
     });
   });
 
@@ -83,7 +93,7 @@ describe("createWorldRider", () => {
     const first = steps[0];
     const firstReading = first?.readings[0];
     const firstPresence = first?.presence.get("C09");
-    expect(firstReading?.reading.reading.direction).toBe("in");
+    expect(directionOf(firstReading)).toBe("in");
     expect(firstPresence?.kind).toBe("moving");
     if (firstPresence?.kind === "moving") {
       expect(firstPresence.from).toBe(firstReading?.reading.reading.station);
@@ -96,7 +106,7 @@ describe("createWorldRider", () => {
     // The second transition is a tap-out: it starts a dwell, so its presence is at.
     const second = steps[1];
     const secondPresence = second?.presence.get("C09");
-    expect(second?.readings[0]?.reading.reading.direction).toBe("out");
+    expect(directionOf(second?.readings[0])).toBe("out");
     expect(secondPresence?.kind).toBe("at");
     if (secondPresence?.kind === "at") {
       expect(secondPresence.node).toBe(second?.readings[0]?.reading.reading.station);

@@ -61,22 +61,19 @@ export function MetroMap() {
               ))
           : null}
 
-        {/* Offset-parallel line polylines in the world.json colors. */}
-        {lines.map((line) => {
-          const points = line.loop ? [...line.points, line.points[0]] : line.points;
-          return (
-            <polyline
-              key={line.id}
-              data-line={line.id}
-              className="metro-line"
-              points={points
-                .filter((point): point is NonNullable<typeof point> => point !== undefined)
-                .map((point) => `${point.x},${point.y}`)
-                .join(" ")}
-              stroke={line.color}
-            />
-          );
-        })}
+        {/* Offset-parallel line polylines in the world.json colors. A loop line's stops
+            already return to the start (the Circle is cen, jct, cen), so its polyline is
+            drawn as-is; appending the first point again would add a spurious segment
+            between the two offset Central tracks. */}
+        {lines.map((line) => (
+          <polyline
+            key={line.id}
+            data-line={line.id}
+            className="metro-line"
+            points={line.points.map((point) => `${point.x},${point.y}`).join(" ")}
+            stroke={line.color}
+          />
+        ))}
 
         {/* Sites and the OCC: a zone badge, its name, and its restricted sensor chips. */}
         {sites.map((node) => {

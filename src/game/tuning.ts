@@ -213,3 +213,29 @@ export const RIDER_BALANCE = 2000;
  * Older readings are dropped, so the log stays bounded on a perpetual run.
  */
 export const WORLD_LOG_RETENTION = 120;
+
+/**
+ * M2 (living metro, #87) train pacing. One persistent train rides each line, dwelling
+ * at every platform and running the connection minutes between them (converted with
+ * `minutesToTicks`). These set the derived, deterministic timetable.
+ */
+
+/**
+ * The platform dwell, in whole sim ticks (~30 game seconds at `GAME_SECONDS_PER_TICK`).
+ * A positive integer, so a train's reschedule off a dwell strictly advances its tick.
+ */
+export const TRAIN_DWELL_TICKS = 15;
+
+/**
+ * The service headway in game minutes. With one train per line it sets each line's
+ * launch phase: line k's train first departs at `k * minutesToTicks(headway)`, so the
+ * four trains do not leave their origins in lockstep.
+ */
+export const TRAIN_HEADWAY_MINUTES = 2;
+
+/**
+ * The service span in game minutes: the operating window the timetable's launch phases
+ * wrap within, so a large headway can never push a line's first departure past the end
+ * of service. The run itself is perpetual; this only bounds the derived launch phase.
+ */
+export const TRAIN_SERVICE_SPAN_MINUTES = 60;

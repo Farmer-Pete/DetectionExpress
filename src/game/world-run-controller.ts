@@ -11,6 +11,10 @@
  */
 
 import { createRiderSpawner } from "../sim/actors/rider-spawner";
+import { createTrain, initialTrainPresence } from "../sim/actors/train";
+import type { DistanceTable } from "../sim/world/distance";
+import { buildTimetable } from "../sim/world/timetable";
+import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
 import { TARGET_RIDERS } from "./tuning";
@@ -29,8 +33,12 @@ export interface WorldRunController {
 }
 
 export interface WorldRunControllerDeps {
+  /** The validated world. The controller derives the timetable and env from it. */
+  world: World;
+  /** The all-pairs station distances, built once by the caller. */
+  distances: DistanceTable;
+  /** Extra persistent fixtures beyond the trains the controller builds (none yet in M2). */
   getFixtures: () => readonly WorldFixture[];
-  env: WorldEnv;
   getSeed: () => number;
   setWorldSnapshot: (snapshot: WorldSnapshot) => void;
   /** Defaults to the real world engine; tests inject a fake. */
@@ -49,6 +57,24 @@ export interface WorldRunControllerDeps {
 export function createWorldRunController(deps: WorldRunControllerDeps): WorldRunController {
   const startEngine = deps.start ?? startWorldDefault;
 
+  // The timetable and env are immutable, so build them once; the run-controller derives
+  // the timetable from the world and puts it in the WorldEnv the engine reads.
+  const timetable = buildTimetable(deps.world);
+  const env: WorldEnv = { world: deps.world, distances: deps.distances, timetable };
+
+  // One persistent train per line, ids T1..T4 in world-line order. Fresh per run so a
+  // re-run starts every train at its origin rather than mid-ride (they hold ride state).
+  const buildTrains = (): readonly WorldFixture[] =>
+    deps.world.lines.map((line, index): WorldFixture => {
+      const schedule = timetable.line(line.id);
+      const origin = schedule.stops[0] ?? line.id;
+      return {
+        actor: createTrain({ id: `T${index + 1}`, line: line.id, startTick: schedule.startTick }),
+        kind: "train",
+        initialPresence: (firstTick) => initialTrainPresence(origin, firstTick, line.id),
+      };
+    });
+
   let engine: WorldEngineHandle | null = null;
   let disposed = false;
 
@@ -62,12 +88,12 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
     // A fresh, seeded spawner per run, so the population replays for a seed.
     const spawner = createRiderSpawner({
       seed: runSeed,
-      world: deps.env.world,
+      world: deps.world,
       target: TARGET_RIDERS,
     });
     const startOptions: WorldStartOptions = {
-      fixtures: deps.getFixtures(),
-      env: deps.env,
+      fixtures: [...buildTrains(), ...deps.getFixtures()],
+      env,
       runSeed,
       setWorldSnapshot: deps.setWorldSnapshot,
       onError: (error) => deps.onError?.(error),

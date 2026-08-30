@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
-import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
 import type { WorldEngineHandle } from "./world-engine";
 import { createWorldRunController, type WorldRunControllerDeps } from "./world-run-controller";
 
-const env: WorldEnv = { world, distances: distanceTable(world) };
+const distances = distanceTable(world);
 
 /** A fake engine handle whose `whenStopped` a test resolves by hand. */
 function fakeHandle(): { handle: WorldEngineHandle; stops: number; settle: () => void } {
@@ -38,8 +37,9 @@ async function flush(): Promise<void> {
 
 function baseDeps(over: Partial<WorldRunControllerDeps>): WorldRunControllerDeps {
   return {
+    world,
+    distances,
     getFixtures: () => [],
-    env,
     getSeed: () => 1,
     setWorldSnapshot: () => undefined,
     start: () => fakeHandle().handle,
@@ -63,6 +63,22 @@ describe("world run controller", () => {
     controller.run();
     expect(started).toBe(1);
     expect(published).toEqual([emptyWorldSnapshot()]);
+  });
+
+  it("builds one persistent train per line as fixtures (T1..T4)", () => {
+    let fixtures: readonly { actor: { id: string }; kind: string }[] = [];
+    const controller = createWorldRunController(
+      baseDeps({
+        start: (options) => {
+          fixtures = options.fixtures;
+          return fakeHandle().handle;
+        },
+      }),
+    );
+    controller.run();
+    const trains = fixtures.filter((fixture) => fixture.kind === "train");
+    expect(trains.map((fixture) => fixture.actor.id)).toEqual(["T1", "T2", "T3", "T4"]);
+    expect(trains).toHaveLength(world.lines.length);
   });
 
   it("passes the current fixtures and seed to the engine", () => {
