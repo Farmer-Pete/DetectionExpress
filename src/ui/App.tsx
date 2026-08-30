@@ -24,7 +24,12 @@ import { getGraph, useGameStore } from "../game/store";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
+import { ChaosLadder } from "./ChaosLadder";
+import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
+import { IntroOverlay } from "./IntroOverlay";
+import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
 
@@ -61,6 +66,41 @@ export function App({ controller }: AppProps = {}) {
   const algoClientRef = useRef<AlgorithmsDevClient | null>(null);
   const [algoReady, setAlgoReady] = useState(false);
   const [localMode, setLocalMode] = useState(false);
+
+  // The intro overlay. The seen flag is read once, in a lazy initializer, so the
+  // overlay decision is made before first paint. `scrollTarget` holds a deferred
+  // anchor id: a dismissing action sets it, then an effect scrolls to it after the
+  // overlay has unmounted, so the scroll always lands on the mounted shell.
+  const [introOpen, setIntroOpen] = useState(() => !hasSeenIntro());
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const reopenRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+
+  // Dismiss the overlay. Every dismissing action marks the intro seen and, when it
+  // carries a scroll target, defers the scroll to after the overlay unmounts. A
+  // storage failure never blocks the close, since the wrapper swallows it.
+  const dismissIntro = (target: string | null): void => {
+    markIntroSeen();
+    setScrollTarget(target);
+    returnFocus.current = true;
+    setIntroOpen(false);
+  };
+
+  // Run the deferred scroll and the focus return after the overlay unmounts. Reading
+  // the anchor here, not at click time, is what keeps the scroll off the overlay.
+  useEffect(() => {
+    if (introOpen) {
+      return;
+    }
+    if (scrollTarget !== null) {
+      document.getElementById(scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setScrollTarget(null);
+    }
+    if (returnFocus.current) {
+      reopenRef.current?.focus();
+      returnFocus.current = false;
+    }
+  }, [introOpen, scrollTarget]);
 
   const slug = scenarioSlug(kioskPinAttack.id);
 
@@ -138,13 +178,34 @@ export function App({ controller }: AppProps = {}) {
       <header className="topbar">
         <h1>Detection Express</h1>
         <span className="slice-tag">Slice 1 &mdash; Spot the threat</span>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            ref={reopenRef}
+            className="topbar-reopen"
+            onClick={() => setIntroOpen(true)}
+          >
+            How this works
+          </button>
+          <HireMe copy={hireMe} />
+        </div>
       </header>
       <Hud />
       <ReactFlowProvider>
         <Pipeline />
       </ReactFlowProvider>
-      <Briefing text={kioskPinAttack.briefing} />
+      <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
       <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+      <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+      {introOpen ? (
+        <IntroOverlay
+          copy={introCopy}
+          repoUrl={REPO_URL}
+          onObserve={() => dismissIntro(null)}
+          onCauseChaos={() => dismissIntro("chaos-ladder")}
+          onEditEngine={() => dismissIntro("algorithm-editor")}
+        />
+      ) : null}
       {algoReady ? (
         <div className="local-ide">
           {localMode ? (
