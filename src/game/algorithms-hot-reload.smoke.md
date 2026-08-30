@@ -21,7 +21,7 @@ Run this smoke by hand after any change to `algorithms-hmr.ts`,
 2. Open the app. The run starts on the in-game editor source (source mode).
 3. Click **Edit in IDE**. The in-game editor locks. The client sends `algo:hello`; the
    plugin replies `algo:changed` with the default engine path (no override yet), so the
-   run switches to url mode on `/src/game/default-engine.ts` with no page reload.
+   run switches to url mode on `/src/sim/default-engine.ts` with no page reload.
 4. Create `src/algorithms/kiosk-pin-attack.ts` (a copy of `default-engine.ts` is a good
    start). The plugin re-resolves the slug to the new override and pings it; the run
    re-imports the override with no reload.

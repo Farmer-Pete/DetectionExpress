@@ -9,8 +9,8 @@
  * reloading the source module would. A test that reuses the module drives it in a
  * single pass.
  */
-import type { RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
-import type { Finding } from "../sim/finding";
+import type { RawKioskV1 } from "./endpoints/kiosk/formats/kiosk-v1";
+import type { Finding } from "./finding";
 
 /** The shape Normalize produces from a raw kiosk Event. */
 interface NormalizedKiosk {

@@ -172,7 +172,7 @@ describe("algorithms dev client", () => {
     const h = harness();
     h.client.enter();
     // First the default-engine fallback, then a create of the override switches to it.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/game/default-engine.ts", version: 1 });
+    h.channel.emitChanged({ slug: SLUG, path: "/src/sim/default-engine.ts", version: 1 });
     h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
     expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
     expect(h.runs()).toBe(2);
@@ -271,8 +271,8 @@ describe("algorithms dev client", () => {
     expect(channel2.lastHelloSlug()).toBe(SLUG); // re-subscribed after the reload
 
     // The plugin re-resolves to the default engine (the override was deleted).
-    channel2.emitChanged({ slug: SLUG, path: "/src/game/default-engine.ts", version: 5 });
-    expect(store2.local).toEqual({ path: "/src/game/default-engine.ts", version: 5 });
+    channel2.emitChanged({ slug: SLUG, path: "/src/sim/default-engine.ts", version: 5 });
+    expect(store2.local).toEqual({ path: "/src/sim/default-engine.ts", version: 5 });
 
     // Stop restores the ORIGINAL customized text, not the post-reload default.
     client2.stop();

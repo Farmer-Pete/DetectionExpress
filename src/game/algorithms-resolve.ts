@@ -5,7 +5,7 @@
  * and the same rules are unit-tested off the browser.
  *
  * The active file for a slug is the player override `src/algorithms/<slug>.ts` when it
- * exists on disk, else the committed default engine at `src/game/default-engine.ts`
+ * exists on disk, else the committed default engine at `src/sim/default-engine.ts`
  * (86-PLAN.md "Loading path"). Paths are ROOT-RELATIVE URLs (`/src/...`) so Vite serves
  * them directly and the client can `import(path + "?v=" + version)`.
  *
@@ -23,7 +23,7 @@ const ALGORITHM_SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
 export const ALGORITHMS_DIR = "/src/algorithms";
 
 /** The committed fallback engine, loaded when a slug has no override on disk. */
-export const DEFAULT_ENGINE_PATH = "/src/game/default-engine.ts";
+export const DEFAULT_ENGINE_PATH = "/src/sim/default-engine.ts";
 
 /** True when `slug` matches the one legal shape. An invalid slug never touches the fs. */
 export function isValidAlgorithmSlug(slug: string): boolean {

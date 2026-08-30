@@ -38,7 +38,7 @@ You write the Algorithm that catches the threat. There are two ways.
 - **In your own editor.** Run `pnpm run dev`, press "Edit in IDE" in the game, and edit
   `src/algorithms/<scenario-slug>.ts`. It is real TypeScript, so your editor type-checks it as
   you write. Vite hot-reloads each save into the running game. `src/algorithms/` is gitignored,
-  so your files never get committed. The checked-in example is `src/game/default-engine.ts`.
+  so your files never get committed. The checked-in example is `src/sim/default-engine.ts`.
 
 `pnpm run typecheck` checks your algorithm too, so a type error fails locally the same way your
 editor flags it. See `docs/adr/0008-native-algorithm-hot-reload.md` for how it works.

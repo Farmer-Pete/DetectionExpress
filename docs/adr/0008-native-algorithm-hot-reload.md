@@ -4,7 +4,9 @@
 - Date: 2026-08-29
 - Supersedes the local dev kit (the standalone same-origin host and the two-build split).
 - Renumbered from `0004-local-dev-kit` to resolve the duplicate `0004` (shared with
-  `0004-measured-cost-model`). Closes the housekeeping note in ADR 0006.
+  `0004-measured-cost-model`), closing the housekeeping note in ADR 0006 (issue #85). The
+  target was `0007`, but ADR `0007-actor-based-world-simulation` (#88) landed on `main`
+  first and took that number, so this ADR is `0008`.
 
 ## Context
 
@@ -36,7 +38,7 @@ Serve TypeScript algorithms as native Vite modules, hot-reloaded, on one dev ser
 - **The in-game editor stays JavaScript.** It runs a source string through a Blob import, as
   before. The public CDN site does not change and ships no transpiler.
 - **The default engine is checked in, outside the player folder.** It lives at
-  `src/game/default-engine.ts` so anti-slop lint covers it; Biome cannot lint a gitignored
+  `src/sim/default-engine.ts` so anti-slop lint covers it; Biome cannot lint a gitignored
   file. `src/algorithms/` is player scratch space, gitignored whole, so no player file is
   committed by accident.
 - **The mechanism is a thin change notification, not a protocol.** A dev-only plugin watches

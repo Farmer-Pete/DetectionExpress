@@ -73,7 +73,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and generates it once; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.
 - `src/sim/scenarios/` holds one folder per Scenario. A Scenario composes Endpoints, drives the intent timeline, injects Attacks, and records the Ground truth. Pure logic, no React.
 - The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
-- Two ways to author it. The in-game editor holds a JavaScript source string. Or a player edits a real TypeScript module at `src/algorithms/<slug>.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine lives at `src/game/default-engine.ts`. See `docs/adr/0008-native-algorithm-hot-reload.md`.
+- Two ways to author it. The in-game editor holds a JavaScript source string. Or a player edits a real TypeScript module at `src/algorithms/<slug>.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine lives at `src/sim/default-engine.ts`. See `docs/adr/0008-native-algorithm-hot-reload.md`.
 
 ## Toolchain
 

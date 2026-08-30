@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
-import type { PipeEvent } from "../sim/event";
-import type { Finding } from "../sim/finding";
+import { LEVEL_SEED } from "../game/tuning";
+import { detect as defaultDetect, normalize as defaultNormalize } from "./default-engine";
+import { isRawKioskV1, type RawKioskV1 } from "./endpoints/kiosk/formats/kiosk-v1";
+import type { PipeEvent } from "./event";
+import type { Finding } from "./finding";
 import {
   buildReferenceAlgorithm,
   type ReferenceAlgorithm,
-} from "../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
-import { detect as defaultDetect, normalize as defaultNormalize } from "./default-engine";
-import { LEVEL_SEED } from "./tuning";
+} from "./scenarios/kiosk-pin-attack/reference";
+import { kioskPinAttack } from "./scenarios/kiosk-pin-attack/scenario";
 
 /** Read an Event's kiosk-v1 payload, narrowing at the boundary. */
 function raw(ev: PipeEvent): RawKioskV1 {

@@ -15,9 +15,7 @@ describe("freshModuleUrl", () => {
   });
 
   it("appends a nonce with ? when the url has no query", () => {
-    expect(freshModuleUrl("/src/game/default-engine.ts", 2)).toBe(
-      "/src/game/default-engine.ts?r=2",
-    );
+    expect(freshModuleUrl("/src/sim/default-engine.ts", 2)).toBe("/src/sim/default-engine.ts?r=2");
   });
 
   it("gives two loads at the same version distinct urls, so each is a fresh module", () => {
