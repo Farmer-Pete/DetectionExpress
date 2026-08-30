@@ -81,6 +81,20 @@ describe("world run controller", () => {
     expect(trains).toHaveLength(world.lines.length);
   });
 
+  it("builds and passes a seeded account-rider spawner to the engine (M4)", () => {
+    let hasAccountSpawner = false;
+    const controller = createWorldRunController(
+      baseDeps({
+        start: (options) => {
+          hasAccountSpawner = options.accountSpawner !== undefined;
+          return fakeHandle().handle;
+        },
+      }),
+    );
+    controller.run();
+    expect(hasAccountSpawner).toBe(true);
+  });
+
   it("passes the current fixtures and seed to the engine", () => {
     let seenSeed: number | null = null;
     const controller = createWorldRunController(

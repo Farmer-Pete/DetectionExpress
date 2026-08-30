@@ -122,6 +122,16 @@ export function gateNodeId(station: string): MapNodeId {
   return `${station}:${SENSOR_KEY.G}`;
 }
 
+/** The kiosk (K) chip node an account sign-in flash lands on, at a station. */
+export function kioskNodeId(station: string): MapNodeId {
+  return `${station}:${SENSOR_KEY.K}`;
+}
+
+/** The TVM (V) chip node a card top-up flash lands on, at a station. */
+export function tvmNodeId(station: string): MapNodeId {
+  return `${station}:${SENSOR_KEY.V}`;
+}
+
 /** The door-reader (R) chip node a grant flash lands on, at a site or the OCC. */
 export function readerNodeId(location: string): MapNodeId {
   return `${location}:${SENSOR_KEY.R}`;

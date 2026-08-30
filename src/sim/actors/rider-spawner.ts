@@ -14,7 +14,8 @@ import { randomLcg } from "d3-random";
 import {
   RIDER_ARRIVAL_MAX_TICKS,
   RIDER_ARRIVAL_MIN_TICKS,
-  RIDER_BALANCE,
+  RIDER_BALANCE_MAX,
+  RIDER_BALANCE_MIN,
   RIDER_WINDOW_TICKS,
 } from "../../game/tuning";
 import type { World } from "../world/world";
@@ -52,6 +53,7 @@ export function createRiderSpawner(config: RiderSpawnerConfig): RiderSpawner {
   const rng = randomLcg(actorSeedHash(config.seed, "rider-spawner"));
   const stations = config.world.stations;
   const gapSpan = RIDER_ARRIVAL_MAX_TICKS - RIDER_ARRIVAL_MIN_TICKS + 1;
+  const balanceSpan = RIDER_BALANCE_MAX - RIDER_BALANCE_MIN + 1;
 
   let births = 0;
   // The next tick at which an arrival is considered. Starts at 0 so the population
@@ -63,10 +65,14 @@ export function createRiderSpawner(config: RiderSpawnerConfig): RiderSpawner {
   const makeAdmission = (atTick: number): Admission<WorldReading, WorldEnv> => {
     const id = `C${String(births++).padStart(6, "0")}`;
     const origin = stations[Math.floor(rng() * stations.length)]?.id ?? stations[0]?.id ?? "cen";
+    // Draw the starting balance after the origin, from the spawner's own stream. A low
+    // draw leaves the rider unable to afford its first trip, so it tops up at a TVM on
+    // arrival; a high draw funds its whole window. One draw per rider.
+    const balance = RIDER_BALANCE_MIN + Math.floor(rng() * balanceSpan);
     const tripConfig: RiderTripConfig = {
       card: id,
       origin,
-      balance: RIDER_BALANCE,
+      balance,
       window: { startTick: atTick, endTick: atTick + RIDER_WINDOW_TICKS },
       fare: RIDER_FARE,
       jitterTicks: RIDER_JITTER,

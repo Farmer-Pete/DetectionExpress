@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { TARGET_RIDERS } from "../../game/tuning";
+import { distanceTable } from "../world/distance";
+import { buildTimetable } from "../world/timetable";
 import { world } from "../world/world";
+import type { WorldEnv } from "../world-reading";
+import { createSchedule } from "./actor";
 import { createRiderSpawner } from "./rider-spawner";
+
+const env: WorldEnv = {
+  world,
+  distances: distanceTable(world),
+  timetable: buildTimetable(world),
+};
 
 /**
  * Drive a spawner over many ticks against a shrinking-then-refilling live count and
@@ -97,5 +107,39 @@ describe("createRiderSpawner", () => {
     for (const origin of origins) {
       expect(stationIds.has(origin)).toBe(true);
     }
+  });
+
+  it("draws a spread of starting balances, so a fraction top up while most just ride", () => {
+    // Admit a batch of riders (one balance draw each), run them all together, and see
+    // which ones hit a TVM. A low draw leaves a rider too poor for its first fare, so it
+    // tops up on arrival; a high draw funds its window. Both must appear: the plan wants
+    // "a low rider visibly refilling", not every rider topping up.
+    const seed = 4242;
+    const spawner = createRiderSpawner({ seed, world, target: 40 });
+    const actors = [];
+    for (let tick = 1; tick <= 600 && actors.length < 40; tick++) {
+      for (const admission of spawner.tick(tick, actors.length)) {
+        actors.push(admission.actor);
+      }
+    }
+    expect(actors.length).toBeGreaterThan(10);
+
+    const schedule = createSchedule({ actors, env, runSeed: seed });
+    const toppedUp = new Set<string>();
+    const rode = new Set<string>();
+    for (let tick = 0; tick < 2000; tick++) {
+      for (const timed of schedule.advanceTo(tick + 1).readings) {
+        if (timed.reading.sensor === "tvm") {
+          toppedUp.add(timed.actorId);
+        } else if (timed.reading.sensor === "fare-gate") {
+          rode.add(timed.actorId);
+        }
+      }
+    }
+    // Some riders arrive too poor and refill at a TVM.
+    expect(toppedUp.size).toBeGreaterThan(0);
+    // Others ride their whole window without ever topping up.
+    const rodeWithoutTopup = [...rode].filter((id) => !toppedUp.has(id));
+    expect(rodeWithoutTopup.length).toBeGreaterThan(0);
   });
 });

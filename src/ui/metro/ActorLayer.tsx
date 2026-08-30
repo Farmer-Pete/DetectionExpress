@@ -23,6 +23,8 @@ import { presencePoint, stepBetween } from "./interpolate";
 
 /** The rider dot color (`--ink`) and the flash token per firing sensor kind. */
 const INK = "#fbd57b";
+/** An account rider's dot color (`--s-kiosk`), so it reads as "at the kiosk". */
+const ACCOUNT_FILL = "#f9c74f";
 const TRAIN_FILL = "#cfe3ea";
 /** The staff glyph: a filled 7x7 green (`--ok`) square (view notes section 4). */
 const STAFF_FILL = "#43aa8b";
@@ -399,7 +401,7 @@ export function ActorLayer() {
           }
         }
 
-        ctx.fillStyle = INK;
+        ctx.fillStyle = actor.kind === "account-rider" ? ACCOUNT_FILL : INK;
         let point: Point | null;
         let alpha = RIDER_MOVING_ALPHA;
         if (transition?.mode === "board") {

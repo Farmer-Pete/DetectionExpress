@@ -1,5 +1,6 @@
+import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
+import { GAME_SECONDS_PER_TICK, TVM_TOPUP_AMOUNT } from "../../game/tuning";
 import { distanceTable } from "../world/distance";
 import { buildTimetable, trainIdForLine } from "../world/timetable";
 import { world } from "../world/world";
@@ -231,5 +232,94 @@ describe("initialRiderPresence", () => {
   it("places a fresh rider at its origin until its first tick", () => {
     const presence = initialRiderPresence("mkt", 12);
     expect(presence).toEqual({ kind: "at", node: "mkt", fromTick: 12, untilTick: 12 });
+  });
+});
+
+/**
+ * Drive one actor directly to dormancy through a SPY rng, recording every value it
+ * draws and every reading it emits. Driving the actor (not the schedule) lets the test
+ * see the exact rng stream, so it can prove the funded path draws no extra value.
+ */
+function drawsAndReadings(actor: ReturnType<typeof createWorldRider>, seed: number) {
+  const draws: number[] = [];
+  const base = randomLcg(seed);
+  const rng = (): number => {
+    const value = base();
+    draws.push(value);
+    return value;
+  };
+  const readings: WorldReading[] = [];
+  let next = actor.start({ rng });
+  let guard = 0;
+  while (next !== "dormant" && guard < 200000) {
+    const tick = next;
+    const result = actor.act({ env, rng, tick });
+    readings.push(...result.readings);
+    next = result.nextTick;
+    guard += 1;
+  }
+  return { draws, readings };
+}
+
+/** The direction of a fare-gate reading, or undefined for any other sensor. */
+function tapDir(reading: WorldReading): "in" | "out" | undefined {
+  return reading.sensor === "fare-gate" ? reading.reading.direction : undefined;
+}
+
+describe("createWorldRider TVM top-up (M4)", () => {
+  it("is provably additive: a funded rider draws no extra rng and emits no tvm reading", () => {
+    // A funded rider (a balance far above a whole window of fares) never runs low, so
+    // the top-up transition can never fire. Its rng budget is then exactly the shared
+    // core's: one dwell draw at start, then two draws per tap-in (destination + jitter)
+    // and one per tap-out (dwell). Any top-up would insert a tvm reading AND an extra
+    // destination draw, so matching both over many seeds proves the path adds nothing.
+    const funded: RiderTripConfig = { ...base, origin: "har", balance: 1_000_000 };
+    for (const seed of [1, 2, 7, 42, 4242, 20260830, 999, 12345]) {
+      const { draws, readings } = drawsAndReadings(createWorldRider(funded), seed);
+      const tapIns = readings.filter((reading) => tapDir(reading) === "in").length;
+      const tapOuts = readings.filter((reading) => tapDir(reading) === "out").length;
+      expect(readings.some((reading) => reading.sensor === "tvm")).toBe(false);
+      expect(tapIns).toBeGreaterThan(0);
+      expect(draws.length).toBe(1 + 2 * tapIns + tapOuts);
+    }
+  });
+
+  it("tops up at the origin TVM only when it cannot afford the next trip, then rides again", () => {
+    // A low balance runs out after a hop or two; instead of going dormant the rider
+    // tops up at its station's TVM and keeps riding.
+    const lowConfig: RiderTripConfig = {
+      ...base,
+      origin: "cen",
+      balance: 25,
+      window: { startTick: 0, endTick: 800 },
+    };
+    const schedule = createSchedule({ actors: [createWorldRider(lowConfig)], env, runSeed: 4242 });
+    const timed = schedule.advanceTo(1000).readings;
+
+    const topups = timed.filter((entry) => entry.reading.sensor === "tvm");
+    expect(topups.length).toBeGreaterThan(0);
+
+    const topup = topups[0]?.reading;
+    if (topup?.sensor !== "tvm") {
+      throw new Error("expected a tvm reading");
+    }
+    expect(topup.reading.kind).toBe("topup");
+    expect(topup.reading.card).toBe(lowConfig.card);
+    expect(topup.reading.machine).toBe("V1");
+    expect(topup.reading.amount).toBe(TVM_TOPUP_AMOUNT);
+    expect(Number.isInteger(topup.reading.amount)).toBe(true);
+    expect(world.stations.some((station) => station.id === topup.reading.station)).toBe(true);
+
+    // The top-up fires on the low-balance path, not at the window's end: its tick is
+    // well within the active window.
+    const topupTick = topups[0]?.tick ?? Number.NaN;
+    expect(topupTick).toBeLessThan(lowConfig.window.endTick);
+
+    // It lifts the balance so the trip becomes affordable: a fare-gate tap-in follows
+    // the first top-up, so the rider really rode again after refilling.
+    const rodeAgain = timed.some(
+      (entry) => tapDir(entry.reading) === "in" && entry.tick > topupTick,
+    );
+    expect(rodeAgain).toBe(true);
   });
 });

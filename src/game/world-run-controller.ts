@@ -10,6 +10,7 @@
  * real clock.
  */
 
+import { createAccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import { createRiderSpawner } from "../sim/actors/rider-spawner";
 import { createStaffSpawner } from "../sim/actors/staff-spawner";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
@@ -18,7 +19,7 @@ import { buildTimetable, trainIdForLine } from "../sim/world/timetable";
 import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
-import { STAFF_TARGET, TARGET_RIDERS } from "./tuning";
+import { ACCOUNT_RIDER_TARGET, STAFF_TARGET, TARGET_RIDERS } from "./tuning";
 import {
   startWorld as startWorldDefault,
   type WorldEngineHandle,
@@ -100,6 +101,11 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
       world: deps.world,
       target: STAFF_TARGET,
     });
+    const accountSpawner = createAccountRiderSpawner({
+      seed: runSeed,
+      world: deps.world,
+      target: ACCOUNT_RIDER_TARGET,
+    });
     const startOptions: WorldStartOptions = {
       fixtures: [...buildTrains(), ...deps.getFixtures()],
       env,
@@ -108,6 +114,7 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
       onError: (error) => deps.onError?.(error),
       spawner,
       staffSpawner,
+      accountSpawner,
     };
     // Assign the optional speed reader only when given, so exactOptionalPropertyTypes
     // never sees an explicit undefined.

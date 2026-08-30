@@ -13,7 +13,7 @@
  * actor, keeps its abstract-duration model and its byte-identical readings; only the
  * ride execution differs here. No wall clock, no React (ADR-0007, ARCHITECTURE rule 8).
  */
-import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
+import { GAME_SECONDS_PER_TICK, TVM_TOPUP_AMOUNT } from "../../game/tuning";
 import type { Presence } from "../world/presence";
 import { nextService, trainIdForLine } from "../world/timetable";
 import type { WorldEnv, WorldReading } from "../world-reading";
@@ -52,6 +52,22 @@ type RidePhase =
 export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, WorldEnv> {
   const core = createRiderCore(config);
   let phase: RidePhase = { kind: "planning", station: config.origin };
+
+  /** The station's TVM id. One machine per station in this sim, so a fixed id. */
+  const TVM_MACHINE = "V1";
+
+  /** One TVM `topup` `WorldReading` at `tick`, in the game-second domain. */
+  const topup = (station: string, tick: number): WorldReading => ({
+    sensor: "tvm",
+    reading: {
+      ts: tick * GAME_SECONDS_PER_TICK,
+      card: config.card,
+      station,
+      machine: TVM_MACHINE,
+      amount: TVM_TOPUP_AMOUNT,
+      kind: "topup",
+    },
+  });
 
   /** One fare-gate tap `WorldReading` at `tick`, in the game-second domain. */
   const tap = (
@@ -115,10 +131,26 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
       }
 
       // PLANNING: decide the next trip through the shared core, then couple to the train.
+      const origin = phase.station;
       const transition = core.step(env, rng, tick);
       if (transition.kind !== "enter") {
         // The core is `outside` here, so it returns `enter` or `dormant`; an `exit`
-        // is unreachable. Either way, no trip starts this tick.
+        // is unreachable. A dormant has two causes, told apart WITHOUT drawing rng:
+        // the active window has closed (a genuine end), or the balance can no longer
+        // afford any trip. On the low-balance path the rider tops up at its origin's
+        // TVM and plans again next tick, so it keeps riding instead of dying broke.
+        //
+        // This is provably additive: the window check draws no rng, and a funded rider
+        // only ever reaches dormancy through the window, so it takes the plain
+        // `return dormant` below with the exact reading and rng sequence it had before.
+        if (tick < config.window.endTick) {
+          core.topUp(TVM_TOPUP_AMOUNT);
+          return {
+            readings: [topup(origin, tick)],
+            nextTick: tick + 1,
+            presence: { kind: "at", node: origin, fromTick: tick, untilTick: tick + 1 },
+          };
+        }
         return { readings: [], nextTick: "dormant" };
       }
       const { station, line, dest, balance } = transition;

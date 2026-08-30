@@ -61,13 +61,51 @@ export interface DoorContactReading {
 }
 
 /**
+ * The account-kiosk family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: an account signing in at a station's kiosk terminal. Benign traffic
+ * is always a `success` (the `wrong_pin` value is for a later attack ticket, out of
+ * scope here). This is a NEW type, distinct from the legacy `KioskReading` in
+ * `endpoints/kiosk/internal.ts`, which the kiosk-pin-attack scenario keeps untouched.
+ * `ts` is in game seconds; `terminal` is a deterministic per-kiosk id (e.g. `"K1"`).
+ */
+export interface AccountKioskReading {
+  /** Game seconds. */
+  ts: number;
+  account: string;
+  station: string;
+  terminal: string;
+  outcome: "success";
+}
+
+/**
+ * The TVM (ticket vending machine) family's internal record, matching the
+ * `normalizedExample` in `sensors.json`: a card topping up its stored value at a
+ * station's machine. Benign traffic is always a `topup`. The live world rider emits
+ * one when it tops up rather than going dormant on a low balance. `ts` is in game
+ * seconds; `machine` is a deterministic per-machine id (e.g. `"V1"`); `amount` is a
+ * whole-unit top-up.
+ */
+interface TvmReading {
+  /** Game seconds. */
+  ts: number;
+  card: string;
+  station: string;
+  machine: string;
+  amount: number;
+  kind: "topup";
+}
+
+/**
  * A discriminated reading tagged by its sensor id (distinct from a vendor
  * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm; M3 adds the door
- * reader (a staff grant) and the door contact (the reducer's open/close). M4..M6 add
- * tvm, kiosk, camera, console, and relay arms as their actors land.
+ * reader (a staff grant) and the door contact (the reducer's open/close); M4 adds the
+ * tvm (a card top-up) and the kiosk (an account sign-in). M5..M6 add camera, console,
+ * and relay arms as their actors land.
  */
 export type WorldReading =
   | { sensor: "fare-gate"; reading: FareGateReading }
+  | { sensor: "tvm"; reading: TvmReading }
+  | { sensor: "kiosk"; reading: AccountKioskReading }
   | { sensor: "train-tracker"; reading: TrainReading }
   | { sensor: "door-reader"; reading: DoorReaderReading }
   | { sensor: "door-contact"; reading: DoorContactReading };

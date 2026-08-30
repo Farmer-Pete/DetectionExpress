@@ -82,6 +82,22 @@ function logRow(entry: TimedWorldReading): { code: string; color: string; text: 
       text: `door contact, ${place}, ${reading.reading.door} ${reading.reading.event}`,
     };
   }
+  if (reading.sensor === "kiosk") {
+    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
+    return {
+      code: "K",
+      color: "var(--s-kiosk)",
+      text: `account kiosk, ${place}, ${reading.reading.account} sign-in (${reading.reading.terminal})`,
+    };
+  }
+  if (reading.sensor === "tvm") {
+    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
+    return {
+      code: "V",
+      color: "var(--s-tvm)",
+      text: `ticket machine, ${place}, ${reading.reading.card} top-up +${reading.reading.amount} (${reading.reading.machine})`,
+    };
+  }
   const place = placeName.get(reading.reading.station) ?? reading.reading.station;
   const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
   return {
@@ -154,6 +170,11 @@ function Legend() {
       <div className="metro-legend-row">
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--ink)" }} />
         rider
+      </div>
+      <div className="metro-legend-row">
+        {/* A kiosk-colored dot matching the account rider's real glyph (--s-kiosk). */}
+        <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--s-kiosk)" }} />
+        account rider
       </div>
       <div className="metro-legend-row">
         {/* A square swatch matching the staff's real 7x7 green square glyph (--ok). */}

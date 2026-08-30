@@ -13,10 +13,18 @@
  * `nowTick` is NOT computed here; it is the integer `simTick` for now, and the
  * canvas owns the fractional estimate from M1.
  */
+
+import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import { type Actor, createSchedule, type StepResult } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import type { StaffSpawner } from "../sim/actors/staff-spawner";
-import { contactNodeId, gateNodeId, readerNodeId } from "../sim/world/layout";
+import {
+  contactNodeId,
+  gateNodeId,
+  kioskNodeId,
+  readerNodeId,
+  tvmNodeId,
+} from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent, WorldSnapshot } from "../sim/world-snapshot";
@@ -65,6 +73,12 @@ export interface WorldStartOptions {
    * each tick, capped by the live staff count; when absent it runs without staff.
    */
   staffSpawner?: StaffSpawner;
+  /**
+   * The seeded transient-account-rider source (M4). When present the engine admits its
+   * births each tick, capped by the live account-rider count; when absent it runs
+   * without account riders.
+   */
+  accountSpawner?: AccountRiderSpawner;
   /**
    * The sim steps per clock tick, sampled each tick. A UI-only float (the pause/speed
    * control): 0 freezes the sim, 1 is real time, higher speeds it up. It never enters
@@ -157,14 +171,9 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
     views.set(id, { id, kind, presence });
   };
 
-  /** The live rider count, the spawner's ceiling input. */
-  const liveRiders = (): number =>
-    [...views.values()].filter((view) => view.kind === "rider" || view.kind === "account-rider")
-      .length;
-
-  /** The live staff count, the staff spawner's ceiling input. */
-  const liveStaff = (): number =>
-    [...views.values()].filter((view) => view.kind === "staff").length;
+  /** The live count of one actor kind, a spawner's ceiling input. */
+  const liveOfKind = (kind: ActorView["kind"]): number =>
+    [...views.values()].filter((view) => view.kind === kind).length;
 
   let clock: Clock | null = null;
   let detachVisibility: (() => void) | null = null;
@@ -232,6 +241,24 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
           id: nextFlashId,
           kind: "grant",
           node: readerNodeId(entry.reading.reading.site),
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
+      } else if (entry.reading.sensor === "kiosk") {
+        // An account sign-in flashes on the station's kiosk (K) chip.
+        flashes.push({
+          id: nextFlashId,
+          kind: "signin",
+          node: kioskNodeId(entry.reading.reading.station),
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
+      } else if (entry.reading.sensor === "tvm") {
+        // A card top-up flashes on the station's TVM (V) chip.
+        flashes.push({
+          id: nextFlashId,
+          kind: "topup",
+          node: tvmNodeId(entry.reading.reading.station),
           atTick: entry.tick,
         });
         nextFlashId += 1;
@@ -320,11 +347,16 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
   // Admit each spawner's due births at the current frontier and seed each view. The
   // rider and staff spawners are independent, each capped by its own live count.
   const spawnTransients = (): void => {
-    for (const admission of options.spawner?.tick(simTick, liveRiders()) ?? []) {
+    for (const admission of options.spawner?.tick(simTick, liveOfKind("rider")) ?? []) {
       const firstTick = schedule.admit(admission);
       seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
     }
-    for (const admission of options.staffSpawner?.tick(simTick, liveStaff()) ?? []) {
+    for (const admission of options.staffSpawner?.tick(simTick, liveOfKind("staff")) ?? []) {
+      const firstTick = schedule.admit(admission);
+      seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
+    }
+    for (const admission of options.accountSpawner?.tick(simTick, liveOfKind("account-rider")) ??
+      []) {
       const firstTick = schedule.admit(admission);
       seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
     }

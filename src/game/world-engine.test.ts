@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
+import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import type { Actor, Admission } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import { createStaff, initialStaffPresence } from "../sim/actors/staff";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import { distanceTable } from "../sim/world/distance";
-import { contactNodeId, gateNodeId, readerNodeId } from "../sim/world/layout";
+import {
+  contactNodeId,
+  gateNodeId,
+  kioskNodeId,
+  readerNodeId,
+  tvmNodeId,
+} from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
@@ -563,6 +571,170 @@ describe("world engine doors", () => {
     expect((last?.actors ?? []).filter((view) => view.kind === "staff")).toHaveLength(0);
   });
 });
+
+/** An account-rider fixture that signs in at a station kiosk (M4). */
+function accountRiderFixture(station: string, terminal: string): WorldFixture {
+  const actor = createAccountRider({
+    id: "A1",
+    account: "river.k",
+    station,
+    terminal,
+    startTick: 1,
+    dwellTicks: 6,
+  });
+  return {
+    actor,
+    kind: "account-rider",
+    initialPresence: (firstTick) => initialAccountRiderPresence(station, firstTick),
+  };
+}
+
+/** A test-only stub that emits one tvm `topup` reading at `station`, then goes dormant. */
+function tvmStub(id: string, station: string): Actor<WorldReading, WorldEnv> {
+  let done = false;
+  return {
+    id,
+    start: () => 1,
+    act: ({ tick }) => {
+      if (done) {
+        return { readings: [], nextTick: "dormant" };
+      }
+      done = true;
+      const reading: WorldReading = {
+        sensor: "tvm",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          card: id,
+          station,
+          machine: "V1",
+          amount: 100,
+          kind: "topup",
+        },
+      };
+      return {
+        readings: [reading],
+        nextTick: tick + 2,
+        presence: { kind: "at", node: station, fromTick: tick, untilTick: tick + 2 },
+      };
+    },
+  };
+}
+
+/** A scripted account spawner that admits a fixed cast once, then nothing. */
+function scriptedAccountSpawner(ids: readonly string[]): AccountRiderSpawner {
+  let admitted = false;
+  return {
+    tick: (nowTick) => {
+      if (admitted) {
+        return [];
+      }
+      admitted = true;
+      return ids.map(
+        (id): Admission<WorldReading, WorldEnv> => ({
+          actor: createAccountRider({
+            id,
+            account: "river.k",
+            station: "cen",
+            terminal: "K1",
+            startTick: nowTick,
+            dwellTicks: 8,
+          }),
+          kind: "account-rider",
+          initialPresence: (firstTick) => initialAccountRiderPresence("cen", firstTick),
+        }),
+      );
+    },
+  };
+}
+
+describe("world engine terminals (M4)", () => {
+  it("flashes a kiosk sign-in at the station's kiosk chip and logs the reading", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [accountRiderFixture("har", "K1")],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 12);
+    handle.stop();
+
+    const flashes = snapshots.flatMap((snapshot) => snapshot.flashes);
+    const signins = flashes.filter((flash) => flash.kind === "signin");
+    expect(signins.length).toBeGreaterThan(0);
+    expect(signins.every((flash) => flash.node === kioskNodeId("har"))).toBe(true);
+
+    // The genuine normalized reading reaches the event log.
+    const log = snapshots.at(-1)?.log ?? [];
+    const kiosk = log.find((entry) => entry.reading.sensor === "kiosk");
+    expect(kiosk?.reading.sensor).toBe("kiosk");
+    if (kiosk?.reading.sensor === "kiosk") {
+      expect(kiosk.reading.reading.outcome).toBe("success");
+      expect(kiosk.reading.reading.terminal).toBe("K1");
+    }
+  });
+
+  it("flashes a tvm top-up at the station's TVM chip and logs the reading", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [
+        { actor: tvmStub("C9", "end"), kind: "rider", initialPresence: () => tvmPresence("end") },
+      ],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 12);
+    handle.stop();
+
+    const flashes = snapshots.flatMap((snapshot) => snapshot.flashes);
+    const topups = flashes.filter((flash) => flash.kind === "topup");
+    expect(topups.length).toBeGreaterThan(0);
+    expect(topups.every((flash) => flash.node === tvmNodeId("end"))).toBe(true);
+
+    const log = snapshots.at(-1)?.log ?? [];
+    const tvm = log.find((entry) => entry.reading.sensor === "tvm");
+    expect(tvm?.reading.sensor).toBe("tvm");
+    if (tvm?.reading.sensor === "tvm") {
+      expect(tvm.reading.reading.kind).toBe("topup");
+      expect(tvm.reading.reading.machine).toBe("V1");
+    }
+  });
+
+  it("admits the account spawner's transients and folds them into the rider count", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+      accountSpawner: scriptedAccountSpawner(["A000000", "A000001"]),
+    });
+    tick(driver, 4);
+    handle.stop();
+    const seen = snapshots.find((snapshot) =>
+      snapshot.actors.some((view) => view.kind === "account-rider"),
+    );
+    const accountRiders = (seen?.actors ?? []).filter((view) => view.kind === "account-rider");
+    expect(accountRiders.map((view) => view.id).sort()).toEqual(["A000000", "A000001"]);
+    // The snapshot's rider count folds account riders in with card riders.
+    expect(seen?.counts.riders).toBe(2);
+  });
+});
+
+/** A stationary presence for the tvm stub fixture. */
+function tvmPresence(station: string): Presence {
+  return { kind: "at", node: station, fromTick: 0, untilTick: 1 };
+}
 
 describe("world engine lifecycle", () => {
   it("stops advancing after stop() and settles whenStopped", async () => {

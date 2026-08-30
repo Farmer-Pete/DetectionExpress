@@ -74,6 +74,13 @@ export interface RiderCore {
   startTick(rng: () => number): number;
   /** One FSM transition at `tick`, advancing the held state and balance. */
   step(env: RiderTripEnv, rng: () => number, tick: number): RiderTransition;
+  /**
+   * Add whole currency units to the running balance, a TVM top-up. It draws no rng
+   * and changes no FSM state, so a caller that never tops up (the batch `createRider`)
+   * keeps its byte-identical reading sequence; only the live `createWorldRider` calls
+   * it, on the low-balance path where it would otherwise go dormant.
+   */
+  topUp(amount: number): void;
 }
 
 /** The rider's own FSM state. */
@@ -180,6 +187,10 @@ export function createRiderCore(config: RiderTripConfig): RiderCore {
 
   return {
     startTick: (rng) => config.window.startTick + sampleTicks(config.dwellTicks, rng),
+    topUp: (amount) => {
+      assertWholeAmount(amount, "topUp amount");
+      balance += amount;
+    },
     step: (env, rng, tick) => {
       if (state.kind === "riding") {
         // ARRIVE: tap out at the destination. Exit does not charge, so the balance

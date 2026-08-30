@@ -205,8 +205,20 @@ export const RIDER_ARRIVAL_MAX_TICKS = 12;
 /** How long a fresh rider's active window runs, in ticks, before it heads home and exits. */
 export const RIDER_WINDOW_TICKS = 600;
 
-/** A fresh rider's starting balance, high enough to fund a full window of trips. */
-export const RIDER_BALANCE = 2000;
+/**
+ * A fresh rider's starting balance, in whole currency units, drawn per rider from the
+ * spawner's seeded rng over `[RIDER_BALANCE_MIN, RIDER_BALANCE_MAX]`. A ride costs
+ * `10 + 5 * minutes` (about 20 to 70), and a rider makes only about one trip per window
+ * under the train-coupled wait, so a flat high balance never depletes and the TVM
+ * top-up never shows. Instead the LOW end sits below the cheapest single fare (~20-35),
+ * so a fraction of riders arrive unable to afford their first trip and top up at a TVM
+ * on arrival (M4's visible "low rider refilling"), while the HIGH end lets most riders
+ * ride their window without topping up. Whole units, so the balance and fares stay
+ * integers; the high end stays below `TVM_TOPUP_AMOUNT + cheapest fare` only as a
+ * matter of taste, not correctness (one top-up clears the dearest ~70 fare regardless).
+ */
+export const RIDER_BALANCE_MIN = 10;
+export const RIDER_BALANCE_MAX = 200;
 
 /**
  * How many recent normalized readings the world snapshot carries for the event log.
@@ -269,3 +281,32 @@ export const TRAIN_HEADWAY_MINUTES = 2;
  * of service. The run itself is perpetual; this only bounds the derived launch phase.
  */
 export const TRAIN_SERVICE_SPAN_MINUTES = 60;
+
+/**
+ * M4 (living metro, #87) station terminals: the kiosk and the TVM.
+ *
+ * The account-rider spawner keeps a small transient cast of account holders: each
+ * walks to a station, signs in benignly at its kiosk, lingers, and leaves. The card
+ * rider's TVM top-up refills a low balance so it can ride again. First-draft numbers,
+ * tuned once M4 is on screen.
+ */
+
+/** The steady concurrent account-rider count the spawner aims for. */
+export const ACCOUNT_RIDER_TARGET = 4;
+
+/** The seeded inter-arrival gap between account-rider births, in whole ticks (min <= max, >= 1). */
+export const ACCOUNT_ARRIVAL_MIN_TICKS = 12;
+export const ACCOUNT_ARRIVAL_MAX_TICKS = 40;
+
+/** Ticks an account rider lingers `at` the kiosk after signing in, before it despawns (> 0). */
+export const ACCOUNT_DWELL_TICKS = 10;
+
+/** How many distinct accounts the seeded pool mints; each account rider draws one. */
+export const ACCOUNT_POOL = 12;
+
+/**
+ * The whole-unit amount a low card rider tops up at a station TVM, chosen comfortably
+ * above the most expensive single trip so one top-up always restores enough to ride
+ * again. The `sensors.json` example tops up 100.
+ */
+export const TVM_TOPUP_AMOUNT = 100;
