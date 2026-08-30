@@ -9,7 +9,9 @@
  * unused arm or an unread field. M0 defines only what exists today: the fare-gate
  * reading and the `{ world, distances }` env.
  */
+
 import type { FareGateReading } from "./endpoints/fare-gate/gatekeep";
+import type { ControlReference } from "./entities/control";
 import type { DistanceTable } from "./world/distance";
 import type { Timetable } from "./world/timetable";
 import type { World } from "./world/world";
@@ -114,6 +116,40 @@ export interface CameraReading {
 }
 
 /**
+ * The occ-console family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: an authorized operator issuing a command from an OCC console. Benign
+ * traffic is a routine control-room command on a benign target; the Phantom Signal /
+ * Dispatcher Overreach values are for a later attack ticket, out of scope here. `ts` is
+ * in game seconds; `operator` is the login (e.g. `"green.disp"`), `host` the console
+ * (e.g. `"OCC-3"`), `command` the verb, `target` what it acts on.
+ */
+export interface ConsoleReading {
+  /** Game seconds. */
+  ts: number;
+  operator: string;
+  host: string;
+  command: string;
+  target: string;
+}
+
+/**
+ * The network-relay family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: a node on the control backbone reporting which host talked to which
+ * destination, and how many bytes moved. Benign traffic is a small internal transfer;
+ * an exfil-sized flow to an external address is a later hunt, out of scope here. `ts` is
+ * in game seconds; `site` is the host's location, `host` its id, `dest` the internal
+ * destination, `bytes` a whole-byte count in the benign range.
+ */
+export interface RelayReading {
+  /** Game seconds. */
+  ts: number;
+  site: string;
+  host: string;
+  dest: string;
+  bytes: number;
+}
+
+/**
  * A discriminated reading tagged by its sensor id (distinct from a vendor
  * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm; M3 adds the door
  * reader (a staff grant) and the door contact (the reducer's open/close); M4 adds the
@@ -128,7 +164,9 @@ export type WorldReading =
   | { sensor: "train-tracker"; reading: TrainReading }
   | { sensor: "door-reader"; reading: DoorReaderReading }
   | { sensor: "door-contact"; reading: DoorContactReading }
-  | { sensor: "platform-camera"; reading: CameraReading };
+  | { sensor: "platform-camera"; reading: CameraReading }
+  | { sensor: "occ-console"; reading: ConsoleReading }
+  | { sensor: "network-relay"; reading: RelayReading };
 
 /** The read-only environment every live actor reads. It grows per milestone. */
 export interface WorldEnv {
@@ -136,7 +174,13 @@ export interface WorldEnv {
   distances: DistanceTable;
   /** The derived train timetable. M2 adds it; riders ignore it, the train rides it. */
   timetable: Timetable;
-  // M6 adds:  consoles: readonly Console[];  destinations: readonly string[];
+  /**
+   * The curated control-room reference (M6): the authorized consoles, the benign
+   * command set, the site hosts, the internal destinations, and the benign byte range.
+   * The operator and host fixtures read it. Optional so the batch path and the frozen
+   * pre-M6 tests build a valid env without it; the world controller always sets it.
+   */
+  control?: ControlReference;
 }
 
 /**

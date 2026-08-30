@@ -20,11 +20,13 @@ import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import type { StaffSpawner } from "../sim/actors/staff-spawner";
 import {
   cameraNodeId,
+  consoleNodeId,
   contactNodeId,
   gateIdForStation,
   gateNodeId,
   kioskNodeId,
   readerNodeId,
+  relayNodeId,
   tvmNodeId,
 } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
@@ -139,6 +141,10 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
     env: options.env,
     runSeed: options.runSeed,
   });
+
+  // The OCC node id an occ-console command flash lands on (the console reading is
+  // OCC-only and carries no location of its own).
+  const occId = options.env.world.controlCenter.id;
 
   // The authoritative view map, seeded from each fixture's first tick. A fixture
   // that starts dormant has no numeric first tick, so it is omitted.
@@ -268,6 +274,26 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
           id: nextFlashId,
           kind: "topup",
           node: tvmNodeId(entry.reading.reading.station),
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
+      } else if (entry.reading.sensor === "occ-console") {
+        // An operator's command flashes on the OCC control-console (O) chip. The console
+        // reading carries no location (it is OCC-only), so the flash lands at the OCC.
+        flashes.push({
+          id: nextFlashId,
+          kind: "command",
+          node: consoleNodeId(occId),
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
+      } else if (entry.reading.sensor === "network-relay") {
+        // A host's relay flashes on its site's network-relay (N) chip; the view pulses
+        // the faint dashed site -> OCC backdrop link from this packet flash.
+        flashes.push({
+          id: nextFlashId,
+          kind: "packet",
+          node: relayNodeId(entry.reading.reading.site),
           atTick: entry.tick,
         });
         nextFlashId += 1;

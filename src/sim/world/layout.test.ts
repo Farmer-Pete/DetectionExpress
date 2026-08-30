@@ -16,7 +16,7 @@ describe("metroLayout", () => {
     expect(layout.get("dep")).toEqual({ x: 578, y: 520 });
     expect(layout.get("sig")).toEqual({ x: 398, y: 546 });
     expect(layout.get("sub")).toEqual({ x: 742, y: 398 });
-    expect(layout.get("occ")).toEqual({ x: 470, y: 128 });
+    expect(layout.get("occ")).toEqual({ x: 806, y: 496 });
   });
 
   it("places every node at a distinct point", () => {

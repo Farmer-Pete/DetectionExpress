@@ -11,15 +11,25 @@
  */
 
 import { createAccountRiderSpawner } from "../sim/actors/account-rider-spawner";
+import { createHost, initialHostPresence } from "../sim/actors/host";
+import { createOperator, initialOperatorPresence } from "../sim/actors/operator";
 import { createRiderSpawner } from "../sim/actors/rider-spawner";
 import { createStaffSpawner } from "../sim/actors/staff-spawner";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
+import { controlReference } from "../sim/entities/control";
 import type { DistanceTable } from "../sim/world/distance";
 import { buildTimetable, trainIdForLine } from "../sim/world/timetable";
 import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
-import { ACCOUNT_RIDER_TARGET, STAFF_TARGET, TARGET_RIDERS } from "./tuning";
+import {
+  ACCOUNT_RIDER_TARGET,
+  CONTROL_LAUNCH_PHASE_TICKS,
+  HOST_RELAY_TICKS,
+  OPERATOR_COMMAND_TICKS,
+  STAFF_TARGET,
+  TARGET_RIDERS,
+} from "./tuning";
 import {
   startWorld as startWorldDefault,
   type WorldEngineHandle,
@@ -62,7 +72,13 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
   // The timetable and env are immutable, so build them once; the run-controller derives
   // the timetable from the world and puts it in the WorldEnv the engine reads.
   const timetable = buildTimetable(deps.world);
-  const env: WorldEnv = { world: deps.world, distances: deps.distances, timetable };
+  // The M6 control-room reference the operator and host fixtures read from `env.control`.
+  const env: WorldEnv = {
+    world: deps.world,
+    distances: deps.distances,
+    timetable,
+    control: controlReference,
+  };
 
   // One persistent train per line, ids T1..T4 in world-line order. Fresh per run so a
   // re-run starts every train at its origin rather than mid-ride (they hold ride state).
@@ -77,6 +93,43 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
         actor: createTrain({ id, line: line.id, startTick: schedule.startTick }),
         kind: "train",
         initialPresence: (firstTick) => initialTrainPresence(origin, firstTick, line.id),
+      };
+    });
+
+  // One persistent operator per authorized OCC console, seated at the control center for
+  // the whole run (never spawned, never evicted). Staggered launch phases keep them from
+  // issuing commands in lockstep.
+  const occId = deps.world.controlCenter.id;
+  const buildOperators = (): readonly WorldFixture[] =>
+    controlReference.consoles.map((console, index): WorldFixture => {
+      const id = `OP${index + 1}`;
+      return {
+        actor: createOperator({
+          id,
+          node: occId,
+          console,
+          startTick: index * CONTROL_LAUNCH_PHASE_TICKS,
+          cadenceTicks: OPERATOR_COMMAND_TICKS,
+        }),
+        kind: "operator",
+        initialPresence: (firstTick) => initialOperatorPresence(occId, firstTick),
+      };
+    });
+
+  // One persistent host per site network host, sitting at its site for the whole run.
+  const buildHosts = (): readonly WorldFixture[] =>
+    controlReference.hosts.map((siteHost, index): WorldFixture => {
+      const id = `H${index + 1}`;
+      return {
+        actor: createHost({
+          id,
+          site: siteHost.site,
+          host: siteHost.host,
+          startTick: index * CONTROL_LAUNCH_PHASE_TICKS,
+          cadenceTicks: HOST_RELAY_TICKS,
+        }),
+        kind: "host",
+        initialPresence: (firstTick) => initialHostPresence(siteHost.site, firstTick),
       };
     });
 
@@ -107,7 +160,7 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
       target: ACCOUNT_RIDER_TARGET,
     });
     const startOptions: WorldStartOptions = {
-      fixtures: [...buildTrains(), ...deps.getFixtures()],
+      fixtures: [...buildTrains(), ...buildOperators(), ...buildHosts(), ...deps.getFixtures()],
       env,
       runSeed,
       setWorldSnapshot: deps.setWorldSnapshot,

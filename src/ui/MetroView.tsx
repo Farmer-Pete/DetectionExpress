@@ -106,6 +106,22 @@ function logRow(entry: TimedWorldReading): { code: string; color: string; text: 
       text: `platform camera, ${place}, ${reading.reading.persons} people / ${reading.reading.grants} grants`,
     };
   }
+  if (reading.sensor === "occ-console") {
+    // The console reading is OCC-only and carries no location, so the place is the OCC.
+    return {
+      code: "O",
+      color: "var(--s-console)",
+      text: `control console, ${world.controlCenter.name}, ${reading.reading.operator} ${reading.reading.command} ${reading.reading.target} (${reading.reading.host})`,
+    };
+  }
+  if (reading.sensor === "network-relay") {
+    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
+    return {
+      code: "N",
+      color: "var(--s-relay)",
+      text: `network relay, ${place}, ${reading.reading.host} -> ${reading.reading.dest} ${reading.reading.bytes}B`,
+    };
+  }
   const place = placeName.get(reading.reading.station) ?? reading.reading.station;
   const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
   return {

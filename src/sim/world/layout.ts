@@ -69,7 +69,7 @@ const SITE_XY: Record<string, Point> = {
   sig: { x: 398, y: 546 },
   sub: { x: 742, y: 398 },
 };
-const OCC_XY: Point = { x: 470, y: 128 };
+const OCC_XY: Point = { x: 806, y: 496 };
 const OCC_ID = "occ";
 
 /** Every station draws the same four public sensor chips, in this order. */
@@ -156,6 +156,16 @@ export function readerNodeId(location: string): MapNodeId {
 /** The door-contact (D) chip node a door open/close flash and its state land on. */
 export function contactNodeId(location: string): MapNodeId {
   return `${location}:${SENSOR_KEY.D}`;
+}
+
+/** The network-relay (N) chip node a relay flash lands on, at a site or the OCC. */
+export function relayNodeId(location: string): MapNodeId {
+  return `${location}:${SENSOR_KEY.N}`;
+}
+
+/** The control-console (O) chip node an OCC command flash lands on, at the OCC only. */
+export function consoleNodeId(location: string): MapNodeId {
+  return `${location}:${SENSOR_KEY.O}`;
 }
 
 /** The i-th of n chips in a row centered on `(cx, cy)`, at pitch 9. */

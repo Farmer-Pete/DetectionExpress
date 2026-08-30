@@ -320,3 +320,24 @@ export const TVM_TOPUP_AMOUNT = 100;
  * once M5 is on screen.
  */
 export const CAMERA_WINDOW_TICKS = 60;
+
+/**
+ * M6 (living metro, #87) control center and network. One persistent operator sits at
+ * each OCC console issuing benign commands, and one persistent host sits at each staff
+ * site sending benign relays. These set their command / relay cadences and the small
+ * launch phase that keeps the fixtures from firing in lockstep. First-draft numbers,
+ * tuned once M6 is on screen.
+ */
+
+/** Whole ticks between an operator's benign commands (~60 game seconds). */
+export const OPERATOR_COMMAND_TICKS = 30;
+
+/** Whole ticks between a host's benign relays (~24 game seconds). */
+export const HOST_RELAY_TICKS = 12;
+
+/**
+ * The per-index launch phase, in whole ticks, that staggers the operator and host
+ * fixtures so they do not all fire on the same tick. Fixture k first acts at
+ * `k * CONTROL_LAUNCH_PHASE_TICKS`.
+ */
+export const CONTROL_LAUNCH_PHASE_TICKS = 4;

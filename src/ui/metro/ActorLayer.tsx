@@ -32,6 +32,10 @@ const STAFF_SIZE = 7;
 /** An open door lights its door-contact (D) chip: a small stroked square in `--s-contact`. */
 const DOOR_OPEN_COLOR = "#577590";
 const DOOR_MARK_SIZE = 9;
+/** A network-relay pulse travels the site -> OCC backdrop link, in `--s-relay`. */
+const RELAY_COLOR = "#f8961e";
+/** The OCC node a network pulse travels toward (the site -> OCC control backbone). */
+const OCC_ID = world.controlCenter.id;
 /** A crowd-density disc on the camera (C) chip, in `--s-cam`, sized by the window count. */
 const CROWD_COLOR = "#4cc9f0";
 /** The disc radius grows from this to this (design units) as the window count saturates. */
@@ -296,6 +300,42 @@ function drawCrowd(ctx: CanvasRenderingContext2D, view: View, point: Point, gran
   ctx.globalAlpha = 1;
 }
 
+/**
+ * A network pulse: the faint dashed site -> OCC backdrop link brightens and a bright dot
+ * travels along it from the firing site toward the OCC, so the ambient control network
+ * reads as LIVE when a relay fires. Driven by a packet flash's age over its life, so the
+ * pulse fades with the flash. This makes the existing backdrop live rather than adding a
+ * new structure (view notes section 2 + 6).
+ */
+function drawNetworkPulse(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  from: Point,
+  to: Point,
+  age: number,
+): void {
+  const ax = view.offsetX + from.x * view.scale;
+  const ay = view.offsetY + from.y * view.scale;
+  const bx = view.offsetX + to.x * view.scale;
+  const by = view.offsetY + to.y * view.scale;
+  const fade = 1 - age;
+  // Brighten the whole link, strongest as the packet leaves, fading as it lands.
+  ctx.globalAlpha = 0.25 * fade;
+  ctx.strokeStyle = RELAY_COLOR;
+  ctx.lineWidth = 1.5 * view.scale;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  // The travelling packet dot: from the site toward the OCC over the flash's life.
+  ctx.globalAlpha = fade;
+  ctx.fillStyle = RELAY_COLOR;
+  ctx.beginPath();
+  ctx.arc(ax + (bx - ax) * age, ay + (by - ay) * age, 2.6 * view.scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
 /** An open-door mark: a small stroked square on the door-contact chip. */
 function drawDoorMark(ctx: CanvasRenderingContext2D, view: View, point: Point): void {
   const size = DOOR_MARK_SIZE * view.scale;
@@ -407,6 +447,12 @@ export function ActorLayer() {
           drawStaff(ctx, view, presencePoint(actor.presence, layout, renderNow));
           continue;
         }
+        if (actor.kind === "operator" || actor.kind === "host") {
+          // A control-room fixture: it sits at a chip the whole run and is represented by
+          // its command / relay flash (and, for a host, the network pulse), not a moving
+          // glyph. Drawing it as a rider dot on the OCC or a site would misread.
+          continue;
+        }
 
         // A rider (or account rider). Track its presence across frames to catch the
         // board / alight flip and animate the short step on / off the train.
@@ -500,6 +546,30 @@ export function ActorLayer() {
         const point = layout.get(door.node);
         if (point !== undefined) {
           drawDoorMark(ctx, view, point);
+        }
+      }
+      // The live control network: each packet flash pulses the site -> OCC backdrop link.
+      // A packet flash lands on a site's relay (N) chip, so the pulse runs from that site
+      // node to the OCC. Drawn under the flash rings so the ring reads on top.
+      const occPoint = layout.get(OCC_ID);
+      if (occPoint !== undefined) {
+        for (const flash of snapshot.flashes) {
+          if (flash.kind !== "packet") {
+            continue;
+          }
+          const site = flash.node.split(":")[0] ?? "";
+          if (site === "" || site === OCC_ID) {
+            continue;
+          }
+          const from = layout.get(site);
+          if (from === undefined) {
+            continue;
+          }
+          const age = (renderNow - flash.atTick) / FLASH_LIFE_TICKS;
+          if (age < 0 || age > 1) {
+            continue;
+          }
+          drawNetworkPulse(ctx, view, from, occPoint, age);
         }
       }
       for (const flash of snapshot.flashes) {
