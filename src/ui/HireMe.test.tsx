@@ -42,4 +42,31 @@ describe("HireMe", () => {
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByText(/25 years/)).toBeNull();
   });
+
+  it("closes the open card on a click outside it", () => {
+    render(<HireMe copy={hireMe} />);
+    fireEvent.click(screen.getByRole("button", { name: hireMe.heading }));
+    expect(screen.getByText(/25 years/)).toBeDefined();
+
+    // A click outside the card closes it; a click inside would not.
+    fireEvent.click(document.body);
+    expect(screen.queryByText(/25 years/)).toBeNull();
+  });
+
+  it("leaves the card open when Escape is already handled", () => {
+    render(<HireMe copy={hireMe} />);
+    fireEvent.click(screen.getByRole("button", { name: hireMe.heading }));
+    expect(screen.getByText(/25 years/)).toBeDefined();
+
+    // The intro overlay marks its own Escape handled. A handled Escape must not
+    // also close this card.
+    const handled = new KeyboardEvent("keydown", {
+      key: "Escape",
+      cancelable: true,
+      bubbles: true,
+    });
+    handled.preventDefault();
+    document.body.dispatchEvent(handled);
+    expect(screen.getByText(/25 years/)).toBeDefined();
+  });
 });

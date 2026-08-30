@@ -3,7 +3,7 @@
  * carries Peter's pitch, that this simulation is a live demo of his work, that he is
  * open to work, and his email as a mailto link.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HireMeCopy } from "./content/narrative";
 
 interface HireMeProps {
@@ -14,24 +14,37 @@ const CARD_ID = "hire-me-card";
 
 export function HireMe({ copy }: HireMeProps) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Escape closes the card while it is open, from anywhere on the page. The listener
-  // is only attached while open, so it never intercepts Escape otherwise.
+  // While the card is open, Escape closes it and a click outside it closes it. Both
+  // listeners attach only while open, so they never intercept events otherwise. The
+  // Escape handler skips an already-handled event, so dismissing the intro overlay
+  // (which marks its own Escape handled) never also closes this card.
   useEffect(() => {
     if (!open) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        setOpen(false);
+      }
+    };
+    const onClick = (event: MouseEvent): void => {
+      const container = containerRef.current;
+      if (container !== null && event.target instanceof Node && !container.contains(event.target)) {
         setOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("click", onClick);
+    };
   }, [open]);
 
   return (
-    <div className="hire-me">
+    <div className="hire-me" ref={containerRef}>
       <button
         type="button"
         className="hire-me-toggle"
