@@ -3,7 +3,6 @@ import type { Attack } from "../sim/attack";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
-import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint } from "../sim/scenario";
 import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
@@ -13,8 +12,10 @@ import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
 import { ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
+import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
+  CLOCK_HZ,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
@@ -22,18 +23,6 @@ import {
   LEVEL_SEED,
   PIN_BRUTE_FORCE_THRESHOLD,
 } from "./tuning";
-
-const NODES: GraphNode[] = [
-  { id: "ingest", kind: "ingest" },
-  { id: "normalize", kind: "normalize" },
-  { id: "detect", kind: "detect" },
-  { id: "sink", kind: "sink" },
-];
-const EDGES: GraphEdge[] = [
-  { id: "e1", source: "ingest", target: "normalize" },
-  { id: "e2", source: "normalize", target: "detect" },
-  { id: "e3", source: "detect", target: "sink" },
-];
 
 const SCORER_CONFIG: ScorerConfig = {
   threshold: PIN_BRUTE_FORCE_THRESHOLD,
@@ -119,7 +108,7 @@ function launch(opts: LaunchOpts): Harness {
   const driver = new ManualDriver();
   const snapshots: SimSnapshot[] = [];
   const options: StartOptions = {
-    getGraph: () => ({ nodes: NODES, edges: EDGES }),
+    getGraph,
     setSnapshot: opts.setSnapshot ?? ((snapshot) => snapshots.push(snapshot)),
     algorithm: opts.algorithm ?? idleAlgorithm,
     scorer: opts.scorer ?? createScorer([], SCORER_CONFIG),
@@ -127,7 +116,6 @@ function launch(opts: LaunchOpts): Harness {
     serviceRate: opts.serviceRate ?? FAST_RATE,
     checkpoints: opts.checkpoints ?? [],
     driver,
-    bindVisibility: () => () => undefined,
     ...(opts.onError ? { onError: opts.onError } : {}),
   };
   const handle = start(options);
@@ -144,6 +132,7 @@ class SpyDriver implements TickDriver {
   stop(): void {
     this.stopped = true;
   }
+  setRate(): void {}
 }
 
 describe("engine start guards", () => {
@@ -159,33 +148,35 @@ describe("engine start guards", () => {
         serviceRate: FAST_RATE,
         checkpoints: [],
         driver,
-        bindVisibility: () => () => undefined,
       }),
     ).toThrow(/unknown/i);
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
-  it("tears down after a setup failure past allocation", () => {
+  it("tears down the clock and publishes nothing when setup throws after the clock is built", () => {
+    // The Clock is constructed and starts the driver, then reading the scorer during
+    // runtime wiring throws. This exercises start()'s post-construction catch, which must
+    // stop the driver (through clock.stop) and leave no snapshot published.
     const driver = new SpyDriver();
     const snapshots: SimSnapshot[] = [];
+    const boom = new Error("setup boom after clock");
     expect(() =>
       start({
-        getGraph: () => ({ nodes: NODES, edges: EDGES }),
+        getGraph,
         setSnapshot: (snapshot) => snapshots.push(snapshot),
         algorithm: idleAlgorithm,
-        scorer: createScorer([], SCORER_CONFIG),
+        get scorer(): Scorer {
+          throw boom;
+        },
         generator: scheduleOf([]),
         serviceRate: FAST_RATE,
         checkpoints: [],
         driver,
-        bindVisibility: () => {
-          throw new Error("visibility bind boom");
-        },
       }),
-    ).toThrow(/visibility bind boom/);
-    expect(driver.started).toBe(true); // the Clock started it
-    expect(driver.stopped).toBe(true); // teardown stopped it again
-    expect(snapshots).toHaveLength(0); // nothing published
+    ).toThrow(boom);
+    expect(driver.started).toBe(true); // the Clock was constructed and started the driver
+    expect(driver.stopped).toBe(true); // the post-construction catch tore the clock down
+    expect(snapshots).toHaveLength(0); // no snapshot ever reached the sink
   });
 });
 
@@ -229,16 +220,14 @@ describe("engine integration with the reference Algorithm", () => {
     expect(snap.correctness.rolling).toBe(100);
   });
 
-  it("presents all three edge rates, four node heats, and a drained Backlog at the win", async () => {
+  it("drains the Queue and completes every admitted Event at the win", async () => {
     const { harness, finalTick } = runReference();
     await step(harness.driver, finalTick + 2, 300);
     await harness.handle.whenStopped;
     const snap = harness.last();
     expect(snap).toBeDefined();
     if (!snap) return;
-    expect(Object.keys(snap.edges).sort()).toEqual(["e1", "e2", "e3"]);
-    expect(Object.keys(snap.nodes).sort()).toEqual(["detect", "ingest", "normalize", "sink"]);
-    expect(snap.backlog).toBe(0); // sum of all channels, drained by the deadline
+    expect(snap.queued).toBe(0); // sum of all channels, drained by the deadline
     expect(snap.admitted).toBe(snap.completed); // every admitted Event completed
   });
 
@@ -272,10 +261,10 @@ describe("engine lifecycle: the run ends at the deadline, not at the marker", ()
     expect(final?.failureReason).toBeNull();
   });
 
-  it("force-publishes exactly one terminal frame at the win, carrying prior rates", async () => {
-    // Seven Events over ticks 0..6, then a distant deadline. A normal sample and
-    // the terminal forced publish must agree on the carried rates and heat while
-    // the terminal frame flips status to won.
+  it("force-publishes exactly one terminal frame at the win", async () => {
+    // Seven Events over ticks 0..6, then a distant deadline. A normal sample runs
+    // while the run is live, then the terminal forced publish flips status to won
+    // with the Queue drained.
     const events = [0, 1, 2, 3, 4, 5, 6].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
     const h = launch({ generator: scheduleOf(events), checkpoints: deadlineAt(9) });
     await step(h.driver, 10);
@@ -287,9 +276,7 @@ describe("engine lifecycle: the run ends at the deadline, not at the marker", ()
     if (!forced || !normal) return;
     expect(forced.status).toBe("won");
     expect(normal.status).toBe("running");
-    expect(forced.backlog).toBe(0);
-    const anyFlow = Object.values(forced.edges).some((e) => e.inRate > 0);
-    expect(anyFlow).toBe(true); // the carried rates are meaningfully non-zero
+    expect(forced.queued).toBe(0);
   });
 
   it("absorbs a throwing terminal setSnapshot and still resolves", async () => {
@@ -389,7 +376,7 @@ describe("engine failure and stop paths", () => {
     let nextId = 0;
     const driver = new BadStopDriver();
     const handle = start({
-      getGraph: () => ({ nodes: NODES, edges: EDGES }),
+      getGraph,
       setSnapshot: () => undefined,
       algorithm: idleAlgorithm,
       scorer: createScorer([], SCORER_CONFIG),
@@ -397,7 +384,6 @@ describe("engine failure and stop paths", () => {
       serviceRate: FAST_RATE,
       checkpoints: [],
       driver,
-      bindVisibility: () => () => undefined,
     });
     await step(driver, 20);
     handle.stop(); // the engine swallows the driver throw
@@ -425,10 +411,10 @@ describe("engine failure and stop paths", () => {
 });
 
 describe("engine backpressure ceiling (M2 seam 5)", () => {
-  it("saturates the Backlog near 2 * CHANNEL_CAP with the Detect->Sink channel near empty", async () => {
+  it("saturates the Queue near 2 * CHANNEL_CAP with the Detect->Sink channel near empty", async () => {
     // A flood of Events due now, against a slow service rate. The two upstream
     // channels fill to cap; the Detect->Sink channel stays near empty because the
-    // Sink drains at once, so the total Backlog tops out near 2 * CHANNEL_CAP.
+    // Sink drains at once, so the total Queue tops out near 2 * CHANNEL_CAP.
     let nextId = 0;
     const h = launch({
       generator: () => ev(nextId++, 0), // never exhausts, all due at tick 0
@@ -439,8 +425,8 @@ describe("engine backpressure ceiling (M2 seam 5)", () => {
     expect(snap).toBeDefined();
     if (!snap) return;
     const ceiling = 2 * CHANNEL_CAP;
-    expect(snap.backlog).toBeGreaterThanOrEqual(ceiling - 2);
-    expect(snap.backlog).toBeLessThanOrEqual(ceiling + 2); // not near 3*CAP: e3 stays empty
+    expect(snap.queued).toBeGreaterThanOrEqual(ceiling - 2);
+    expect(snap.queued).toBeLessThanOrEqual(ceiling + 2); // not near 3*CAP: e3 stays empty
     expect(snap.admitted - snap.completed).toBeGreaterThanOrEqual(ceiling - 2);
     h.handle.stop();
     await h.handle.whenStopped;
@@ -462,7 +448,7 @@ describe("engine checkpoint clear, exact tick phase (M2 seam 6)", () => {
     await step(h.driver, 3);
     await h.handle.whenStopped;
     expect(h.last()?.status).toBe("failed");
-    expect(h.last()?.failureReason).toBe("backlog");
+    expect(h.last()?.failureReason).toBe("queue");
   });
 
   it("clears once the Event has completed by the next checkpoint tick", async () => {
@@ -491,7 +477,7 @@ describe("engine final deadline over a live Clock (M2 seam 7)", () => {
     expect(h.last()?.status).toBe("won");
   });
 
-  it("fails at the deadline with a slow rule still holding Backlog", async () => {
+  it("fails at the deadline with a slow rule still holding Queue", async () => {
     const events = [0, 1, 2, 3, 4].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
     const h = launch({
       generator: scheduleOf(events),
@@ -501,7 +487,7 @@ describe("engine final deadline over a live Clock (M2 seam 7)", () => {
     await step(h.driver, 41);
     await h.handle.whenStopped;
     expect(h.last()?.status).toBe("failed");
-    expect(h.last()?.failureReason).toBe("backlog");
+    expect(h.last()?.failureReason).toBe("queue");
   });
 });
 
@@ -520,7 +506,7 @@ describe("engine terminal snapshot reaches the HUD (M2 seam 8)", () => {
     if (!last) return;
     expect(last.status).not.toBe("running");
     expect(last.status).toBe("failed");
-    expect(last.failureReason).toBe("backlog");
+    expect(last.failureReason).toBe("queue");
   });
 });
 
@@ -528,7 +514,7 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
   it("fails on Correctness via advanceTo, with no Event in the gap and no end of stream", async () => {
     // One Attack whose window closes at ts 10 (tick 5). The rule never alerts, so
     // the Attack stays pending; every Event finishes before the checkpoint, so the
-    // Backlog is clear. The checkpoint at tick 10 sits in a drain gap with no later
+    // Queue is clear. The checkpoint at tick 10 sits in a drain gap with no later
     // Event: only scorer.advanceTo can settle the miss, dropping Correctness.
     const attack: Attack = {
       id: 1,
@@ -542,7 +528,7 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
     const h = launch({
       generator: scheduleOf(events),
       scorer: createScorer([attack], SCORER_CONFIG),
-      serviceRate: FAST_RATE, // Backlog clears well before the checkpoint
+      serviceRate: FAST_RATE, // Queue clears well before the checkpoint
       checkpoints: deadlineAt(10),
     });
     await step(h.driver, 11);
@@ -550,6 +536,54 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
     expect(h.last()?.status).toBe("failed");
     expect(h.last()?.failureReason).toBe("correctness");
     expect(h.last()?.correctness.missed).toBe(1); // settled by advanceTo, not EOS
+  });
+});
+
+describe("engine speed changes only wall pacing (M4 seam 5)", () => {
+  // A ManualDriver that also records every wall-clock rate setSpeed arms it at. The
+  // recorded rate proves setSpeed actually reached the driver; the by-hand ticks ignore
+  // that rate, so the tick sequence stays identical across speeds. Without the recording
+  // this test would be vacuous: it would pass even if setSpeed never called setRate.
+  class RateSpyManualDriver extends ManualDriver {
+    readonly rates: number[] = [];
+    override setRate(hz: number): void {
+      this.rates.push(hz);
+    }
+  }
+
+  // Drive one fixed seed to the deadline at a given speed and collect every snapshot and
+  // every armed rate.
+  async function runAtSpeed(speed: number): Promise<{ snapshots: SimSnapshot[]; rates: number[] }> {
+    const driver = new RateSpyManualDriver();
+    const events = [0, 1, 2, 3, 4].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
+    const snapshots: SimSnapshot[] = [];
+    const handle = start({
+      getGraph,
+      setSnapshot: (snapshot) => snapshots.push(snapshot),
+      algorithm: idleAlgorithm,
+      scorer: createScorer([], SCORER_CONFIG),
+      generator: scheduleOf(events),
+      serviceRate: FAST_RATE,
+      checkpoints: deadlineAt(20),
+      driver,
+    });
+    handle.setSpeed(speed);
+    await step(driver, 22);
+    await handle.whenStopped;
+    return { snapshots, rates: driver.rates };
+  }
+
+  it("arms the driver at a distinct rate per speed yet replays an identical snapshot sequence", async () => {
+    const half = await runAtSpeed(0.5);
+    const one = await runAtSpeed(1);
+    const two = await runAtSpeed(2);
+    // setSpeed reached the driver with baseHz * multiplier, a distinct rate per speed.
+    expect(half.rates).toEqual([CLOCK_HZ * 0.5]);
+    expect(one.rates).toEqual([CLOCK_HZ]);
+    expect(two.rates).toEqual([CLOCK_HZ * 2]);
+    // The by-hand tick sequence ignores the wall rate, so the snapshots match exactly.
+    expect(one.snapshots).toEqual(half.snapshots);
+    expect(two.snapshots).toEqual(half.snapshots);
   });
 });
 

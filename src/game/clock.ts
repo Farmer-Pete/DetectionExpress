@@ -21,6 +21,8 @@ export class ClockStoppedError extends Error {
 export interface TickDriver {
   start(onTick: () => void): void;
   stop(): void;
+  /** Re-arm the driver at a new wall-clock rate, keeping the same tick callback. */
+  setRate(hz: number): void;
 }
 
 /** A driver a test steps by hand. `advance(n)` fires n ticks with no real time. */
@@ -34,6 +36,9 @@ export class ManualDriver implements TickDriver {
   stop(): void {
     this.onTick = null;
   }
+
+  /** No-op: tests fire ticks by hand, so a wall-clock rate is meaningless here. */
+  setRate(_hz: number): void {}
 
   /**
    * Fire exactly one tick. Multi-tick stepping is deliberately not offered here:
@@ -49,8 +54,10 @@ export class ManualDriver implements TickDriver {
 /** The production driver: a fixed-rate setInterval. */
 export function intervalDriver(hz: number): TickDriver {
   let handle: ReturnType<typeof setInterval> | null = null;
+  let tick: (() => void) | null = null;
   return {
     start(onTick: () => void): void {
+      tick = onTick;
       handle = setInterval(onTick, 1000 / hz);
     },
     stop(): void {
@@ -58,6 +65,15 @@ export function intervalDriver(hz: number): TickDriver {
         clearInterval(handle);
         handle = null;
       }
+    },
+    setRate(nextHz: number): void {
+      // Clear and re-arm at the new period, keeping the same onTick. A driver that
+      // has not started, or one already stopped, has nothing to re-arm.
+      if (handle === null || tick === null) {
+        return;
+      }
+      clearInterval(handle);
+      handle = setInterval(tick, 1000 / nextHz);
     },
   };
 }
@@ -132,6 +148,24 @@ export class Clock {
   /** Register a per-tick listener. The sampler runs here. */
   onTick(callback: () => void): void {
     this.tickListeners.push(callback);
+  }
+
+  /**
+   * Change only the driver's wall-clock period. `this.hz` is the fixed base set at
+   * construction, so `newHz = baseHz * multiplier` never compounds off the current
+   * rate. The tick sequence and now() are unchanged, so per-machine replay holds. It
+   * is a no-op after stop, and it never resumes a paused clock: re-arming the driver
+   * does not touch the paused flag, so a paused clock stays paused and now() does not
+   * advance.
+   */
+  setSpeed(multiplier: number): void {
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new Error(`Clock.setSpeed needs a finite positive multiplier, got ${multiplier}.`);
+    }
+    if (this.stopped) {
+      return;
+    }
+    this.driver.setRate(this.hz * multiplier);
   }
 
   /** Stop advancing. Sleeps and gates hold until resume or stop. */

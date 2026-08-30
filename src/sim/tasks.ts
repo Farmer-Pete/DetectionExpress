@@ -215,7 +215,7 @@ export async function runNormalize(
  *
  * The governor charges only real Events, never the marker. It runs after `record`
  * and before `push`, so a slow rule holds each Event in service for whole ticks;
- * the arrival rate then outruns the service rate and the Backlog climbs.
+ * the arrival rate then outruns the service rate and the Queue climbs.
  *
  * `inspector.markProcessed()` runs right after `scorer.record` and before the
  * governor charge, so the watermark tracks scoring completion, not service

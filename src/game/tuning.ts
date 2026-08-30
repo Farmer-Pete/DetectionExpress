@@ -12,20 +12,15 @@ export const PUBLISH_HZ = 20;
 /** The inspector's recent-events ring: how many Events it keeps, id-ordered. */
 export const RING_SIZE = 256;
 
-/** Backlog channel capacity. A push waits when the channel is full. */
+/**
+ * The log panel's queue bar full-scale: the `admitted - processed` value that
+ * paints the bar red. This is the cursor's own queue, the count Detect has not
+ * yet scored, a different number from the HUD's channel-buffer queue.
+ */
+export const LOG_QUEUE_MAX = 50;
+
+/** Queue channel capacity. A push waits when the channel is full. */
 export const CHANNEL_CAP = 100;
-
-/** EMA time constant in seconds. */
-export const RATE_TAU = 0.4;
-
-/** Input occupancy above this ramps a node's heat. */
-export const OCC_THRESHOLD = 0.5;
-
-/** Seconds of sustained fill to reach full red. */
-export const HEAT_RAMP_S = 2.5;
-
-/** Seconds to cool from red back to calm. */
-export const HEAT_COOL_S = 2.0;
 
 /** The Throughput gauge averages Sink completions over this window, in ms. */
 export const THROUGHPUT_WINDOW_MS = 500;
@@ -147,7 +142,7 @@ export const INTRO_TICKS = 120;
 
 /**
  * The length of each wave, in ticks. Much longer than the drain gap on purpose: a
- * rule that floods at the peak builds far more Backlog than it can clear inside the
+ * rule that floods at the peak builds far more Queue than it can clear inside the
  * following gap, so it is still behind when the checkpoint reads it.
  */
 export const WAVE_DURATION_TICKS = 240;

@@ -188,18 +188,13 @@ body {
 
 .inspector-stream {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  border: 1px dashed var(--line);
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
-}
-
-.inspector-stream-note {
-  margin: 0;
-  color: var(--dim);
-  font-size: 0.85rem;
+  overflow: hidden;
 }
 
 /* Findings panel */
@@ -1012,6 +1007,193 @@ body {
   color: var(--ink);
   font-size: 0.8rem;
   font-weight: 700;
+}
+
+/* Log panel: it fills the inspector-stream cell, which supplies the panel chrome. */
+.log-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+/* Transport controls: the Freeze button lights amber while the run is frozen. */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.transport-freeze {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transport-freeze:hover {
+  border-color: var(--alert);
+}
+
+.transport-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--dim);
+}
+
+.transport-freeze-on {
+  border-color: var(--alert);
+  background: color-mix(in srgb, var(--alert) 22%, transparent);
+}
+
+.transport-freeze-on .transport-dot {
+  background: var(--alert);
+  box-shadow: 0 0 8px var(--alert);
+}
+
+/* Speed buttons: the active multiplier lights, matching the panel and Freeze look. */
+.transport-speeds {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.transport-speed {
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transport-speed:hover {
+  border-color: var(--ok);
+}
+
+.transport-speed-on {
+  border-color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.engine-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+.queue-bar {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.queue-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition:
+    width 0.12s linear,
+    background 0.2s linear;
+}
+
+.queue-count {
+  flex: 0 0 auto;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-stream {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  /* Bound the row list so up to RING_SIZE rows scroll inside the panel instead of
+     growing the page. The sticky "engine N behind" bar is a child of this element,
+     so it pins to the bottom of this scroll area. min-height:0 lets it shrink in the
+     flex column; the max-height caps it even when no ancestor gives a definite height. */
+  min-height: 0;
+  max-height: clamp(220px, 40vh, 360px);
+  overflow-y: auto;
+}
+
+.log-row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* Zero-minimum tracks let a cell shrink; wrap long endpoint values or JSON
+   fallbacks instead of widening the row past the panel. */
+.log-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.log-row-time {
+  color: var(--dim);
+}
+
+.log-row-ok .log-row-result {
+  color: var(--ok);
+}
+
+.log-row-bad .log-row-result {
+  color: var(--threat);
+}
+
+.log-row-neutral .log-row-result {
+  color: var(--dim);
+}
+
+.log-row-pending {
+  opacity: 0.55;
+}
+
+.log-row-cursor {
+  opacity: 1;
+  background: color-mix(in srgb, var(--a1) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--a1);
+}
+
+.log-sticky {
+  position: sticky;
+  bottom: 0;
+  margin-top: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--a1) 25%, var(--panel));
+  border: 1px solid var(--a1);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 /* Briefing tagline */

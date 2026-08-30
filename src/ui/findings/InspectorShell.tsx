@@ -10,6 +10,7 @@
  * editor or the intro overlay, both of which live outside the shell.
  */
 import { useGameStore } from "../../game/store";
+import { LogPanel } from "../log/LogPanel";
 import { FindingsPanel } from "./FindingsPanel";
 
 export function InspectorShell() {
@@ -24,7 +25,7 @@ export function InspectorShell() {
   return (
     <section className="inspector-shell" aria-label="Inspector" onKeyDown={onKeyDown}>
       <div className="inspector-stream">
-        <p className="inspector-stream-note">T7 &mdash; raw stream, coming</p>
+        <LogPanel />
       </div>
       <FindingsPanel />
       <TraceOverlayMount />
