@@ -41,10 +41,20 @@ body {
   min-height: 100vh;
 }
 
+/* The shell holds every surface. It carries the column layout so the canvas still
+   grows, and it takes the `inert` attribute while the intro overlay is open. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+
 .topbar {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 0.75rem;
+  row-gap: 0.4rem;
   padding: 1rem 1.5rem 0.5rem;
 }
 
@@ -138,8 +148,9 @@ body {
 .pipeline {
   flex: 1 1 auto;
   /* Keep a usable canvas height now that the shell scrolls: the flex item no
-     longer draws its height from a fixed-height parent. */
-  min-height: 360px;
+     longer draws its height from a fixed-height parent. A flexible floor keeps the
+     canvas visible on a tall viewport without crushing a short one. */
+  min-height: clamp(220px, 40vh, 360px);
   margin: 0 1rem 1rem;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -381,7 +392,8 @@ body {
   top: calc(100% + 0.5rem);
   right: 0;
   z-index: 20;
-  width: 300px;
+  /* Stay inside a narrow viewport instead of forcing horizontal scroll. */
+  width: min(300px, calc(100vw - 2rem));
   padding: 0.9rem 1rem;
   border-radius: 10px;
   background: var(--panel);
@@ -556,7 +568,8 @@ body {
 }
 
 .chaos-ladder-rung {
-  color: var(--dim);
+  /* --ink over --panel2 clears WCAG AA (about 5.8:1); --dim did not. */
+  color: var(--ink);
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -578,7 +591,9 @@ body {
 
 .chaos-ladder-live {
   margin: 0.4rem 0 0;
-  color: var(--a1);
+  /* Brightened from --a1 (about 3.6:1) to --ink (about 5.8:1) to clear WCAG AA.
+     The orange accent stays present on the card's border and glow. */
+  color: var(--ink);
   font-size: 0.8rem;
   font-weight: 700;
 }
