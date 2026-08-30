@@ -103,7 +103,7 @@ describe("kioskPinAttack.generate", () => {
         }
         const record = raw(ev);
         expect(record.res).toBe("WRONG_PIN");
-        expect(record.acct).toBe(attack.account);
+        expect(record.acct).toBe(attack.entity);
         expect(ev.ts).toBeGreaterThanOrEqual(attack.window.startTs);
         expect(ev.ts).toBeLessThanOrEqual(attack.window.endTs);
       }
@@ -112,7 +112,7 @@ describe("kioskPinAttack.generate", () => {
 
   it("gives each Attack a distinct account and a non-overlapping window", () => {
     const { attacks } = kioskPinAttack.generate(LEVEL_SEED);
-    const accounts = new Set(attacks.map((a) => a.account));
+    const accounts = new Set(attacks.map((a) => a.entity));
     expect(accounts.size).toBe(attacks.length);
     const windows = [...attacks].sort((x, y) => x.window.startTs - y.window.startTs);
     let end = -1;
@@ -124,7 +124,7 @@ describe("kioskPinAttack.generate", () => {
 
   it("is fair: only victims cross the threshold, and only via their burst", () => {
     const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
-    const victimFails = new Map(attacks.map((a) => [a.account, new Set(a.eventIds)]));
+    const victimFails = new Map(attacks.map((a) => [a.entity, new Set(a.eventIds)]));
     const failTimes = failTimesByAccount(events);
 
     for (const [account, times] of failTimes) {
@@ -138,10 +138,10 @@ describe("kioskPinAttack.generate", () => {
 
     // A victim's only failure Events are exactly its burst.
     for (const attack of attacks) {
-      const burst = victimFails.get(attack.account) ?? new Set<number>();
+      const burst = victimFails.get(attack.entity) ?? new Set<number>();
       const fails = events.filter((ev) => {
         const record = raw(ev);
-        return record.acct === attack.account && record.res === "WRONG_PIN";
+        return record.acct === attack.entity && record.res === "WRONG_PIN";
       });
       for (const ev of fails) {
         expect(burst.has(ev.id)).toBe(true);
@@ -164,12 +164,10 @@ describe("kioskPinAttack.generate", () => {
     for (const ev of events) {
       const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      // Fold Finding[] to Alert[] the same way runDetect does.
-      const alerts = algo
-        .detect(view)
-        .filter((finding) => !finding.isPartial)
-        .map((finding) => finding.alert);
-      scorer.record(alerts, ev);
+      // Hand the scorer the findings the way runDetect does: the scorer skips
+      // partials itself, so pass them all as ScoredFinding (no subject here).
+      const scored = algo.detect(view).map((finding) => ({ finding }));
+      scorer.record(scored, ev);
     }
     scorer.finalize();
 

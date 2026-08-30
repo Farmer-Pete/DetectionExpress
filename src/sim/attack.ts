@@ -7,7 +7,8 @@ import type { AlertReason } from "./finding";
  */
 export interface Attack {
   id: number;
-  account: string;
+  /** The subject this Attack is on: an account here, generic to the scorer. */
+  entity: string;
   /** The pattern that reveals it; "pin_brute_force" this slice. */
   reason: AlertReason;
   /** Game seconds. The burst spans this window; evidence past endTs is too late. */

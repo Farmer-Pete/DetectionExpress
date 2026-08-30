@@ -35,13 +35,26 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* The shell grows with its content and the page scrolls vertically. A fixed
+     100vh height would crush the canvas once the chaos ladder is added, and the
+     deferred scroll to an anchor needs the document to scroll. */
+  min-height: 100vh;
+}
+
+/* The shell holds every surface. It carries the column layout so the canvas still
+   grows, and it takes the `inert` attribute while the intro overlay is open. */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
 }
 
 .topbar {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 0.75rem;
+  row-gap: 0.4rem;
   padding: 1rem 1.5rem 0.5rem;
 }
 
@@ -60,6 +73,7 @@ body {
 /* HUD */
 .hud {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   padding: 0.5rem 1.5rem 1rem;
 }
@@ -134,7 +148,10 @@ body {
 /* Canvas */
 .pipeline {
   flex: 1 1 auto;
-  min-height: 0;
+  /* Keep a usable canvas height now that the shell scrolls: the flex item no
+     longer draws its height from a fixed-height parent. A flexible floor keeps the
+     canvas visible on a tall viewport without crushing a short one. */
+  min-height: clamp(220px, 40vh, 360px);
   margin: 0 1rem 1rem;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -290,7 +307,8 @@ body {
   color: var(--ink);
 }
 
-.editor-run {
+.editor-apply,
+.editor-reset {
   padding: 0.3rem 1.1rem;
   border-radius: 8px;
   border: 1px solid var(--a1);
@@ -300,8 +318,14 @@ body {
   cursor: pointer;
 }
 
-.editor-run:hover {
+.editor-apply:hover:not(:disabled),
+.editor-reset:hover {
   background: color-mix(in srgb, var(--a1) 30%, transparent);
+}
+
+.editor-apply:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .editor-code {
@@ -327,4 +351,266 @@ body {
   color: var(--threat);
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* Topbar actions: the reopen control and the Hire Me surface, pushed to the right. */
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.topbar-reopen {
+  padding: 0.3rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.topbar-reopen:hover {
+  border-color: var(--a1);
+}
+
+/* Hire Me */
+.hire-me {
+  position: relative;
+}
+
+.hire-me-toggle {
+  padding: 0.3rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--a1);
+  background: color-mix(in srgb, var(--a1) 18%, transparent);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hire-me-toggle:hover {
+  background: color-mix(in srgb, var(--a1) 30%, transparent);
+}
+
+.hire-me-card {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 20;
+  /* Stay inside a narrow viewport instead of forcing horizontal scroll. */
+  width: min(300px, calc(100vw - 2rem));
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.hire-me-text {
+  margin: 0 0 0.6rem;
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.hire-me-email {
+  color: var(--a1);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.hire-me-email:hover {
+  text-decoration: underline;
+}
+
+/* Intro overlay */
+.intro-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 22, 29, 0.72);
+}
+
+.intro-overlay {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.6rem 1.8rem;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.intro-overlay-title {
+  margin: 0 0 0.9rem;
+  font-size: 1.5rem;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+}
+
+.intro-overlay-text {
+  margin: 0 0 0.8rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.intro-overlay-invitation {
+  margin: 0 0 1.2rem;
+  color: var(--a1);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.intro-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-bottom: 0.9rem;
+}
+
+.intro-overlay-observe,
+.intro-overlay-chaos {
+  padding: 0.5rem 1.2rem;
+  border-radius: 9px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.intro-overlay-observe {
+  border: 1px solid var(--a1);
+  background: color-mix(in srgb, var(--a1) 20%, transparent);
+}
+
+.intro-overlay-observe:hover {
+  background: color-mix(in srgb, var(--a1) 32%, transparent);
+}
+
+.intro-overlay-chaos {
+  border: 1px solid var(--threat);
+  background: color-mix(in srgb, var(--threat) 18%, transparent);
+}
+
+.intro-overlay-chaos:hover {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+}
+
+.intro-overlay-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+
+.intro-overlay-source {
+  color: var(--a1);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.intro-overlay-source:hover {
+  text-decoration: underline;
+}
+
+.intro-overlay-edit {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--a1);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intro-overlay-edit:hover {
+  text-decoration: underline;
+}
+
+/* Chaos ladder */
+.chaos-ladder {
+  margin: 0 1.5rem 1.5rem;
+  padding: 1rem 1.2rem;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.chaos-ladder-title {
+  margin: 0 0 0.8rem;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.chaos-ladder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.chaos-level {
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+}
+
+.chaos-level-playable {
+  border-color: var(--a1);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--a1) 20%, transparent);
+}
+
+.chaos-ladder-rung {
+  /* --ink over --panel2 clears WCAG AA (about 5.8:1); --dim did not. */
+  color: var(--ink);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  margin-right: 0.5rem;
+}
+
+.chaos-ladder-label {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.chaos-ladder-blurb {
+  margin: 0.3rem 0 0;
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.chaos-ladder-live {
+  margin: 0.4rem 0 0;
+  /* Brightened from --a1 (about 3.6:1) to --ink (about 5.8:1) to clear WCAG AA.
+     The orange accent stays present on the card's border and glow. */
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* Briefing tagline */
+.briefing-tagline {
+  margin: 0 0 0.4rem;
+  color: var(--a1);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
 }

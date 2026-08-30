@@ -16,6 +16,7 @@ beforeEach(() => {
     seed: LEVEL_SEED,
     error: null,
     sourceLocked: false,
+    runPending: false,
   });
 });
 
@@ -92,5 +93,13 @@ describe("store", () => {
     expect(useGameStore.getState().sourceLocked).toBe(true);
     useGameStore.getState().setSourceLocked(false);
     expect(useGameStore.getState().sourceLocked).toBe(false);
+  });
+
+  it("starts with no run pending and toggles it through setRunPending", () => {
+    expect(useGameStore.getState().runPending).toBe(false);
+    useGameStore.getState().setRunPending(true);
+    expect(useGameStore.getState().runPending).toBe(true);
+    useGameStore.getState().setRunPending(false);
+    expect(useGameStore.getState().runPending).toBe(false);
   });
 });
