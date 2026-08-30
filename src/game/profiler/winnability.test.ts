@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { admitArrivals } from "../../sim/actors/admission";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../sim/event";
@@ -6,7 +7,8 @@ import type { Finding } from "../../sim/finding";
 import type { GraphEdge, GraphNode } from "../../sim/graph";
 import { buildOptimizationAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/optimization";
 import { buildReferenceAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/reference";
-import { buildSchedule, kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
+import { kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
+import { buildSchedule } from "../../sim/schedule";
 import { makeGovernor, type ServiceRate } from "../../sim/service-governor";
 import type { SimSnapshot } from "../../sim/snapshot";
 import type { TaskAlgorithm } from "../../sim/tasks";
@@ -14,8 +16,6 @@ import { ManualDriver } from "../clock";
 import { start } from "../engine";
 import {
   CHANNEL_CAP,
-  CORPUS_ACCOUNTS,
-  CORPUS_FAIL_SHARE,
   CORPUS_PEAK_EVENTS_PER_TICK,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
@@ -23,10 +23,15 @@ import {
   LEVEL_SEED,
   OMEGA,
   PIN_BRUTE_FORCE_THRESHOLD,
-  SCAN_WINDOW_TICKS,
   WAVE_RATES,
 } from "../tuning";
-import { quantizeServiceRate } from "./quantize";
+import { simulate as bandSimulate, type SimResult } from "./band";
+import {
+  NAIVE_CODE_PER_ANCHOR,
+  naiveCost,
+  rateFor,
+  TALLY_CODE_PER_ANCHOR,
+} from "./kiosk-band-calibration";
 
 /**
  * The abstract-cost winnability band test (M2 seam 9). Pure, deterministic, no
@@ -37,135 +42,40 @@ import { quantizeServiceRate } from "./quantize";
  * the naive raw-log scan must fail a checkpoint with margin and the incremental
  * tally must clear every one with margin. This is what locks OMEGA and the wave
  * rates. See GH3-PLAN.md sections 8, 9 (M2 seam 9), and 11.
+ *
+ * GH89: the cost model (naiveCost, the code-per-anchor multipliers) now lives in
+ * `kiosk-band-calibration.ts`, and the checkpoint-squeeze math now lives in the
+ * generic `band.ts`. This file keeps a kiosk-local adapter that builds
+ * `arrivalsByTick` from the wave schedule and calls the generic `simulate`, plus
+ * a frozen copy of the pre-extraction `simulate(rate)` as an independent parity
+ * oracle (see the "band extraction parity" describe at the bottom).
  */
 
-// --- The counted-cost model -------------------------------------------------
-// The naive scan re-filters an account's in-window fails on every fail, so its
-// per-Event cost grows with the window fill. The tally is amortized O(1). The
-// anchor is the naive scan priced at the corpus density, so codePerAnchor is 1
-// for the naive rule and the cost ratio for the tally. The overhead and per-op
-// constants only shift the ratio slightly; the skew band absorbs that slack.
-const OVERHEAD = 2; // per-Event dispatch and normalize, in element-visit units
-const TALLY_OP = 3; // enqueue, expiry drain, and count update, amortized
+// --- The kiosk-local adapter -------------------------------------------------
+// A faithful integer model of the run: arrivals follow the wave schedule; the
+// generic band `simulate` runs the real channel and governor math against them.
 
-/** Fails an account holds in the detection window at `density` Events per tick. */
-function windowFill(density: number): number {
-  return (density * CORPUS_FAIL_SHARE * SCAN_WINDOW_TICKS) / CORPUS_ACCOUNTS;
-}
-
-/** The naive scan's counted cost per Event at `density`: overhead plus the scan. */
-function naiveCost(density: number): number {
-  return OVERHEAD + CORPUS_FAIL_SHARE * windowFill(density);
-}
-
-/** The tally's counted cost per Event: overhead plus O(1) bookkeeping. */
-const TALLY_COST = OVERHEAD + CORPUS_FAIL_SHARE * TALLY_OP;
-
-/** The anchor cost: the naive scan priced at the corpus peak density. */
-const ANCHOR_COST = naiveCost(CORPUS_PEAK_EVENTS_PER_TICK);
-
-/** codePerAnchor for each rule: the anchor cost over the rule's own cost. */
-const NAIVE_CODE_PER_ANCHOR = ANCHOR_COST / naiveCost(CORPUS_PEAK_EVENTS_PER_TICK); // == 1
-const TALLY_CODE_PER_ANCHOR = ANCHOR_COST / TALLY_COST; // the separation ratio R
-
-/** Turn a code speed, a difficulty dial, and a skew into the real quantized rate. */
-function rateFor(codePerAnchor: number, omega: number, skew: number): ServiceRate {
-  return quantizeServiceRate(codePerAnchor * omega * skew);
-}
-
-// --- The abstract pipeline ---------------------------------------------------
-// A faithful integer model of the run: arrivals follow the wave schedule; the Detect
-// node completes Events at the real governor's rate; a backpressure ceiling
-// of 2 * CHANNEL_CAP caps how far admitted may lead completed, exactly as the two
-// bounded upstream Channels do (the Detect->Sink Channel stays near empty). The
-// checkpoint is read at the start-of-tick boundary, before that tick's service,
-// so an Event completing on the checkpoint tick counts as still outstanding.
-
-interface SimResult {
-  outcome: "won" | "failed";
-  failedCheckpoint: number; // index, or -1 on a win
-  backlogAtFailure: number;
-  maxBacklog: number;
-}
-
-/** Events arriving at each tick, from the wave schedule's carried accumulator. */
+/** Events arriving at each tick, binned from the admission controller's arrivals. */
 function arrivalsByTick(deadline: number): number[] {
   const arrivals = new Array<number>(deadline + 1).fill(0);
-  for (const wave of buildSchedule().waves) {
-    let acc = 0;
-    const end = wave.startTick + wave.durationTicks;
-    for (let tick = wave.startTick; tick < end && tick <= deadline; tick++) {
-      acc += wave.eventsPerTick;
-      while (acc >= 1) {
-        acc -= 1;
-        arrivals[tick] = (arrivals[tick] ?? 0) + 1;
-      }
+  for (const tick of admitArrivals(buildSchedule().waves)) {
+    if (tick <= deadline) {
+      arrivals[tick] = (arrivals[tick] ?? 0) + 1;
     }
   }
   return arrivals;
 }
 
+/** Builds the kiosk's arrivalsByTick and checkpoints, then calls the generic simulate. */
 function simulate(rate: ServiceRate): SimResult {
   const { checkpoints } = buildSchedule();
   const deadline = checkpoints[checkpoints.length - 1]?.atTick ?? 0;
-  const arrivals = arrivalsByTick(deadline);
-  const governor = makeGovernor(rate);
-  const ceiling = 2 * CHANNEL_CAP;
-
-  let scheduledCum = 0;
-  let admitted = 0;
-  let completed = 0;
-  let detectFreeAt = 1; // the next tick Detect may pull, given its governor sleeps
-  let maxBacklog = 0;
-  let nextCheckpoint = 0;
-
-  for (let tick = 1; tick <= deadline; tick++) {
-    // Start-of-tick checkpoint evaluation, before this tick's arrivals and service.
-    while (nextCheckpoint < checkpoints.length) {
-      const cp = checkpoints[nextCheckpoint];
-      if (!cp || cp.atTick > tick) {
-        break;
-      }
-      const backlog = admitted - completed;
-      const isFinal = nextCheckpoint === checkpoints.length - 1;
-      if (backlog !== 0) {
-        return {
-          outcome: "failed",
-          failedCheckpoint: nextCheckpoint,
-          backlogAtFailure: backlog,
-          maxBacklog,
-        };
-      }
-      if (isFinal) {
-        return { outcome: "won", failedCheckpoint: -1, backlogAtFailure: 0, maxBacklog };
-      }
-      nextCheckpoint += 1;
-    }
-
-    // Admit this tick's arrivals, held back by the backpressure ceiling.
-    scheduledCum += arrivals[tick] ?? 0;
-    admitted = Math.min(scheduledCum, completed + ceiling);
-
-    // Serve as many Events as the governor allows this tick.
-    while (tick >= detectFreeAt && admitted > completed) {
-      const sleep = governor.charge();
-      completed += 1;
-      admitted = Math.min(scheduledCum, completed + ceiling);
-      if (sleep > 0) {
-        detectFreeAt = tick + sleep; // busy through the sleep, resuming later
-        break;
-      }
-    }
-    maxBacklog = Math.max(maxBacklog, admitted - completed);
-  }
-
-  const remaining = admitted - completed;
-  return {
-    outcome: remaining === 0 ? "won" : "failed",
-    failedCheckpoint: remaining === 0 ? -1 : checkpoints.length - 1,
-    backlogAtFailure: remaining,
-    maxBacklog,
-  };
+  return bandSimulate({
+    arrivalsByTick: arrivalsByTick(deadline),
+    serviceRate: rate,
+    channelCap: CHANNEL_CAP,
+    checkpoints,
+  });
 }
 
 // The skew band: the player's measured code speed can deviate from the anchor by
@@ -337,6 +247,91 @@ describe("winnability across the OMEGA and skew band (M2 seam 9)", () => {
         const result = simulate(rateFor(TALLY_CODE_PER_ANCHOR, omega, 1 / skew));
         expect(result.outcome).toBe("won");
         expect(result.maxBacklog).toBeLessThanOrEqual(CHANNEL_CAP);
+      }
+    }
+  });
+});
+
+// --- Frozen oracle (parity guard) -------------------------------------------
+// An exact, independent copy of the pre-extraction simulate(rate): the same
+// channel and governor math `band.ts` now generalizes. It must never be
+// "improved" — drift here would blunt the parity check it exists to run.
+function frozenSimulate(rate: ServiceRate): SimResult {
+  const { checkpoints } = buildSchedule();
+  const deadline = checkpoints[checkpoints.length - 1]?.atTick ?? 0;
+  const arrivals = arrivalsByTick(deadline);
+  const governor = makeGovernor(rate);
+  const ceiling = 2 * CHANNEL_CAP;
+
+  let scheduledCum = 0;
+  let admitted = 0;
+  let completed = 0;
+  let detectFreeAt = 1; // the next tick Detect may pull, given its governor sleeps
+  let maxBacklog = 0;
+  let nextCheckpoint = 0;
+
+  for (let tick = 1; tick <= deadline; tick++) {
+    // Start-of-tick checkpoint evaluation, before this tick's arrivals and service.
+    while (nextCheckpoint < checkpoints.length) {
+      const cp = checkpoints[nextCheckpoint];
+      if (!cp || cp.atTick > tick) {
+        break;
+      }
+      const backlog = admitted - completed;
+      const isFinal = nextCheckpoint === checkpoints.length - 1;
+      if (backlog !== 0) {
+        return {
+          outcome: "failed",
+          failedCheckpoint: nextCheckpoint,
+          backlogAtFailure: backlog,
+          maxBacklog,
+        };
+      }
+      if (isFinal) {
+        return { outcome: "won", failedCheckpoint: -1, backlogAtFailure: 0, maxBacklog };
+      }
+      nextCheckpoint += 1;
+    }
+
+    // Admit this tick's arrivals, held back by the backpressure ceiling.
+    scheduledCum += arrivals[tick] ?? 0;
+    admitted = Math.min(scheduledCum, completed + ceiling);
+
+    // Serve as many Events as the governor allows this tick.
+    while (tick >= detectFreeAt && admitted > completed) {
+      const sleep = governor.charge();
+      completed += 1;
+      admitted = Math.min(scheduledCum, completed + ceiling);
+      if (sleep > 0) {
+        detectFreeAt = tick + sleep; // busy through the sleep, resuming later
+        break;
+      }
+    }
+    maxBacklog = Math.max(maxBacklog, admitted - completed);
+  }
+
+  const remaining = admitted - completed;
+  return {
+    outcome: remaining === 0 ? "won" : "failed",
+    failedCheckpoint: remaining === 0 ? -1 : checkpoints.length - 1,
+    backlogAtFailure: remaining,
+    maxBacklog,
+  };
+}
+
+describe("band extraction parity (frozen oracle)", () => {
+  // The oracle is 1-based; the extracted `simulate` is now 0-based. They agree on
+  // this curve because the schedule places no arrival at tick 0 (the intro alone
+  // is 120 ticks), so the extra tick 0 the 0-based loop visits is a no-op. This
+  // sweep is what proves that equivalence.
+  it("matches the frozen pre-extraction simulate on every SimResult field, across the OMEGA/skew sweep", () => {
+    for (const omega of OMEGA_BAND) {
+      for (const skew of SKEW_BAND) {
+        const naiveRate = rateFor(NAIVE_CODE_PER_ANCHOR, omega, skew);
+        const tallyRate = rateFor(TALLY_CODE_PER_ANCHOR, omega, 1 / skew);
+        for (const rate of [naiveRate, tallyRate]) {
+          expect(simulate(rate)).toEqual(frozenSimulate(rate));
+        }
       }
     }
   });

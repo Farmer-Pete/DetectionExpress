@@ -20,9 +20,12 @@ export interface Wave {
 
 /**
  * A run gate the engine evaluates at the start of `atTick`, before that tick's
- * task continuations resume. It clears every wave up to and including
- * `clearsThroughWave` (a zero-based wave index). The checkpoint after the last
- * wave is the final deadline. See GH3-PLAN.md section 5.3.
+ * task continuations resume. It clears every record already due through
+ * `clearsThroughWave` (a zero-based wave index) — the events admitted and
+ * completed so far, not every event a wave will ever emit, since a wave can
+ * still be in flight or an event can arrive late inside a drain gap. The
+ * checkpoint after the last wave is the final deadline. See GH3-PLAN.md
+ * section 5.3.
  */
 export interface Checkpoint {
   atTick: number;

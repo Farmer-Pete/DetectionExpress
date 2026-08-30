@@ -11,18 +11,15 @@
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
 import {
-  DRAIN_GAP_TICKS,
   GAME_SECONDS_PER_TICK,
-  INTRO_TICKS,
   PIN_BRUTE_FORCE_THRESHOLD,
   PIN_BRUTE_FORCE_WINDOW_S,
-  WAVE_DURATION_TICKS,
-  WAVE_RATES,
 } from "../../../game/tuning";
 import type { Attack } from "../../attack";
 import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import { generateKiosk } from "../../endpoints/kiosk/internal";
-import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../../scenario";
+import type { GeneratedRun, Scenario } from "../../scenario";
+import { buildSchedule } from "../../schedule";
 import { attackFromPlan, planAttacks } from "./attacks";
 
 /** Accounts in the pool. One distinct victim per wave; the rest stay benign. */
@@ -38,25 +35,6 @@ interface Draft {
   payload: RawKioskV1;
   /** Creation order, the stable tiebreak when two Events share a time. */
   seq: number;
-}
-
-/**
- * The wave ramp and the checkpoints, derived from the tuning schedule. Wave 1
- * follows the intro; each later wave starts at the prior wave's checkpoint, so the
- * waves are half-open and never overlap. Each checkpoint sits a drain gap past its
- * wave's end; the last one is the final deadline.
- */
-export function buildSchedule(): { waves: Wave[]; checkpoints: Checkpoint[] } {
-  const waves: Wave[] = [];
-  const checkpoints: Checkpoint[] = [];
-  let start = INTRO_TICKS;
-  WAVE_RATES.forEach((eventsPerTick, index) => {
-    waves.push({ startTick: start, durationTicks: WAVE_DURATION_TICKS, eventsPerTick });
-    const atTick = start + WAVE_DURATION_TICKS + DRAIN_GAP_TICKS;
-    checkpoints.push({ atTick, clearsThroughWave: index });
-    start = atTick; // the next wave starts at this checkpoint: no overlap, no gap-jump
-  });
-  return { waves, checkpoints };
 }
 
 /** Build a stable pool of distinct account names from the seeded faker. */
