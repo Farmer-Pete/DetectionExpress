@@ -156,10 +156,15 @@ describe("store selection", () => {
     expect(useGameStore.getState().selection).toBeNull();
   });
 
-  it("setSnapshot clears a selection when a run restart resets seq from zero", () => {
-    useGameStore.getState().selectFinding(42);
-    // A fresh run's first snapshot carries low seqs; the old seq 42 is gone.
-    useGameStore.getState().setSnapshot(snapshotWith([finding(0), finding(1)]));
+  it("clears a stale selection across a run restart so a reused seq cannot alias", () => {
+    useGameStore.getState().selectFinding(0);
+    // A restart publishes an empty snapshot first (run-controller), which clears the
+    // selection because seq 0 is no longer present.
+    useGameStore.getState().setSnapshot(snapshotWith([]));
+    expect(useGameStore.getState().selection).toBeNull();
+    // The fresh run then reuses seq 0 for a different finding; selection stays cleared,
+    // so the old selection never aliases the new seq-0 finding.
+    useGameStore.getState().setSnapshot(snapshotWith([finding(0)]));
     expect(useGameStore.getState().selection).toBeNull();
   });
 

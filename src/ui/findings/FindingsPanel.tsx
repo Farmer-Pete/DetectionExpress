@@ -6,9 +6,9 @@
  * toggles the selection, and a click on the empty panel background clears it.
  *
  * The background-clear listener lives on the document, not on the panel element, so
- * the panel div stays plain and presentational (matching the IntroOverlay backdrop
- * pattern). It clears only when the click lands on the bare panel background, never on
- * a row or a card.
+ * the panel div stays plain and presentational. It uses IntroOverlay's document-level
+ * listener technique, but with a stricter check: it clears only when the click target
+ * is the bare panel background itself, never a row, a card, or anything outside.
  *
  * `buildFindingGroups` runs each render. The live set is small and bounded, and the
  * sim publishes a fresh frozen array every tick, so a `useMemo` on that reference
@@ -88,7 +88,12 @@ function FindingGroupCard({ group, selectedSeq, onSelect }: GroupCardProps) {
         {group.entity !== null ? (
           <span className="findings-entity-chip">
             {group.entityKind !== undefined ? (
-              <span className="findings-entity-kind">{group.entityKind}</span>
+              <>
+                <span className="findings-entity-kind">{group.entityKind}</span>
+                {/* A spoken separator so a screen reader does not run the kind and the
+                    value together, e.g. "account acct-7". */}
+                <span className="visually-hidden">: </span>
+              </>
             ) : null}
             <span className="findings-entity-value">{group.entity}</span>
           </span>
@@ -98,6 +103,9 @@ function FindingGroupCard({ group, selectedSeq, onSelect }: GroupCardProps) {
         {group.agreement ? (
           <span className="findings-agreement" title="Two hunts agree on this entity">
             Agreement
+            {/* The visible word carries the signal; this spells it out for a screen
+                reader, since a title tooltip is not reliably announced. */}
+            <span className="visually-hidden"> — two hunts corroborate this entity</span>
           </span>
         ) : null}
       </div>

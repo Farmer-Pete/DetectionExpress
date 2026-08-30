@@ -81,8 +81,9 @@ describe("buildFindingGroups grouping", () => {
     );
     expect(groups).toHaveLength(2);
     expect(groups[0]?.entity).toBeNull();
-    expect(groups[0]?.key).toBe("ungrouped::1");
-    expect(groups[1]?.key).toBe("ungrouped::2");
+    expect(groups[1]?.entity).toBeNull();
+    // Distinct keys, so the two solo findings never merge into one group.
+    expect(groups[0]?.key).not.toBe(groups[1]?.key);
   });
 });
 
@@ -133,6 +134,33 @@ describe("buildFindingGroups agreement", () => {
   });
 });
 
+describe("buildFindingGroups key collisions", () => {
+  it("does not merge a grouped finding with a solo finding whose old keys would collide", () => {
+    const { groups } = buildFindingGroups(
+      [
+        // The old `${subjectType}::${entity}` key was `ungrouped::1` here...
+        live({ seq: 2, subjectType: "ungrouped", entity: "1", state: "hit", reason: "r1" }),
+        // ...and the old solo key `ungrouped::${seq}` was also `ungrouped::1` for seq 1.
+        live({ seq: 1, state: "hit", reason: "r2" }),
+      ],
+      null,
+    );
+    expect(groups).toHaveLength(2);
+  });
+
+  it("keeps two groups apart when a value contains the old separator", () => {
+    const { groups } = buildFindingGroups(
+      [
+        live({ seq: 1, subjectType: "a", entity: "b::c", state: "hit", reason: "r1" }),
+        live({ seq: 2, subjectType: "a::b", entity: "c", state: "hit", reason: "r2" }),
+      ],
+      null,
+    );
+    expect(groups).toHaveLength(2);
+    expect(groups.every((g) => !g.agreement)).toBe(true);
+  });
+});
+
 describe("buildFindingGroups ranking", () => {
   it("orders by hit count, then watch count, then recency", () => {
     const { groups } = buildFindingGroups(
@@ -148,6 +176,22 @@ describe("buildFindingGroups ranking", () => {
       null,
     );
     expect(groups.map((g) => g.entity)).toEqual(["b", "c", "a"]);
+  });
+
+  it("breaks a hit-count tie by watch count", () => {
+    const { groups } = buildFindingGroups(
+      [
+        // group a: 1 hit, 1 watch, more recent
+        live({ seq: 1, subjectType: "account", entity: "a", reason: "r1", state: "hit", at: 9 }),
+        live({ seq: 2, subjectType: "account", entity: "a", reason: "r2", state: "watch", at: 9 }),
+        // group b: 1 hit, 2 watches -> more watches ranks it above a despite an older `at`
+        live({ seq: 3, subjectType: "account", entity: "b", reason: "r1", state: "hit", at: 1 }),
+        live({ seq: 4, subjectType: "account", entity: "b", reason: "r2", state: "watch", at: 1 }),
+        live({ seq: 5, subjectType: "account", entity: "b", reason: "r3", state: "watch", at: 1 }),
+      ],
+      null,
+    );
+    expect(groups.map((g) => g.entity)).toEqual(["b", "a"]);
   });
 
   it("sorts hits above watches within a group", () => {
@@ -210,7 +254,7 @@ describe("buildFindingGroups row shape", () => {
     expect(row?.citedCount).toBe(3);
   });
 
-  it("keeps the same seq when a watch promotes to a hit", () => {
+  it("carries the seq through unchanged for both watch and hit inputs", () => {
     const watch = buildFindingGroups(
       [live({ seq: 4, subjectType: "account", entity: "a", state: "watch" })],
       null,

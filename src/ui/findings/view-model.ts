@@ -22,7 +22,7 @@ export interface FindingRow {
 
 /** One entity's findings, or a single entity-less finding rendered solo. */
 export interface FindingGroup {
-  /** Grouped: `${subjectType}::${entity}`. Solo: `ungrouped::${seq}`. */
+  /** A collision-free tagged JSON key: `["grouped", subjectType, entity]` or `["solo", seq]`. */
   key: string;
   /** The resolved entity, or null for an entity-less OneShot. */
   entity: string | null;
@@ -80,8 +80,9 @@ interface Draft {
  * Group findings by `(subjectType, entity)`, rank the groups, and report how many
  * fall past the visible cap. Keying on the pair, not the entity alone, keeps two
  * subject domains that resolve the same value apart, so agreement never fires across
- * them. An entity-less finding gets a unique `ungrouped::${seq}` key, so it renders
- * solo and no live finding is ever dropped or merged away.
+ * them. An entity-less finding gets a unique per-seq key, so it renders solo and no
+ * live finding is ever dropped or merged away. The key is a tagged JSON tuple, so no
+ * odd entity value or subject type can collide two distinct groups onto one bucket.
  *
  * `selectedSeq` pins the selected finding's group into the first 12, even when it
  * ranks past the cap, so a selection never hides.
@@ -95,7 +96,13 @@ export function buildFindingGroups(
   for (const finding of findings) {
     const entity = finding.entity ?? null;
     const entityKind = finding.finding.subjectType;
-    const key = entity === null ? `ungrouped::${finding.seq}` : `${entityKind}::${entity}`;
+    // A tagged JSON tuple, collision-free: no two distinct (kind, entity) pairs or seqs
+    // encode to the same string, so an odd value (a "::" in an entity, a subjectType
+    // literally named "ungrouped") can never merge unrelated findings.
+    const key =
+      entity === null
+        ? JSON.stringify(["solo", finding.seq])
+        : JSON.stringify(["grouped", entityKind ?? null, entity]);
     const existing = drafts.get(key);
     if (existing) {
       existing.findings.push(finding);
