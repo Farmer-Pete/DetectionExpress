@@ -532,7 +532,7 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
     // Event: only scorer.advanceTo can settle the miss, dropping Correctness.
     const attack: Attack = {
       id: 1,
-      account: "root",
+      entity: "root",
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 10 },
       eventIds: [0, 1, 2, 3, 4],

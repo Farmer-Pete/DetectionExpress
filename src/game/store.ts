@@ -38,22 +38,37 @@ interface GameState {
   snapshot: SimSnapshot;
   /** The player's Algorithm source. The editor edits it; the run controller loads it. */
   source: string;
+  /**
+   * The active local-IDE override, or null in in-game-editor (source) mode. Set by the
+   * dev-only algorithms client when a watched file changes; the App reads it to choose a
+   * url-mode `AlgorithmSource` over the in-game `source`. Dev-only in practice, but
+   * generic and harmless in the static build (always null).
+   */
+  localAlgorithm: { path: string; version: number } | null;
   /** The deterministic level seed for the run. */
   seed: number;
   /** The current run or Rule error, or null. The editor shows it. */
   error: RuleErrorInfo | null;
   /**
-   * True while an external source drives the run (the dev host watches a file), so
-   * the editor locks its textarea. Generic, not dev-specific: the static build
-   * carries it too, always false and harmless.
+   * True while an external source drives the run (a local-IDE file, hot-reloaded by the
+   * algorithms-hmr plugin), so the editor locks its textarea. Generic, not dev-specific:
+   * the production build carries it too, always false and harmless.
    */
   sourceLocked: boolean;
+  /**
+   * True while a `run()` loads and profiles a source (the Apply dry-run, app mount, or
+   * a dev hot-reload). The editor disables Apply and reads "Checking..." while it holds.
+   * The run controller drives it; the editor reads it.
+   */
+  runPending: boolean;
   onNodesChange: OnNodesChange<PipelineNode>;
   onEdgesChange: OnEdgesChange;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
+  setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
   setError: (error: RuleErrorInfo | null) => void;
   setSourceLocked: (locked: boolean) => void;
+  setRunPending: (pending: boolean) => void;
 }
 
 const initialNodes: PipelineNode[] = [
@@ -74,15 +89,19 @@ export const useGameStore = create<GameState>((set) => ({
   edges: initialEdges,
   snapshot: emptySnapshot(),
   source: referenceSource,
+  localAlgorithm: null,
   seed: LEVEL_SEED,
   error: null,
   sourceLocked: false,
+  runPending: false,
   onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
   onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
   setSnapshot: (snapshot) => set({ snapshot }),
   setAlgorithmSource: (source) => set({ source }),
+  setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
+  setRunPending: (pending) => set({ runPending: pending }),
 }));
 
 /** The store graph, mapped to the validator's shape for the engine. */

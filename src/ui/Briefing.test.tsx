@@ -2,25 +2,34 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { Briefing } from "./Briefing";
+import { liveScenario } from "./content/narrative";
+
+function renderBriefing() {
+  render(<Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />);
+}
 
 describe("Briefing", () => {
   it("renders the scenario's briefing text", () => {
-    render(<Briefing text={kioskPinAttack.briefing} />);
+    renderBriefing();
     expect(screen.getByText(kioskPinAttack.briefing)).toBeDefined();
   });
 
-  it("hints one Alert per Attack", () => {
-    render(<Briefing text={kioskPinAttack.briefing} />);
-    expect(screen.getByText(/one Alert per Attack/)).toBeDefined();
+  it("shows the tagline above the briefing", () => {
+    renderBriefing();
+    const tagline = screen.getByText(liveScenario.tagline);
+    const briefing = screen.getByText(kioskPinAttack.briefing);
+    // The briefing follows the tagline in the DOM, so the tagline sits above it.
+    const position = tagline.compareDocumentPosition(briefing);
+    expect(Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
-  it("states the 5-in-5-minutes Hunt plainly", () => {
-    render(<Briefing text={kioskPinAttack.briefing} />);
+  it("describes the burst raising one Alert, in the new voice", () => {
+    renderBriefing();
+    expect(screen.getByText(/one Alert for the whole burst/)).toBeDefined();
+  });
+
+  it("states the 5-in-5-minutes pattern plainly", () => {
+    renderBriefing();
     expect(screen.getByText(/five.*minutes|5.*minutes/i)).toBeDefined();
-  });
-
-  it("explains the Compute gauge cost", () => {
-    render(<Briefing text={kioskPinAttack.briefing} />);
-    expect(screen.getByText(/Compute gauge/)).toBeDefined();
   });
 });

@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { SCENARIO_SLUGS, scenarioFileName, scenarioSlug } from "./scenarios";
 
+// The slug pattern the dev plugin (`src/dev/algorithms-hmr.ts`) validates a slug
+// against before it touches the filesystem. A slug also caps at this length.
 const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
-// Mirrors the host's DEVHOST_MAX_SLUGS cap (dd-dev.mjs). The host is untyped JS, so
-// the test asserts against the same small number rather than importing it, and the
-// host's own build check guards the packaged Scenario count against the real constant.
-const DEVHOST_MAX_SLUGS = 64;
+const MAX_SLUGS = 64;
 
 describe("scenarios", () => {
-  it("maps every Scenario id to a slug that matches the host's slug pattern", () => {
+  it("maps every Scenario id to a slug that matches the dev plugin's slug pattern", () => {
     for (const slug of Object.values(SCENARIO_SLUGS)) {
       expect(slug).toMatch(SLUG_PATTERN);
     }
@@ -19,8 +18,8 @@ describe("scenarios", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  it("keeps the Scenario count below the host's per-slug channel cap", () => {
-    expect(Object.keys(SCENARIO_SLUGS).length).toBeLessThan(DEVHOST_MAX_SLUGS);
+  it("keeps the Scenario count below the per-slug cap", () => {
+    expect(Object.keys(SCENARIO_SLUGS).length).toBeLessThan(MAX_SLUGS);
   });
 
   it("resolves the kiosk-pin-attack scenario to its slug", () => {
@@ -31,7 +30,7 @@ describe("scenarios", () => {
     expect(() => scenarioSlug("no-such-scenario")).toThrow();
   });
 
-  it("builds the on-disk Algorithm filename the dev host writes for a slug", () => {
-    expect(scenarioFileName("kiosk-pin-attack")).toBe("detection-express-kiosk-pin-attack.js");
+  it("builds the src/algorithms/<slug>.ts filename the editor's download uses", () => {
+    expect(scenarioFileName("kiosk-pin-attack")).toBe("kiosk-pin-attack.ts");
   });
 });

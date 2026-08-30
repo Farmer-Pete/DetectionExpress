@@ -7,9 +7,11 @@
  * its id, activates them in a fixed, seed-derived order, and then STEPS forward: a
  * half-open `advanceTo(horizon)` runs every actor due below the horizon, `admit`
  * lets a transient enter at runtime, and a dormant actor is evicted so a perpetual
- * run stays bounded. `runActors` is a thin wrapper that runs one schedule straight
- * to a horizon, for the batch path and its byte-identical readings. Neither reads a
- * wall clock (ARCHITECTURE rule 8).
+ * run stays bounded. Due order is kept in an `ActorHeap`, a binary min-heap ordered
+ * by the exact `(nextTick, seededPriority, actorId)` tie-break, so pops come out in
+ * the same order the old linear scan produced. `runActors` is a thin wrapper that
+ * runs one schedule straight to a horizon, for the batch path and its byte-identical
+ * readings. Neither reads a wall clock (ARCHITECTURE rule 8).
  */
 import { randomLcg } from "d3-random";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
@@ -110,13 +112,127 @@ interface RunActorsInput<Reading, Env> {
   horizon: number;
 }
 
-/** The scheduler's per-actor record. Only the scheduler stores `nextTick`. */
+/**
+ * The scheduler's per-actor record: the actor, its rng stream, its tie-break
+ * priority, and the seed that fixed both (kept so eviction can free the live seed).
+ * The next tick lives on the heap entry, not here.
+ */
 interface ActorRecord<Reading, Env> {
   actor: Actor<Reading, Env>;
   rng: () => number;
   seededPriority: number;
-  nextTick: number | "dormant";
   seed: number;
+}
+
+/**
+ * One heap slot: a record due at a concrete tick. A dormant actor never gets an
+ * entry, so `nextTick` here is always a number, never `"dormant"`.
+ */
+interface HeapEntry<Reading, Env> {
+  record: ActorRecord<Reading, Env>;
+  nextTick: number;
+}
+
+/**
+ * A binary min-heap of due records, ordered by `(nextTick, seededPriority,
+ * actorId)`: numeric tick first, then priority, then JavaScript string `<` on the
+ * id. This is the same tie-break the old linear scan used, so the pop order, and
+ * therefore the output, is identical.
+ */
+class ActorHeap<Reading, Env> {
+  private readonly entries: HeapEntry<Reading, Env>[] = [];
+
+  get size(): number {
+    return this.entries.length;
+  }
+
+  /** The minimum entry, without removing it. */
+  peek(): HeapEntry<Reading, Env> | undefined {
+    return this.entries[0];
+  }
+
+  push(entry: HeapEntry<Reading, Env>): void {
+    this.entries.push(entry);
+    this.siftUp(this.entries.length - 1);
+  }
+
+  /** Remove and return the minimum entry. */
+  pop(): HeapEntry<Reading, Env> | undefined {
+    const top = this.entries[0];
+    if (top === undefined) {
+      return undefined;
+    }
+    const last = this.entries.pop();
+    if (this.entries.length > 0 && last !== undefined) {
+      this.entries[0] = last;
+      this.siftDown(0);
+    }
+    return top;
+  }
+
+  private less(a: HeapEntry<Reading, Env>, b: HeapEntry<Reading, Env>): boolean {
+    if (a.nextTick !== b.nextTick) {
+      return a.nextTick < b.nextTick;
+    }
+    if (a.record.seededPriority !== b.record.seededPriority) {
+      return a.record.seededPriority < b.record.seededPriority;
+    }
+    return a.record.actor.id < b.record.actor.id;
+  }
+
+  private siftUp(index: number): void {
+    let i = index;
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      const here = this.entries[i];
+      const there = this.entries[parent];
+      if (here === undefined || there === undefined || !this.less(here, there)) {
+        break;
+      }
+      this.entries[i] = there;
+      this.entries[parent] = here;
+      i = parent;
+    }
+  }
+
+  private siftDown(index: number): void {
+    let i = index;
+    const n = this.entries.length;
+    for (;;) {
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      let smallest = i;
+      const leftEntry = left < n ? this.entries[left] : undefined;
+      const smallestEntry = this.entries[smallest];
+      if (
+        leftEntry !== undefined &&
+        smallestEntry !== undefined &&
+        this.less(leftEntry, smallestEntry)
+      ) {
+        smallest = left;
+      }
+      const rightEntry = right < n ? this.entries[right] : undefined;
+      const currentSmallestEntry = this.entries[smallest];
+      if (
+        rightEntry !== undefined &&
+        currentSmallestEntry !== undefined &&
+        this.less(rightEntry, currentSmallestEntry)
+      ) {
+        smallest = right;
+      }
+      if (smallest === i) {
+        break;
+      }
+      const a = this.entries[i];
+      const b = this.entries[smallest];
+      if (a === undefined || b === undefined) {
+        break;
+      }
+      this.entries[i] = b;
+      this.entries[smallest] = a;
+      i = smallest;
+    }
+  }
 }
 
 /**
@@ -186,6 +302,12 @@ function resolveSeed(runSeed: number, id: string, live: ReadonlySet<number>): nu
   return seed;
 }
 
+/** A freshly built record, paired with the first tick its `start()` returned. */
+interface BuiltRecord<Reading, Env> {
+  record: ActorRecord<Reading, Env>;
+  nextTick: number | "dormant";
+}
+
 /**
  * Build one per-actor record in the locked construction order: one `randomLcg(seed)`,
  * then `seededPriority` as the first draw from that stream, then `actor.start`. Only
@@ -196,11 +318,11 @@ function resolveSeed(runSeed: number, id: string, live: ReadonlySet<number>): nu
 function buildRecord<Reading, Env>(
   actor: Actor<Reading, Env>,
   seed: number,
-): ActorRecord<Reading, Env> {
+): BuiltRecord<Reading, Env> {
   const rng = randomLcg(seed);
   const seededPriority = rng();
   const nextTick = actor.start({ rng });
-  return { actor, rng, seededPriority, nextTick, seed };
+  return { record: { actor, rng, seededPriority, seed }, nextTick };
 }
 
 /** True when a next tick is a valid non-negative integer (or `"dormant"`). */
@@ -224,30 +346,37 @@ export function createSchedule<Reading, Env>(
   }
   const seeds = assignSeeds(runSeed, ids);
 
+  // Due order lives in the heap; the records map tracks the live set for
+  // `activeIds`/eviction; `liveSeeds` backs the collision rehash on admission.
+  const heap = new ActorHeap<Reading, Env>();
   const records = new Map<string, ActorRecord<Reading, Env>>();
   const liveSeeds = new Set<number>();
   const initialFirstTicks = new Map<string, number>();
-  // Every id ever seen, startup or admitted, kept for the whole run. It outlives
-  // eviction, so a retired id is never reused (the plan's whole-run id contract).
-  const seenIds = new Set<string>(ids);
+  // The startup id set. It is fixed at construction (startup actors are never
+  // spawned at runtime), so it is bounded, unlike a per-admission log would be. It
+  // reserves every startup id — including a dormant starter's — for the whole run,
+  // so a startup id is never reused even after the actor is gone.
+  const startupIds = new Set<string>(ids);
+
   for (const actor of actors) {
     const seed = seeds.get(actor.id);
     if (seed === undefined) {
       throw new Error(`createSchedule: no seed for actor "${actor.id}".`);
     }
-    const record = buildRecord(actor, seed);
-    if (!isValidStart(record.nextTick)) {
+    const { record, nextTick } = buildRecord(actor, seed);
+    if (!isValidStart(nextTick)) {
       throw new Error(
-        `createSchedule: actor "${actor.id}" started at ${record.nextTick}, which is not "dormant" or a non-negative integer.`,
+        `createSchedule: actor "${actor.id}" started at ${nextTick}, which is not "dormant" or a non-negative integer.`,
       );
     }
     // A startup actor that begins dormant never runs, so it is not retained as a
-    // live record or seed and never appears in `activeIds()`. Its id stays in
-    // `seenIds`, so it is still never reused.
-    if (record.nextTick !== "dormant") {
+    // live record or seed and never appears in `activeIds()`. Its id stays reserved
+    // in `startupIds`, so it is still never reused.
+    if (nextTick !== "dormant") {
       records.set(actor.id, record);
       liveSeeds.add(seed);
-      initialFirstTicks.set(actor.id, record.nextTick);
+      initialFirstTicks.set(actor.id, nextTick);
+      heap.push({ record, nextTick });
     }
   }
 
@@ -264,47 +393,38 @@ export function createSchedule<Reading, Env>(
     const presences = new Map<string, Presence>();
     const dormant: string[] = [];
 
+    // Pop the earliest due record while it sits strictly below the horizon. The heap
+    // keeps the minimum at the top, so once the top is at or past the horizon every
+    // remaining record is later still and the step is done.
     for (;;) {
-      let best: ActorRecord<Reading, Env> | null = null;
-      let bestTick = 0;
-      for (const record of records.values()) {
-        const tick = record.nextTick;
-        if (tick === "dormant" || tick >= horizon) {
-          continue;
-        }
-        const wins =
-          best === null ||
-          tick < bestTick ||
-          (tick === bestTick &&
-            (record.seededPriority < best.seededPriority ||
-              (record.seededPriority === best.seededPriority && record.actor.id < best.actor.id)));
-        if (wins) {
-          best = record;
-          bestTick = tick;
-        }
-      }
-      if (best === null) {
+      const top = heap.peek();
+      if (top === undefined || top.nextTick >= horizon) {
         break;
       }
-      const result = best.actor.act({ env, rng: best.rng, tick: bestTick });
+      const entry = heap.pop();
+      if (entry === undefined) {
+        break;
+      }
+      const { record, nextTick: bestTick } = entry;
+      const result = record.actor.act({ env, rng: record.rng, tick: bestTick });
       for (const reading of result.readings) {
-        readings.push({ reading, actorId: best.actor.id, tick: bestTick });
+        readings.push({ reading, actorId: record.actor.id, tick: bestTick });
       }
       if (result.presence !== undefined) {
-        presences.set(best.actor.id, result.presence);
+        presences.set(record.actor.id, result.presence);
       }
       const next = result.nextTick;
       if (next !== "dormant" && (!Number.isInteger(next) || next <= bestTick)) {
         throw new Error(
-          `advanceTo: actor "${best.actor.id}" rescheduled to ${next}, which does not strictly advance ${bestTick}.`,
+          `advanceTo: actor "${record.actor.id}" rescheduled to ${next}, which does not strictly advance ${bestTick}.`,
         );
       }
       if (next === "dormant") {
-        records.delete(best.actor.id);
-        liveSeeds.delete(best.seed);
-        dormant.push(best.actor.id);
+        records.delete(record.actor.id);
+        liveSeeds.delete(record.seed);
+        dormant.push(record.actor.id);
       } else {
-        best.nextTick = next;
+        heap.push({ record, nextTick: next });
       }
     }
 
@@ -314,30 +434,33 @@ export function createSchedule<Reading, Env>(
 
   const admit = (admission: Admission<Reading, Env>): number => {
     const { actor } = admission;
-    if (seenIds.has(actor.id)) {
+    // Reject only a currently-reserved id: a live actor (in `records`) or a startup
+    // id. An evicted transient's id is not retained, so nothing grows without bound;
+    // spawners mint monotonic ids per prefix, so a live id is never regenerated.
+    if (records.has(actor.id) || startupIds.has(actor.id)) {
       throw new Error(`admit: actor id "${actor.id}" was already used; ids are never reused.`);
     }
     const seed = resolveSeed(runSeed, actor.id, liveSeeds);
-    const record = buildRecord(actor, seed);
-    if (record.nextTick === "dormant") {
+    const { record, nextTick } = buildRecord(actor, seed);
+    if (nextTick === "dormant") {
       throw new Error(
         `admit: transient "${actor.id}" started dormant; it must start at a real tick.`,
       );
     }
-    if (!isValidStart(record.nextTick)) {
+    if (!isValidStart(nextTick)) {
       throw new Error(
-        `admit: transient "${actor.id}" started at ${record.nextTick}, which is not a non-negative integer.`,
+        `admit: transient "${actor.id}" started at ${nextTick}, which is not a non-negative integer.`,
       );
     }
-    if (record.nextTick < frontier) {
+    if (nextTick < frontier) {
       throw new Error(
-        `admit: transient "${actor.id}" starts at ${record.nextTick}, before the frontier ${frontier}.`,
+        `admit: transient "${actor.id}" starts at ${nextTick}, before the frontier ${frontier}.`,
       );
     }
     records.set(actor.id, record);
     liveSeeds.add(seed);
-    seenIds.add(actor.id);
-    return record.nextTick;
+    heap.push({ record, nextTick });
+    return nextTick;
   };
 
   return {

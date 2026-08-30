@@ -11,18 +11,15 @@
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
 import {
-  DRAIN_GAP_TICKS,
   GAME_SECONDS_PER_TICK,
-  INTRO_TICKS,
   PIN_BRUTE_FORCE_THRESHOLD,
   PIN_BRUTE_FORCE_WINDOW_S,
-  WAVE_DURATION_TICKS,
-  WAVE_RATES,
 } from "../../../game/tuning";
 import type { Attack } from "../../attack";
 import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import { generateKiosk } from "../../endpoints/kiosk/internal";
-import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../../scenario";
+import type { GeneratedRun, Scenario } from "../../scenario";
+import { buildSchedule } from "../../schedule";
 import { attackFromPlan, planAttacks } from "./attacks";
 
 /** Accounts in the pool. One distinct victim per wave; the rest stay benign. */
@@ -38,25 +35,6 @@ interface Draft {
   payload: RawKioskV1;
   /** Creation order, the stable tiebreak when two Events share a time. */
   seq: number;
-}
-
-/**
- * The wave ramp and the checkpoints, derived from the tuning schedule. Wave 1
- * follows the intro; each later wave starts at the prior wave's checkpoint, so the
- * waves are half-open and never overlap. Each checkpoint sits a drain gap past its
- * wave's end; the last one is the final deadline.
- */
-export function buildSchedule(): { waves: Wave[]; checkpoints: Checkpoint[] } {
-  const waves: Wave[] = [];
-  const checkpoints: Checkpoint[] = [];
-  let start = INTRO_TICKS;
-  WAVE_RATES.forEach((eventsPerTick, index) => {
-    waves.push({ startTick: start, durationTicks: WAVE_DURATION_TICKS, eventsPerTick });
-    const atTick = start + WAVE_DURATION_TICKS + DRAIN_GAP_TICKS;
-    checkpoints.push({ atTick, clearsThroughWave: index });
-    start = atTick; // the next wave starts at this checkpoint: no overlap, no gap-jump
-  });
-  return { waves, checkpoints };
 }
 
 /** Build a stable pool of distinct account names from the seeded faker. */
@@ -176,7 +154,7 @@ function assertFair(drafts: Draft[], victims: Set<string>, attacks: Attack[]): v
  * worst window in one pass.
  */
 function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
-  const windowByAccount = new Map(attacks.map((a) => [a.account, a.window]));
+  const windowByAccount = new Map(attacks.map((a) => [a.entity, a.window]));
   const failsByAccount = new Map<string, Draft[]>();
   for (const d of drafts) {
     if (d.outcome !== "fail") {
@@ -215,19 +193,19 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
 }
 
 /**
- * The Hunt text, shown to the player before they touch the Rule. States the
- * 5-in-5-minutes pattern plainly and warns against alert spam, since one Alert
- * per Attack is the actual skill being tested.
+ * The briefing for the live scenario, shown above the Engine. It carries the new
+ * voice: what the chaos is, and how the finished Engine answers it. It keeps the
+ * real facts, five wrong PINs in five minutes and one Alert per burst, and it
+ * describes the Engine at work rather than asking the player to write a Rule.
  */
 const briefing =
-  "This Hunt is the kiosk PIN brute force. Five or more wrong PINs on one " +
-  "account inside five minutes make an Attack. Normalize the raw kiosk " +
-  "Events, then write the Detect Rule to catch that burst per account and " +
-  "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
-  "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
-  "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +
-  "slow Rule reads high and falls behind the rising waves, so apply the " +
-  "Optimization to lower that cost.";
+  "A PIN brute force hits a station kiosk. One rider account takes five or more " +
+  "wrong PINs inside five minutes. That burst is the Attack. Watch the Engine " +
+  "read the raw kiosk PIN entries, normalize them, and count the failures per account. " +
+  "When a burst crosses the line, it raises one Alert for the whole burst, not " +
+  "one per entry. Normal traffic keeps rising in waves. Watch the Compute gauge: " +
+  "the Engine holds its speed and stays ahead of the backlog while it catches " +
+  "every burst.";
 
 export const kioskPinAttack: Scenario = {
   id: "kiosk-pin-attack",

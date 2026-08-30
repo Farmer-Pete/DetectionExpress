@@ -336,6 +336,17 @@ winnability and performance-band tests against the generated traffic. Ticket #30
 this. It stops at one rider's coherent day and a small benign stream, before the wave schedule
 becomes load-bearing.
 
+**2026-08-30 (#89):** Resolved. The wave admission controller (`src/sim/actors/admission.ts`)
+covers an arrivals-only envelope: `WAVE_RATES` bounds trips *started* per tick, reproducing the
+kiosk fractional accumulator exactly, not total event volume. A gap is arrival-quiet, not
+event-silent — a drain gap and even a later wave may still carry an in-flight trip's tap-out,
+since a rider is never clamped mid-ride. The final deadline is data-derived, not read from the
+governor or the wave math: it is the real last event's tick, plus one, plus `DRAIN_GAP_TICKS`, and
+a guard test pins the contract (`admitted === completed === events.length` on a win) so an engine
+change would fail loudly rather than drift silently. Checkpoints clear records already admitted and
+completed so far, never a wave's full eventual count. See `src/sim/scenarios/fare-gate-rush/run.ts`
+and issue #89.
+
 ## Anomaly injection
 
 An attack is a deviant actor, added after the benign baseline. Each deviation is small and

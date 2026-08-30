@@ -22,7 +22,7 @@ import { adaptLoaded, parseRequest } from "./worker-support";
 addEventListener("message", (event: MessageEvent) => {
   try {
     const request = parseRequest(event.data);
-    loadAlgorithm(request.source)
+    loadAlgorithm(request.target)
       .then((algorithm) => {
         // `profile` can throw synchronously (a rule that returns a wrong shape);
         // that lands in this promise chain and is caught below.

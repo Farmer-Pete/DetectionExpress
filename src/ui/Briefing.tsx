@@ -1,15 +1,19 @@
 /**
- * The Briefing panel: the Scenario's Hunt text. It sits above the Algorithm
- * editor so the player reads the objective before writing the Rule.
+ * The Briefing panel: the live scenario's tagline above its briefing text. It sits
+ * above the engine so the player reads what the chaos is, and how the engine
+ * answers it, before watching the run. The tagline is UI prose from `narrative.ts`;
+ * the briefing string belongs to the Scenario contract.
  */
 interface BriefingProps {
+  tagline: string;
   text: string;
 }
 
-export function Briefing({ text }: BriefingProps) {
+export function Briefing({ tagline, text }: BriefingProps) {
   return (
     <div className="briefing">
       <div className="briefing-title">Briefing</div>
+      <p className="briefing-tagline">{tagline}</p>
       <p className="briefing-text">{text}</p>
     </div>
   );

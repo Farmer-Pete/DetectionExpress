@@ -1,10 +1,10 @@
 /**
  * The UI-side Scenario slug map. The Scenario carries a stable `id` but no filename;
- * the dev host writes `detection-express-<slug>.js` from a logical name, so the app
- * turns each Scenario id into a slug here. The map is explicit and injective: every
- * value matches the host's slug pattern (`^[a-z0-9-]{1,64}$`) and no two ids share a
- * slug, so distinct Scenarios never collide on one file. `sim/` never learns about
- * files, so this lives in `ui/`, not the Scenario.
+ * the local-IDE flow keys an algorithm file on the slug (`src/algorithms/<slug>.ts`), so
+ * the app turns each Scenario id into a slug here. The map is explicit and injective:
+ * every value matches the slug pattern (`^[a-z0-9-]{1,64}$`) and no two ids share a slug,
+ * so distinct Scenarios never collide on one file. `sim/` never learns about files, so
+ * this lives in `ui/`, not the Scenario.
  */
 export const SCENARIO_SLUGS: Record<string, string> = {
   "kiosk-pin-attack": "kiosk-pin-attack",
@@ -22,10 +22,11 @@ export function scenarioSlug(id: string): string {
 }
 
 /**
- * The Algorithm filename for a slug. This is the exact name the dev host writes on
- * disk (`detection-express-<slug>.js`), so a Scenario downloaded from the static build
- * drops straight into a local dev kit.
+ * The download filename for a slug: `<slug>.ts`, the name the local-IDE flow expects at
+ * `src/algorithms/<slug>.ts`. So a Scenario downloaded from the game drops straight in as
+ * the starting point a player then edits and types. The saved content is the current
+ * in-game source (JavaScript, valid TypeScript); the player adds types from there.
  */
 export function scenarioFileName(slug: string): string {
-  return `detection-express-${slug}.js`;
+  return `${slug}.ts`;
 }

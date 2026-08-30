@@ -4,47 +4,43 @@
  * that mode becomes visible and disposes it (permanently) on hide, so only the
  * visible mode's loop runs. React Strict Mode's mount/unmount/mount cycle is safe:
  * the factory yields a new controller per epoch and the cleanup disposes the old one.
- * Render never drives either loop.
+ * Render never drives either loop. The Apply button reloads the current Algorithm
+ * source.
  *
- * The dev-host-client lifecycle lives in its OWN unconditional effect, so a mode
- * switch never tears the dev client down or reconnects it. Under the `DEV_KIT` build
- * flag that effect builds and wires the client: it connects on mount and disconnects
- * on cleanup, maps the client's state to the store's generic `sourceLocked`, and
- * pushes each watched save into the pipeline run. The client and the `DevKitPanel` are
- * both loaded by a dynamic `import` behind the folded `DEV_KIT` gate, so neither is a
- * static input to the CDN build and both drop out entirely when `DEV_KIT` is false.
- *
- * The App is the state hub: the client's `onState` sets the store lock (an App
- * concern) and forwards the richer dev state to the panel through `subscribe`. "Stop
- * editing" disconnects the client and drops the ref; the next "Edit in my IDE"
- * rebuilds a fresh client, so reconnecting after a stop still works.
+ * A second, dev-only effect wires the local-IDE (algorithms hot-reload) client. Its
+ * whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
+ * production build inlines the gate to `false` and strips both the client and its
+ * loader out entirely; under test there is no `import.meta.hot`, so it stays inert
+ * too. That client maps a watched save into the run and drives the store's generic
+ * `sourceLocked` while a local file is authoritative. It lives in its own effect, so
+ * a mode switch never tears the dev client down or reconnects it.
  *
  * Tests inject controller factories through `createPipelineController` /
- * `createWorldController` and a dev-client factory through `createDevClient`, so the
- * app never loads the real loader, engine, or EventSource under test.
+ * `createWorldController`, so the app never loads the real loader or engine under test.
  */
 import { ReactFlowProvider } from "@xyflow/react";
-import { type FunctionComponent, useCallback, useEffect, useRef, useState } from "react";
-import { DEV_KIT, loadDevHostClient, loadDevKitPanel } from "../game/dev-flag";
-import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
+import { useEffect, useRef, useState } from "react";
+import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
+import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
+import { localAlgorithmUrl } from "../game/algorithms-resolve";
 import { createRunController, type RunController } from "../game/run-controller";
 import { getGraph, useGameStore } from "../game/store";
 import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
 import { useWorldStore, worldSpeed } from "../game/world-store";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
-import type { DevKitPanelProps } from "./DevKitPanel";
+import { ChaosLadder } from "./ChaosLadder";
+import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
+import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
+import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
-
-/** Builds a dev-host client from the deps the App wires. Injected in tests. */
-type DevClientFactory = (deps: DevHostClientDeps) => DevHostClient;
 
 /** Which mode is on screen. Only the visible mode's loop runs. */
 type View = "pipeline" | "metro";
@@ -56,10 +52,20 @@ function buildController(): RunController {
   return createRunController({
     scenario: kioskPinAttack,
     getGraph,
-    getSource: () => useGameStore.getState().source,
+    // The one discriminated input. A local override (set by the dev-only algorithms
+    // client) drives url mode; otherwise the in-game editor drives source mode.
+    getAlgorithmSource: () => {
+      const state = useGameStore.getState();
+      if (state.localAlgorithm !== null) {
+        const { path, version } = state.localAlgorithm;
+        return { kind: "url", path, version, url: localAlgorithmUrl(path, version) };
+      }
+      return { kind: "source", source: state.source };
+    },
     getSeed: () => useGameStore.getState().seed,
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,
+    setRunPending: useGameStore.getState().setRunPending,
   });
 }
 
@@ -81,86 +87,61 @@ interface AppProps {
   // and disposes it on hide (disposal is permanent). Tests inject stub factories.
   createPipelineController?: () => RunController;
   createWorldController?: () => WorldRunController;
-  createDevClient?: DevClientFactory;
-  // A test seam for the ASYNC load path: an injectable loader that resolves the
-  // factory over a promise, mirroring the real dynamic import. Production leaves it
-  // unset and uses `loadDevHostClient`.
-  loadDevClient?: () => Promise<DevClientFactory>;
 }
 
-export function App({
-  createPipelineController,
-  createWorldController,
-  createDevClient,
-  loadDevClient,
-}: AppProps = {}) {
+export function App({ createPipelineController, createWorldController }: AppProps = {}) {
   const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
-  const worldControllerRef = useRef<WorldRunController | null>(null);
-  const devClientRef = useRef<DevHostClient | null>(null);
-  const devFactoryRef = useRef<DevClientFactory | null>(null);
-  const startClientRef = useRef<((factory: DevClientFactory) => DevHostClient | null) | null>(null);
-  const loadClientRef = useRef<(() => Promise<DevHostClient | null>) | null>(null);
-  // The in-flight client load, so a second "Edit in my IDE" click during a load
-  // reuses it instead of building a second client (which would leak an EventSource).
-  const pendingClientRef = useRef<Promise<DevHostClient | null> | null>(null);
-  const devSubscriberRef = useRef<((state: DevState) => void) | null>(null);
-  const lastDevStateRef = useRef<DevState | null>(null);
-  const [Panel, setPanel] = useState<FunctionComponent<DevKitPanelProps> | null>(null);
+
+  // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
+  // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
+  // build or under test (no `import.meta.hot`).
+  const algoClientRef = useRef<AlgorithmsDevClient | null>(null);
+  const [algoReady, setAlgoReady] = useState(false);
+  const [localMode, setLocalMode] = useState(false);
+
+  // The intro overlay. The seen flag is read once, in a lazy initializer, so the
+  // overlay decision is made before first paint. A dismissing action records its
+  // intent in a ref, then an effect acts on it after the overlay has unmounted, so
+  // the scroll always lands on the mounted shell. The intent lives in a ref, not
+  // state, so the effect runs once per dismiss and never re-triggers itself.
+  const [introOpen, setIntroOpen] = useState(() => !hasSeenIntro());
+  const reopenRef = useRef<HTMLButtonElement>(null);
+  const pendingDismiss = useRef<{ scrollTarget: string | null } | null>(null);
+
+  // Dismiss the overlay. Every dismissing action marks the intro seen and records its
+  // scroll target for the post-close effect. A storage failure never blocks the close,
+  // since the wrapper swallows it.
+  const dismissIntro = (target: string | null): void => {
+    markIntroSeen();
+    pendingDismiss.current = { scrollTarget: target };
+    setIntroOpen(false);
+  };
+
+  // After the overlay unmounts, act on the recorded dismiss intent exactly once.
+  // A scroll action scrolls to its target, then moves focus there without a second
+  // scroll. Observe and Escape carry no target, so focus returns to the reopen
+  // control. Reading the anchor here, not at click time, keeps the scroll off the
+  // overlay.
+  useEffect(() => {
+    if (introOpen) {
+      return;
+    }
+    const pending = pendingDismiss.current;
+    if (pending === null) {
+      return;
+    }
+    pendingDismiss.current = null;
+    if (pending.scrollTarget !== null) {
+      const target = document.getElementById(pending.scrollTarget);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      target?.focus({ preventScroll: true });
+    } else {
+      reopenRef.current?.focus({ preventScroll: true });
+    }
+  }, [introOpen]);
 
   const slug = scenarioSlug(kioskPinAttack.id);
-
-  // Cache the last dev state and forward it to the current subscriber. A state emitted
-  // before the async DevKitPanel has subscribed would otherwise be dropped, leaving the
-  // panel stuck in its off state; the cache lets `subscribe` replay it on arrival.
-  const reportDev = useCallback((state: DevState): void => {
-    lastDevStateRef.current = state;
-    devSubscriberRef.current?.(state);
-  }, []);
-
-  const buildDeps = useCallback(
-    (): DevHostClientDeps => ({
-      scenarioSlug: slug,
-      applySource: (text: string): void => {
-        useGameStore.getState().setAlgorithmSource(text);
-        controllerRef.current?.run();
-      },
-      onState: (state: DevState): void => {
-        useGameStore.getState().setSourceLocked(state.path !== null);
-        reportDev(state);
-      },
-    }),
-    [slug, reportDev],
-  );
-
-  const subscribeDevState = useCallback((listener: (state: DevState) => void): (() => void) => {
-    devSubscriberRef.current = listener;
-    // Replay the cached state so a panel that subscribes after the event still sees it.
-    if (lastDevStateRef.current !== null) {
-      listener(lastDevStateRef.current);
-    }
-    return () => {
-      if (devSubscriberRef.current === listener) {
-        devSubscriberRef.current = null;
-      }
-    };
-  }, []);
-
-  // Record the in-flight client load so a concurrent `ensureClient` reuses it, and
-  // clear it once it settles. Stable, so it can be an effect dependency.
-  const trackPending = useCallback(
-    (promise: Promise<DevHostClient | null>): Promise<DevHostClient | null> => {
-      pendingClientRef.current = promise;
-      const clear = (): void => {
-        if (pendingClientRef.current === promise) {
-          pendingClientRef.current = null;
-        }
-      };
-      promise.then(clear, clear);
-      return promise;
-    },
-    [],
-  );
 
   // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
   // controller per visible epoch; the cleanup disposes it (permanently) on hide or
@@ -169,12 +150,12 @@ export function App({
     if (view !== "pipeline") {
       return;
     }
-    const controller = (createPipelineController ?? buildController)();
-    controllerRef.current = controller;
-    controller.run();
+    const active = (createPipelineController ?? buildController)();
+    controllerRef.current = active;
+    active.run();
     return () => {
-      controller.dispose();
-      if (controllerRef.current === controller) {
+      active.dispose();
+      if (controllerRef.current === active) {
         controllerRef.current = null;
       }
     };
@@ -186,208 +167,137 @@ export function App({
     if (view !== "metro") {
       return;
     }
-    const controller = (createWorldController ?? buildWorldController)();
-    worldControllerRef.current = controller;
-    controller.run();
+    const active = (createWorldController ?? buildWorldController)();
+    active.run();
     return () => {
-      controller.dispose();
-      if (worldControllerRef.current === controller) {
-        worldControllerRef.current = null;
-      }
+      active.dispose();
     };
   }, [view, createWorldController]);
 
-  // The dev-host-client lifecycle, UNCONDITIONAL, so a mode switch never tears the dev
-  // client down or reconnects it. It only wires the client; the pipeline controller it
-  // pushes sources into is owned by the effect above.
+  // Build the dev-only local-IDE client on mount, behind the folded `import.meta.env.DEV`
+  // gate and a live HMR channel. On a forced reload (Vite reloads when the active file is
+  // deleted) the persisted snapshot re-enters local mode automatically. Dispose on unmount
+  // keeps the snapshot, so a reload can still resume.
   useEffect(() => {
-    let cancelled = false;
-
-    const startClient = (factory: DevClientFactory): DevHostClient | null => {
-      if (cancelled) {
-        return null;
-      }
-      try {
-        const client = factory(buildDeps());
-        devClientRef.current = client;
-        // Remember the factory only once a client is built, so a build that threw
-        // leaves it null and `ensureClient` re-runs the load rather than the dead factory.
-        devFactoryRef.current = factory;
-        client.connect();
-        return client;
-      } catch {
-        reportDev({ status: "error", path: null, message: "The dev host is unavailable." });
-        return null;
-      }
-    };
-    startClientRef.current = startClient;
-
-    // The async factory source: an injected loader (tests), or the real dynamic import
-    // whose gate is co-located with the flag const so `dev-host-client` is stripped from
-    // the static build. Returns null when the dev kit is off.
-    const loadFactory = (): Promise<DevClientFactory> | null => {
-      if (loadDevClient) {
-        return loadDevClient();
-      }
-      const pending = loadDevHostClient();
-      return pending === null ? null : pending.then((mod) => mod.createDevHostClient);
-    };
-
-    // Load and start the client, resolving to the built client (or null on failure).
-    // Re-runnable, so a later "Edit in my IDE" can retry after a failed load or build
-    // (the factory stays null until one succeeds). The injected sync `createDevClient`
-    // builds synchronously so a mount-time connect is observable to tests.
-    const loadAndStart = (): Promise<DevHostClient | null> => {
-      if (cancelled) {
-        return Promise.resolve(null);
-      }
-      if (createDevClient) {
-        return Promise.resolve(startClient(createDevClient));
-      }
-      const factoryPromise = loadFactory();
-      if (factoryPromise === null) {
-        return Promise.resolve(null);
-      }
-      return factoryPromise
-        .then((factory) => startClient(factory))
-        .catch(() => {
-          if (!cancelled) {
-            reportDev({
-              status: "error",
-              path: null,
-              message: "The dev host client failed to load.",
-            });
-          }
-          return null;
-        });
-    };
-    loadClientRef.current = loadAndStart;
-
-    trackPending(loadAndStart());
-
-    return () => {
-      cancelled = true;
-      devClientRef.current?.disconnect();
-      devClientRef.current = null;
-      startClientRef.current = null;
-      loadClientRef.current = null;
-      pendingClientRef.current = null;
-    };
-  }, [createDevClient, loadDevClient, buildDeps, reportDev, trackPending]);
-
-  // Load the dev panel the same folded-gate way, so it never enters the static build.
-  useEffect(() => {
-    const pending = loadDevKitPanel();
-    if (pending === null) {
+    if (!import.meta.env.DEV) {
+      return;
+    }
+    const channel = devHotChannel();
+    if (channel === null) {
+      return; // no dev server (production build, or the test environment): no local mode
+    }
+    const loader = loadAlgorithmsDevClient();
+    if (loader === null) {
       return;
     }
     let cancelled = false;
-    pending
+    loader
       .then((mod) => {
-        if (!cancelled) {
-          setPanel(() => mod.DevKitPanel);
+        if (cancelled) {
+          return;
         }
+        const client = mod.createAlgorithmsDevClient({
+          slug,
+          channel,
+          store: {
+            getSource: () => useGameStore.getState().source,
+            setSource: (source) => useGameStore.getState().setAlgorithmSource(source),
+            setLocalAlgorithm: (value) => useGameStore.getState().setLocalAlgorithm(value),
+            setSourceLocked: (locked) => useGameStore.getState().setSourceLocked(locked),
+          },
+          run: () => controllerRef.current?.run(),
+          session: window.sessionStorage,
+        });
+        algoClientRef.current = client;
+        if (client.resume()) {
+          setLocalMode(true); // a forced reload re-entered local mode
+        }
+        setAlgoReady(true);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
+      algoClientRef.current?.dispose();
+      algoClientRef.current = null;
     };
-  }, []);
+  }, [slug]);
 
-  // Make sure a client exists before an edit, resolving to it. A "Stop editing" drops
-  // the client but keeps the known-good factory, so rebuild from it synchronously. A
-  // failed initial load or build leaves the factory null, so re-run the load (retrying
-  // the dynamic import). An in-flight load is reused, so one extra click cannot build a
-  // second client.
-  const ensureClient = (): Promise<DevHostClient | null> => {
-    if (devClientRef.current !== null) {
-      return Promise.resolve(devClientRef.current);
-    }
-    if (pendingClientRef.current !== null) {
-      return pendingClientRef.current;
-    }
-    const factory = devFactoryRef.current;
-    const start = startClientRef.current;
-    const load = loadClientRef.current;
-    if (factory !== null && start !== null) {
-      return trackPending(Promise.resolve(start(factory)));
-    }
-    if (load !== null) {
-      return trackPending(load());
-    }
-    return Promise.resolve(null);
+  const onEnterLocalMode = (): void => {
+    algoClientRef.current?.enter();
+    setLocalMode(true);
   };
 
-  const openWith = (client: DevHostClient): void => {
-    client.editInIde(slug, referenceSource).catch((error: unknown) => {
-      // Surface the dev host's specific reason (cap, invalid name, symlink) when it
-      // gave one, falling back to a generic line only when it did not.
-      const message =
-        error instanceof Error && error.message.length > 0
-          ? error.message
-          : "Could not open the Scenario file.";
-      reportDev({ status: "error", path: null, message });
-    });
+  const onStopLocalMode = (): void => {
+    algoClientRef.current?.stop();
+    controllerRef.current?.run(); // the restored in-game source drives the run again
+    setLocalMode(false);
   };
-
-  const onEditInIde = (): void => {
-    const pending = ensureClient();
-    // A known-good factory builds synchronously, so the client is ready now: open at
-    // once (keeps the click fully synchronous). Otherwise the load is async (a dynamic
-    // import); await it so one click after a failed load both reconnects AND opens,
-    // instead of the old two-click behavior.
-    if (devClientRef.current !== null) {
-      openWith(devClientRef.current);
-      return;
-    }
-    pending.then((client) => {
-      if (client !== null) {
-        openWith(client);
-      }
-    });
-  };
-
-  const onStopEditing = (): void => {
-    devClientRef.current?.disconnect();
-    devClientRef.current = null;
-    useGameStore.getState().setSourceLocked(false);
-    reportDev({ status: "off", path: null, message: null });
-  };
-
-  const devEnabled = DEV_KIT || createDevClient !== undefined || loadDevClient !== undefined;
 
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>Detection Express</h1>
-        <span className="slice-tag">Slice 1 &mdash; Spot the threat</span>
-        <button
-          type="button"
-          className="view-toggle"
-          onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
-        >
-          {view === "pipeline" ? "Metro view" : "Pipeline view"}
-        </button>
-      </header>
-      {view === "pipeline" ? (
-        <>
-          <Hud />
-          <ReactFlowProvider>
-            <Pipeline />
-          </ReactFlowProvider>
-          <Briefing text={kioskPinAttack.briefing} />
-          <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
-          {devEnabled && Panel !== null ? (
-            <Panel
-              onEditInIde={onEditInIde}
-              onStopEditing={onStopEditing}
-              subscribe={subscribeDevState}
-            />
-          ) : null}
-        </>
-      ) : (
-        <MetroView />
-      )}
+      {/* The shell. While the intro overlay is open it is `inert`, so a screen
+          reader's virtual cursor and the keyboard cannot reach it and the overlay
+          is truly modal. The overlay is a sibling of this container, so it stays
+          interactive. */}
+      <div className="app-shell" inert={introOpen}>
+        <header className="topbar">
+          <h1>Detection Express</h1>
+          <span className="slice-tag">Observe the Engine, then cause chaos</span>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="view-toggle"
+              onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
+            >
+              {view === "pipeline" ? "Metro view" : "Pipeline view"}
+            </button>
+            <button
+              type="button"
+              ref={reopenRef}
+              className="topbar-reopen"
+              onClick={() => setIntroOpen(true)}
+            >
+              How this works
+            </button>
+            <HireMe copy={hireMe} />
+          </div>
+        </header>
+        {view === "pipeline" ? (
+          <>
+            <Hud />
+            <ReactFlowProvider>
+              <Pipeline />
+            </ReactFlowProvider>
+            <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
+            <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+            <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+            {algoReady ? (
+              <div className="local-ide">
+                {localMode ? (
+                  <button type="button" onClick={onStopLocalMode}>
+                    Stop editing
+                  </button>
+                ) : (
+                  <button type="button" onClick={onEnterLocalMode}>
+                    Edit in IDE
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <MetroView />
+        )}
+      </div>
+      {introOpen ? (
+        <IntroOverlay
+          copy={introCopy}
+          repoUrl={REPO_URL}
+          onObserve={() => dismissIntro(null)}
+          onCauseChaos={() => dismissIntro("chaos-ladder")}
+          onEditEngine={() => dismissIntro("algorithm-editor")}
+        />
+      ) : null}
     </div>
   );
 }

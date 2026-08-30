@@ -1,20 +1,23 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
-import { beforeEach, describe, expect, it } from "vitest";
-import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { App } from "./App";
-import { scenarioSlug } from "./scenarios";
+import { hireMe, introCopy, liveScenario } from "./content/narrative";
+import { markIntroSeen } from "./onboarding-storage";
 
 // The zustand store is a singleton shared across test files, so reset the fields
-// this file reads before each test, or a leaked `sourceLocked` would hide the Run
+// this file reads before each test, or a leaked `sourceLocked` would hide the Apply
 // button. Mirrors the reset pattern in store.test.ts.
+//
+// The onboarding overlay covers the shell on first load. Shell tests seed the seen
+// flag so the overlay stays closed; the onboarding tests clear it to see the overlay.
 beforeEach(() => {
-  useGameStore.setState({ source: referenceSource, sourceLocked: false });
+  useGameStore.setState({ source: referenceSource, sourceLocked: false, runPending: false });
+  markIntroSeen();
 });
 
 /** A no-op controller so the test never touches the real loader or engine. */
@@ -57,7 +60,7 @@ function stubWorldController(): WorldRunController & { runs: number; disposes: n
   };
 }
 
-describe("App", () => {
+describe("App shell", () => {
   it("renders the heading, both gauges, and the Algorithm editor", () => {
     render(<App createPipelineController={() => stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
@@ -65,13 +68,118 @@ describe("App", () => {
     expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Backlog")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
-  it("runs the pipeline controller on mount", () => {
+  it("runs the controller on mount and disposes it on unmount", () => {
+    const controller = stubController();
+    const { unmount } = render(<App createPipelineController={() => controller} />);
+    expect(controller.runs).toBe(1);
+    unmount();
+    expect(controller.disposes).toBe(1);
+  });
+
+  it("does not mount the local-IDE control without a dev HMR channel", () => {
+    // The local-IDE client gates on a live `import.meta.hot` channel, which the test
+    // environment lacks, so neither the "Edit in IDE" nor "Stop editing" control shows.
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByRole("button", { name: "Edit in IDE" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Stop editing" })).toBeNull();
+  });
+
+  it("carries the Hire Me button and the reopen control in the topbar", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
+    expect(screen.getByRole("button", { name: /how this works/i })).toBeDefined();
+  });
+
+  it("renders the chaos ladder in the shell", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    expect(container.querySelector("#chaos-ladder")).not.toBeNull();
+    expect(screen.getByText(new RegExp(liveScenario.displayName))).toBeDefined();
+  });
+});
+
+describe("App onboarding", () => {
+  // Record the anchor id each scrollIntoView lands on, so a test asserts the target.
+  let scrollTargets: string[];
+  const original = Element.prototype.scrollIntoView;
+
+  beforeEach(() => {
+    localStorage.clear(); // show the overlay on first load
+    scrollTargets = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrollTargets.push(this.id);
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.scrollIntoView = original;
+  });
+
+  it("shows the intro overlay on first load and hides it after dismiss", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("scrolls to the chaos ladder, then focuses it, after Cause chaos dismisses", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The scroll and the focus both land on the chaos ladder after the overlay unmounts.
+    expect(scrollTargets).toContain("chaos-ladder");
+    expect(document.activeElement?.id).toBe("chaos-ladder");
+  });
+
+  it("scrolls to the engine editor, then focuses it, after Edit the Engine dismisses", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(scrollTargets).toContain("algorithm-editor");
+    expect(document.activeElement?.id).toBe("algorithm-editor");
+  });
+
+  it("reopens the overlay from the topbar without clearing the seen flag", () => {
+    const { unmount } = render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /how this works/i }));
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    // Reopen must not clear the flag. Unmount first so only one App tree is ever
+    // mounted, then a fresh mount still treats the intro as seen.
+    unmount();
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("returns focus to the reopen control after a reopen and dismiss", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    // The overlay is open on first load. Dismiss it, so the shell is live again.
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Reopen from the topbar, then dismiss again. Focus returns to the reopen button.
+    const reopen = screen.getByRole("button", { name: /how this works/i });
+    fireEvent.click(reopen);
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(reopen);
+  });
+
+  it("does not restart or dispose the controller when the overlay dismisses", () => {
     const controller = stubController();
     render(<App createPipelineController={() => controller} />);
     expect(controller.runs).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+    expect(controller.runs).toBe(1);
+    expect(controller.disposes).toBe(0);
   });
 });
 
@@ -143,206 +251,5 @@ describe("App view toggle", () => {
     expect(pipes[0]?.disposes).toBe(1);
     expect(pipes[1]?.runs).toBe(1);
     expect(pipes[1]?.disposes).toBe(0);
-  });
-});
-
-/** A fake dev-host client whose deps the App wires. Records the calls it receives. */
-function fakeDevKit() {
-  let deps: DevHostClientDeps | null = null;
-  let connects = 0;
-  let disconnects = 0;
-  const editCalls: Array<{ name: string; defaultSource: string }> = [];
-
-  const factory = (received: DevHostClientDeps): DevHostClient => {
-    deps = received;
-    return {
-      connect() {
-        connects += 1;
-      },
-      disconnect() {
-        disconnects += 1;
-      },
-      async editInIde(name, defaultSource) {
-        editCalls.push({ name, defaultSource });
-        return { path: "/algorithms/detection-express-kiosk-pin-attack.js", existed: true };
-      },
-    };
-  };
-
-  return {
-    factory,
-    deps: () => {
-      if (deps === null) {
-        throw new Error("the App never built the dev client");
-      }
-      return deps;
-    },
-    connects: () => connects,
-    disconnects: () => disconnects,
-    editCalls,
-  };
-}
-
-describe("App dev wiring", () => {
-  beforeEach(() => {
-    useGameStore.setState({ source: referenceSource, sourceLocked: false });
-  });
-
-  it("connects the dev client on mount and disconnects it on unmount", () => {
-    const dev = fakeDevKit();
-    const { unmount } = render(
-      <App createPipelineController={() => stubController()} createDevClient={dev.factory} />,
-    );
-    expect(dev.connects()).toBe(1);
-    unmount();
-    expect(dev.disconnects()).toBe(1);
-  });
-
-  it("locks the store when the client reports an active path and unlocks when it clears", () => {
-    const dev = fakeDevKit();
-    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
-    const onState = (state: DevState) => act(() => dev.deps().onState(state));
-
-    onState({ status: "connected", path: "/algorithms/x.js", message: null });
-    expect(useGameStore.getState().sourceLocked).toBe(true);
-
-    onState({ status: "connected", path: null, message: null });
-    expect(useGameStore.getState().sourceLocked).toBe(false);
-  });
-
-  it("applies a pushed source into the store and reruns the controller", () => {
-    const dev = fakeDevKit();
-    const controller = stubController();
-    render(<App createPipelineController={() => controller} createDevClient={dev.factory} />);
-    const runsBefore = controller.runs;
-
-    act(() => dev.deps().applySource("// pushed from my IDE"));
-
-    expect(useGameStore.getState().source).toBe("// pushed from my IDE");
-    expect(controller.runs).toBe(runsBefore + 1);
-  });
-
-  it("opens the Scenario file in the IDE with the Scenario slug and reference source", async () => {
-    const dev = fakeDevKit();
-    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
-
-    // The panel is loaded through the folded DEV_KIT gate, so it mounts asynchronously.
-    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
-    fireEvent.click(button);
-
-    expect(dev.editCalls).toEqual([
-      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
-    ]);
-  });
-
-  it("recovers a failed initial client build on a later Edit in my IDE click", async () => {
-    let attempts = 0;
-    let connects = 0;
-    const editCalls: Array<{ name: string; defaultSource: string }> = [];
-    const factory = (_deps: DevHostClientDeps): DevHostClient => {
-      attempts += 1;
-      if (attempts === 1) {
-        throw new Error("the dev host client failed to build");
-      }
-      return {
-        connect() {
-          connects += 1;
-        },
-        disconnect() {},
-        async editInIde(name, defaultSource) {
-          editCalls.push({ name, defaultSource });
-          return { path: "/algorithms/detection-express-kiosk-pin-attack.js", existed: true };
-        },
-      };
-    };
-
-    render(<App createPipelineController={() => stubController()} createDevClient={factory} />);
-
-    // The first build threw, so no client connected yet, but the panel still mounts.
-    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
-    expect(connects).toBe(0);
-
-    fireEvent.click(button);
-
-    // The click re-ran the build, connected the fresh client, and opened the file.
-    expect(connects).toBe(1);
-    expect(editCalls).toEqual([
-      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
-    ]);
-  });
-
-  it("recovers a failed ASYNC client load with a single later Edit in my IDE click", async () => {
-    // Drive the async load path (a dynamic import in production) through the injected
-    // loader: it rejects once, then resolves the factory. F4: after the failed load the
-    // first click must both reconnect AND open, not silently reconnect and need a second.
-    let attempts = 0;
-    let connects = 0;
-    const editCalls: Array<{ name: string; defaultSource: string }> = [];
-    const client: DevHostClient = {
-      connect() {
-        connects += 1;
-      },
-      disconnect() {},
-      async editInIde(name, defaultSource) {
-        editCalls.push({ name, defaultSource });
-        return { path: "/algorithms/detection-express-kiosk-pin-attack.js", existed: true };
-      },
-    };
-    const loadDevClient = (): Promise<(deps: DevHostClientDeps) => DevHostClient> => {
-      attempts += 1;
-      if (attempts === 1) {
-        return Promise.reject(new Error("the dynamic import failed"));
-      }
-      return Promise.resolve(() => client);
-    };
-
-    render(<App createPipelineController={() => stubController()} loadDevClient={loadDevClient} />);
-
-    // The first (mount) load rejected, so nothing connected, but the panel still mounts.
-    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
-    expect(connects).toBe(0);
-    expect(attempts).toBe(1);
-
-    // One click retries the async load, connects the fresh client, and opens the file.
-    await act(async () => {
-      fireEvent.click(button);
-    });
-
-    expect(connects).toBe(1);
-    expect(editCalls).toEqual([
-      { name: scenarioSlug(kioskPinAttack.id), defaultSource: referenceSource },
-    ]);
-  });
-
-  it("replays the last dev state to a panel that subscribes after the event", async () => {
-    const dev = fakeDevKit();
-    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
-
-    // Emit a dev state before the async panel has mounted and subscribed. Without a
-    // replay of the cached state, the panel would stay in its off state.
-    act(() => dev.deps().onState({ status: "connected", path: "/algorithms/x.js", message: null }));
-
-    // Once the panel subscribes it replays the cached state and shows the active path.
-    expect(await screen.findByText("/algorithms/x.js")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Stop editing" })).toBeDefined();
-  });
-
-  it("surfaces the host's failure message when opening the Scenario file fails", async () => {
-    const factory = (_deps: DevHostClientDeps): DevHostClient => ({
-      connect() {},
-      disconnect() {},
-      async editInIde() {
-        throw new Error("The dev host is at capacity.");
-      },
-    });
-
-    render(<App createPipelineController={() => stubController()} createDevClient={factory} />);
-    const button = await screen.findByRole("button", { name: "Edit in my IDE" });
-    fireEvent.click(button);
-
-    // Scope to the message text: the HUD is also a role="status" region, so a bare
-    // findByRole("status") would race against the dev panel's error status.
-    const status = await screen.findByText("The dev host is at capacity.");
-    expect(status.getAttribute("role")).toBe("status");
   });
 });

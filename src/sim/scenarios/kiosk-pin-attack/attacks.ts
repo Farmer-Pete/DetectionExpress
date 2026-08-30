@@ -82,7 +82,7 @@ export function planAttacks(
 export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
   return {
     id: plan.id,
-    account: plan.account,
+    entity: plan.account,
     reason: PIN_BRUTE_FORCE_REASON,
     window: plan.window,
     eventIds,
