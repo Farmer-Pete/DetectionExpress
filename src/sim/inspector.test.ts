@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import { createInspector } from "./inspector";
+
+/** An object that cites itself, so `JSON.stringify` throws on it. */
+function makeCircular(): { self?: unknown } {
+  const circular: { self?: unknown } = {};
+  circular.self = circular;
+  return circular;
+}
+
+describe("createInspector ring", () => {
+  it("pairs raw with normalized and keeps events id-ordered", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", { u: "bob" }, { user: "bob" });
+    inspector.captureNormalized(1, 2, "kiosk-v1", { u: "amy" }, { user: "amy" });
+    const { events } = inspector.snapshot();
+    expect(events).toEqual([
+      { id: 0, ts: 0, endpoint: "kiosk-v1", raw: { u: "bob" }, normalized: { user: "bob" } },
+      { id: 1, ts: 2, endpoint: "kiosk-v1", raw: { u: "amy" }, normalized: { user: "amy" } },
+    ]);
+  });
+
+  it("evicts the oldest event once past ringSize, keeping id order", () => {
+    const inspector = createInspector({ ringSize: 3 });
+    for (let id = 0; id < 5; id++) {
+      inspector.captureNormalized(id, id, "kiosk-v1", { id }, { id });
+    }
+    const { events } = inspector.snapshot();
+    expect(events.map((e) => e.id)).toEqual([2, 3, 4]);
+  });
+
+  it("stores a null placeholder for a non-serializable raw, but keeps the entry", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    const circular = makeCircular();
+    inspector.captureNormalized(0, 0, "kiosk-v1", circular, { user: "bob" });
+    const { events } = inspector.snapshot();
+    expect(events).toHaveLength(1); // the entry is kept, not dropped: id continuity holds
+    expect(events[0]?.raw).toBeNull();
+    expect(events[0]?.normalized).toEqual({ user: "bob" });
+  });
+
+  it("stores a null placeholder for a non-serializable normalized form independently", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    const circular = makeCircular();
+    inspector.captureNormalized(0, 0, "kiosk-v1", { u: "bob" }, circular);
+    const { events } = inspector.snapshot();
+    expect(events[0]?.raw).toEqual({ u: "bob" });
+    expect(events[0]?.normalized).toBeNull();
+  });
+
+  it("never throws on a non-serializable form", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    const circular = makeCircular();
+    expect(() => inspector.captureNormalized(0, 0, "kiosk-v1", circular, circular)).not.toThrow();
+  });
+});
+
+describe("createInspector watermark", () => {
+  it("markProcessed increments the count and never goes backward", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    expect(inspector.snapshot().processed).toBe(0);
+    inspector.markProcessed();
+    expect(inspector.snapshot().processed).toBe(1);
+    inspector.markProcessed();
+    inspector.markProcessed();
+    expect(inspector.snapshot().processed).toBe(3);
+  });
+});
+
+describe("createInspector snapshot", () => {
+  it("returns a fresh frozen events array on every call", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", {}, {});
+    const first = inspector.snapshot();
+    expect(Object.isFrozen(first.events)).toBe(true);
+    const second = inspector.snapshot();
+    expect(second.events).not.toBe(first.events); // a new array each call
+    expect(second.events).toEqual(first.events); // with the same contents
+  });
+
+  it("does not let a caller mutate future snapshots through the returned array", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", {}, {});
+    const first = inspector.snapshot();
+    inspector.captureNormalized(1, 2, "kiosk-v1", {}, {});
+    expect(first.events).toHaveLength(1); // the earlier snapshot did not grow
+  });
+});

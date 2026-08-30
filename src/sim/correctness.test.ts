@@ -387,16 +387,20 @@ describe("scorer decisions", () => {
     expect(log.map((d) => d.at)).toEqual([100, 5]); // at falls: not an ordering key
   });
 
-  it("clones the finding, so mutating the source after record leaves the decision intact", () => {
-    const widget = { type: "text" as const, text: "orig" };
+  it("stores an independent frozen clone of the finding in the decision", () => {
+    // record() freezes its input findings in place (the live path is freeze-only), so
+    // the source cannot be mutated after the call. The decision still holds its own
+    // deep clone, proven here by object identity, not by mutating a now-frozen source.
     const finding: Finding = {
       alert: { reason: REASON, at: 50, eventIds: [10, 11] },
-      context: [widget],
+      context: [{ type: "text" as const, text: "orig" }],
     };
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
     s.record([sf(finding)], at(50));
-    widget.text = "changed"; // mutate the source after recording
-    const stored = asCaught(s.decisions()[0]).finding.context?.[0];
+    const dec = asCaught(s.decisions()[0]);
+    expect(dec.finding).not.toBe(finding); // an independent copy, not the caller's object
+    expect(Object.isFrozen(dec.finding)).toBe(true);
+    const stored = dec.finding.context?.[0];
     expect(stored && stored.type === "text" ? stored.text : null).toBe("orig");
   });
 
@@ -435,5 +439,137 @@ describe("scorer decisions", () => {
     s.finalize(); // no event ever closed it
     const [d] = s.decisions();
     expect(d?.outcome).toBe("missed");
+  });
+});
+
+// Seam H: the live findings set, per GH28-PLAN.md.
+describe("scorer liveFindings", () => {
+  it("upserts a partial as a watch and a one-shot final as a hit", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    const partial: Finding = {
+      alert: { reason: REASON, at: 40, eventIds: [10] },
+      eventId: 10,
+      isPartial: true,
+    };
+    s.record([sf(partial), sf(found([20, 21], 50, "other_reason"))], at(50));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(2);
+    const watch = live.find((f) => f.state === "watch");
+    const hit = live.find((f) => f.state === "hit");
+    expect(watch?.reason).toBe(REASON);
+    expect(watch?.eventIds).toEqual([10]);
+    expect(hit?.reason).toBe("other_reason");
+    expect(hit?.eventIds).toEqual([20, 21]);
+  });
+
+  it("promotes a watch to a hit on the same eventId+reason, keeping seq and refreshing at", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    const partial: Finding = {
+      alert: { reason: REASON, at: 40, eventIds: [10] },
+      eventId: 10,
+      isPartial: true,
+    };
+    s.record([sf(partial)], at(40));
+    const before = s.liveFindings()[0];
+    expect(before?.state).toBe("watch");
+    const seq = before?.seq;
+
+    const resolved: Finding = {
+      alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      eventId: 10,
+    };
+    s.record([sf(resolved)], at(50));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(1); // replaced in place, not appended
+    expect(live[0]?.state).toBe("hit");
+    expect(live[0]?.seq).toBe(seq); // stable UI slot
+    expect(live[0]?.at).toBe(50); // refreshed to the trusted env.ts
+    expect(live[0]?.eventIds).toEqual([10, 11]);
+  });
+
+  it("ages a hit out at liveHorizon after its last emission, not the same tick it catches", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 20 }));
+    s.record(one([10, 11], 50), at(50)); // caught
+    expect(s.liveFindings()).toHaveLength(1); // still live the same tick
+    s.record([], at(65)); // 65 - 50 = 15 < 20: still live
+    expect(s.liveFindings()).toHaveLength(1);
+    s.record([], at(70)); // 70 - 50 = 20 >= 20: ages out
+    expect(s.liveFindings()).toHaveLength(0);
+  });
+
+  it("ages an orphan watch out at liveHorizon on a benign entity", () => {
+    const s = createScorer([], cfg({ liveHorizon: 20 }));
+    const partial: Finding = {
+      alert: { reason: REASON, at: 10, eventIds: [1] },
+      eventId: 1,
+      isPartial: true,
+    };
+    s.record([sf(partial)], at(10));
+    expect(s.liveFindings()).toHaveLength(1);
+    s.record([], at(29)); // 19 < 20: still live
+    expect(s.liveFindings()).toHaveLength(1);
+    s.record([], at(30)); // 20 >= 20: ages out
+    expect(s.liveFindings()).toHaveLength(0);
+  });
+
+  it("drops a watch early when its attack resolves missed", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 1000 }));
+    const partial: Finding = {
+      alert: { reason: REASON, at: 50, eventIds: [10] },
+      eventId: 10,
+      isPartial: true,
+    };
+    s.record([sf(partial)], at(50));
+    expect(s.liveFindings()).toHaveLength(1);
+    s.record([], at(101)); // the attack's window closes, resolving it missed
+    expect(s.liveFindings()).toHaveLength(0); // dropped early, well before liveHorizon
+  });
+
+  it("does not drop a hit when an unrelated attack resolves missed", () => {
+    const s = createScorer(
+      [attack(1, "root", 0, 100, [10, 11]), attack(2, "other", 0, 300, [20, 21])],
+      cfg({ liveHorizon: 1000 }),
+    );
+    s.record(one([10, 11], 50), at(50)); // catches attack 1
+    expect(s.liveFindings()).toHaveLength(1);
+    s.record([], at(301)); // attack 2's window closes, resolving it missed via closeExpired
+    expect(s.liveFindings()).toHaveLength(1); // the caught hit survives; only its horizon evicts it
+  });
+
+  it("returns frozen entries in a fresh frozen array each call", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([10, 11], 50), at(50));
+    const first = s.liveFindings();
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(first[0] !== undefined && Object.isFrozen(first[0])).toBe(true);
+    expect(s.liveFindings()).not.toBe(first);
+    expect(s.liveFindings()).toEqual(first);
+  });
+
+  it("freezes the live entry deeply, so the published snapshot cannot be mutated", () => {
+    const finding: Finding = {
+      alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      context: [{ type: "text" as const, text: "orig" }],
+    };
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record([sf(finding)], at(50));
+    const stored = s.liveFindings()[0];
+    expect(stored !== undefined && Object.isFrozen(stored)).toBe(true);
+    expect(stored !== undefined && Object.isFrozen(stored.finding)).toBe(true);
+    expect(stored !== undefined && Object.isFrozen(stored.finding.alert)).toBe(true);
+  });
+
+  it("finalize clears the whole live set", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([10, 11], 50), at(50));
+    expect(s.liveFindings()).toHaveLength(1);
+    s.finalize();
+    expect(s.liveFindings()).toHaveLength(0);
+  });
+
+  it("carries the resolved entity when the finding names one", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ entityMatch: true }));
+    s.record([sf(found([10, 11], 50, REASON), "root")], at(50));
+    expect(s.liveFindings()[0]?.entity).toBe("root");
   });
 });
