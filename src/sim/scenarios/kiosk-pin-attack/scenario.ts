@@ -215,19 +215,19 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
 }
 
 /**
- * The Hunt text, shown to the player before they touch the Rule. States the
- * 5-in-5-minutes pattern plainly and warns against alert spam, since one Alert
- * per Attack is the actual skill being tested.
+ * The briefing for the live scenario, shown above the engine. It carries the new
+ * voice: what the chaos is, and how the finished engine answers it. It keeps the
+ * real facts, five wrong PINs in five minutes and one alarm per burst, and it
+ * describes the engine at work rather than asking the player to write a Rule.
  */
 const briefing =
-  "This Hunt is the kiosk PIN brute force. Five or more wrong PINs on one " +
-  "account inside five minutes make an Attack. Normalize the raw kiosk " +
-  "Events, then write the Detect Rule to catch that burst per account and " +
-  "raise one Alert per Attack, not one per wrong PIN. Catch each Attack and " +
-  "Correctness climbs. Miss one, or fire extra Alerts on the same burst, and " +
-  "Correctness falls. The Compute gauge reads each Event's cost in ticks: a " +
-  "slow Rule reads high and falls behind the rising waves, so apply the " +
-  "Optimization to lower that cost.";
+  "A PIN brute force hits a station kiosk. One rider account takes five or more " +
+  "wrong PINs inside five minutes. That burst is the attack. Watch the engine " +
+  "read the raw kiosk taps, normalize them, and count the failures per account. " +
+  "When a burst crosses the line, it raises one alarm for the whole burst, not " +
+  "one per tap. Normal traffic keeps rising in waves. Watch the Compute gauge: " +
+  "the engine holds its speed and stays ahead of the backlog while it catches " +
+  "every burst.";
 
 export const kioskPinAttack: Scenario = {
   id: "kiosk-pin-attack",
