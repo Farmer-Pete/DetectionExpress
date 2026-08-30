@@ -85,4 +85,13 @@ describe("createInspector snapshot", () => {
     inspector.captureNormalized(1, 2, "kiosk-v1", {}, {});
     expect(first.events).toHaveLength(1); // the earlier snapshot did not grow
   });
+
+  it("deep-freezes each event and its payloads, so a snapshot cannot be mutated", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", { u: "bob" }, { user: "bob" });
+    const event = inspector.snapshot().events[0];
+    expect(event !== undefined && Object.isFrozen(event)).toBe(true);
+    expect(event !== undefined && Object.isFrozen(event.raw)).toBe(true);
+    expect(event !== undefined && Object.isFrozen(event.normalized)).toBe(true);
+  });
 });

@@ -525,6 +525,20 @@ describe("scorer liveFindings", () => {
     expect(s.liveFindings()).toHaveLength(0); // dropped early, well before liveHorizon
   });
 
+  it("does not seed a watch for a partial whose attack already resolved missed", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 1000 }));
+    // A partial anchored on event 10 arrives at ts 200, past the attack window (ends 100).
+    // record() closes the attack missed first; the late watch must not linger as a zombie.
+    const partial: Finding = {
+      alert: { reason: REASON, at: 200, eventIds: [10] },
+      eventId: 10,
+      isPartial: true,
+    };
+    s.record([sf(partial)], at(200));
+    expect(s.liveFindings()).toHaveLength(0);
+    expect(s.decisions().filter((d) => d.outcome === "missed")).toHaveLength(1);
+  });
+
   it("does not drop a hit when an unrelated attack resolves missed", () => {
     const s = createScorer(
       [attack(1, "root", 0, 100, [10, 11]), attack(2, "other", 0, 300, [20, 21])],

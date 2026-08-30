@@ -57,19 +57,35 @@ function toJsonSafe(value: unknown): JsonValue {
   }
 }
 
+/** Recursively freeze a value in place. Only objects and arrays descend. */
+function freezeDeep<T>(value: T): T {
+  if (value instanceof Object) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) {
+      freezeDeep(child);
+    }
+  }
+  return value;
+}
+
 export function createInspector(config: { ringSize: number }): Inspector {
   const ring: RingEvent[] = [];
   let processed = 0;
 
   return {
     captureNormalized(id, ts, endpoint, raw, normalized) {
-      ring.push({
-        id,
-        ts,
-        endpoint,
-        raw: toJsonSafe(raw),
-        normalized: toJsonSafe(normalized),
-      });
+      // Deep-freeze the entry at push. `toJsonSafe` already detached both payloads,
+      // so the ring holds fully immutable records: a published snapshot shares them,
+      // and a consumer cannot mutate one and corrupt a later snapshot.
+      ring.push(
+        freezeDeep({
+          id,
+          ts,
+          endpoint,
+          raw: toJsonSafe(raw),
+          normalized: toJsonSafe(normalized),
+        }),
+      );
       if (ring.length > config.ringSize) {
         ring.shift();
       }

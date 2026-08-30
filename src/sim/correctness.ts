@@ -330,6 +330,17 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    */
   function upsertLive(scored: ScoredFinding, ts: number): void {
     const finding = scored.finding;
+    // Drop a partial "watch" whose owning attack has already resolved. `record`
+    // closes expired attacks (dropping their linked watches) BEFORE this upsert, so a
+    // partial that arrives after its attack window would otherwise seed a zombie watch:
+    // `scoreFinding` skips partials, so it would never resolve and would linger until
+    // the horizon. A partial for a still-pending or unowned attack is a normal watch.
+    if (finding.isPartial === true && finding.eventId !== undefined) {
+      const attackId = owner.get(finding.eventId);
+      if (attackId !== undefined && state.get(attackId) !== "pending") {
+        return;
+      }
+    }
     const liveState: "hit" | "watch" = finding.isPartial === true ? "watch" : "hit";
     const anchorKey =
       finding.eventId !== undefined ? `${finding.eventId}::${finding.alert.reason}` : undefined;
