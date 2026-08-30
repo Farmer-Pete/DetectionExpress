@@ -45,7 +45,7 @@ export function AlgorithmEditor({ onRun, slug }: AlgorithmEditorProps) {
   };
 
   return (
-    <div className="editor">
+    <div id="algorithm-editor" className="editor">
       <div className="editor-bar">
         <span className="editor-title">Algorithm</span>
         <button type="button" className="editor-download" onClick={onDownload}>
