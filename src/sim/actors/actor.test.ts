@@ -241,6 +241,131 @@ describe("runActors forced seed collision", () => {
   });
 });
 
+/**
+ * A frozen copy of the pre-heap linear scan, kept only as an independent oracle
+ * for the parity test below. It must never be "improved": drift here would blunt
+ * the parity check it exists to run. Do not import from `actor.ts` — it deliberately
+ * duplicates the scheduling loop, not the guards, since the guards run once, up
+ * front, in both implementations the same way.
+ */
+function referenceRunActors<Reading, Env>(input: {
+  actors: readonly Actor<Reading, Env>[];
+  env: Env;
+  runSeed: number;
+  horizon: number;
+}): Reading[] {
+  const { actors, env, runSeed, horizon } = input;
+  interface Record_ {
+    actor: Actor<Reading, Env>;
+    rng: () => number;
+    seededPriority: number;
+    nextTick: number | "dormant";
+  }
+  const records: Record_[] = actors.map((actor) => {
+    const seed = actorSeedHash(runSeed, actor.id);
+    const rng = randomLcg(seed);
+    const seededPriority = rng();
+    const nextTick = actor.start({ rng });
+    return { actor, rng, seededPriority, nextTick };
+  });
+
+  const readings: Reading[] = [];
+  for (;;) {
+    let best: Record_ | null = null;
+    let bestTick = 0;
+    for (const record of records) {
+      const tick = record.nextTick;
+      if (tick === "dormant" || tick >= horizon) {
+        continue;
+      }
+      const wins =
+        best === null ||
+        tick < bestTick ||
+        (tick === bestTick &&
+          (record.seededPriority < best.seededPriority ||
+            (record.seededPriority === best.seededPriority && record.actor.id < best.actor.id)));
+      if (wins) {
+        best = record;
+        bestTick = tick;
+      }
+    }
+    if (best === null) {
+      break;
+    }
+    const result = best.actor.act({ env, rng: best.rng, tick: bestTick });
+    for (const reading of result.readings) {
+      readings.push(reading);
+    }
+    best.nextTick = result.nextTick;
+  }
+  return readings;
+}
+
+/** A reading a cast member emits: which member fired, at what tick, and its draw. */
+interface CastReading {
+  id: string;
+  tick: number;
+  draw: number;
+}
+
+/**
+ * Build a random cast whose base seeds never collide, so the parity test exercises
+ * only the ordinary (non-rehashed) path. Each member starts at a random tick, or
+ * goes dormant immediately, and on every `act` it rerolls whether it goes dormant
+ * next or reschedules a random strictly-later tick, so the cast includes the
+ * dormant transition the plan calls out.
+ */
+function randomCast(
+  runSeed: number,
+  size: number,
+  seedRng: () => number,
+): Actor<CastReading, null>[] {
+  const used = new Set<number>();
+  const actors: Actor<CastReading, null>[] = [];
+  let n = 0;
+  while (actors.length < size) {
+    const id = `actor-${n}`;
+    n += 1;
+    const seed = actorSeedHash(runSeed, id);
+    if (used.has(seed)) {
+      continue; // skip a colliding id: the parity cast avoids the rehash path
+    }
+    used.add(seed);
+
+    const startsDormant = seedRng() < 0.1;
+    const startTick = startsDormant ? 0 : Math.floor(seedRng() * 20);
+    actors.push({
+      id,
+      start: () => (startsDormant ? "dormant" : startTick),
+      act: ({ rng, tick }) => {
+        const draw = rng();
+        const goesDormant = rng() < 0.15;
+        return {
+          readings: [{ id, tick, draw }],
+          nextTick: goesDormant ? "dormant" : tick + 1 + Math.floor(rng() * 5),
+        };
+      },
+    });
+  }
+  return actors;
+}
+
+describe("runActors heap parity", () => {
+  it("matches the linear-scan oracle on random casts and seeds, dormant picks included", () => {
+    const seedRng = randomLcg(20260830);
+    for (let trial = 0; trial < 40; trial++) {
+      const runSeed = Math.floor(seedRng() * 1_000_000);
+      const size = 1 + Math.floor(seedRng() * 12);
+      const horizon = 5 + Math.floor(seedRng() * 60);
+      const cast = randomCast(runSeed, size, seedRng);
+
+      const expected = referenceRunActors({ actors: cast, env: null, runSeed, horizon });
+      const actual = runActors({ actors: cast, env: null, runSeed, horizon });
+      expect(actual).toEqual(expected);
+    }
+  });
+});
+
 describe("minutesToTicks", () => {
   it("matches a hand-checked table (2 game seconds per tick)", () => {
     expect(minutesToTicks(1)).toBe(30);

@@ -14,8 +14,9 @@ import {
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
+import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm, referenceSource } from "./reference";
-import { buildSchedule, kioskPinAttack } from "./scenario";
+import { kioskPinAttack } from "./scenario";
 
 /** The run ends at the final deadline: the last checkpoint's tick, in game seconds. */
 function deadlineSeconds(): number {
