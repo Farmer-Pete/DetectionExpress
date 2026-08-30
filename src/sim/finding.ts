@@ -46,15 +46,17 @@ interface FindingBase {
  * so it is promotable, and groupable when `subjectType` is set.
  *
  * `eventId` is an anchor: one representative cited event, normally the first, and a
- * member of `alert.eventIds`. Identity for replace and promote is `eventId` + `reason`.
- * A partial "watch", like "3 wrong PINs, needs 5", lives here, because promotion keys
- * on the anchor. The scorer skips a partial. The UI shows it and ages it out. Promote
- * means re-emit a Finding with the same `eventId` and `reason`, without `isPartial`.
- * The old one is replaced, not mutated.
+ * member of `alert.eventIds`. To promote a watch, re-emit a Finding with the same
+ * `reason` for the same subject, without `isPartial`; the old one is replaced, not
+ * mutated. A partial "watch", like "3 wrong PINs, needs 5", lives here. The scorer
+ * skips a partial. The UI shows it and ages it out. The scorer keys a grouped finding's
+ * live row on its resolved entity and `reason`, not the anchor, so a hunt whose anchor
+ * shifts mid-attack still lands on one row per subject; see `correctness.ts`.
  */
 export interface Finding extends FindingBase {
   /** The anchor: one representative cited event, normally the first, a member of
-   *  `alert.eventIds`. Identity for replace and promote is `eventId` + `reason`. */
+   *  `alert.eventIds`. The scorer keys the live row on resolved entity + `reason` when
+   *  `subjectType` resolves, else on `eventId` + `reason`. */
   eventId: number;
   /**
    * Names the field on the anchor event that holds the entity value.

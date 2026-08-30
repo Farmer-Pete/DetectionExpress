@@ -18,6 +18,10 @@ removes the unused arm. Three parts of the text below are now superseded:
 - The parser (`parse-findings.ts`) now requires the anchor unconditionally. The old rules
   "subjectType requires eventId" and "a partial requires eventId" are subsumed: a finding
   with no `eventId` is rejected outright, before those checks run.
+- The scorer's live-findings panel keys a grouped finding (one with a resolved entity) on
+  (subjectType, entity, reason), not the anchor. The anchor is a sliding-window value that
+  can move mid-attack, so keying on it would fork one account's row. Keying on the entity
+  keeps one row per account and hunt (`correctness.ts`).
 
 The rest of the contract holds unchanged: the per-Event pull, the synchronous `detect()`,
 the typed widget vocabulary, and the scorer that reads `finding.alert` and skips partials.
@@ -78,6 +82,9 @@ so allowing it would only create a failure mode. The contract is synchronous by 
 `Detect` type encodes it: it returns `Finding[]`, not `Promise<Finding[]>`.
 
 ## The types
+
+> Superseded in part by the Update (#99) at the top: `Finding` is now one interface with a
+> required `eventId`. The `Anchored | OneShot` union below is kept for history only.
 
 These land in `src/sim/finding.ts`, with doc comments the block below omits for brevity. Types
 only, no runtime. The parser that enforces them at the boundary is T1's job, and the rules below
@@ -176,6 +183,10 @@ escape hatch, a collapsed tree over any value, and it carries a recursive `JsonV
 widget by adding one union member and one renderer.
 
 ## Normative parser rules for T1
+
+> Superseded in part by the Update (#99) at the top: `eventId` is now required, so a finding
+> with no anchor is rejected outright. The conditional "if `eventId` is present" rules below
+> are kept for history only.
 
 The boundary parser replaces `matchResult`. It validates the player's `detect()` return before
 the scorer folds it. These rules are the spec, and they are normative. T1 implements them with

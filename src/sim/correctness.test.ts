@@ -496,14 +496,43 @@ describe("scorer liveFindings", () => {
     expect(live[0]?.eventIds).toEqual([10, 11]);
   });
 
-  it("keeps two findings that share a reason but differ in eventId as two entries", () => {
-    // Live identity is eventId + reason, so a distinct anchor never collapses onto
-    // another finding's row even when the reason matches.
+  it("keeps two entity-less findings that share a reason but differ in eventId as two entries", () => {
+    // With no resolved entity, live identity falls back to eventId + reason, so a
+    // distinct anchor never collapses onto another finding's row even when reason matches.
     const s = createScorer([attack(1, "root", 0, 300, [10, 11, 20, 21])], cfg());
     s.record([sf(found([10, 11], 50)), sf(found([20, 21], 50))], at(50));
     const live = s.liveFindings();
     expect(live).toHaveLength(2);
     expect(new Set(live.map((f) => f.seq)).size).toBe(2);
+  });
+
+  it("collapses a moved-anchor watch onto the prior hit for one entity and reason", () => {
+    // Anchor stability regression: the live row is identified by (subjectType, entity,
+    // reason), not the anchor. So a later watch on the same account and reason, anchored
+    // on a DIFFERENT event, replaces the prior hit's row instead of seeding a second,
+    // stale entry. Keyed on the anchor this would read as two rows.
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 1000 }));
+    const hit: Finding = {
+      alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      eventId: 10,
+      subjectType: "acct",
+    };
+    s.record([sf(hit, "root")], at(50));
+    expect(s.liveFindings()).toHaveLength(1);
+    expect(s.liveFindings()[0]?.state).toBe("hit");
+
+    // A later watch for the same account and reason, anchored on an unowned event so the
+    // zombie-watch guard keeps it, with an anchor that differs from the hit's.
+    const watch: Finding = {
+      alert: { reason: REASON, at: 200, eventIds: [99] },
+      eventId: 99,
+      subjectType: "acct",
+      isPartial: true,
+    };
+    s.record([sf(watch, "root")], at(200));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(1); // one row per (entity, reason), no stale hit beside it
+    expect(live[0]?.state).toBe("watch");
   });
 
   it("ages a hit out at liveHorizon after its last emission, not the same tick it catches", () => {
