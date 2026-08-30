@@ -331,9 +331,10 @@ describe("world engine event log", () => {
     const log = last?.log ?? [];
     expect(log.length).toBeLessThanOrEqual(WORLD_LOG_RETENTION);
     expect(log.length).toBeGreaterThan(1);
-    // Newest first: one tap per tick, so the ticks strictly decrease down the list.
+    // Newest first: from M5 a tick emits a tap AND its camera count, so ticks are
+    // non-increasing down the list (same-tick reducer readings tie, never rise).
     for (let i = 1; i < log.length; i++) {
-      expect(log[i - 1]?.tick ?? 0).toBeGreaterThan(log[i]?.tick ?? 0);
+      expect(log[i - 1]?.tick ?? 0).toBeGreaterThanOrEqual(log[i]?.tick ?? 0);
     }
   });
 });

@@ -19,7 +19,9 @@ import { type Actor, createSchedule, type StepResult } from "../sim/actors/actor
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import type { StaffSpawner } from "../sim/actors/staff-spawner";
 import {
+  cameraNodeId,
   contactNodeId,
+  gateIdForStation,
   gateNodeId,
   kioskNodeId,
   readerNodeId,
@@ -28,9 +30,11 @@ import {
 import type { Presence } from "../sim/world/presence";
 import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent, WorldSnapshot } from "../sim/world-snapshot";
+import { type CameraGrant, createCameraReducer } from "./camera-reducer";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import { createDoorReducer } from "./door-reducer";
 import {
+  CAMERA_WINDOW_TICKS,
   CLOCK_HZ,
   DOOR_DWELL_TICKS,
   FLASH_WINDOW_TICKS,
@@ -158,6 +162,11 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
   // The door projection over the frozen env: a staff grant opens a door, and this
   // reducer closes it after a dwell (M3). It is not a scheduler actor (ADR-0007).
   const doorReducer = createDoorReducer(DOOR_DWELL_TICKS);
+  // The camera projection over the frozen env: it counts each tick's fare-gate grants
+  // per gate over a rolling window (M5). Also an engine reducer, not an actor. The
+  // latest per-gate counts feed the snapshot's crowd-density marks.
+  const cameraReducer = createCameraReducer(CAMERA_WINDOW_TICKS);
+  let latestCrowds: readonly { node: string; persons: number; grants: number }[] = [];
   // A bounded ring of the most recent normalized readings, for the event log. Newest
   // is pushed to the end; the snapshot publishes it newest-first.
   const recentLog: TimedWorldReading[] = [];
@@ -309,6 +318,53 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
       });
       nextFlashId += 1;
     }
+  };
+
+  // Run the camera reducer for one tick over that tick's fare-gate grants, AFTER the
+  // actor and door readings are logged, so the fixed source order (actor, door, camera)
+  // holds. It counts the grants per gate over a rolling window and produces the crowd
+  // density per gate (benign, so persons == grants). It emits a `platform-camera`
+  // reading (source "camera") for each gate that saw a tap THIS tick, carrying that
+  // gate's windowed counts, and refreshes the snapshot's crowd marks. The camera is an
+  // engine projection over the frozen env, never a scheduler actor (ADR-0007).
+  const reduceCamera = (step: StepResult<WorldReading>, tick: number): void => {
+    const grants: CameraGrant[] = [];
+    const tappedGates = new Set<string>();
+    for (const timed of step.readings) {
+      if (timed.reading.sensor === "fare-gate" && timed.reading.reading.result === "ok") {
+        const station = timed.reading.reading.station;
+        const gate = gateIdForStation(station);
+        grants.push({ station, gate });
+        tappedGates.add(gate);
+      }
+    }
+    const counts = cameraReducer.step(grants, tick);
+    // The crowd marks: every gate active in the window, drawn on its camera (C) chip.
+    latestCrowds = counts.map((count) => ({
+      node: cameraNodeId(count.station),
+      persons: count.persons,
+      grants: count.grants,
+    }));
+    // The log lines: one camera reading per gate that saw a tap this tick, so the
+    // camera reports at the tap cadence but carries the richer windowed counts.
+    for (const count of counts) {
+      if (!tappedGates.has(count.gate)) {
+        continue;
+      }
+      const reading: WorldReading = {
+        sensor: "platform-camera",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          station: count.station,
+          gate: count.gate,
+          grants: count.grants,
+          persons: count.persons,
+        },
+      };
+      recentLog.push({ reading, tick, source: "camera" });
+    }
+    // Trim once, after this tick's actor, door, and camera readings are all appended,
+    // so the fixed source order is preserved before the log is bounded.
     if (recentLog.length > WORLD_LOG_RETENTION) {
       recentLog.splice(0, recentLog.length - WORLD_LOG_RETENTION);
     }
@@ -336,7 +392,7 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
       nowTick: simTick,
       actors,
       doors: [...openNodes].map((node) => ({ node, open: true })),
-      crowds: [],
+      crowds: latestCrowds.map((crowd) => ({ ...crowd })),
       flashes: [...flashes],
       // Newest first, so the log panel reads top to bottom as most-recent first.
       log: [...recentLog].reverse(),
@@ -400,6 +456,10 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
           // processed is `simTick`, before the increment), so a door closes on time
           // even on a tick with no grants.
           reduceDoors(step, simTick);
+          // The camera reducer runs each tick over this step's fare-gate grants, after
+          // the door reducer, so the fixed source order (actor, door, camera) holds and
+          // the crowd density decays even on a tick with no taps.
+          reduceCamera(step, simTick);
           simTick += 1;
           spawnTransients();
         }

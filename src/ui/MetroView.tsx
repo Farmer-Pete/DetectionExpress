@@ -98,6 +98,14 @@ function logRow(entry: TimedWorldReading): { code: string; color: string; text: 
       text: `ticket machine, ${place}, ${reading.reading.card} top-up +${reading.reading.amount} (${reading.reading.machine})`,
     };
   }
+  if (reading.sensor === "platform-camera") {
+    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
+    return {
+      code: "C",
+      color: "var(--s-cam)",
+      text: `platform camera, ${place}, ${reading.reading.persons} people / ${reading.reading.grants} grants`,
+    };
+  }
   const place = placeName.get(reading.reading.station) ?? reading.reading.station;
   const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
   return {

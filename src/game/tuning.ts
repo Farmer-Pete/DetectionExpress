@@ -310,3 +310,13 @@ export const ACCOUNT_POOL = 12;
  * again. The `sensors.json` example tops up 100.
  */
 export const TVM_TOPUP_AMOUNT = 100;
+
+/**
+ * M5 (living metro, #87) platform camera. The camera reducer counts fare-gate grants
+ * per gate over this trailing window, in whole sim ticks, so a station's crowd-density
+ * mark tracks its recent tap rate and decays as the taps age out. The reducer keeps
+ * only this window's per-tick grant buckets, so its ring is bounded by
+ * `CAMERA_WINDOW_TICKS * live gates` on a perpetual run. First-draft number, tuned
+ * once M5 is on screen.
+ */
+export const CAMERA_WINDOW_TICKS = 60;

@@ -122,6 +122,22 @@ export function gateNodeId(station: string): MapNodeId {
   return `${station}:${SENSOR_KEY.G}`;
 }
 
+/**
+ * The gate id the platform camera groups its counts by, derived from a station. A
+ * fare-gate reading carries only its `station`, so the camera reducer maps that to a
+ * gate through this typed function rather than changing `FareGateReading`. It is the
+ * same gate the fare-gate tap flashes on (`gateNodeId`), so the camera and the tap
+ * agree on which gate a rider crossed.
+ */
+export function gateIdForStation(station: string): string {
+  return gateNodeId(station);
+}
+
+/** The camera (C) chip node a station's crowd-density mark is drawn on. */
+export function cameraNodeId(station: string): MapNodeId {
+  return `${station}:${SENSOR_KEY.C}`;
+}
+
 /** The kiosk (K) chip node an account sign-in flash lands on, at a station. */
 export function kioskNodeId(station: string): MapNodeId {
   return `${station}:${SENSOR_KEY.K}`;

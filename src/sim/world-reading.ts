@@ -96,11 +96,30 @@ interface TvmReading {
 }
 
 /**
+ * The platform-camera family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: the camera over a station's fare gate turning a picture into two
+ * numbers, how many taps (`grants`) and how many bodies (`persons`), counted over a
+ * rolling window. Benign, so the two agree; an untapped person is the later Shadow
+ * Rider hunt, out of scope here. The engine's camera reducer emits these, never a
+ * scheduler actor. `ts` is in game seconds; `gate` is the gate id the reducer groups
+ * by, derived from `station` via `gateIdForStation`.
+ */
+export interface CameraReading {
+  /** Game seconds. */
+  ts: number;
+  station: string;
+  gate: string;
+  grants: number;
+  persons: number;
+}
+
+/**
  * A discriminated reading tagged by its sensor id (distinct from a vendor
  * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm; M3 adds the door
  * reader (a staff grant) and the door contact (the reducer's open/close); M4 adds the
- * tvm (a card top-up) and the kiosk (an account sign-in). M5..M6 add camera, console,
- * and relay arms as their actors land.
+ * tvm (a card top-up) and the kiosk (an account sign-in); M5 adds the platform camera
+ * (the crowd reducer's per-gate counts). M6 adds the console and relay arms as their
+ * actors land.
  */
 export type WorldReading =
   | { sensor: "fare-gate"; reading: FareGateReading }
@@ -108,7 +127,8 @@ export type WorldReading =
   | { sensor: "kiosk"; reading: AccountKioskReading }
   | { sensor: "train-tracker"; reading: TrainReading }
   | { sensor: "door-reader"; reading: DoorReaderReading }
-  | { sensor: "door-contact"; reading: DoorContactReading };
+  | { sensor: "door-contact"; reading: DoorContactReading }
+  | { sensor: "platform-camera"; reading: CameraReading };
 
 /** The read-only environment every live actor reads. It grows per milestone. */
 export interface WorldEnv {

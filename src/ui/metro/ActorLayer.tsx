@@ -32,6 +32,13 @@ const STAFF_SIZE = 7;
 /** An open door lights its door-contact (D) chip: a small stroked square in `--s-contact`. */
 const DOOR_OPEN_COLOR = "#577590";
 const DOOR_MARK_SIZE = 9;
+/** A crowd-density disc on the camera (C) chip, in `--s-cam`, sized by the window count. */
+const CROWD_COLOR = "#4cc9f0";
+/** The disc radius grows from this to this (design units) as the window count saturates. */
+const CROWD_R_MIN = 2.5;
+const CROWD_R_MAX = 8;
+/** The window grant count at which the density disc is fully grown and opaque. */
+const CROWD_SATURATION = 16;
 const FLASH_COLOR: Record<FlashEvent["kind"], string> = {
   tap: "#f2a900",
   topup: "#90be6d",
@@ -266,6 +273,29 @@ function drawStaff(ctx: CanvasRenderingContext2D, view: View, point: Point): voi
   );
 }
 
+/**
+ * A crowd-density mark: a filled disc on a station's camera (C) chip whose radius and
+ * opacity grow with the tap count the camera counted over its window, so a busy gate
+ * reads as a denser mark that decays as the taps age out. This is a real density
+ * indicator, NOT the prototype's 1-for-1 gate-tap echo (view notes section 6).
+ */
+function drawCrowd(ctx: CanvasRenderingContext2D, view: View, point: Point, grants: number): void {
+  const fill = Math.min(1, grants / CROWD_SATURATION);
+  const radius = (CROWD_R_MIN + (CROWD_R_MAX - CROWD_R_MIN) * fill) * view.scale;
+  ctx.globalAlpha = 0.3 + 0.5 * fill;
+  ctx.fillStyle = CROWD_COLOR;
+  ctx.beginPath();
+  ctx.arc(
+    view.offsetX + point.x * view.scale,
+    view.offsetY + point.y * view.scale,
+    radius,
+    0,
+    Math.PI * 2,
+  );
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
 /** An open-door mark: a small stroked square on the door-contact chip. */
 function drawDoorMark(ctx: CanvasRenderingContext2D, view: View, point: Point): void {
   const size = DOOR_MARK_SIZE * view.scale;
@@ -454,6 +484,14 @@ export function ActorLayer() {
       }
 
       ctx.globalAlpha = 1;
+      // The crowd density per gate: a disc on each active station's camera (C) chip,
+      // sized by the window's tap count. Drawn under the doors and flashes.
+      for (const crowd of snapshot.crowds) {
+        const point = layout.get(crowd.node);
+        if (point !== undefined) {
+          drawCrowd(ctx, view, point, crowd.grants);
+        }
+      }
       // An open door: mark its door-contact chip so the door state reads on the map.
       for (const door of snapshot.doors) {
         if (!door.open) {
