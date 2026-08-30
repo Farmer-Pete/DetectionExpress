@@ -66,6 +66,21 @@ describe("IntroOverlay", () => {
     expect(onObserve).toHaveBeenCalledTimes(1);
   });
 
+  it("dismisses on a backdrop click but not on a click inside the dialog", () => {
+    const { onObserve } = renderOverlay();
+    const dialog = screen.getByRole("dialog");
+    // A click inside the dialog carries a different target, so it never dismisses.
+    fireEvent.click(dialog);
+    expect(onObserve).not.toHaveBeenCalled();
+    // A click on the backdrop scrim itself dismisses.
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    fireEvent.click(backdrop);
+    expect(onObserve).toHaveBeenCalledTimes(1);
+  });
+
   it("moves focus into the dialog on open", () => {
     renderOverlay();
     const dialog = screen.getByRole("dialog");

@@ -4,10 +4,10 @@
  * this component only renders and manages focus.
  *
  * It is a real modal dialog. It carries `role="dialog"` and `aria-modal="true"`,
- * takes its accessible name from its title, moves focus inside on open, and traps
- * Tab and Shift+Tab at the edges so focus never leaves while it is open. Escape
- * dismisses it the way Observe does. The App restores focus to the reopen control
- * after the overlay unmounts.
+ * takes its accessible name from its title, and moves focus inside on open. It wraps
+ * Tab and Shift+Tab at the edges to keep focus within the dialog. Escape and a click
+ * on the backdrop both dismiss it the way Observe does. The App restores focus to the
+ * reopen control after the overlay unmounts.
  */
 import { useEffect, useRef } from "react";
 import type { IntroCopy } from "./content/narrative";
@@ -15,7 +15,7 @@ import type { IntroCopy } from "./content/narrative";
 interface IntroOverlayProps {
   copy: IntroCopy;
   repoUrl: string;
-  /** Dismiss only. Also the Escape handler. */
+  /** Dismiss only. Also fires on Escape and on a backdrop click. */
   onObserve: () => void;
   /** Dismiss, then scroll to the chaos ladder. */
   onCauseChaos: () => void;
@@ -23,9 +23,13 @@ interface IntroOverlayProps {
   onEditEngine: () => void;
 }
 
+/** The standard focusable set, so the trap survives controls added later. */
+const FOCUSABLE_SELECTOR =
+  'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 /** The dialog's focusable controls, in DOM order. */
 function focusableControls(dialog: HTMLElement): HTMLElement[] {
-  return [...dialog.querySelectorAll<HTMLElement>("button, a[href]")];
+  return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
 }
 
 export function IntroOverlay({
@@ -46,6 +50,21 @@ export function IntroOverlay({
     }
     focusableControls(dialog)[0]?.focus();
   }, []);
+
+  // A click outside the dialog, on the backdrop scrim, dismisses the way Observe
+  // does. A click inside the dialog is contained, so it never dismisses. The listener
+  // lives on the document, not on the scrim element, so the scrim stays a plain
+  // presentational div.
+  useEffect(() => {
+    const onDocumentClick = (event: MouseEvent): void => {
+      const dialog = dialogRef.current;
+      if (dialog !== null && event.target instanceof Node && !dialog.contains(event.target)) {
+        onObserve();
+      }
+    };
+    document.addEventListener("click", onDocumentClick);
+    return () => document.removeEventListener("click", onDocumentClick);
+  }, [onObserve]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {

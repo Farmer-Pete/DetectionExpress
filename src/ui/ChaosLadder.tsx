@@ -1,8 +1,7 @@
 /**
  * The chaos ladder: the five levels of rising chaos, each with its authored blurb.
- * It is the honest, prose-forward view of the game's structure. The one live
- * scenario is marked playable inside its level and named there. The other levels are
- * described, not yet playable.
+ * The one live scenario is marked playable inside its level and named there. The
+ * other levels are described, not yet playable.
  *
  * It renders a stable `#chaos-ladder` anchor. The intro's "Cause chaos" action
  * scrolls to it after the overlay dismisses.
@@ -16,7 +15,12 @@ interface ChaosLadderProps {
 
 export function ChaosLadder({ levels, liveScenario }: ChaosLadderProps) {
   return (
-    <section id="chaos-ladder" className="chaos-ladder" aria-labelledby="chaos-ladder-title">
+    <section
+      id="chaos-ladder"
+      className="chaos-ladder"
+      aria-labelledby="chaos-ladder-title"
+      tabIndex={-1}
+    >
       <h2 id="chaos-ladder-title" className="chaos-ladder-title">
         The chaos ladder
       </h2>

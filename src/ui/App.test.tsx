@@ -102,39 +102,52 @@ describe("App onboarding", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("scrolls to the chaos ladder after Cause chaos dismisses the overlay", () => {
+  it("scrolls to the chaos ladder, then focuses it, after Cause chaos dismisses", () => {
     render(<App controller={stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
+    // The scroll and the focus both land on the chaos ladder after the overlay unmounts.
     expect(scrollTargets).toContain("chaos-ladder");
+    expect(document.activeElement?.id).toBe("chaos-ladder");
   });
 
-  it("scrolls to the engine editor after Edit the engine dismisses the overlay", () => {
+  it("scrolls to the engine editor, then focuses it, after Edit the Engine dismisses", () => {
     render(<App controller={stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(scrollTargets).toContain("algorithm-editor");
+    expect(document.activeElement?.id).toBe("algorithm-editor");
   });
 
   it("reopens the overlay from the topbar without clearing the seen flag", () => {
-    render(<App controller={stubController()} />);
+    const { unmount } = render(<App controller={stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /how this works/i }));
     expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
-
-    // Reopen must not clear the flag: a remount still treats the intro as seen.
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    // Reopen must not clear the flag. Unmount first so only one App tree is ever
+    // mounted, then a fresh mount still treats the intro as seen.
+    unmount();
     const { container } = render(<App controller={stubController()} />);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("returns focus to the reopen control after the overlay closes", () => {
+  it("returns focus to the reopen control after a reopen and dismiss", () => {
     render(<App controller={stubController()} />);
+    // The overlay is open on first load. Dismiss it, so the shell is live again.
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // Reopen from the topbar, then dismiss again. Focus returns to the reopen button.
     const reopen = screen.getByRole("button", { name: /how this works/i });
     fireEvent.click(reopen);
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(reopen);
   });
 
