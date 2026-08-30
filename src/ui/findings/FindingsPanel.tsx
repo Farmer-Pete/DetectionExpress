@@ -16,10 +16,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
-import { buildFindingGroups, type FindingGroup, type FindingRow } from "./view-model";
-
-/** The panel shows this many groups before the "+N more" line. */
-const VISIBLE_CAP = 12;
+import { buildFindingGroups, type FindingGroup, type FindingRow, VISIBLE_CAP } from "./view-model";
 
 export function FindingsPanel() {
   const findings = useGameStore((state) => state.snapshot.findings);
@@ -149,7 +146,10 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
           {row.state}
         </span>
         <span className="findings-label">{row.label}</span>
-        <span className="findings-cited">{row.citedCount}</span>
+        <span className="findings-cited">
+          {row.citedCount}
+          <span className="visually-hidden"> cited events</span>
+        </span>
       </button>
     </li>
   );

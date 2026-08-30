@@ -5,22 +5,23 @@
  * engine reads through `getGraph()`.
  *
  * The values are `readonly` and sim-shaped (`GraphNode` / `GraphEdge`), with no React
- * Flow positions or types. `getGraph()` maps them to fresh objects each call, so no
- * consumer can mutate the shared topology.
+ * Flow positions or types. Each element is frozen, and `getGraph()` maps them to fresh
+ * objects each call, so no consumer can mutate the shared topology through the constant
+ * or through the returned graph.
  */
 import type { GraphEdge, GraphNode } from "../sim/graph";
 
 /** The four Nodes of the locked chain, in run order. */
-export const PIPELINE_NODES: readonly GraphNode[] = [
-  { id: "ingest", kind: "ingest" },
-  { id: "normalize", kind: "normalize" },
-  { id: "detect", kind: "detect" },
-  { id: "sink", kind: "sink" },
+export const PIPELINE_NODES: readonly Readonly<GraphNode>[] = [
+  Object.freeze({ id: "ingest", kind: "ingest" }),
+  Object.freeze({ id: "normalize", kind: "normalize" }),
+  Object.freeze({ id: "detect", kind: "detect" }),
+  Object.freeze({ id: "sink", kind: "sink" }),
 ];
 
 /** The three edges wiring the chain, in run order. */
-export const PIPELINE_EDGES: readonly GraphEdge[] = [
-  { id: "e1", source: "ingest", target: "normalize" },
-  { id: "e2", source: "normalize", target: "detect" },
-  { id: "e3", source: "detect", target: "sink" },
+export const PIPELINE_EDGES: readonly Readonly<GraphEdge>[] = [
+  Object.freeze({ id: "e1", source: "ingest", target: "normalize" }),
+  Object.freeze({ id: "e2", source: "normalize", target: "detect" }),
+  Object.freeze({ id: "e3", source: "detect", target: "sink" }),
 ];

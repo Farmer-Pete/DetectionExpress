@@ -46,8 +46,9 @@ export interface GroupedFindings {
   hiddenCount: number;
 }
 
-/** The panel shows this many groups before the "+N more" line. */
-const VISIBLE_CAP = 12;
+/** The panel shows this many groups before the "+N more" line. The panel imports this
+ * same constant, so the cap it slices by and the hidden count reported here cannot drift. */
+export const VISIBLE_CAP = 12;
 
 /**
  * Prettify a raw reason token for display. Splits on `_` and camelCase boundaries,
