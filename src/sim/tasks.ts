@@ -17,6 +17,7 @@ import type { Channel } from "./channel";
 import type { ScoredFinding } from "./correctness";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
 import type { DetectView, Finding } from "./finding";
+import type { TaskInspector } from "./inspector";
 import { parseFindings } from "./parse-findings";
 import { RuleError } from "./rule-error";
 import { makeGovernor, type ServiceRate } from "./service-governor";
@@ -173,12 +174,19 @@ export async function runIngest(
  * The Normalize task: an Event -> replace its payload with the Rule's normalize
  * result and forward a fresh envelope. A marker -> forward it unchanged, without
  * calling player code, then return.
+ *
+ * On the success path, `inspector.captureNormalized` runs after `normalizedPayload`
+ * validates and before `output.push`. A throw in `normalize`/`normalizedPayload`
+ * fires before capture, so the ring is never half-written; capturing before the
+ * push means downstream backpressure never gates it. The marker path captures
+ * nothing.
  */
 export async function runNormalize(
   input: Channel<PipeMessage>,
   output: Channel<PipeMessage>,
   clock: TaskClock,
   normalize: TaskAlgorithm["normalize"],
+  inspector: TaskInspector,
 ): Promise<void> {
   for (;;) {
     await clock.gate();
@@ -194,6 +202,7 @@ export async function runNormalize(
       throw new RuleError("normalize", messageOf(error));
     }
     const payload = normalizedPayload(result);
+    inspector.captureNormalized(message.id, message.ts, message.endpoint, message.payload, payload);
     await output.push({ id: message.id, ts: message.ts, endpoint: message.endpoint, payload });
   }
 }
@@ -207,6 +216,11 @@ export async function runNormalize(
  * The governor charges only real Events, never the marker. It runs after `record`
  * and before `push`, so a slow rule holds each Event in service for whole ticks;
  * the arrival rate then outruns the service rate and the Backlog climbs.
+ *
+ * `inspector.markProcessed()` runs right after `scorer.record` and before the
+ * governor charge, so the watermark tracks scoring completion, not service
+ * completion: a stop mid-service still counts the Event processed. The marker
+ * path marks nothing.
  */
 export async function runDetect(
   input: Channel<PipeMessage>,
@@ -214,6 +228,7 @@ export async function runDetect(
   clock: TaskClock,
   detect: TaskAlgorithm["detect"],
   scorer: TaskScorer,
+  inspector: TaskInspector,
   serviceRate: ServiceRate,
 ): Promise<void> {
   const governor = makeGovernor(serviceRate);
@@ -255,6 +270,7 @@ export async function runDetect(
       throw new RuleError("detect", messageOf(error));
     }
     scorer.record(scored, message);
+    inspector.markProcessed();
     const ticks = governor.charge();
     if (ticks > 0) {
       await clock.sleep(ticks);
@@ -303,6 +319,8 @@ export interface NodeRuntime {
   algorithm: TaskAlgorithm;
   /** The Correctness scorer; the Detect task is its single writer. */
   scorer: TaskScorer;
+  /** The inspector's write surface; Normalize and Detect are its writers. */
+  inspector: TaskInspector;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   nextEvent: () => PipeEvent | null;
   /** The quantized per-Event service rate the Detect governor charges. */
@@ -342,6 +360,7 @@ const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
     requireChannel(wiring.output, nodeId, "output"),
     runtime.clock,
     runtime.algorithm.normalize,
+    runtime.inspector,
   );
 
 const detectTask: NodeTask = (nodeId, wiring, runtime) =>
@@ -351,6 +370,7 @@ const detectTask: NodeTask = (nodeId, wiring, runtime) =>
     runtime.clock,
     runtime.algorithm.detect,
     runtime.scorer,
+    runtime.inspector,
     runtime.serviceRate,
   );
 

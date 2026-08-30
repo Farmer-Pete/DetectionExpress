@@ -26,6 +26,7 @@ import {
   validateLinearChain,
 } from "../sim/graph";
 import { nextHeat, occupancy } from "../sim/heat";
+import { createInspector, type Inspector } from "../sim/inspector";
 import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
 import type { Checkpoint } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
@@ -42,6 +43,7 @@ import {
   OCC_THRESHOLD,
   PUBLISH_HZ,
   RATE_TAU,
+  RING_SIZE,
   THROUGHPUT_WINDOW_MS,
 } from "./tuning";
 import { bindVisibility as bindVisibilityDefault } from "./visibility";
@@ -135,6 +137,7 @@ function makeSampler(
   chain: LinearChain,
   edges: GraphEdge[],
   scorer: Scorer,
+  inspector: Inspector,
   setSnapshot: (snapshot: SimSnapshot) => void,
   run: RunState,
 ): (force: boolean) => void {
@@ -214,6 +217,7 @@ function makeSampler(
       edgeReadings[edgeId] = { inRate: state.inRate, outRate: state.outRate };
     }
 
+    const ring = inspector.snapshot();
     setSnapshot({
       backlog,
       throughput,
@@ -225,6 +229,9 @@ function makeSampler(
       failureReason: run.getFailureReason(),
       admitted: run.getAdmitted(),
       completed: run.getCompleted(),
+      findings: scorer.liveFindings(),
+      events: ring.events,
+      processed: ring.processed,
     });
   };
 }
@@ -333,6 +340,10 @@ export function start(options: StartOptions): EngineHandle {
     const bind = options.bindVisibility ?? bindVisibilityDefault;
     detachVisibility = bind(clock);
 
+    // The inspector needs no ground truth, so the engine builds it directly. This
+    // is a deliberate asymmetry with the scorer, which the run controller injects.
+    const inspector = createInspector({ ringSize: RING_SIZE });
+
     const runtime: NodeRuntime = {
       clock,
       onComplete: () => {
@@ -343,6 +354,7 @@ export function start(options: StartOptions): EngineHandle {
       },
       algorithm: options.algorithm,
       scorer: options.scorer,
+      inspector,
       nextEvent: options.generator,
       serviceRate: options.serviceRate,
     };
@@ -365,6 +377,7 @@ export function start(options: StartOptions): EngineHandle {
       chain,
       graph.edges,
       options.scorer,
+      inspector,
       options.setSnapshot,
       {
         compute,
