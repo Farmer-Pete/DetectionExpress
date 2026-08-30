@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../sim/world/layout";
 import type { Presence } from "../../sim/world/presence";
-import { presencePoint } from "./interpolate";
+import { presencePoint, stepBetween } from "./interpolate";
 
 const layout = new Map<string, Point>([
   ["cen", { x: 470, y: 300 }],
@@ -45,5 +45,27 @@ describe("presencePoint", () => {
     };
     expect(presencePoint(presence, layout, 50)).toEqual({ x: 470, y: 300 }); // before -> from
     expect(presencePoint(presence, layout, 500)).toEqual({ x: 250, y: 300 }); // after -> to
+  });
+});
+
+describe("stepBetween (board / alight)", () => {
+  const platform: Point = { x: 250, y: 320 };
+  const train: Point = { x: 300, y: 300 };
+
+  it("sits on the platform at the start of boarding", () => {
+    expect(stepBetween(platform, train, 100, 10, 100)).toEqual(platform);
+  });
+
+  it("reaches the train at the end of the window and clamps past it", () => {
+    expect(stepBetween(platform, train, 100, 10, 110)).toEqual(train);
+    expect(stepBetween(platform, train, 100, 10, 999)).toEqual(train);
+  });
+
+  it("is halfway across at the midpoint of the window", () => {
+    expect(stepBetween(platform, train, 100, 10, 105)).toEqual({ x: 275, y: 310 });
+  });
+
+  it("clamps to the start before the window opens", () => {
+    expect(stepBetween(platform, train, 100, 10, 40)).toEqual(platform);
   });
 });

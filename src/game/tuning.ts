@@ -215,6 +215,36 @@ export const RIDER_BALANCE = 2000;
 export const WORLD_LOG_RETENTION = 120;
 
 /**
+ * M3 (living metro, #87) staff and doors. A seeded spawner keeps a small transient
+ * staff cast: each walks from a location's nearest station to the location, crosses
+ * its zones low to high tapping the door readers within its badge grade, then walks
+ * back out. First-draft numbers, tuned once M3 is on screen.
+ */
+
+/** The steady concurrent staff count the spawner aims for (the prototype's cap of 3). */
+export const STAFF_TARGET = 3;
+
+/** The seeded inter-arrival gap between staff births, in whole ticks (min <= max, min >= 1). */
+export const STAFF_ARRIVAL_MIN_TICKS = 30;
+export const STAFF_ARRIVAL_MAX_TICKS = 90;
+
+/** A staff member's walk-in / walk-out duration, in whole ticks (> 0). */
+export const STAFF_WALK_TICKS = 20;
+
+/** Ticks between a staff member's consecutive door taps as it crosses the zones (> 0). */
+export const STAFF_DOOR_STEP_TICKS = 8;
+
+/** How many distinct badges the seeded staff pool mints; each staff draws one. */
+export const STAFF_BADGE_POOL = 6;
+
+/**
+ * How long the engine holds a door open after a staff grant, in whole sim ticks,
+ * before the door reducer closes it and emits the `door-contact` close. A positive
+ * integer, comfortably shorter than a staff's per-door step so a door closes between taps.
+ */
+export const DOOR_DWELL_TICKS = 5;
+
+/**
  * M2 (living metro, #87) train pacing. One persistent train rides each line, dwelling
  * at every platform and running the connection minutes between them (converted with
  * `minutesToTicks`). These set the derived, deterministic timetable.

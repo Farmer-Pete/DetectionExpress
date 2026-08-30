@@ -30,13 +30,47 @@ interface TrainReading {
 }
 
 /**
+ * The door-reader family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: a badge granted through a door at a site or the control center, and
+ * the zone that door guards. Benign traffic is always a `grant` (the `deny` value is
+ * for a later attack ticket). `ts` is in game seconds; `site` is the door's location
+ * id (a site or the OCC), `zone` the guarded zone (e.g. `"z3"`).
+ */
+export interface DoorReaderReading {
+  /** Game seconds. */
+  ts: number;
+  badge: string;
+  site: string;
+  door: string;
+  zone: string;
+  result: "grant";
+}
+
+/**
+ * The door-contact family's internal record, matching the `normalizedExample` in
+ * `sensors.json`: the magnetic sensor reporting a door opening or closing. Benign
+ * traffic toggles `open`/`close`; the `forced`/`held` values are for a later attack
+ * ticket. The engine's door reducer emits these, never a scheduler actor.
+ */
+export interface DoorContactReading {
+  /** Game seconds. */
+  ts: number;
+  site: string;
+  door: string;
+  event: "open" | "close";
+}
+
+/**
  * A discriminated reading tagged by its sensor id (distinct from a vendor
- * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm. M3..M6 add tvm,
- * kiosk, door, camera, console, and relay arms as their actors land.
+ * `Endpoint.id`). M0 had one arm; M2 adds the train-tracker arm; M3 adds the door
+ * reader (a staff grant) and the door contact (the reducer's open/close). M4..M6 add
+ * tvm, kiosk, camera, console, and relay arms as their actors land.
  */
 export type WorldReading =
   | { sensor: "fare-gate"; reading: FareGateReading }
-  | { sensor: "train-tracker"; reading: TrainReading };
+  | { sensor: "train-tracker"; reading: TrainReading }
+  | { sensor: "door-reader"; reading: DoorReaderReading }
+  | { sensor: "door-contact"; reading: DoorContactReading };
 
 /** The read-only environment every live actor reads. It grows per milestone. */
 export interface WorldEnv {

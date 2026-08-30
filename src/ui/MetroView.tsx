@@ -19,7 +19,12 @@ const TICKS_PER_MINUTE = 60 / GAME_SECONDS_PER_TICK;
 /** How many of the retained log entries the panel shows. */
 const LOG_ROWS = 70;
 
-const stationName = new Map(world.stations.map((station) => [station.id, station.name]));
+/** Every named place a reading can cite: the nine stations, the sites, and the OCC. */
+const placeName = new Map<string, string>([
+  ...world.stations.map((station): [string, string] => [station.id, station.name]),
+  ...world.sites.map((site): [string, string] => [site.id, site.name]),
+  [world.controlCenter.id, world.controlCenter.name],
+]);
 
 /** The four lines, for the legend, in the map's draw order. */
 const LEGEND_LINES = world.lines
@@ -53,7 +58,7 @@ function tapsPerMinute(log: readonly TimedWorldReading[], nowTick: number): numb
 function logRow(entry: TimedWorldReading): { code: string; color: string; text: string } {
   const reading = entry.reading;
   if (reading.sensor === "train-tracker") {
-    const place = stationName.get(reading.reading.station) ?? reading.reading.station;
+    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
     const detail = reading.reading.event === "arr" ? "arrive" : "depart";
     return {
       code: "T",
@@ -61,7 +66,23 @@ function logRow(entry: TimedWorldReading): { code: string; color: string; text: 
       text: `train tracker, ${place}, ${reading.reading.train} ${detail} (${reading.reading.line})`,
     };
   }
-  const place = stationName.get(reading.reading.station) ?? reading.reading.station;
+  if (reading.sensor === "door-reader") {
+    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
+    return {
+      code: "R",
+      color: "var(--s-reader)",
+      text: `door reader, ${place}, ${reading.reading.badge} grant ${reading.reading.door} (${reading.reading.zone})`,
+    };
+  }
+  if (reading.sensor === "door-contact") {
+    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
+    return {
+      code: "D",
+      color: "var(--s-contact)",
+      text: `door contact, ${place}, ${reading.reading.door} ${reading.reading.event}`,
+    };
+  }
+  const place = placeName.get(reading.reading.station) ?? reading.reading.station;
   const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
   return {
     code: "G",
@@ -133,6 +154,11 @@ function Legend() {
       <div className="metro-legend-row">
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--ink)" }} />
         rider
+      </div>
+      <div className="metro-legend-row">
+        {/* A square swatch matching the staff's real 7x7 green square glyph (--ok). */}
+        <span className="metro-swatch metro-swatch-staff" style={{ background: "var(--ok)" }} />
+        staff
       </div>
       <div className="metro-legend-row">
         {/* A rounded-rect swatch matching the train's real pill glyph (#cfe3ea). */}

@@ -22,6 +22,26 @@ function lerp(from: Point, to: Point, t: number): Point {
 }
 
 /**
+ * A clamped step between two points over `[startTick, startTick + durationTicks]`, for
+ * the short board/alight animation the canvas draws when a rider gets on or off a
+ * train: it returns `from` (the platform) at the start and `to` (the train) at the end,
+ * blending linearly in between and clamping outside the window. Pure and view-only, so
+ * it is unit-tested without a canvas; the render `nowTick` is a UI estimate that never
+ * re-enters the sim.
+ */
+export function stepBetween(
+  from: Point,
+  to: Point,
+  startTick: number,
+  durationTicks: number,
+  nowTick: number,
+): Point {
+  const t =
+    durationTicks <= 0 ? 1 : Math.max(0, Math.min(1, (nowTick - startTick) / durationTicks));
+  return lerp(from, to, t);
+}
+
+/**
  * Where an actor is at `nowTick`, in design space. A `moving` actor is blended along
  * its line edge, clamped to the endpoints outside `[fromTick, untilTick]`; an `at`
  * actor rests on its node.

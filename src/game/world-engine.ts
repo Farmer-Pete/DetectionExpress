@@ -15,14 +15,18 @@
  */
 import { type Actor, createSchedule, type StepResult } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
-import { gateNodeId } from "../sim/world/layout";
+import type { StaffSpawner } from "../sim/actors/staff-spawner";
+import { contactNodeId, gateNodeId, readerNodeId } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent, WorldSnapshot } from "../sim/world-snapshot";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
+import { createDoorReducer } from "./door-reducer";
 import {
   CLOCK_HZ,
+  DOOR_DWELL_TICKS,
   FLASH_WINDOW_TICKS,
+  GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
   SIM_TICKS_PER_CLOCK_TICK,
   WORLD_LOG_RETENTION,
@@ -56,6 +60,11 @@ export interface WorldStartOptions {
    * tick; when absent (M0 tests) it runs the fixtures alone. Deterministic per seed.
    */
   spawner?: RiderSpawner;
+  /**
+   * The seeded transient-staff source (M3). When present the engine admits its births
+   * each tick, capped by the live staff count; when absent it runs without staff.
+   */
+  staffSpawner?: StaffSpawner;
   /**
    * The sim steps per clock tick, sampled each tick. A UI-only float (the pause/speed
    * control): 0 freezes the sim, 1 is real time, higher speeds it up. It never enters
@@ -132,6 +141,9 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
   const flashes: FlashEvent[] = [];
   let nextFlashId = 0;
   let simTick = 0;
+  // The door projection over the frozen env: a staff grant opens a door, and this
+  // reducer closes it after a dwell (M3). It is not a scheduler actor (ADR-0007).
+  const doorReducer = createDoorReducer(DOOR_DWELL_TICKS);
   // A bounded ring of the most recent normalized readings, for the event log. Newest
   // is pushed to the end; the snapshot publishes it newest-first.
   const recentLog: TimedWorldReading[] = [];
@@ -149,6 +161,10 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
   const liveRiders = (): number =>
     [...views.values()].filter((view) => view.kind === "rider" || view.kind === "account-rider")
       .length;
+
+  /** The live staff count, the staff spawner's ceiling input. */
+  const liveStaff = (): number =>
+    [...views.values()].filter((view) => view.kind === "staff").length;
 
   let clock: Clock | null = null;
   let detachVisibility: (() => void) | null = null;
@@ -210,12 +226,20 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
           atTick: entry.tick,
         });
         nextFlashId += 1;
+      } else if (entry.reading.sensor === "door-reader") {
+        // A staff grant flashes on the location's door-reader (R) chip.
+        flashes.push({
+          id: nextFlashId,
+          kind: "grant",
+          node: readerNodeId(entry.reading.reading.site),
+          atTick: entry.tick,
+        });
+        nextFlashId += 1;
       }
-      // Keep the reading for the event log, bounded to the retention window.
+      // Keep the reading for the event log; the retention trim runs after the door
+      // reducer appends this tick's door-contact readings, so the fixed source order
+      // (actor readings, then door) is preserved before the log is bounded.
       recentLog.push(entry);
-    }
-    if (recentLog.length > WORLD_LOG_RETENTION) {
-      recentLog.splice(0, recentLog.length - WORLD_LOG_RETENTION);
     }
     for (const [id, presence] of step.presences) {
       const view = views.get(id);
@@ -225,6 +249,41 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
     }
     for (const id of step.dormant) {
       views.delete(id);
+    }
+  };
+
+  // Run the door reducer for one tick over that tick's staff grants, AFTER the actor
+  // readings are logged. It closes doors whose dwell has elapsed and opens the tick's
+  // grants, then the engine turns each open/close into a `door-contact` reading (source
+  // "door", appended after the actor readings) and a flash on the door-contact (D) chip.
+  const reduceDoors = (step: StepResult<WorldReading>, tick: number): void => {
+    const grants: { location: string; door: string }[] = [];
+    for (const timed of step.readings) {
+      if (timed.reading.sensor === "door-reader") {
+        grants.push({ location: timed.reading.reading.site, door: timed.reading.reading.door });
+      }
+    }
+    for (const event of doorReducer.step(grants, tick)) {
+      const reading: WorldReading = {
+        sensor: "door-contact",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          site: event.location,
+          door: event.door,
+          event: event.event,
+        },
+      };
+      recentLog.push({ reading, tick, source: "door" });
+      flashes.push({
+        id: nextFlashId,
+        kind: "door",
+        node: contactNodeId(event.location),
+        atTick: tick,
+      });
+      nextFlashId += 1;
+    }
+    if (recentLog.length > WORLD_LOG_RETENTION) {
+      recentLog.splice(0, recentLog.length - WORLD_LOG_RETENTION);
     }
   };
 
@@ -243,10 +302,13 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
 
   const buildSnapshot = (): WorldSnapshot => {
     const actors = [...views.values()];
+    // The door projection: each currently-open door lights its location's door-contact
+    // (D) chip. Multiple open doors at one location collapse onto the one chip node.
+    const openNodes = new Set(doorReducer.openDoors().map((door) => contactNodeId(door.location)));
     return {
       nowTick: simTick,
       actors,
-      doors: [],
+      doors: [...openNodes].map((node) => ({ node, open: true })),
       crowds: [],
       flashes: [...flashes],
       // Newest first, so the log panel reads top to bottom as most-recent first.
@@ -255,13 +317,14 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
     };
   };
 
-  // Admit the spawner's due births at the current frontier and seed each view.
+  // Admit each spawner's due births at the current frontier and seed each view. The
+  // rider and staff spawners are independent, each capped by its own live count.
   const spawnTransients = (): void => {
-    const spawner = options.spawner;
-    if (spawner === undefined) {
-      return;
+    for (const admission of options.spawner?.tick(simTick, liveRiders()) ?? []) {
+      const firstTick = schedule.admit(admission);
+      seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
     }
-    for (const admission of spawner.tick(simTick, liveRiders())) {
+    for (const admission of options.staffSpawner?.tick(simTick, liveStaff()) ?? []) {
       const firstTick = schedule.admit(admission);
       seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
     }
@@ -301,6 +364,10 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
         for (let i = 0; i < steps; i++) {
           const step = schedule.advanceTo(simTick + 1);
           applyStep(step);
+          // The door reducer runs each tick over this step's grants (the tick being
+          // processed is `simTick`, before the increment), so a door closes on time
+          // even on a tick with no grants.
+          reduceDoors(step, simTick);
           simTick += 1;
           spawnTransients();
         }

@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, Admission } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import { createStaff, initialStaffPresence } from "../sim/actors/staff";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import { distanceTable } from "../sim/world/distance";
-import { gateNodeId } from "../sim/world/layout";
+import { contactNodeId, gateNodeId, readerNodeId } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
-import type { WorldEnv, WorldReading } from "../sim/world-reading";
+import type { DoorContactReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { WorldSnapshot } from "../sim/world-snapshot";
 import { ManualDriver } from "./clock";
 import {
   CLOCK_HZ,
+  DOOR_DWELL_TICKS,
   FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
@@ -427,6 +429,138 @@ describe("world engine trains", () => {
     expect(trainFlashes.length).toBeGreaterThan(0);
     // The Red train departs Harbor at tick 0, so a train flash lands on the "har" node.
     expect(trainFlashes.some((flash) => flash.node === "har")).toBe(true);
+  });
+});
+
+/** The door-contact payloads in a snapshot's log, narrowed off the reading union. */
+function doorContacts(snapshot: WorldSnapshot | undefined): DoorContactReading[] {
+  const contacts: DoorContactReading[] = [];
+  for (const entry of snapshot?.log ?? []) {
+    if (entry.reading.sensor === "door-contact") {
+      contacts.push(entry.reading.reading);
+    }
+  }
+  return contacts;
+}
+
+/** A staff fixture that visits Eastyard Depot and taps its doors low to high. */
+function depotStaffFixture(): WorldFixture {
+  const actor = createStaff({
+    id: "S1",
+    badge: { id: "B900", grade: 4 },
+    location: "dep",
+    nearestStation: "jct",
+    startTick: 0,
+    walkTicks: 1,
+    stepTicks: 10,
+  });
+  return {
+    actor,
+    kind: "staff",
+    initialPresence: (firstTick) => initialStaffPresence("jct", firstTick),
+  };
+}
+
+describe("world engine doors", () => {
+  it("flashes a grant at the door reader and opens the door via the reducer", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [depotStaffFixture()],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    // Long enough for both taps (ticks 1 and 11) and their dwell closes.
+    tick(driver, 30);
+    handle.stop();
+
+    const flashes = snapshots.flatMap((snapshot) => snapshot.flashes);
+    // A grant flashes on the depot's door-reader (R) chip.
+    const grants = flashes.filter((flash) => flash.kind === "grant");
+    expect(grants.length).toBeGreaterThan(0);
+    expect(grants.every((flash) => flash.node === readerNodeId("dep"))).toBe(true);
+    // The door contact open/close flashes on the depot's door-contact (D) chip.
+    const doorFlashes = flashes.filter((flash) => flash.kind === "door");
+    expect(doorFlashes.length).toBeGreaterThan(0);
+    expect(doorFlashes.every((flash) => flash.node === contactNodeId("dep"))).toBe(true);
+  });
+
+  it("emits door-contact open then close readings and toggles the door projection", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [depotStaffFixture()],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 30);
+    handle.stop();
+
+    // The door-contact readings the reducer emitted, in order, for STORE (the first door).
+    const last = snapshots.at(-1);
+    const store = doorContacts(last).filter((reading) => reading.door === "STORE");
+    expect(store.map((reading) => reading.event)).toContain("open");
+    expect(store.map((reading) => reading.event)).toContain("close");
+
+    // A snapshot mid-dwell shows the door open; a late snapshot shows it closed again.
+    const anyOpen = snapshots.some((snapshot) =>
+      snapshot.doors.some((door) => door.node === contactNodeId("dep") && door.open),
+    );
+    expect(anyOpen).toBe(true);
+    expect(last?.doors ?? []).toHaveLength(0);
+  });
+
+  it("closes a door exactly DOOR_DWELL_TICKS after the grant that opened it", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [depotStaffFixture()],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 30);
+    handle.stop();
+
+    const contacts = doorContacts(snapshots.at(-1));
+    // STORE opens at tick 1 (game seconds 2) and closes at tick 1 + DOOR_DWELL_TICKS.
+    const openTs = contacts.find((r) => r.door === "STORE" && r.event === "open")?.ts ?? Number.NaN;
+    const closeTs =
+      contacts.find((r) => r.door === "STORE" && r.event === "close")?.ts ?? Number.NaN;
+    expect(closeTs - openTs).toBe(DOOR_DWELL_TICKS * GAME_SECONDS_PER_TICK);
+  });
+
+  it("counts staff and evicts them from the view when they leave", () => {
+    let sawStaff = false;
+    let last: WorldSnapshot | undefined;
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [depotStaffFixture()],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => {
+        if (snapshot.counts.staff > 0) {
+          sawStaff = true;
+        }
+        last = snapshot;
+      },
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, 60);
+    handle.stop();
+    expect(sawStaff).toBe(true);
+    // After the visit the staff has walked out and despawned.
+    expect(last?.counts.staff).toBe(0);
+    expect((last?.actors ?? []).filter((view) => view.kind === "staff")).toHaveLength(0);
   });
 });
 

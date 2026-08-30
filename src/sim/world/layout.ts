@@ -122,6 +122,16 @@ export function gateNodeId(station: string): MapNodeId {
   return `${station}:${SENSOR_KEY.G}`;
 }
 
+/** The door-reader (R) chip node a grant flash lands on, at a site or the OCC. */
+export function readerNodeId(location: string): MapNodeId {
+  return `${location}:${SENSOR_KEY.R}`;
+}
+
+/** The door-contact (D) chip node a door open/close flash and its state land on. */
+export function contactNodeId(location: string): MapNodeId {
+  return `${location}:${SENSOR_KEY.D}`;
+}
+
 /** The i-th of n chips in a row centered on `(cx, cy)`, at pitch 9. */
 function chipPoint(cx: number, cy: number, index: number, count: number): Point {
   return { x: cx - ((count - 1) * CHIP_PITCH) / 2 + index * CHIP_PITCH, y: cy };

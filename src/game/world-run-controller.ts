@@ -11,13 +11,14 @@
  */
 
 import { createRiderSpawner } from "../sim/actors/rider-spawner";
+import { createStaffSpawner } from "../sim/actors/staff-spawner";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import type { DistanceTable } from "../sim/world/distance";
 import { buildTimetable, trainIdForLine } from "../sim/world/timetable";
 import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
-import { TARGET_RIDERS } from "./tuning";
+import { STAFF_TARGET, TARGET_RIDERS } from "./tuning";
 import {
   startWorld as startWorldDefault,
   type WorldEngineHandle,
@@ -88,11 +89,16 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
     engine?.stop(); // sync + idempotent
     deps.setWorldSnapshot(emptyWorldSnapshot());
     const runSeed = deps.getSeed();
-    // A fresh, seeded spawner per run, so the population replays for a seed.
+    // Fresh, seeded spawners per run, so the population replays for a seed.
     const spawner = createRiderSpawner({
       seed: runSeed,
       world: deps.world,
       target: TARGET_RIDERS,
+    });
+    const staffSpawner = createStaffSpawner({
+      seed: runSeed,
+      world: deps.world,
+      target: STAFF_TARGET,
     });
     const startOptions: WorldStartOptions = {
       fixtures: [...buildTrains(), ...deps.getFixtures()],
@@ -101,6 +107,7 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
       setWorldSnapshot: deps.setWorldSnapshot,
       onError: (error) => deps.onError?.(error),
       spawner,
+      staffSpawner,
     };
     // Assign the optional speed reader only when given, so exactOptionalPropertyTypes
     // never sees an explicit undefined.
