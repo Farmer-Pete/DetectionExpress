@@ -428,6 +428,30 @@ rest as not modeled, rather than claim the full protocol.
   `GeneratedRun` integration. The remaining actors, train, operator, host, and the gate observer,
   arrive with the hunts that read their sensors.
 
+## Revision: the live view couples riders to trains (ticket #87, M2b)
+
+The observable metro view (#87) adds one coupling this ADR earlier deferred ("a train will
+gate a rider's boarding," listed as a planned interaction). In the live view a rider now rides
+a real train. The `createWorldRider` actor still makes its whole trip DECISION through the
+shared, pure trip core (destination, line, fare, balance), so that logic stays single-sourced
+and coherent. What changes is the ride EXECUTION: the rider reads the timetable's pure
+`nextService(line, from, to, afterTick)` to find the tick its line's train departs the origin
+and the tick it arrives at the destination, waits `at` the origin until that departure (tapping
+in), rides an `onTrain` presence until the arrival (tapping out), then dwells.
+
+Two properties are kept on purpose:
+
+- Determinism and separability. The rider reads the timetable, not a live train's state, so the
+  cast still holds ADR-0007's rule that an actor reads only immutable environment. `nextService`
+  shares the exact ping-pong/loop stepping with the train actor, so the boarding matches the
+  train's real motion rather than a phantom, and the fare-gate taps stay separable telemetry.
+- The batch rider stays abstract. `createRider`, the production/`#89` data-path actor, keeps its
+  abstract-duration ride and its byte-identical emitted readings for every seed. Only the live
+  `createWorldRider` couples. The two share the trip core; only the ride execution differs.
+
+The camera and door remain engine reducers over finished readings, not scheduler actors, as this
+ADR requires.
+
 ## Research sources
 
 - Agent-based model overview: https://en.wikipedia.org/wiki/Agent-based_model

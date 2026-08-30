@@ -15,8 +15,9 @@ import { CLOCK_HZ, FLASH_LIFE_TICKS } from "../../game/tuning";
 import { useWorldStore } from "../../game/world-store";
 import { metroLayout, metroLines, type Point } from "../../sim/world/layout";
 import type { Presence } from "../../sim/world/presence";
+import { trainIdForLine } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
-import type { FlashEvent, WorldSnapshot } from "../../sim/world-snapshot";
+import type { ActorView, FlashEvent, WorldSnapshot } from "../../sim/world-snapshot";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./design";
 import { presencePoint } from "./interpolate";
 
@@ -60,7 +61,30 @@ const POINTS_BY_LINE = new Map<string, readonly Point[]>(
 );
 
 /** Each train's line color, keyed by its id (T1..T4 = world lines in order). */
-const TRAIN_COLOR_BY_ID = new Map(world.lines.map((line, index) => [`T${index + 1}`, line.color]));
+const TRAIN_COLOR_BY_ID = new Map(
+  world.lines.map((line) => [trainIdForLine(world, line.id), line.color]),
+);
+
+/** A boarded rider clusters near its train glyph: dx +/-8, dy +/-6 (view notes section 4). */
+const ONBOARD_DX = 8;
+const ONBOARD_DY = 6;
+
+/**
+ * A stable per-rider onboard offset, so a boarded rider keeps one seat by the train
+ * rather than jittering each frame. Derived from the rider id, spread over the offset
+ * box; deterministic and pure.
+ */
+function onboardOffset(id: string): Point {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  const unit = (bits: number): number => ((bits >>> 0) % 1000) / 1000; // [0,1)
+  return {
+    x: (unit(hash) * 2 - 1) * ONBOARD_DX,
+    y: (unit(hash >> 10) * 2 - 1) * ONBOARD_DY,
+  };
+}
 
 /** A uniform design-space -> canvas transform: fit and center, never stretch. */
 interface View {
@@ -99,6 +123,11 @@ function trainPlacement(
   layout: ReadonlyMap<string, Point>,
   renderNow: number,
 ): { point: Point; angle: number } {
+  if (presence.kind === "onTrain") {
+    // A train is never itself onTrain; this only satisfies the union. Boarded riders
+    // are placed relative to their train's placement by the caller, not here.
+    return { point: ORIGIN, angle: 0 };
+  }
   const rail = presence.rail;
   if (rail !== undefined) {
     const points = POINTS_BY_LINE.get(rail.line) ?? [];
@@ -221,6 +250,14 @@ export function ActorLayer() {
       const view = fit(width, height);
       ctx.clearRect(0, 0, width, height);
 
+      // Index the trains so a boarded rider can ride with the train it named.
+      const trainById = new Map<string, ActorView>();
+      for (const actor of snapshot.actors) {
+        if (actor.kind === "train") {
+          trainById.set(actor.id, actor);
+        }
+      }
+
       for (const actor of snapshot.actors) {
         if (actor.kind === "train") {
           // A train rides its line's offset polyline, rotated to face its travel
@@ -231,6 +268,19 @@ export function ActorLayer() {
           continue;
         }
         ctx.fillStyle = INK;
+        if (actor.presence.kind === "onTrain") {
+          // A boarded rider is placed near its train's glyph and drawn fully opaque
+          // (view notes section 4). If the train is gone the rider is not drawn.
+          const train = trainById.get(actor.presence.train);
+          if (train === undefined) {
+            continue;
+          }
+          const base = trainPlacement(train.presence, layout, renderNow).point;
+          const offset = onboardOffset(actor.id);
+          ctx.globalAlpha = RIDER_MOVING_ALPHA;
+          drawRider(ctx, view, { x: base.x + offset.x, y: base.y + offset.y });
+          continue;
+        }
         // Dim a waiting or dwelling rider; a moving rider is fully opaque.
         ctx.globalAlpha = actor.presence.kind === "moving" ? RIDER_MOVING_ALPHA : RIDER_DWELL_ALPHA;
         drawRider(ctx, view, presencePoint(actor.presence, layout, renderNow));

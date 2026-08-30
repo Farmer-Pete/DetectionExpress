@@ -34,6 +34,11 @@ export function presencePoint(
   if (presence.kind === "at") {
     return pointOf(layout, presence.node);
   }
+  if (presence.kind === "onTrain") {
+    // A boarded rider is placed near its train, which needs the whole snapshot; the
+    // layer resolves that. Without the train this pure helper has no point to give.
+    return ORIGIN;
+  }
   const span = presence.untilTick - presence.fromTick;
   const raw = span <= 0 ? 1 : (nowTick - presence.fromTick) / span;
   const t = Math.max(0, Math.min(1, raw));

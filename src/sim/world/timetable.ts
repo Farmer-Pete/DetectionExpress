@@ -16,6 +16,7 @@ import {
   TRAIN_SERVICE_SPAN_MINUTES,
 } from "../../game/tuning";
 import { minutesToTicks } from "../actors/actor";
+import { trainCycle } from "../actors/train-stepping";
 import type { World } from "./world";
 
 /** One line's ride plan: enough for a single train to run it end to end. */
@@ -94,4 +95,104 @@ export function buildTimetable(world: World): Timetable {
     },
     lines: () => schedules,
   };
+}
+
+/** The next service found for a boarding: when the train leaves `from`, when it reaches `to`. */
+export interface Service {
+  /** The tick the line's train departs `from`, at or after `afterTick`. The rider taps in here. */
+  boardTick: number;
+  /** The tick that same train arrives at `to`, having ridden through any stops between. */
+  alightTick: number;
+}
+
+/**
+ * The deterministic train id for a line, `T1..T4` in world-line order. Shared by the
+ * run-controller (which seeds the trains) and a live rider (which names the train it
+ * boards), so the rider's `onTrain` presence references the real train's `ActorView`.
+ */
+export function trainIdForLine(world: World, lineId: string): string {
+  const index = world.lines.findIndex((line) => line.id === lineId);
+  if (index < 0) {
+    throw new Error(`trainIdForLine: unknown line "${lineId}".`);
+  }
+  return `T${index + 1}`;
+}
+
+/**
+ * The next service on one line from `from` to `to` at or after `afterTick`: the tick
+ * the line's single train DEPARTS `from` heading toward `to`, and the tick it ARRIVES
+ * at `to`. It finds the earliest departure from `from` whose direction reaches `to`
+ * before the train returns to `from`, and rides it there. The tick math is the shared
+ * stepping, so the ticks equal `createTrain`'s emitted `dep`/`arr`.
+ *
+ * Periodic and unbounded in time. The train's motion repeats every `cycle.period` ticks,
+ * so rather than simulate every leg up to a distant `afterTick` (which would eventually
+ * run out and throw), it fast-forwards by whole cycles to preserve the train's phase,
+ * then scans a bounded few cycles from there. It never throws for a valid service at any
+ * `afterTick`, however large.
+ *
+ * Returns null only when the line has no direct service for the pair (an equal stop, or
+ * a station not on the line). On a shared line a next pass always exists, so a real
+ * boarding never returns null.
+ */
+export function nextService(
+  schedule: LineTimetable,
+  from: string,
+  to: string,
+  afterTick: number,
+): Service | null {
+  if (from === to || !schedule.stops.includes(from) || !schedule.stops.includes(to)) {
+    return null;
+  }
+
+  const cycle = trainCycle(schedule);
+  const start = schedule.startTick;
+  // Fast-forward whole cycles so cycle `k0` starts at or before `afterTick`, preserving
+  // the train's phase. Materialize a few consecutive cycles from there: the earliest
+  // boarding at or after `afterTick` lies in cycle k0 or k0+1, and its ride to `to`
+  // completes within the following cycles. Four cycles is comfortably enough.
+  const k0 = afterTick <= start ? 0 : Math.floor((afterTick - start) / cycle.period);
+  const legs: { fromStation: string; toStation: string; depTick: number; arrTick: number }[] = [];
+  for (let k = k0; k <= k0 + 3; k++) {
+    const base = start + k * cycle.period;
+    for (const leg of cycle.legs) {
+      legs.push({
+        fromStation: leg.fromStation,
+        toStation: leg.toStation,
+        depTick: base + leg.depOffset,
+        arrTick: base + leg.arrOffset,
+      });
+    }
+  }
+
+  for (let boarding = 0; boarding < legs.length; boarding++) {
+    const departure = legs[boarding];
+    if (
+      departure === undefined ||
+      departure.fromStation !== from ||
+      departure.depTick < afterTick
+    ) {
+      continue;
+    }
+    // Ride forward from this departure until the train reaches `to`. If it returns to
+    // `from` first, this departure was heading the wrong way; try the next one.
+    for (let leg = boarding; leg < legs.length; leg++) {
+      const current = legs[leg];
+      if (current === undefined) {
+        break;
+      }
+      // A fresh departure from `from` ends this boarding's ride: its arrival belongs to
+      // that later departure, so break before crediting it to this one.
+      if (leg > boarding && current.fromStation === from) {
+        break;
+      }
+      if (current.toStation === to) {
+        return { boardTick: departure.depTick, alightTick: current.arrTick };
+      }
+    }
+  }
+
+  // A shared-line pair is always served, so this is unreachable for a real boarding; a
+  // defensive null (the caller's fallback), never a throw that could stop the run.
+  return null;
 }

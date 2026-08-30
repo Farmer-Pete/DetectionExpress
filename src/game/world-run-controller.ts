@@ -13,7 +13,7 @@
 import { createRiderSpawner } from "../sim/actors/rider-spawner";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import type { DistanceTable } from "../sim/world/distance";
-import { buildTimetable } from "../sim/world/timetable";
+import { buildTimetable, trainIdForLine } from "../sim/world/timetable";
 import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
@@ -65,11 +65,14 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
   // One persistent train per line, ids T1..T4 in world-line order. Fresh per run so a
   // re-run starts every train at its origin rather than mid-ride (they hold ride state).
   const buildTrains = (): readonly WorldFixture[] =>
-    deps.world.lines.map((line, index): WorldFixture => {
+    deps.world.lines.map((line): WorldFixture => {
       const schedule = timetable.line(line.id);
       const origin = schedule.stops[0] ?? line.id;
+      // The same deterministic line -> train id the live rider names when it boards,
+      // so a rider's onTrain presence references this exact train fixture.
+      const id = trainIdForLine(deps.world, line.id);
       return {
-        actor: createTrain({ id: `T${index + 1}`, line: line.id, startTick: schedule.startTick }),
+        actor: createTrain({ id, line: line.id, startTick: schedule.startTick }),
         kind: "train",
         initialPresence: (firstTick) => initialTrainPresence(origin, firstTick, line.id),
       };

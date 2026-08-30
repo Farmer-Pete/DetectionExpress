@@ -35,7 +35,11 @@ interface RailPlacement {
  * A stationary actor sits `at` a node from `fromTick`; a fixture whose next act is
  * far off uses `untilTick: "open"`. A `moving` actor rides one line's edge between
  * two nodes, always with `untilTick > fromTick`, because a moving actor is mid-trip
- * with a known arrival. Either may carry a `rail` placement for exact on-track drawing.
+ * with a known arrival. An `onTrain` actor rides a named train from `fromTick` to
+ * `untilTick`: the view places it near that train's `ActorView` rather than on a line
+ * edge of its own. Additive: a boarded rider carries it; other actors never do, and a
+ * consumer that does not know it treats it as a rider it cannot place on the map.
+ * A `moving` or `at` presence may carry a `rail` placement for exact on-track drawing.
  */
 export type Presence =
   | {
@@ -53,4 +57,11 @@ export type Presence =
       fromTick: number;
       untilTick: number;
       rail?: RailPlacement;
+    }
+  | {
+      kind: "onTrain";
+      /** The id of the train `ActorView` this rider rides, e.g. `"T1"`. */
+      train: string;
+      fromTick: number;
+      untilTick: number;
     };

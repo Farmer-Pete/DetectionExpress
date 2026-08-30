@@ -14,9 +14,9 @@
  */
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
 import type { Presence } from "../world/presence";
-import type { LineTimetable } from "../world/timetable";
 import type { WorldEnv, WorldReading } from "../world-reading";
 import type { Actor } from "./actor";
+import { stepLeg } from "./train-stepping";
 
 /** One train's configuration: which line it rides and its first departure tick. */
 export interface TrainConfig {
@@ -45,33 +45,6 @@ type Pending =
 function trackId(line: string, a: string, b: string): string {
   const [low, high] = a < b ? [a, b] : [b, a];
   return `${line}:${low}-${high}`;
-}
-
-/**
- * The next stop index and direction from `index`, and the departing segment index. A
- * loop wraps forward through its ring (its stops repeat the origin at the end); a
- * straight line reflects at either end.
- */
-function nextStop(
-  schedule: LineTimetable,
-  index: number,
-  dir: 1 | -1,
-): { index: number; dir: 1 | -1; segment: number } {
-  const stops = schedule.stops;
-  if (schedule.loop) {
-    // The stops close on the origin (stops[last] === stops[0]), so the ring has
-    // `stops.length - 1` distinct positions and the train always steps forward.
-    const ring = stops.length - 1;
-    const next = (index + 1) % ring;
-    return { index: next, dir: 1, segment: index };
-  }
-  let step = index + dir;
-  let nextDir = dir;
-  if (step < 0 || step >= stops.length) {
-    nextDir = dir === 1 ? -1 : 1;
-    step = index + nextDir;
-  }
-  return { index: step, dir: nextDir, segment: Math.min(index, step) };
 }
 
 /**
@@ -110,40 +83,44 @@ export function createTrain(config: TrainConfig): Actor<WorldReading, WorldEnv> 
 
       if (pending.do === "depart") {
         const here = pending.index;
-        const step = nextStop(schedule, here, pending.dir);
-        const fromStation = stops[here];
-        const toStation = stops[step.index];
-        const hop = schedule.hopTicks[step.segment];
-        if (fromStation === undefined || toStation === undefined || hop === undefined) {
+        // The shared stepping decides the next stop, the hop, and the polyline points
+        // this leg rides, so the train and a rider's `nextService` move identically. A
+        // malformed hop is re-scoped to this actor, keeping the original error message.
+        let leg: ReturnType<typeof stepLeg>;
+        try {
+          leg = stepLeg(schedule, here, pending.dir, tick);
+        } catch {
           throw new Error(`train "${config.id}": bad hop on line "${config.line}".`);
         }
-        // The polyline point indices this hop rides. A straight line's stop index IS its
-        // point index; a loop repeats a station id, so it rides the segment's own points
-        // (segment -> segment + 1) instead of the wrapped station index.
-        const fromPoint = here;
-        const toPoint = schedule.loop ? step.segment + 1 : step.index;
-        const nextTick = tick + hop;
+        const nextTick = leg.arrTick;
         const reading: WorldReading = {
           sensor: "train-tracker",
           reading: {
             ts,
             train: config.id,
             line: config.line,
-            station: fromStation,
+            station: leg.fromStation,
             event: "dep",
-            track: trackId(config.line, fromStation, toStation),
+            track: trackId(config.line, leg.fromStation, leg.toStation),
           },
         };
         const presence: Presence = {
           kind: "moving",
-          from: fromStation,
-          to: toStation,
+          from: leg.fromStation,
+          to: leg.toStation,
           line: config.line,
           fromTick: tick,
           untilTick: nextTick,
-          rail: { line: config.line, from: fromPoint, to: toPoint },
+          rail: { line: config.line, from: leg.fromPoint, to: leg.toPoint },
         };
-        pending = { do: "arrive", from: here, to: step.index, dir: step.dir, fromPoint, toPoint };
+        pending = {
+          do: "arrive",
+          from: here,
+          to: leg.toIndex,
+          dir: leg.dir,
+          fromPoint: leg.fromPoint,
+          toPoint: leg.toPoint,
+        };
         return { readings: [reading], nextTick, presence };
       }
 
