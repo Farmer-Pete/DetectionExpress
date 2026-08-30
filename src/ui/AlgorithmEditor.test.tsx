@@ -1,14 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../game/store";
-import { optimizationSource } from "../sim/scenarios/kiosk-pin-attack/optimization";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 
 const SLUG = "kiosk-pin-attack";
 
 beforeEach(() => {
-  useGameStore.setState({ sourceLocked: false });
+  useGameStore.setState({ sourceLocked: false, runPending: false });
   useGameStore.getState().setAlgorithmSource(referenceSource);
 });
 
@@ -17,32 +16,48 @@ describe("AlgorithmEditor", () => {
     expect(useGameStore.getState().source).toBe(referenceSource);
   });
 
-  it("is editable with a Run button when the source is not locked", () => {
+  it("is editable with an Apply button when the source is not locked", () => {
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
     const textarea = screen.getByRole("textbox");
     expect(textarea.hasAttribute("readonly")).toBe(false);
-    expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
-  it("swaps the source to the Optimization when Apply Optimization is clicked", () => {
+  it("resets the source to the reference default when Reset to default is clicked", () => {
+    useGameStore.getState().setAlgorithmSource("// a broken edit");
     render(<AlgorithmEditor onRun={() => undefined} slug={SLUG} />);
-    fireEvent.click(screen.getByRole("button", { name: /apply optimization/i }));
-    expect(useGameStore.getState().source).toBe(optimizationSource);
+    fireEvent.click(screen.getByRole("button", { name: /reset to default/i }));
+    expect(useGameStore.getState().source).toBe(referenceSource);
   });
 
-  it("runs the current source when Run is clicked", () => {
+  it("runs the current source when Apply is clicked", () => {
     let ran = 0;
     render(<AlgorithmEditor onRun={() => (ran += 1)} slug={SLUG} />);
-    fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(ran).toBe(1);
   });
 
-  it("is read-only and hides the Run button while the source is locked", () => {
+  it("disables Apply and reads Checking... while a run is pending", () => {
+    useGameStore.setState({ runPending: true });
+    render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
+    const apply = screen.getByRole("button", { name: "Checking..." });
+    expect(apply).toHaveProperty("disabled", true);
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+  });
+
+  it("enables Apply and reads Apply when no run is pending", () => {
+    render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply).toHaveProperty("disabled", false);
+  });
+
+  it("is read-only and hides the Apply and Reset buttons while the source is locked", () => {
     useGameStore.setState({ sourceLocked: true });
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
     const textarea = screen.getByRole("textbox");
     expect(textarea.hasAttribute("readonly")).toBe(true);
-    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /reset to default/i })).toBeNull();
   });
 
   it("shows the pushed source in the locked textarea", () => {
@@ -56,6 +71,15 @@ describe("AlgorithmEditor", () => {
     useGameStore.setState({ sourceLocked: true });
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
     expect(screen.getByRole("button", { name: "Download this Scenario" })).toBeDefined();
+  });
+
+  it("shows the error line bound to the store error", () => {
+    useGameStore.setState({ error: { phase: "load", message: "bad syntax" } });
+    render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("load");
+    expect(alert.textContent).toContain("bad syntax");
+    useGameStore.setState({ error: null });
   });
 
   it("downloads the Scenario as <slug>.ts", () => {
