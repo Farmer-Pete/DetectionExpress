@@ -5,7 +5,7 @@ chosen palette, maps every color to a role, and gives a drop-in token block.
 Read it before you style any gauge, panel, or Node.
 
 Terms come from `CONTEXT.md`: Engine, Resource, Throughput, Correctness, Cost,
-Flexibility, Backlog, Event, Alert, Threat, Node, SLA.
+Flexibility, Queue, Event, Alert, Threat, Node, SLA.
 
 ## Decision
 
@@ -69,8 +69,8 @@ Values below are the resolved output for this palette.
 | `--a2`      | `#f94144`                  | Correctness meter fill, graph line, section labels, wires  |
 | `--a3`      | `#277da1`                  | Cost meter fill                                             |
 | `--a4`      | `#43aa8b`                  | Spare accent (seagrass)                                     |
-| `--threat`  | `#f94144`                  | Threat tags, the Backlog danger zone, threat Event rows     |
-| `--alert`   | `#f9c74f`                  | Alert tags, the Backlog warning zone                        |
+| `--threat`  | `#f94144`                  | Threat tags, the Queue danger zone, threat Event rows       |
+| `--alert`   | `#f9c74f`                  | Alert tags, the Queue warning zone                          |
 | `--ok`      | `#43aa8b`                  | Healthy state: the "SLA met" pill                           |
 
 ## Semantic colors

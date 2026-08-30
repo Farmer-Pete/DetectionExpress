@@ -4,9 +4,10 @@ import { useGameStore } from "../../game/store";
 import { CHANNEL_CAP, OMEGA } from "../../game/tuning";
 import type { FailureReason, RunStatus } from "../../sim/snapshot";
 import { Gauge } from "../gauges/Gauge";
+import { severityFill } from "./severity";
 
-/** The effective Backlog ceiling: the two upstream channels fill; the Sink drains at once. */
-const BACKLOG_MAX = 2 * CHANNEL_CAP;
+/** The effective Queue ceiling: the two upstream channels fill; the Sink drains at once. */
+const QUEUE_MAX = 2 * CHANNEL_CAP;
 
 /**
  * The Compute ceiling, in ticks per Event. The naive default rule measures at
@@ -15,17 +16,6 @@ const BACKLOG_MAX = 2 * CHANNEL_CAP;
  * Optimization's far lower cost reads as a clear drop.
  */
 const COMPUTE_MAX = 2 / OMEGA;
-
-/** A fill that ramps healthy -> warning -> danger as a fraction of the gauge's max. */
-function severityFill(fraction: number) {
-  if (fraction >= 0.8) {
-    return "var(--threat)";
-  }
-  if (fraction >= 0.5) {
-    return "var(--alert)";
-  }
-  return "var(--ok)";
-}
 
 /** The Correctness fill ramps the other way: it is healthy high, danger low. */
 function correctnessFill(rolling: number) {
@@ -44,8 +34,8 @@ function outcomeText(status: RunStatus, reason: FailureReason) {
     return "Won";
   }
   if (status === "failed") {
-    return reason === "backlog"
-      ? "Failed: Backlog overflowed"
+    return reason === "queue"
+      ? "Failed: Queue overflowed"
       : reason === "correctness"
         ? "Failed: Correctness too low"
         : "Failed";
@@ -55,13 +45,13 @@ function outcomeText(status: RunStatus, reason: FailureReason) {
 
 export function Hud() {
   const throughput = useGameStore((state) => state.snapshot.throughput);
-  // The Backlog the player sees is the authoritative outstanding count,
+  // The Queue the player sees is the authoritative outstanding count,
   // `admitted - completed`, the same value the checkpoint fails on. The channel
   // sum can read zero on the terminal frame while an Event is still in service,
   // so it must not drive this gauge (GH3-PLAN.md 5.5).
   const admitted = useGameStore((state) => state.snapshot.admitted);
   const completed = useGameStore((state) => state.snapshot.completed);
-  const backlog = admitted - completed;
+  const queued = admitted - completed;
   const rolling = useGameStore((state) => state.snapshot.correctness.rolling);
   const caught = useGameStore((state) => state.snapshot.correctness.caught);
   const missed = useGameStore((state) => state.snapshot.correctness.missed);
@@ -73,11 +63,11 @@ export function Hud() {
     <div className="hud">
       <Gauge label="Throughput" value={throughput} max={20} unit="/s" fill="var(--a1)" />
       <Gauge
-        label="Backlog"
-        value={backlog}
-        max={BACKLOG_MAX}
+        label="Queue"
+        value={queued}
+        max={QUEUE_MAX}
         unit=""
-        fill={severityFill(backlog / BACKLOG_MAX)}
+        fill={severityFill(queued / QUEUE_MAX)}
       />
       <Gauge
         label="Compute"

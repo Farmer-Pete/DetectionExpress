@@ -6,7 +6,7 @@
  * seeded `rng` and `faker`, so the same seed always replays the same run.
  *
  * The waves make the squeeze: benign Events per tick climb wave over wave against
- * the rule's fixed service rate, so a slow rule's Backlog outgrows a checkpoint.
+ * the rule's fixed service rate, so a slow rule's Queue outgrows a checkpoint.
  */
 import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
@@ -204,7 +204,7 @@ const briefing =
   "read the raw kiosk PIN entries, normalize them, and count the failures per account. " +
   "When a burst crosses the line, it raises one Alert for the whole burst, not " +
   "one per entry. Normal traffic keeps rising in waves. Watch the Compute gauge: " +
-  "the Engine holds its speed and stays ahead of the backlog while it catches " +
+  "the Engine holds its speed and stays ahead of the queue while it catches " +
   "every burst.";
 
 export const kioskPinAttack: Scenario = {

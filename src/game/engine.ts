@@ -7,7 +7,7 @@
  * resolved only at true teardown.
  *
  * The run no longer ends when the stream drains. It ends at a checkpoint: a failed
- * one (Backlog not clear, or Correctness below the floor) or the final deadline (a
+ * one (Queue not clear, or Correctness below the floor) or the final deadline (a
  * win when clear). Every game-outcome terminal transition force-publishes the
  * terminal snapshot first, so the HUD always receives the outcome. An explicit
  * stop is a teardown, not an outcome, so it publishes nothing.
@@ -19,15 +19,9 @@
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
 import type { PipeEvent, PipeMessage } from "../sim/event";
-import {
-  type GraphEdge,
-  type GraphNode,
-  type LinearChain,
-  validateLinearChain,
-} from "../sim/graph";
-import { nextHeat, occupancy } from "../sim/heat";
+import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/graph";
 import { createInspector, type Inspector } from "../sim/inspector";
-import { ema, emaAlpha, makeWindowedRate, perSecond } from "../sim/rate";
+import { makeWindowedRate } from "../sim/rate";
 import type { Checkpoint } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
@@ -38,15 +32,10 @@ import {
   CLOCK_HZ,
   CORRECTNESS_FLOOR,
   GAME_SECONDS_PER_TICK,
-  HEAT_COOL_S,
-  HEAT_RAMP_S,
-  OCC_THRESHOLD,
   PUBLISH_HZ,
-  RATE_TAU,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
 } from "./tuning";
-import { bindVisibility as bindVisibilityDefault } from "./visibility";
 
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
 export interface StartOptions {
@@ -64,8 +53,6 @@ export interface StartOptions {
   checkpoints: Checkpoint[];
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
-  /** Defaults to the real visibility binding; tests pass a no-op. */
-  bindVisibility?: (clock: Clock) => () => void;
   /** Reports an engine or Rule failure. */
   onError?: (error: unknown) => void;
 }
@@ -73,6 +60,12 @@ export interface StartOptions {
 /** A running engine. `stop` tears it down; `whenStopped` settles for tests. */
 export interface EngineHandle {
   stop: () => void;
+  /** Freeze the run: hold the live clock. A no-op after stop. */
+  pause: () => void;
+  /** Unfreeze the run: resume the live clock. A no-op after stop. */
+  resume: () => void;
+  /** Change the run's pace: multiply the live clock's rate. A no-op after stop. */
+  setSpeed: (multiplier: number) => void;
   whenStopped: Promise<void>;
 }
 
@@ -108,14 +101,6 @@ function wiringFor(
   return { input, output };
 }
 
-/** Per-edge smoothing state, kept across samples. */
-interface EdgeState {
-  lastAccepted: number;
-  lastPulled: number;
-  inRate: number;
-  outRate: number;
-}
-
 /** The live run counters and lifecycle the sampler folds into every snapshot. */
 interface RunState {
   compute: number;
@@ -128,37 +113,20 @@ interface RunState {
 /**
  * Build the shared snapshot builder. It runs every tick in normal mode (gated on
  * elapsed ticks) and once per terminal transition in forced mode. A forced publish
- * with no ticks elapsed keeps the prior rates and heat, but always refreshes
- * Backlog, Correctness, and the run counters, so the terminal reading cannot drift.
+ * with no ticks elapsed keeps the prior throughput, but always refreshes Queue,
+ * Correctness, and the run counters, so the terminal reading cannot drift.
  */
 function makeSampler(
   clock: Clock,
   channels: Map<string, Channel<PipeMessage>>,
-  chain: LinearChain,
-  edges: GraphEdge[],
   scorer: Scorer,
   inspector: Inspector,
   setSnapshot: (snapshot: SimSnapshot) => void,
   run: RunState,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
-  const alpha = emaAlpha(RATE_TAU, PUBLISH_HZ);
-  const rampStep = 1 / (HEAT_RAMP_S * PUBLISH_HZ);
-  const coolStep = 1 / (HEAT_COOL_S * PUBLISH_HZ);
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
   const throughputRate = makeWindowedRate(throughputSamples, PUBLISH_HZ);
-
-  const edgeState = new Map<string, EdgeState>();
-  for (const edgeId of chain.edgeIds) {
-    edgeState.set(edgeId, { lastAccepted: 0, lastPulled: 0, inRate: 0, outRate: 0 });
-  }
-  const nodeHeat = new Map<string, number>();
-  const nodeInput = new Map<string, Channel<PipeMessage> | undefined>();
-  for (const nodeId of chain.nodeIds) {
-    nodeHeat.set(nodeId, 0);
-    const inputEdge = edges.find((edge) => edge.target === nodeId);
-    nodeInput.set(nodeId, inputEdge ? channels.get(inputEdge.id) : undefined);
-  }
 
   let lastSampleTick = clock.now();
   let lastCompleted = 0;
@@ -171,58 +139,26 @@ function makeSampler(
       return;
     }
 
-    // With real elapsed ticks, refresh the smoothed rates, heat, and throughput
-    // from exact per-sample deltas. A forced publish at zero elapsed ticks skips
-    // this and keeps the prior values, adding no extra ramp or cool step.
+    // With real elapsed ticks, refresh throughput from the exact per-sample delta.
+    // A forced publish at zero elapsed ticks skips this and keeps the prior value.
     if (ticks > 0) {
-      for (const edgeId of chain.edgeIds) {
-        const channel = channels.get(edgeId);
-        const state = edgeState.get(edgeId);
-        if (!channel || !state) {
-          continue;
-        }
-        const inSample = perSecond(channel.accepted - state.lastAccepted, ticks, CLOCK_HZ);
-        const outSample = perSecond(channel.pulled - state.lastPulled, ticks, CLOCK_HZ);
-        state.inRate = ema(state.inRate, inSample, alpha);
-        state.outRate = ema(state.outRate, outSample, alpha);
-        state.lastAccepted = channel.accepted;
-        state.lastPulled = channel.pulled;
-      }
       const completedNow = run.getCompleted();
       throughput = throughputRate(completedNow - lastCompleted);
       lastCompleted = completedNow;
-      for (const nodeId of chain.nodeIds) {
-        const channel = nodeInput.get(nodeId);
-        const occ = channel ? occupancy(channel.size, channel.cap) : 0;
-        nodeHeat.set(
-          nodeId,
-          nextHeat(nodeHeat.get(nodeId) ?? 0, occ, OCC_THRESHOLD, rampStep, coolStep),
-        );
-      }
       lastSampleTick = now;
     }
 
-    // Backlog, Correctness, and the run counters are always fresh, even on a
+    // Queue, Correctness, and the run counters are always fresh, even on a
     // zero-tick forced publish.
-    let backlog = 0;
+    let queued = 0;
     for (const channel of channels.values()) {
-      backlog += channel.size;
-    }
-    const nodes: Record<string, { heat: number }> = {};
-    for (const [nodeId, heat] of nodeHeat) {
-      nodes[nodeId] = { heat };
-    }
-    const edgeReadings: Record<string, { inRate: number; outRate: number }> = {};
-    for (const [edgeId, state] of edgeState) {
-      edgeReadings[edgeId] = { inRate: state.inRate, outRate: state.outRate };
+      queued += channel.size;
     }
 
     const ring = inspector.snapshot();
     setSnapshot({
-      backlog,
+      queued,
       throughput,
-      nodes,
-      edges: edgeReadings,
       correctness: scorer.reading(),
       compute: run.compute,
       status: run.getStatus(),
@@ -244,11 +180,10 @@ export function start(options: StartOptions): EngineHandle {
   }
 
   const graph = options.getGraph();
-  const chain = validateLinearChain(graph.nodes, graph.edges); // throws before allocation
+  validateLinearChain(graph.nodes, graph.edges); // throws before allocation
 
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
-  let detachVisibility: (() => void) | null = null;
   let publish: ((force: boolean) => void) | null = null;
   let stopped = false;
   let admitted = 0; // real Events pushed out of Ingest
@@ -277,7 +212,6 @@ export function start(options: StartOptions): EngineHandle {
         teardownStep("channel.close", () => channel.close());
       }
     }
-    teardownStep("visibility detach", () => detachVisibility?.());
     resolveTerminal();
   };
 
@@ -337,9 +271,6 @@ export function start(options: StartOptions): EngineHandle {
     }
     channels = channelMap; // publish to the outer scope so stop() can close each
 
-    const bind = options.bindVisibility ?? bindVisibilityDefault;
-    detachVisibility = bind(clock);
-
     // The inspector needs no ground truth, so the engine builds it directly. This
     // is a deliberate asymmetry with the scorer, which the run controller injects.
     const inspector = createInspector({ ringSize: RING_SIZE });
@@ -371,22 +302,13 @@ export function start(options: StartOptions): EngineHandle {
     // Correctness. The run does NOT end here: it waits for the final deadline.
     void Promise.allSettled(tasks);
 
-    publish = makeSampler(
-      clock,
-      channelMap,
-      chain,
-      graph.edges,
-      options.scorer,
-      inspector,
-      options.setSnapshot,
-      {
-        compute,
-        getAdmitted: () => admitted,
-        getCompleted: () => completed,
-        getStatus: () => status,
-        getFailureReason: () => failureReason,
-      },
-    );
+    publish = makeSampler(clock, channelMap, options.scorer, inspector, options.setSnapshot, {
+      compute,
+      getAdmitted: () => admitted,
+      getCompleted: () => completed,
+      getStatus: () => status,
+      getFailureReason: () => failureReason,
+    });
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it
     // does not try to force-publish through the same broken sink.
@@ -418,10 +340,10 @@ export function start(options: StartOptions): EngineHandle {
           break;
         }
         options.scorer.advanceTo(cp.atTick * GAME_SECONDS_PER_TICK);
-        const backlog = admitted - completed;
+        const queued = admitted - completed;
         const isFinal = nextCheckpoint === checkpoints.length - 1;
-        if (backlog !== 0) {
-          finishOutcome("failed", "backlog");
+        if (queued !== 0) {
+          finishOutcome("failed", "queue");
           return;
         }
         if (options.scorer.reading().rolling < CORRECTNESS_FLOOR) {
@@ -436,7 +358,16 @@ export function start(options: StartOptions): EngineHandle {
       }
     });
 
-    return { stop, whenStopped };
+    // The clock is live from here on. pause/resume drive the freeze control seam and
+    // setSpeed drives the speed seam; the Clock guards each against a stopped state,
+    // so they are safe after stop.
+    return {
+      stop,
+      pause: () => clock?.pause(),
+      resume: () => clock?.resume(),
+      setSpeed: (multiplier: number) => clock?.setSpeed(multiplier),
+      whenStopped,
+    };
   } catch (error) {
     stop(); // partial teardown, so a half-built engine leaks nothing
     throw error;

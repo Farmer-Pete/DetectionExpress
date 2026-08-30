@@ -113,7 +113,6 @@ async function runRealEngine(
     serviceRate: rate,
     checkpoints: run.checkpoints,
     driver,
-    bindVisibility: () => () => undefined,
   });
   const deadline = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
   for (let i = 0; i < deadline + 2; i++) {
@@ -157,7 +156,7 @@ describe("fare-gate-rush throughput: squeeze on the real event curve", () => {
   const run = buildFareGateRun(LEVEL_SEED);
   const arrivalsByTick = totalArrivalsByTick(run);
 
-  it("fails a checkpoint with a Backlog margin at the slow reference rate", () => {
+  it("fails a checkpoint with a Queue margin at the slow reference rate", () => {
     const result = simulate({
       arrivalsByTick,
       serviceRate: REFERENCE_SLOW_RATE,
@@ -165,10 +164,10 @@ describe("fare-gate-rush throughput: squeeze on the real event curve", () => {
       checkpoints: run.checkpoints,
     });
     expect(result.outcome).toBe("failed");
-    expect(result.backlogAtFailure).toBeGreaterThan(0);
+    expect(result.queueAtFailure).toBeGreaterThan(0);
   });
 
-  it("clears every checkpoint with Backlog headroom at the fast reference rate", () => {
+  it("clears every checkpoint with Queue headroom at the fast reference rate", () => {
     const result = simulate({
       arrivalsByTick,
       serviceRate: REFERENCE_FAST_RATE,
@@ -179,11 +178,11 @@ describe("fare-gate-rush throughput: squeeze on the real event curve", () => {
     expect(result.failedCheckpoint).toBe(-1);
     // The real total curve (tap-ins plus their echoing tap-outs) peaks well above
     // a kiosk-only wave: two overlapping waves of the same actor can both land in
-    // one tick, so Backlog transiently crosses CHANNEL_CAP (measured peak ~105)
+    // one tick, so Queue transiently crosses CHANNEL_CAP (measured peak ~105)
     // without failing any checkpoint. The bound sits at 1.5 * CHANNEL_CAP: loose
     // enough for that real transient, tight enough to catch a regression drifting
     // toward the 2 * CHANNEL_CAP clamp ceiling. The win invariant is proven
     // separately through the real engine.
-    expect(result.maxBacklog).toBeLessThan(1.5 * CHANNEL_CAP);
+    expect(result.maxQueue).toBeLessThan(1.5 * CHANNEL_CAP);
   });
 });

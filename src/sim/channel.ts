@@ -2,7 +2,7 @@
  * Channel<T>: a bounded, blocking, FIFO async queue on one edge of the Pipeline.
  * Push into it, read with pull. When it is full a push waits until a pull frees
  * a slot; when it is empty a pull waits until a push arrives. Nothing is dropped
- * during a normal run, so the channel's size is that edge's Backlog.
+ * during a normal run, so the channel's size is that edge's Queue.
  *
  * It counts pushes that entered (`accepted`) and pulls that took an item
  * (`pulled`) so the sampler can measure flow. Waiters unblock through `close`,

@@ -152,6 +152,12 @@ export function App({ createPipelineController, createWorldController }: AppProp
     const active = (createPipelineController ?? buildController)();
     controllerRef.current = active;
     active.run();
+    // Seed the fresh controller from the store's transport. The reflection effects are
+    // keyed on [frozen]/[speed], so they do not re-fire on a view change; without this
+    // seed a Metro->Pipeline round-trip would run the new engine unfrozen at 1x while
+    // the panel still shows frozen/2x.
+    active.setFrozen(useGameStore.getState().transport.frozen);
+    active.setSpeed(useGameStore.getState().transport.speed);
     return () => {
       active.dispose();
       if (controllerRef.current === active) {
@@ -172,6 +178,24 @@ export function App({ createPipelineController, createWorldController }: AppProp
       active.dispose();
     };
   }, [view, createWorldController]);
+
+  // Reflect the store's transport mirror into the pipeline controller. This handles a
+  // user toggle from the panel. An engine swap (mount, Apply, hot-reload) is handled by
+  // the controller reapplying its retained state on startEngine, which this effect
+  // misses because the store value did not change. The two guards together drop no
+  // state. `controllerRef` holds the pipeline controller, which is live only in the
+  // pipeline view; in the metro view the ref is null and the reflection is a no-op.
+  const frozen = useGameStore((s) => s.transport.frozen);
+  useEffect(() => {
+    controllerRef.current?.setFrozen(frozen);
+  }, [frozen]);
+
+  // The same reflection for speed. A panel speed change flows here; an engine swap is
+  // handled by the controller reapplying its retained speed on startEngine.
+  const speed = useGameStore((s) => s.transport.speed);
+  useEffect(() => {
+    controllerRef.current?.setSpeed(speed);
+  }, [speed]);
 
   // Build the dev-only local-IDE client on mount, behind the folded `import.meta.env.DEV`
   // gate and a live HMR channel. On a forced reload (Vite reloads when the active file is

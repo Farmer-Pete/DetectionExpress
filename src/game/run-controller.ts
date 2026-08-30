@@ -65,6 +65,14 @@ export interface RuleErrorInfo {
   message: string;
 }
 
+/** The playback speed multipliers the transport offers. */
+export type Speed = 0.5 | 1 | 2;
+
+/** True when a value is one of the three allowed speeds. */
+function isSpeed(value: number): value is Speed {
+  return value === 0.5 || value === 1 || value === 2;
+}
+
 /**
  * A pending service-rate measurement. `rate` resolves with the quantized rate the
  * governor charges; `cancel` terminates the measurement (in production, a stale
@@ -81,6 +89,19 @@ type ResolveServiceRate = (target: LoadTarget) => ServiceRateHandle;
 export interface RunController {
   /** Load the current source and (re)start the engine. Safe to call repeatedly. */
   run(): void;
+  /**
+   * Freeze or unfreeze the run. The controller retains the desired state, delegates
+   * to the live engine handle when one exists, and reapplies it on the next start,
+   * so an Apply or hot-reload inherits the current freeze. Safe with no engine live.
+   */
+  setFrozen(frozen: boolean): void;
+  /**
+   * Set the run's playback speed. The controller validates the value before it retains
+   * it, delegates to the live engine handle when one exists, and reapplies it on the
+   * next start, so an Apply or hot-reload inherits the current speed. Safe with no
+   * engine live.
+   */
+  setSpeed(speed: Speed): void;
   /** Permanent teardown. A later load or completion sees this and does nothing. */
   dispose(): void;
 }
@@ -363,6 +384,11 @@ export function createRunController(deps: RunControllerDeps): RunController {
   let profile: ServiceRateHandle | null = null;
   let generation = 0;
   let disposed = false;
+  // The retained transport state. This is the source of truth: startEngine reapplies
+  // it to every fresh clock, so an Apply or hot-reload inherits the current freeze and
+  // speed. Default speed 1, so a normal startup runs at the base rate.
+  let frozen = false;
+  let speed: Speed = 1;
 
   const run = async (): Promise<void> => {
     if (disposed) {
@@ -464,6 +490,20 @@ export function createRunController(deps: RunControllerDeps): RunController {
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;
+        // Reapply the retained transport state to the fresh clock. Apply and hot-reload
+        // build a new clock, so without this a frozen or 2x session would drive a new
+        // unpaused 1x one. The reapply is transactional: if pause or setSpeed throws, the
+        // freshly built handle is stopped rather than orphaned, then the throw rethrows to
+        // the outer catch, which nulls the engine and reports it as a start-phase error.
+        try {
+          if (frozen) {
+            handle.pause();
+          }
+          handle.setSpeed(speed);
+        } catch (reapplyError) {
+          handle.stop();
+          throw reapplyError;
+        }
         // The live engine's completion keys on handle identity, not the generation, so an
         // old run that finishes during a later dry-run still reports its completion. A
         // superseded or replaced engine (engine !== handle) or a disposed controller is ignored.
@@ -498,10 +538,36 @@ export function createRunController(deps: RunControllerDeps): RunController {
     deps.setRunPending(false); // dispose bumped the generation, so an in-flight finally won't
   };
 
+  // Retain the desired freeze and, when a clock is live, apply it at once. With no
+  // engine live it just stores the value; startEngine reapplies it on the next start.
+  const setFrozen = (next: boolean): void => {
+    frozen = next;
+    if (engine) {
+      if (next) {
+        engine.pause();
+      } else {
+        engine.resume();
+      }
+    }
+  };
+
+  // Validate before retaining, so an invalid value never reaches a later reapply. Then
+  // retain and, when a clock is live, apply it at once. With no engine live it just
+  // stores the value; startEngine reapplies it on the next start.
+  const setSpeed = (next: Speed): void => {
+    if (!isSpeed(next)) {
+      throw new Error(`RunController.setSpeed needs one of 0.5, 1, 2, got ${next}.`);
+    }
+    speed = next;
+    engine?.setSpeed(next);
+  };
+
   return {
     run: () => {
       void run();
     },
+    setFrozen,
+    setSpeed,
     dispose,
   };
 }

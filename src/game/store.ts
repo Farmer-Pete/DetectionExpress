@@ -12,9 +12,19 @@ import { create } from "zustand";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
-import type { RuleErrorInfo } from "./run-controller";
+import type { RuleErrorInfo, Speed } from "./run-controller";
 import { PIPELINE_EDGES, PIPELINE_NODES } from "./topology";
 import { LEVEL_SEED } from "./tuning";
+
+/**
+ * The transport mirror. The run controller owns the authoritative transport state;
+ * this slice only mirrors it so the panel can paint the buttons. It does not hold the
+ * controller.
+ */
+interface TransportState {
+  frozen: boolean;
+  speed: Speed;
+}
 
 interface GameState {
   snapshot: SimSnapshot;
@@ -49,6 +59,8 @@ interface GameState {
    * read it; this slice writes it.
    */
   selection: { seq: number } | null;
+  /** Mirrors the run controller's transport state so the panel can paint the buttons. */
+  transport: TransportState;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
   setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
@@ -59,6 +71,10 @@ interface GameState {
   selectFinding: (seq: number) => void;
   /** Clear the selection. Esc and a click on the empty panel call it. */
   clearSelection: () => void;
+  /** Sets the transport freeze mirror. The App reflects it into the run controller. */
+  setFrozen: (frozen: boolean) => void;
+  /** Sets the transport speed mirror. The App reflects it into the run controller. */
+  setSpeed: (speed: Speed) => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -70,6 +86,7 @@ export const useGameStore = create<GameState>((set) => ({
   sourceLocked: false,
   runPending: false,
   selection: null,
+  transport: { frozen: false, speed: 1 },
   // Reconcile the selection on every snapshot. `seq` is stable within one run, but a
   // run restart (Apply or reload) builds a fresh scorer, so `seq` resets from zero. So
   // keep the selection only while its seq still appears in the new snapshot's findings;
@@ -93,6 +110,10 @@ export const useGameStore = create<GameState>((set) => ({
   selectFinding: (seq) =>
     set((state) => ({ selection: state.selection?.seq === seq ? null : { seq } })),
   clearSelection: () => set({ selection: null }),
+  // Each setter keeps the sibling field, so toggling freeze never resets speed and
+  // vice versa.
+  setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),
+  setSpeed: (speed) => set((s) => ({ transport: { ...s.transport, speed } })),
 }));
 
 /**

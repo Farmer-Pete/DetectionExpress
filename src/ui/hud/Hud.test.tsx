@@ -56,15 +56,15 @@ describe("Hud", () => {
     expect(screen.getByText("Won")).toBeDefined();
   });
 
-  it("reads the authoritative backlog (admitted - completed), not the channel sum", () => {
-    // On a terminal backlog loss the channels can read empty while one Event is
+  it("reads the authoritative queue (admitted - completed), not the channel sum", () => {
+    // On a terminal queue loss the channels can read empty while one Event is
     // still in service; admitted - completed keeps it visible (GH3-PLAN.md 5.5).
     useGameStore.setState({
       snapshot: {
         ...emptySnapshot(),
         status: "failed",
-        failureReason: "backlog",
-        backlog: 0,
+        failureReason: "queue",
+        queued: 0,
         admitted: 40,
         completed: 25,
       },
@@ -75,10 +75,10 @@ describe("Hud", () => {
 
   it("shows the loss and its reason", () => {
     useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "backlog" },
+      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "queue" },
     });
     render(<Hud />);
-    expect(screen.getByText("Failed: Backlog overflowed")).toBeDefined();
+    expect(screen.getByText("Failed: Queue overflowed")).toBeDefined();
   });
 
   it("shows the correctness loss reason", () => {

@@ -58,8 +58,8 @@ The run does not end when the Event stream ends. It ends on a **checkpoint** sch
 from the waves, and the last checkpoint is the **final deadline**.
 
 - At each checkpoint the engine settles pending misses (`scorer.advanceTo`), then reads
-  backlog (`admitted - completed`) and Correctness. Non-zero backlog fails the run with reason
-  `backlog`; Correctness below the floor fails it with reason `correctness`.
+  the queue (`admitted - completed`) and Correctness. A non-zero queue fails the run with reason
+  `queue`. Correctness below the floor fails it with reason `correctness`.
 - The final deadline catches a naive Rule that would otherwise drain slowly after the last
   wave. The Clock stays live until the deadline even after the end-of-stream marker drains, so
   a slow Rule still fails there and a fast one wins.

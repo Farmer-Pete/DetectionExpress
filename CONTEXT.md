@@ -52,9 +52,9 @@ _Avoid_: breach, incident, wave.
 The hidden knowledge of which Events form the real Attacks in a run. The game holds it in the scorer, apart from the Events the Algorithm sees. The player does not see it. The code is open, so we do not obfuscate it.
 _Avoid_: Answer, label, key, tag.
 
-**Backlog**:
-Events waiting because the Engine cannot process them fast enough. Too much Backlog ends the run.
-_Avoid_: Queue depth, lag, buffer.
+**Queue**:
+The Events waiting because the Engine cannot process them fast enough. An Event is Queued while it waits. Any Events still Queued at a checkpoint end the run.
+_Avoid_: lag, buffer.
 
 **SLA**:
 The service level the player must hold. Meeting it earns Income. Falling behind on Throughput or Correctness cuts Income.
@@ -81,7 +81,7 @@ One of four competing measures the player must hold: Throughput, Correctness, Co
 _Avoid_: Stat, metric, meter.
 
 **Throughput**:
-How well the Engine keeps up with the incoming event rate. Falling behind grows the Backlog.
+How well the Engine keeps up with the incoming event rate. Falling behind grows the Queue.
 _Avoid_: Speed, performance, rate.
 
 **Correctness**:
@@ -105,7 +105,7 @@ The architecture disruptor. A new Hunt or Vulnerability the player must detect. 
 _Avoid_: Task, requirement, ticket, feature.
 
 **Failure**:
-A lost Scenario. It happens when a Resource crosses a hard limit. Too much Backlog or too many Correctness mistakes ends the run.
+A lost Scenario. It happens when a Resource crosses a hard limit. Too long a Queue or too many Correctness mistakes ends the run.
 _Avoid_: Game over, death, loss.
 
 ### Optimization
