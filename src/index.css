@@ -1140,13 +1140,20 @@ body {
 
 .log-row {
   display: grid;
-  grid-template-columns: 3.5rem 1fr 1fr 1fr;
+  grid-template-columns: 3.5rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem;
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+}
+
+/* Zero-minimum tracks let a cell shrink; wrap long endpoint values or JSON
+   fallbacks instead of widening the row past the panel. */
+.log-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .log-row-time {

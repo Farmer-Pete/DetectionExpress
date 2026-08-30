@@ -53,7 +53,7 @@ The hidden knowledge of which Events form the real Attacks in a run. The game ho
 _Avoid_: Answer, label, key, tag.
 
 **Queue**:
-The Events waiting because the Engine cannot process them fast enough. An Event is Queued while it waits. A Queue that grows too long ends the run.
+The Events waiting because the Engine cannot process them fast enough. An Event is Queued while it waits. Any Events still Queued at a checkpoint end the run.
 _Avoid_: lag, buffer.
 
 **SLA**:
