@@ -68,7 +68,7 @@ describe("calibrate", () => {
       normalize: normalizeKiosk,
       detect: (v) =>
         v.outcome === "fail"
-          ? [{ alert: { reason: "pin_brute_force", at: v.ts, eventIds: [v.id] } }]
+          ? [{ alert: { reason: "pin_brute_force", at: v.ts, eventIds: [v.id] }, eventId: v.id }]
           : [],
     };
     // If the profiler rejected arrays it would throw here; reaching a finite

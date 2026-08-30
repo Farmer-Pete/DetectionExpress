@@ -42,16 +42,21 @@ interface FindingBase {
 }
 
 /**
- * A Finding with an anchor event. Promotable, and groupable when `subjectType` is set.
+ * One detection the Algorithm emits from detect(). Every Finding carries an anchor,
+ * so it is promotable, and groupable when `subjectType` is set.
  *
  * `eventId` is an anchor: one representative cited event, normally the first, and a
- * member of `alert.eventIds`. Identity for replace and promote is `eventId` + `reason`.
- * A partial "watch", like "3 wrong PINs, needs 5", lives here, because promotion keys
- * on the anchor. The scorer skips a partial. The UI shows it and ages it out. Promote
- * means re-emit an Anchored finding with the same `eventId` and `reason`, without
- * `isPartial`. The old one is replaced, not mutated.
+ * member of `alert.eventIds`. To promote a watch, re-emit a Finding with the same
+ * `reason` for the same subject, without `isPartial`; the old one is replaced, not
+ * mutated. A partial "watch", like "3 wrong PINs, needs 5", lives here. The scorer
+ * skips a partial. The UI shows it and ages it out. The scorer keys a grouped finding's
+ * live row on its resolved entity and `reason`, not the anchor, so a hunt whose anchor
+ * shifts mid-attack still lands on one row per subject; see `correctness.ts`.
  */
-type Anchored = FindingBase & {
+export interface Finding extends FindingBase {
+  /** The anchor: one representative cited event, normally the first, a member of
+   *  `alert.eventIds`. The scorer keys the live row on resolved entity + `reason` when
+   *  `subjectType` resolves, else on `eventId` + `reason`. */
   eventId: number;
   /**
    * Names the field on the anchor event that holds the entity value.
@@ -59,28 +64,13 @@ type Anchored = FindingBase & {
    * field on the record is an error. The UI reads `event[subjectType]` to group
    * findings, and the resolved value must be a primitive, a string or a number.
    * Example: `subjectType: "acct"` resolves to the account value. Optional. Omit it
-   * and the finding is not grouped. `subjectType` requires an `eventId` to resolve.
+   * and the finding is not grouped.
    */
   subjectType?: string;
+  /** A partial "watch", promoted later to a final for the same subject and `reason`. Each
+   *  emission carries a valid `eventId`; the anchor may differ across emissions. */
   isPartial?: boolean;
-};
-
-/**
- * A one-shot final Finding. No anchor, no subject, not promotable. The scorer scores
- * it once. Use it when a detection needs no partial state and no grouping.
- */
-type OneShot = FindingBase & {
-  eventId?: undefined;
-  subjectType?: undefined;
-  isPartial?: false;
-};
-
-/**
- * One detection the Algorithm emits from detect(). It is either Anchored, which is
- * promotable and groupable, or a OneShot final. This shape enforces two rules at the
- * type level: `subjectType` requires `eventId`, and a partial requires `eventId`.
- */
-export type Finding = Anchored | OneShot;
+}
 
 /**
  * The flat, per-Event view detect() receives: the normalized payload spread first,

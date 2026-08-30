@@ -20,9 +20,60 @@ function expectDetectReject(value: unknown): void {
   }
 }
 
+/** Assert a value is rejected with a detect-phase RuleError whose exact message matches. */
+function expectDetectRejectMessage(value: unknown, message: string): void {
+  try {
+    parseFindings(value);
+    throw new Error("expected parseFindings to reject");
+  } catch (error) {
+    expect(error).toBeInstanceOf(RuleError);
+    expect(error instanceof RuleError && error.phase).toBe("detect");
+    expect(error instanceof RuleError && error.message).toBe(message);
+  }
+}
+
+describe("parseFindings: rejects with a precise message across defect types", () => {
+  // Spread the exact-message assertion beyond the required-anchor rule, so a fixture
+  // aimed at one defect cannot silently pass on a different rejection (e.g. the anchor
+  // check firing first). Each fixture carries a valid anchor so it reaches its target rule.
+  it("names an unknown field on a finding", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, mystery: 1 }],
+      'Unknown field "mystery" on a finding.',
+    );
+  });
+
+  it("names an unknown context widget type", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, context: [{ type: "bogus" }] }],
+      "A context widget has an unknown type.",
+    );
+  });
+
+  it("names a non-rectangular table widget", () => {
+    expectDetectRejectMessage(
+      [
+        {
+          alert: { eventIds: [1], reason: "r", at: 1 },
+          eventId: 1,
+          context: [{ type: "table", columns: ["a", "b"], rows: [["only-one"]] }],
+        },
+      ],
+      "A table row length must equal the columns length.",
+    );
+  });
+
+  it("names a non-member eventId anchor", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1, 2], reason: "r", at: 1 }, eventId: 3 }],
+      "eventId must be a member of alert.eventIds.",
+    );
+  });
+});
+
 describe("parseFindings: accepts", () => {
-  it("a minimal OneShot final", () => {
-    const findings = parseFindings([{ alert: { eventIds: [1], reason: "r", at: 1 } }]);
+  it("a minimal final that carries its required anchor", () => {
+    const findings = parseFindings([{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1 }]);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.alert.reason).toBe("r");
   });
@@ -43,9 +94,11 @@ describe("parseFindings: accepts", () => {
     expect(findings).toHaveLength(1);
   });
 
-  it("a OneShot with isPartial false and no eventId", () => {
+  it("isPartial false alongside its required anchor", () => {
     expect(() =>
-      parseFindings([{ alert: { eventIds: [1], reason: "r", at: 1 }, isPartial: false }]),
+      parseFindings([
+        { alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, isPartial: false },
+      ]),
     ).not.toThrow();
   });
 
@@ -59,6 +112,7 @@ describe("parseFindings: accepts", () => {
     const findings = parseFindings([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [
           { type: "text", title: "T", text: "hello" },
           {
@@ -89,6 +143,7 @@ describe("parseFindings: accepts", () => {
       parseFindings([
         {
           alert: { eventIds: [1], reason: "r", at: 1 },
+          eventId: 1,
           context: [{ type: "json", value: { a: shared, b: shared } }],
         },
       ]),
@@ -172,8 +227,18 @@ describe("parseFindings: rejects a bad anchor and grouping", () => {
     expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1.5 }]);
   });
 
-  it("a subjectType with no eventId", () => {
-    expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1 }, subjectType: "acct" }]);
+  it("a finding with no eventId at all", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 } }],
+      "Each finding needs an eventId.",
+    );
+  });
+
+  it("a subjectType finding that omits the now-required eventId", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, subjectType: "acct" }],
+      "Each finding needs an eventId.",
+    );
   });
 
   it("a non-string or empty subjectType", () => {
@@ -185,8 +250,11 @@ describe("parseFindings: rejects a bad anchor and grouping", () => {
     ]);
   });
 
-  it("isPartial true with no eventId, and a non-boolean isPartial", () => {
-    expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1 }, isPartial: true }]);
+  it("isPartial true with no eventId (now the required-anchor rejection), and a non-boolean isPartial", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, isPartial: true }],
+      "Each finding needs an eventId.",
+    );
     expectDetectReject([
       { alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, isPartial: "yes" },
     ]);
@@ -199,12 +267,16 @@ describe("parseFindings: rejects a bad anchor and grouping", () => {
 
 describe("parseFindings: rejects bad context and widgets", () => {
   it("a non-array context", () => {
-    expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1 }, context: {} }]);
+    expectDetectReject([{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, context: {} }]);
   });
 
   it("an unknown widget type", () => {
     expectDetectReject([
-      { alert: { eventIds: [1], reason: "r", at: 1 }, context: [{ type: "chart", data: [] }] },
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
+        context: [{ type: "chart", data: [] }],
+      },
     ]);
   });
 
@@ -212,6 +284,7 @@ describe("parseFindings: rejects bad context and widgets", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "text", title: 5, text: "x" }],
       },
     ]);
@@ -221,6 +294,7 @@ describe("parseFindings: rejects bad context and widgets", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "text", text: "x", extra: 1 }],
       },
     ]);
@@ -228,7 +302,11 @@ describe("parseFindings: rejects bad context and widgets", () => {
 
   it("a text widget with a non-string text", () => {
     expectDetectReject([
-      { alert: { eventIds: [1], reason: "r", at: 1 }, context: [{ type: "text", text: 5 }] },
+      {
+        alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
+        context: [{ type: "text", text: 5 }],
+      },
     ]);
   });
 
@@ -236,18 +314,21 @@ describe("parseFindings: rejects bad context and widgets", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "kv", entries: [{ label: "a", value: {} }] }],
       },
     ]);
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "kv", entries: [{ value: 1 }] }],
       },
     ]);
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "kv", entries: "nope" }],
       },
     ]);
@@ -257,18 +338,21 @@ describe("parseFindings: rejects bad context and widgets", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "table", columns: [1, 2], rows: [] }],
       },
     ]);
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "table", columns: ["a"], rows: [[{}]] }],
       },
     ]);
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "table", columns: ["a", "b"], rows: [["only-one"]] }],
       },
     ]);
@@ -280,6 +364,7 @@ describe("parseFindings: rejects bad context and widgets", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "table", columns: cols, rows: [] }],
       },
     ]);
@@ -290,6 +375,7 @@ describe("parseFindings: rejects a bad json value", () => {
   const withJson = (value: unknown) => [
     {
       alert: { eventIds: [1], reason: "r", at: 1 },
+      eventId: 1,
       context: [{ type: "json", value }],
     },
   ];
@@ -328,6 +414,7 @@ describe("parseFindings: hardening against untrusted input", () => {
   const withJson = (value: unknown) => [
     {
       alert: { eventIds: [1], reason: "r", at: 1 },
+      eventId: 1,
       context: [{ type: "json", value }],
     },
   ];
@@ -349,6 +436,7 @@ describe("parseFindings: hardening against untrusted input", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "kv", entries: [{ label: "a", value: Object(5) }] }],
       },
     ]);
@@ -358,12 +446,14 @@ describe("parseFindings: hardening against untrusted input", () => {
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "kv", entries: [{ label: "a", value: Number.NaN }] }],
       },
     ]);
     expectDetectReject([
       {
         alert: { eventIds: [1], reason: "r", at: 1 },
+        eventId: 1,
         context: [{ type: "table", columns: ["a"], rows: [[Number.POSITIVE_INFINITY]] }],
       },
     ]);

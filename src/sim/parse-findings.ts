@@ -256,7 +256,7 @@ function parseAlert(alert: unknown): number[] {
   return alert.eventIds;
 }
 
-/** Validate one Finding: its alert, then the optional anchor, grouping, and display. */
+/** Validate one Finding: its alert, then the required anchor, grouping, and display. */
 function parseFinding(finding: unknown): void {
   if (!isPlainObject(finding)) {
     reject("Each finding must be an object.");
@@ -268,31 +268,27 @@ function parseFinding(finding: unknown): void {
   );
   const eventIds = parseAlert("alert" in finding ? finding.alert : undefined);
 
-  const hasEventId = "eventId" in finding && finding.eventId !== undefined;
-  if (hasEventId) {
-    if (!isEventId(finding.eventId)) {
-      reject("eventId must be a non-negative finite integer.");
-    }
-    if (!eventIds.includes(finding.eventId)) {
-      reject("eventId must be a member of alert.eventIds.");
-    }
+  // The anchor is now required. Checked right after `parseAlert` so the cited ids
+  // exist for the membership test below.
+  if (!("eventId" in finding) || finding.eventId === undefined) {
+    reject("Each finding needs an eventId.");
+  }
+  if (!isEventId(finding.eventId)) {
+    reject("eventId must be a non-negative finite integer.");
+  }
+  if (!eventIds.includes(finding.eventId)) {
+    reject("eventId must be a member of alert.eventIds.");
   }
 
   if ("subjectType" in finding && finding.subjectType !== undefined) {
     if (!isNonEmptyString(finding.subjectType)) {
       reject("subjectType must be a non-empty string.");
     }
-    if (!hasEventId) {
-      reject("subjectType requires an eventId.");
-    }
   }
 
   if ("isPartial" in finding && finding.isPartial !== undefined) {
     if (!isBoolean(finding.isPartial)) {
       reject("isPartial must be a boolean.");
-    }
-    if (finding.isPartial && !hasEventId) {
-      reject("A partial finding requires an eventId.");
     }
   }
 

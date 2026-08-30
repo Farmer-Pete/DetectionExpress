@@ -28,11 +28,13 @@ describe("adaptModule", () => {
   it("returns a working detect and defaults normalize to identity when absent", () => {
     const algo = adaptModule({
       detect: (event: { flag?: boolean }) =>
-        event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
+        event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 }] : [],
     });
     expect(algo.detect instanceof Function).toBe(true);
     expect(algo.normalize("passthrough")).toBe("passthrough"); // identity default
-    expect(algo.detect({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.detect({ flag: true })).toEqual([
+      { alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 },
+    ]);
     expect(algo.detect({ flag: false })).toEqual([]);
   });
 
@@ -80,11 +82,13 @@ describe("loadAlgorithm", () => {
       Promise.resolve({
         normalize: (r: { x: number }) => ({ u: r.x }),
         detect: (event: { flag?: boolean }) =>
-          event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] } }] : [],
+          event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 }] : [],
       });
     const algo = await loadAlgorithm(target, importSource);
     expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
-    expect(algo.detect({ flag: true })).toEqual([{ alert: { reason: "r", at: 1, eventIds: [1] } }]);
+    expect(algo.detect({ flag: true })).toEqual([
+      { alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 },
+    ]);
     expect(algo.detect({ flag: false })).toEqual([]);
   });
 

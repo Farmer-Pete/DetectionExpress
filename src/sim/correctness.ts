@@ -120,9 +120,10 @@ export type Decision = CaughtDecision | FalseDecision | MissedDecision;
 /**
  * One currently-open finding for the findings panel. Frozen in place, not cloned:
  * the finding is already fresh and engine-owned by the time it reaches the scorer.
- * Identity for upsert/replace: an Anchored finding keys on `eventId` + `reason`
- * (matching the promote/replace contract in `finding.ts`); a OneShot finding keys on
- * its own `seq` and is never replaced.
+ * Identity for upsert/replace: a grouped finding keys on (subjectType, entity, reason),
+ * an entity-less one on (eventId, reason). See `upsertLive` for why the entity, not the
+ * anchor, owns the row. A re-emit on the same key replaces the entry in place; a watch
+ * promotes to a hit without changing its seq.
  */
 export interface LiveFinding {
   /** The emitted finding, frozen in place. */
@@ -235,7 +236,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   const counts: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
   const ring: Outcome[] = [];
   const log: Decision[] = [];
-  // eventId::reason (Anchored) or oneshot:seq (OneShot) -> the open finding.
+  // Live identity -> the open finding. A grouped finding (one with a resolved entity)
+  // keys on (subjectType, entity, reason), so it is the entity that owns the row, not
+  // the anchor. An entity-less finding falls back to (eventId, reason). See `upsertLive`.
   const live = new Map<string, LiveFinding>();
   let nextLiveSeq = 0;
 
@@ -307,21 +310,23 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    */
   function dropWatchesForAttack(attackId: number): void {
     for (const [key, entry] of live) {
-      if (
-        entry.state === "watch" &&
-        entry.finding.eventId !== undefined &&
-        owner.get(entry.finding.eventId) === attackId
-      ) {
+      if (entry.state === "watch" && owner.get(entry.finding.eventId) === attackId) {
         live.delete(key);
       }
     }
   }
 
   /**
-   * Upsert one finding into the live set: partial -> watch, final -> hit, keyed by
-   * `eventId::reason` for an Anchored finding or by its own `seq` for a OneShot
-   * (fire-once, never replaced). A promotion replaces the entry in place, keeping
-   * the original `seq` and refreshing `state`/`eventIds`/`finding`/`at`.
+   * Upsert one finding into the live set: partial -> watch, final -> hit. Identity is
+   * the entity, not the anchor: a finding with a resolved entity keys on
+   * (subjectType, entity, reason), so every emission for one account and hunt lands on
+   * one row. The anchor `eventId` is a sliding-window value that can move mid-attack, so
+   * keying on it would let a shifted anchor seed a second, stale row for the same
+   * account. Keying on the entity removes that dependence: a watch whose anchor moved
+   * still replaces the prior row. An entity-less finding (the profiler's, which never
+   * reaches this panel) falls back to (eventId, reason). A re-emit on the same key
+   * replaces the entry in place, keeping the original `seq` and refreshing
+   * `state`/`eventIds`/`finding`/`at`.
    *
    * Freeze-only, no clone. The finding is already fresh and engine-owned: `runDetect`
    * canonicalizes it (`tasks.ts`, JSON round-trip) before `record`, and nothing
@@ -335,18 +340,27 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     // partial that arrives after its attack window would otherwise seed a zombie watch:
     // `scoreFinding` skips partials, so it would never resolve and would linger until
     // the horizon. A partial for a still-pending or unowned attack is a normal watch.
-    if (finding.isPartial === true && finding.eventId !== undefined) {
+    if (finding.isPartial === true) {
       const attackId = owner.get(finding.eventId);
       if (attackId !== undefined && state.get(attackId) !== "pending") {
         return;
       }
     }
     const liveState: "hit" | "watch" = finding.isPartial === true ? "watch" : "hit";
-    const anchorKey =
-      finding.eventId !== undefined ? `${finding.eventId}::${finding.alert.reason}` : undefined;
-    const existing = anchorKey !== undefined ? live.get(anchorKey) : undefined;
+    // A tagged JSON tuple, collision-free (mirrors the view-model's grouping key). A
+    // grouped finding keys on its resolved entity so a moved anchor cannot fork the row;
+    // an entity-less finding keys on its anchor.
+    const key =
+      scored.entity !== undefined
+        ? JSON.stringify([
+            "grouped",
+            finding.subjectType ?? null,
+            scored.entity,
+            finding.alert.reason,
+          ])
+        : JSON.stringify(["anchor", finding.eventId, finding.alert.reason]);
+    const existing = live.get(key);
     const seq = existing ? existing.seq : nextLiveSeq++;
-    const key = anchorKey ?? `oneshot:${seq}`;
     const entry: LiveFinding = {
       finding,
       state: liveState,

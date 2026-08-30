@@ -58,6 +58,20 @@ describe.each([
     expect(fires[0]).toBe((PIN_BRUTE_FORCE_THRESHOLD - 1) * 10);
   });
 
+  it("carries a bare anchor that is a member of eventIds, and no subjectType", () => {
+    const stream = Array.from({ length: PIN_BRUTE_FORCE_THRESHOLD }, (_, i) =>
+      fail("amy", i * 10, i),
+    );
+    const detector = make();
+    const findings = stream.flatMap((event) => detector.step(event));
+    expect(findings).toHaveLength(1);
+    const finding = findings[0];
+    // The profiler panel never reads these, so they anchor only, no grouping key.
+    expect(finding?.eventId).toBeDefined();
+    expect(finding?.subjectType).toBeUndefined();
+    expect(finding?.alert.eventIds).toContain(finding?.eventId);
+  });
+
   it("stays silent while failures sit below the threshold", () => {
     const stream = Array.from({ length: PIN_BRUTE_FORCE_THRESHOLD - 1 }, (_, i) =>
       fail("amy", i * 10, i),

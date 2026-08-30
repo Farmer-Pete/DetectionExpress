@@ -36,9 +36,17 @@ function at(ts: number): PipeEvent {
   return { id: 0, ts, endpoint: "kiosk-v1", payload: null };
 }
 
-/** A resolved (non-partial) one-shot finding citing the given evidence. */
+/**
+ * A resolved (non-partial) finding citing the given evidence. The anchor is the
+ * first cited id, so it stays tied to this fixture's own evidence rather than an
+ * arbitrary constant. An empty `eventIds` has no valid anchor and is a fixture bug.
+ */
 function found(eventIds: number[], ts: number, reason = REASON): Finding {
-  return { alert: { reason, at: ts, eventIds } };
+  const anchor = eventIds[0];
+  if (anchor === undefined) {
+    throw new Error("found() needs at least one cited event to anchor on");
+  }
+  return { alert: { reason, at: ts, eventIds }, eventId: anchor };
 }
 
 /** Wrap a finding as the Detect task would, with an optional resolved entity. */
@@ -393,6 +401,7 @@ describe("scorer decisions", () => {
     // deep clone, proven here by object identity, not by mutating a now-frozen source.
     const finding: Finding = {
       alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      eventId: 10,
       context: [{ type: "text" as const, text: "orig" }],
     };
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
@@ -487,6 +496,45 @@ describe("scorer liveFindings", () => {
     expect(live[0]?.eventIds).toEqual([10, 11]);
   });
 
+  it("keeps two entity-less findings that share a reason but differ in eventId as two entries", () => {
+    // With no resolved entity, live identity falls back to eventId + reason, so a
+    // distinct anchor never collapses onto another finding's row even when reason matches.
+    const s = createScorer([attack(1, "root", 0, 300, [10, 11, 20, 21])], cfg());
+    s.record([sf(found([10, 11], 50)), sf(found([20, 21], 50))], at(50));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(2);
+    expect(new Set(live.map((f) => f.seq)).size).toBe(2);
+  });
+
+  it("collapses a moved-anchor watch onto the prior hit for one entity and reason", () => {
+    // Anchor stability regression: the live row is identified by (subjectType, entity,
+    // reason), not the anchor. So a later watch on the same account and reason, anchored
+    // on a DIFFERENT event, replaces the prior hit's row instead of seeding a second,
+    // stale entry. Keyed on the anchor this would read as two rows.
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 1000 }));
+    const hit: Finding = {
+      alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      eventId: 10,
+      subjectType: "acct",
+    };
+    s.record([sf(hit, "root")], at(50));
+    expect(s.liveFindings()).toHaveLength(1);
+    expect(s.liveFindings()[0]?.state).toBe("hit");
+
+    // A later watch for the same account and reason, anchored on an unowned event so the
+    // zombie-watch guard keeps it, with an anchor that differs from the hit's.
+    const watch: Finding = {
+      alert: { reason: REASON, at: 200, eventIds: [99] },
+      eventId: 99,
+      subjectType: "acct",
+      isPartial: true,
+    };
+    s.record([sf(watch, "root")], at(200));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(1); // one row per (entity, reason), no stale hit beside it
+    expect(live[0]?.state).toBe("watch");
+  });
+
   it("ages a hit out at liveHorizon after its last emission, not the same tick it catches", () => {
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ liveHorizon: 20 }));
     s.record(one([10, 11], 50), at(50)); // caught
@@ -563,6 +611,7 @@ describe("scorer liveFindings", () => {
   it("freezes the live entry deeply, so the published snapshot cannot be mutated", () => {
     const finding: Finding = {
       alert: { reason: REASON, at: 50, eventIds: [10, 11] },
+      eventId: 10,
       context: [{ type: "text" as const, text: "orig" }],
     };
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());

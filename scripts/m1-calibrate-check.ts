@@ -73,7 +73,12 @@ function makePoorDetector(): Detector {
         return [];
       }
       firing.add(event.account);
-      return [{ alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] } }];
+      return [
+        {
+          alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] },
+          eventId: event.id,
+        },
+      ];
     },
     retained: () => recent.length,
   };
@@ -112,7 +117,12 @@ function makeBucketDetector(): Detector {
         return [];
       }
       firing.add(event.account);
-      return [{ alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] } }];
+      return [
+        {
+          alert: { reason: "pin_brute_force", at: event.ts, eventIds: [event.id] },
+          eventId: event.id,
+        },
+      ];
     },
     retained: () => {
       let total = 0;

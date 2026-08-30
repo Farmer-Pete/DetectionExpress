@@ -60,7 +60,9 @@ describe("adaptLoaded", () => {
   const loaded: LoadedAlgorithm = {
     normalize: () => ({ account: "amy", terminal: "KIOSK-01", outcome: "fail" }),
     detect: (v) =>
-      v instanceof Object ? [{ alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } }] : [],
+      v instanceof Object
+        ? [{ alert: { reason: "pin_brute_force", at: 5, eventIds: [1] }, eventId: 1 }]
+        : [],
   };
 
   it("passes the normalize result through as a plain object", () => {
@@ -75,14 +77,14 @@ describe("adaptLoaded", () => {
   it("parses the detect result into findings", () => {
     const rule = adaptLoaded(loaded);
     expect(rule.detect(view())).toEqual([
-      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] }, eventId: 1 },
     ]);
   });
 
   it("accepts multiple findings, like the run-time Detect task (M2 review)", () => {
     const findings: Finding[] = [
-      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] } },
-      { alert: { reason: "pin_brute_force", at: 6, eventIds: [2] } },
+      { alert: { reason: "pin_brute_force", at: 5, eventIds: [1] }, eventId: 1 },
+      { alert: { reason: "pin_brute_force", at: 6, eventIds: [2] }, eventId: 2 },
     ];
     const arrayRule: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => findings };
     const rule = adaptLoaded(arrayRule);

@@ -24,7 +24,7 @@ export interface FindingRow {
 export interface FindingGroup {
   /** A collision-free tagged JSON key: `["grouped", subjectType, entity]` or `["solo", seq]`. */
   key: string;
-  /** The resolved entity, or null for an entity-less OneShot. */
+  /** The resolved entity, or null for an anchored finding that names no subject. */
   entity: string | null;
   /** The subjectType, when present, for the entity chip. */
   entityKind?: string;

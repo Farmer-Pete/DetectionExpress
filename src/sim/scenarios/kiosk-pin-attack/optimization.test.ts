@@ -9,8 +9,26 @@ import {
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
-import { buildOptimizationAlgorithm, optimizationSource } from "./optimization";
+import type { Finding } from "../../finding";
+import {
+  buildOptimizationAlgorithm,
+  type OptimizationAlgorithm,
+  optimizationSource,
+} from "./optimization";
 import { kioskPinAttack } from "./scenario";
+
+/**
+ * Evaluate an Algorithm source string in-process and adapt it to `OptimizationAlgorithm`,
+ * the same interface the typed twin implements. Strip the cosmetic lodash import (the
+ * logic never calls it) so it runs offline, turn the `export` declarations into
+ * module-local ones, and hand back the callables with a fresh closure each call.
+ */
+function loadSource(src: string): OptimizationAlgorithm {
+  const body = src.replace(/^import .*$/m, "").replace(/^export\s+/gm, "");
+  const factory = new Function(`${body}\nreturn { normalize, detect };`);
+  const loaded: OptimizationAlgorithm = factory();
+  return loaded;
+}
 
 /**
  * The Optimization is the incremental tally the player applies to survive the peak
@@ -32,6 +50,33 @@ describe("optimizationSource", () => {
     expect(optimizationSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
     expect(optimizationSource).toContain("export function normalize");
     expect(optimizationSource).toContain("export function detect");
+  });
+
+  it("executes the same one-hit anchored shape as the typed twin (seam 4 parity)", () => {
+    const source = loadSource(optimizationSource);
+    const twin = buildOptimizationAlgorithm();
+    const allFindings: Finding[] = [];
+    for (let i = 0; i < PIN_BRUTE_FORCE_THRESHOLD + 2; i++) {
+      const view = {
+        account: "amy",
+        terminal: "KIOSK-01",
+        outcome: "fail" as const,
+        id: i,
+        ts: i * 10,
+        endpoint: "kiosk-v1",
+      };
+      const sourceFindings = source.detect(view);
+      // The live game runs the STRING, so its executed Findings must match the twin's.
+      expect(sourceFindings).toEqual(twin.detect(view));
+      allFindings.push(...sourceFindings);
+    }
+    // Exactly one hit over the burst, anchored on its first cited id, grouped by
+    // account, and never a partial (the Optimization has no watch stage).
+    expect(allFindings).toHaveLength(1);
+    const hit = allFindings[0];
+    expect(hit?.subjectType).toBe("account");
+    expect(hit?.isPartial).toBeUndefined();
+    expect(hit?.eventId).toBe(hit?.alert.eventIds[0]);
   });
 });
 
@@ -63,10 +108,9 @@ describe("buildOptimizationAlgorithm", () => {
     expect(r.rolling).toBe(100);
   });
 
-  it("raises exactly one Alert per burst, citing at least the threshold of evidence", () => {
+  it("raises exactly one anchored hit per burst, citing at least the threshold of evidence", () => {
     const algo = buildOptimizationAlgorithm();
-    let alerts = 0;
-    let citedEnough = true;
+    const hits: Finding[] = [];
     for (let i = 0; i < PIN_BRUTE_FORCE_THRESHOLD + 3; i++) {
       const findings = algo.detect({
         account: "amy",
@@ -76,14 +120,15 @@ describe("buildOptimizationAlgorithm", () => {
         ts: i * 10,
         endpoint: "kiosk-v1",
       });
-      for (const finding of findings) {
-        alerts += 1;
-        if (finding.alert.eventIds.length < PIN_BRUTE_FORCE_THRESHOLD) {
-          citedEnough = false;
-        }
-      }
+      hits.push(...findings);
     }
-    expect(alerts).toBe(1);
-    expect(citedEnough).toBe(true);
+    expect(hits).toHaveLength(1);
+    const hit = hits[0];
+    // A correct, faithful twin: one hit, anchored on the first cited id, grouped by
+    // account, not a partial, citing at least the threshold of evidence.
+    expect(hit?.isPartial).toBeUndefined();
+    expect(hit?.subjectType).toBe("account");
+    expect(hit?.eventId).toBe(hit?.alert.eventIds[0]);
+    expect(hit?.alert.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
   });
 });

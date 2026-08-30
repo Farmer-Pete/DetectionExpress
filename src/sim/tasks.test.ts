@@ -378,12 +378,22 @@ describe("runDetect", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     const alert: Alert = { reason: "pin_brute_force", at: 100, eventIds: [1, 2] };
-    guard(runDetect(input, output, idleClock, () => [{ alert }], scorer, noopInspector, FAST_RATE));
+    guard(
+      runDetect(
+        input,
+        output,
+        idleClock,
+        () => [{ alert, eventId: 1 }],
+        scorer,
+        noopInspector,
+        FAST_RATE,
+      ),
+    );
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
     expect(scorer.records).toHaveLength(1);
     // The task hands the scorer canonical ScoredFinding[]; no subject, so no entity.
-    expect(scorer.records[0]?.findings).toEqual([{ finding: { alert } }]);
+    expect(scorer.records[0]?.findings).toEqual([{ finding: { alert, eventId: 1 } }]);
     expect(scorer.records[0]?.env.id).toBe(5);
     expect(idOf(await output.pull())).toBe(5); // Event forwarded to the Sink
     input.close();
@@ -398,7 +408,10 @@ describe("runDetect", () => {
       eventId: 1,
       isPartial: true,
     };
-    const resolved: Finding = { alert: { reason: "pin_brute_force", at: 9, eventIds: [2] } };
+    const resolved: Finding = {
+      alert: { reason: "pin_brute_force", at: 9, eventIds: [2] },
+      eventId: 2,
+    };
     // The task no longer folds out partials; both reach the scorer as ScoredFinding.
     guard(
       runDetect(
@@ -635,7 +648,7 @@ describe("resolveEntity", () => {
   });
 
   it("returns undefined when the finding names no subject", () => {
-    const finding: Finding = { alert: { reason: "r", at: 0, eventIds: [1] } };
+    const finding: Finding = { alert: { reason: "r", at: 0, eventIds: [1] }, eventId: 1 };
     expect(resolveEntity(finding, view)).toBeUndefined();
   });
 
@@ -723,7 +736,7 @@ describe("runDetect canonicalization (Seam I)", () => {
     const output = new Channel<PipeMessage>(10);
     let err: unknown;
     // Well-formed to the first parse, but toJSON serializes to {} with no alert.
-    const finding = { alert: { reason: "r", at: 1, eventIds: [1] } };
+    const finding = { alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 };
     Object.defineProperty(finding, "toJSON", { enumerable: false, value: () => ({}) });
     runDetect(
       input,
@@ -748,6 +761,7 @@ describe("runDetect canonicalization (Seam I)", () => {
     const scorer = stubScorer();
     const finding: Finding = {
       alert: { reason: "pin_brute_force", at: 5, eventIds: [1, 2] },
+      eventId: 1,
       context: [{ type: "text", text: "caught" }],
     };
     guard(runDetect(input, output, idleClock, () => [finding], scorer, noopInspector, FAST_RATE));
