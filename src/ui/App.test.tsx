@@ -8,13 +8,13 @@ import { hireMe, introCopy, liveScenario } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
 
 // The zustand store is a singleton shared across test files, so reset the fields
-// this file reads before each test, or a leaked `sourceLocked` would hide the Run
+// this file reads before each test, or a leaked `sourceLocked` would hide the Apply
 // button. Mirrors the reset pattern in store.test.ts.
 //
 // The onboarding overlay covers the shell on first load. Shell tests seed the seen
 // flag so the overlay stays closed; the onboarding tests clear it to see the overlay.
 beforeEach(() => {
-  useGameStore.setState({ source: referenceSource, sourceLocked: false });
+  useGameStore.setState({ source: referenceSource, sourceLocked: false, runPending: false });
   markIntroSeen();
 });
 
@@ -46,7 +46,7 @@ describe("App shell", () => {
     expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Backlog")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
   it("runs the controller on mount and disposes it on unmount", () => {

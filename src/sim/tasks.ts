@@ -14,8 +14,9 @@
  */
 import { GAME_SECONDS_PER_TICK } from "../game/tuning";
 import type { Channel } from "./channel";
+import type { ScoredFinding } from "./correctness";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
-import type { Alert } from "./finding";
+import type { DetectView, Finding } from "./finding";
 import { parseFindings } from "./parse-findings";
 import { RuleError } from "./rule-error";
 import { makeGovernor, type ServiceRate } from "./service-governor";
@@ -39,7 +40,7 @@ export interface TaskAlgorithm {
 
 /** The scorer surface the Detect task drives. The full scorer also reads. */
 export interface TaskScorer {
-  record: (alerts: Alert | Alert[] | null | undefined, env: PipeEvent) => void;
+  record: (findings: readonly ScoredFinding[], env: PipeEvent) => void;
   finalize: () => void;
 }
 
@@ -93,6 +94,48 @@ export function withEngineFields<T extends object>(
   endpoint: string,
 ): T & EngineFields {
   return { ...base, id, ts, endpoint };
+}
+
+/**
+ * A primitive string, by its tag (mirrors `parse-findings.ts`). The `instanceof
+ * Object` guard rejects a boxed `new String(...)`, which is not the primitive the
+ * entity contract promises.
+ */
+function isString(value: unknown): value is string {
+  return !(value instanceof Object) && Object.prototype.toString.call(value) === "[object String]";
+}
+
+/** A primitive finite number, by its tag. A boxed Number or a non-finite value fails. */
+function isFiniteNumber(value: unknown): value is number {
+  return (
+    !(value instanceof Object) &&
+    Object.prototype.toString.call(value) === "[object Number]" &&
+    Number.isFinite(value)
+  );
+}
+
+/**
+ * Resolve a finding's subject to a string entity from the Detect view. No
+ * `subjectType` -> undefined. A present `subjectType` that does not resolve to a
+ * string or finite number is a contract violation (finding.ts: "a subjectType that
+ * names no field on the record is an error") and throws a detect-phase RuleError.
+ * Called inside `runDetect`'s try, so the throw surfaces as one clean RuleError.
+ */
+export function resolveEntity(finding: Finding, view: DetectView): string | undefined {
+  if (finding.subjectType === undefined) {
+    return undefined;
+  }
+  const raw = view[finding.subjectType];
+  if (isString(raw)) {
+    return raw;
+  }
+  if (isFiniteNumber(raw)) {
+    return String(raw);
+  }
+  throw new RuleError(
+    "detect",
+    `subjectType "${finding.subjectType}" did not resolve to a string or finite number.`,
+  );
 }
 
 /**
@@ -156,7 +199,7 @@ export async function runNormalize(
 }
 
 /**
- * The Detect task: an Event -> run the Rule on a flat view and record its Alerts,
+ * The Detect task: an Event -> run the Rule on a flat view and record its Findings,
  * charge the rule's service time, then forward the Event to the Sink. Engine
  * fields win in the view, so a payload field named `id` cannot shadow the real
  * id. A marker -> call `scorer.finalize`, forward the marker, then return.
@@ -184,22 +227,34 @@ export async function runDetect(
     }
     const payload = message.payload;
     const base = payload instanceof Object ? payload : {};
-    const view = withEngineFields(base, message.id, message.ts, message.endpoint);
-    // Run detect() and parse its return inside one boundary, then fold the
-    // resolved (non-partial) findings down to their Alerts. Any throw, from the
-    // player's detect() or from the parser (a bad shape, or a deep-json
-    // RangeError), surfaces as one clean RuleError the supervisor can report. T1
-    // never scores a partial; T2 moves this skip into the scorer when it folds
-    // Finding[] directly.
-    let alerts: Alert[];
+    // The flat view the Rule sees and the entity resolver reads. Built through the
+    // shared `withEngineFields` (so the profiler reproduces it), then spread into a
+    // DetectView literal so `resolveEntity` can index it by `subjectType`.
+    const view: DetectView = {
+      ...withEngineFields(base, message.id, message.ts, message.endpoint),
+    };
+    // Run detect(), validate its return, then canonicalize each finding to fresh
+    // plain data and resolve its entity, all inside one boundary. The scorer runs
+    // OUTSIDE this try (below), so an exotic player object (a throwing getter, a
+    // Proxy trap, a toJSON) must be made safe here: any throw becomes one clean
+    // RuleError the supervisor can report, and the scorer only ever sees plain data.
+    // The partial-skip now lives in the scorer, so partials are passed through.
+    let scored: ScoredFinding[];
     try {
-      alerts = parseFindings(detect(view))
-        .filter((finding) => !finding.isPartial)
-        .map((finding) => finding.alert);
+      // 1. Validate the player's return, for good errors on a bad shape.
+      const validated = parseFindings(detect(view));
+      // 2. Serialize to plain data. A throwing getter or Proxy trap fires HERE.
+      // 3. Re-validate: a non-enumerable toJSON can pass step 1 and then serialize
+      //    to malformed-but-non-throwing data, so the canonical result is re-parsed.
+      const canonical = parseFindings(JSON.parse(JSON.stringify(validated)));
+      scored = canonical.map((finding) => {
+        const entity = resolveEntity(finding, view);
+        return entity === undefined ? { finding } : { finding, entity };
+      });
     } catch (error) {
       throw new RuleError("detect", messageOf(error));
     }
-    scorer.record(alerts, message);
+    scorer.record(scored, message);
     const ticks = governor.charge();
     if (ticks > 0) {
       await clock.sleep(ticks);

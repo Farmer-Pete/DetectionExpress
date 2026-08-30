@@ -2,7 +2,7 @@
  * The app shell. A useEffect builds the run controller, runs it on mount, and
  * disposes it on unmount, so render never drives the pipeline. React Strict Mode's
  * mount/unmount/mount cycle is safe: each effect builds a fresh controller and the
- * cleanup disposes it. The Run button reloads the current Algorithm source.
+ * cleanup disposes it. The Apply button reloads the current Algorithm source.
  *
  * A second, dev-only effect wires the local-IDE (algorithms hot-reload) client. Its
  * whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
@@ -50,6 +50,7 @@ function buildController(): RunController {
     getSeed: () => useGameStore.getState().seed,
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,
+    setRunPending: useGameStore.getState().setRunPending,
   });
 }
 

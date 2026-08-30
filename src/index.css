@@ -306,7 +306,8 @@ body {
   color: var(--ink);
 }
 
-.editor-run {
+.editor-apply,
+.editor-reset {
   padding: 0.3rem 1.1rem;
   border-radius: 8px;
   border: 1px solid var(--a1);
@@ -316,8 +317,14 @@ body {
   cursor: pointer;
 }
 
-.editor-run:hover {
+.editor-apply:hover:not(:disabled),
+.editor-reset:hover {
   background: color-mix(in srgb, var(--a1) 30%, transparent);
+}
+
+.editor-apply:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 .editor-code {

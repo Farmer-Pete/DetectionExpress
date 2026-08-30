@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Clock, ManualDriver } from "../game/clock";
 import { Channel } from "./channel";
+import type { ScoredFinding } from "./correctness";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
-import type { Alert } from "./finding";
+import type { Alert, DetectView, Finding } from "./finding";
 import { RuleError } from "./rule-error";
 import type { ServiceRate } from "./service-governor";
 import {
   NODE_TASKS,
   type NodeRuntime,
+  resolveEntity,
   runDetect,
   runIngest,
   runNormalize,
@@ -90,18 +92,18 @@ function isFlatView(value: unknown): value is FlatView {
 
 /** A scorer stub that records its calls, so a task test can observe them. */
 function stubScorer(): TaskScorer & {
-  records: Array<{ alerts: unknown; env: PipeEvent }>;
+  records: Array<{ findings: readonly ScoredFinding[]; env: PipeEvent }>;
   finalizes: number;
 } {
-  const records: Array<{ alerts: unknown; env: PipeEvent }> = [];
+  const records: Array<{ findings: readonly ScoredFinding[]; env: PipeEvent }> = [];
   let finalizes = 0;
   return {
     records,
     get finalizes() {
       return finalizes;
     },
-    record(alerts, env) {
-      records.push({ alerts, env });
+    record(findings, env) {
+      records.push({ findings, env });
     },
     finalize() {
       finalizes += 1;
@@ -258,7 +260,7 @@ describe("runNormalize", () => {
 });
 
 describe("runDetect", () => {
-  it("records the Alert against the Event and forwards the Event downstream", async () => {
+  it("records the finding against the Event and forwards the Event downstream", async () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
@@ -267,38 +269,45 @@ describe("runDetect", () => {
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
     expect(scorer.records).toHaveLength(1);
-    expect(scorer.records[0]?.alerts).toEqual([alert]); // the fold hands the scorer Alert[]
+    // The task hands the scorer canonical ScoredFinding[]; no subject, so no entity.
+    expect(scorer.records[0]?.findings).toEqual([{ finding: { alert } }]);
     expect(scorer.records[0]?.env.id).toBe(5);
     expect(idOf(await output.pull())).toBe(5); // Event forwarded to the Sink
     input.close();
   });
 
-  it("skips a partial finding, folding only the resolved alerts to the scorer", async () => {
+  it("passes partials through to the scorer, which now owns the skip (Seam G)", async () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
-    const resolved: Alert = { reason: "pin_brute_force", at: 9, eventIds: [2] };
-    // A partial watch (isPartial) must not score in T1; only the resolved alert folds.
-    guard(
-      runDetect(
-        input,
-        output,
-        idleClock,
-        () => [
-          {
-            alert: { reason: "pin_brute_force", at: 8, eventIds: [1] },
-            eventId: 1,
-            isPartial: true,
-          },
-          { alert: resolved },
-        ],
-        scorer,
-        FAST_RATE,
-      ),
-    );
+    const partial: Finding = {
+      alert: { reason: "pin_brute_force", at: 8, eventIds: [1] },
+      eventId: 1,
+      isPartial: true,
+    };
+    const resolved: Finding = { alert: { reason: "pin_brute_force", at: 9, eventIds: [2] } };
+    // The task no longer folds out partials; both reach the scorer as ScoredFinding.
+    guard(runDetect(input, output, idleClock, () => [partial, resolved], scorer, FAST_RATE));
     await input.push(ev(3, 0));
     await flush();
-    expect(scorer.records[0]?.alerts).toEqual([resolved]);
+    expect(scorer.records[0]?.findings).toEqual([{ finding: partial }, { finding: resolved }]);
+    input.close();
+  });
+
+  it("resolves each finding's entity from the view and passes it to the scorer", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const scorer = stubScorer();
+    // A subject-bearing finding: subjectType "user" resolves to the view's user field.
+    const finding: Finding = {
+      alert: { reason: "pin_brute_force", at: 5, eventIds: [3] },
+      eventId: 3,
+      subjectType: "user",
+    };
+    guard(runDetect(input, output, idleClock, () => [finding], scorer, FAST_RATE));
+    await input.push(ev(3, 0, { user: "amy" }));
+    await flush();
+    expect(scorer.records[0]?.findings).toEqual([{ finding, entity: "amy" }]);
     input.close();
   });
 
@@ -418,6 +427,141 @@ describe("runDetect", () => {
     await input.push(END_OF_STREAM);
     await flush();
     expect(clock.sleeps).toEqual([]); // charge returned zero, so Detect never slept
+  });
+});
+
+// Seam F: strict entity resolution off the Detect view.
+describe("resolveEntity", () => {
+  const view: DetectView = {
+    id: 1,
+    ts: 2,
+    endpoint: "kiosk-v1",
+    acct: "amy",
+    count: 7,
+    notFinite: Number.NaN,
+    nested: { deep: true },
+  };
+  const withSubject = (subjectType: string): Finding => ({
+    alert: { reason: "r", at: 0, eventIds: [1] },
+    eventId: 1,
+    subjectType,
+  });
+
+  it("returns undefined when the finding names no subject", () => {
+    const finding: Finding = { alert: { reason: "r", at: 0, eventIds: [1] } };
+    expect(resolveEntity(finding, view)).toBeUndefined();
+  });
+
+  it("returns the string the subjectType names", () => {
+    expect(resolveEntity(withSubject("acct"), view)).toBe("amy");
+  });
+
+  it("stringifies a finite number the subjectType names", () => {
+    expect(resolveEntity(withSubject("count"), view)).toBe("7");
+  });
+
+  it("throws a detect RuleError when the subjectType names no field", () => {
+    let err: unknown;
+    try {
+      resolveEntity(withSubject("missing"), view);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("detect");
+  });
+
+  it("throws when the subjectType resolves to a non-primitive", () => {
+    expect(() => resolveEntity(withSubject("nested"), view)).toThrow(RuleError);
+  });
+
+  it("throws when the subjectType resolves to a non-finite number", () => {
+    expect(() => resolveEntity(withSubject("notFinite"), view)).toThrow(RuleError);
+  });
+
+  it("surfaces a resolveEntity failure inside runDetect as one clean RuleError", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    // subjectType names a field the view lacks, so resolveEntity throws inside the try.
+    runDetect(
+      input,
+      output,
+      idleClock,
+      () => [{ alert: { reason: "r", at: 0, eventIds: [1] }, eventId: 1, subjectType: "nope" }],
+      stubScorer(),
+      FAST_RATE,
+    ).catch((e: unknown) => {
+      err = e;
+    });
+    await input.push(ev(1, 0, { user: "amy" })); // no "nope" field on the view
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("detect");
+  });
+});
+
+// Seam I: two-pass canonicalization and clone safety at the runDetect boundary.
+describe("runDetect canonicalization (Seam I)", () => {
+  it("turns an exotic finding that throws on serialization into a RuleError", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    // A Proxy finding whose get trap throws: parsing or serializing it must not crash.
+    const trap = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("exotic trap");
+        },
+        has() {
+          return true;
+        },
+      },
+    );
+    runDetect(input, output, idleClock, () => [trap], stubScorer(), FAST_RATE).catch(
+      (e: unknown) => {
+        err = e;
+      },
+    );
+    await input.push(ev(1, 0));
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("detect");
+  });
+
+  it("rejects a toJSON that silently returns malformed data via the second parse pass", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    let err: unknown;
+    // Well-formed to the first parse, but toJSON serializes to {} with no alert.
+    const finding = { alert: { reason: "r", at: 1, eventIds: [1] } };
+    Object.defineProperty(finding, "toJSON", { enumerable: false, value: () => ({}) });
+    runDetect(input, output, idleClock, () => [finding], stubScorer(), FAST_RATE).catch(
+      (e: unknown) => {
+        err = e;
+      },
+    );
+    await input.push(ev(1, 0));
+    await flush();
+    expect(err).toBeInstanceOf(RuleError);
+    expect(err instanceof RuleError && err.phase).toBe("detect");
+  });
+
+  it("canonicalizes a well-formed finding to plain data the scorer can store", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const scorer = stubScorer();
+    const finding: Finding = {
+      alert: { reason: "pin_brute_force", at: 5, eventIds: [1, 2] },
+      context: [{ type: "text", text: "caught" }],
+    };
+    guard(runDetect(input, output, idleClock, () => [finding], scorer, FAST_RATE));
+    await input.push(ev(1, 0));
+    await flush();
+    const passed = scorer.records[0]?.findings[0]?.finding;
+    expect(passed).toEqual(finding); // plain, structurally equal
+    input.close();
   });
 });
 
