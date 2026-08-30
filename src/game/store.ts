@@ -55,6 +55,12 @@ interface GameState {
    * the production build carries it too, always false and harmless.
    */
   sourceLocked: boolean;
+  /**
+   * True while a `run()` loads and profiles a source (the Apply dry-run, app mount, or
+   * a dev hot-reload). The editor disables Apply and reads "Checking..." while it holds.
+   * The run controller drives it; the editor reads it.
+   */
+  runPending: boolean;
   onNodesChange: OnNodesChange<PipelineNode>;
   onEdgesChange: OnEdgesChange;
   setSnapshot: (snapshot: SimSnapshot) => void;
@@ -62,6 +68,7 @@ interface GameState {
   setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
   setError: (error: RuleErrorInfo | null) => void;
   setSourceLocked: (locked: boolean) => void;
+  setRunPending: (pending: boolean) => void;
 }
 
 const initialNodes: PipelineNode[] = [
@@ -86,6 +93,7 @@ export const useGameStore = create<GameState>((set) => ({
   seed: LEVEL_SEED,
   error: null,
   sourceLocked: false,
+  runPending: false,
   onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
   onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
   setSnapshot: (snapshot) => set({ snapshot }),
@@ -93,6 +101,7 @@ export const useGameStore = create<GameState>((set) => ({
   setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
+  setRunPending: (pending) => set({ runPending: pending }),
 }));
 
 /** The store graph, mapped to the validator's shape for the engine. */

@@ -6,10 +6,10 @@ import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { App } from "./App";
 
 // The zustand store is a singleton shared across test files, so reset the fields
-// this file reads before each test, or a leaked `sourceLocked` would hide the Run
+// this file reads before each test, or a leaked `sourceLocked` would hide the Apply
 // button. Mirrors the reset pattern in store.test.ts.
 beforeEach(() => {
-  useGameStore.setState({ source: referenceSource, sourceLocked: false });
+  useGameStore.setState({ source: referenceSource, sourceLocked: false, runPending: false });
 });
 
 /** A no-op controller so the test never touches the real loader or engine. */
@@ -40,7 +40,7 @@ describe("App", () => {
     expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Backlog")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
   it("runs the controller on mount and disposes it on unmount", () => {
