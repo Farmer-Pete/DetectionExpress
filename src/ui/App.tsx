@@ -24,7 +24,12 @@ import { getGraph, useGameStore } from "../game/store";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
+import { ChaosLadder } from "./ChaosLadder";
+import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
+import { IntroOverlay } from "./IntroOverlay";
+import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
 
@@ -62,6 +67,47 @@ export function App({ controller }: AppProps = {}) {
   const algoClientRef = useRef<AlgorithmsDevClient | null>(null);
   const [algoReady, setAlgoReady] = useState(false);
   const [localMode, setLocalMode] = useState(false);
+
+  // The intro overlay. The seen flag is read once, in a lazy initializer, so the
+  // overlay decision is made before first paint. A dismissing action records its
+  // intent in a ref, then an effect acts on it after the overlay has unmounted, so
+  // the scroll always lands on the mounted shell. The intent lives in a ref, not
+  // state, so the effect runs once per dismiss and never re-triggers itself.
+  const [introOpen, setIntroOpen] = useState(() => !hasSeenIntro());
+  const reopenRef = useRef<HTMLButtonElement>(null);
+  const pendingDismiss = useRef<{ scrollTarget: string | null } | null>(null);
+
+  // Dismiss the overlay. Every dismissing action marks the intro seen and records its
+  // scroll target for the post-close effect. A storage failure never blocks the close,
+  // since the wrapper swallows it.
+  const dismissIntro = (target: string | null): void => {
+    markIntroSeen();
+    pendingDismiss.current = { scrollTarget: target };
+    setIntroOpen(false);
+  };
+
+  // After the overlay unmounts, act on the recorded dismiss intent exactly once.
+  // A scroll action scrolls to its target, then moves focus there without a second
+  // scroll. Observe and Escape carry no target, so focus returns to the reopen
+  // control. Reading the anchor here, not at click time, keeps the scroll off the
+  // overlay.
+  useEffect(() => {
+    if (introOpen) {
+      return;
+    }
+    const pending = pendingDismiss.current;
+    if (pending === null) {
+      return;
+    }
+    pendingDismiss.current = null;
+    if (pending.scrollTarget !== null) {
+      const target = document.getElementById(pending.scrollTarget);
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      target?.focus({ preventScroll: true });
+    } else {
+      reopenRef.current?.focus({ preventScroll: true });
+    }
+  }, [introOpen]);
 
   const slug = scenarioSlug(kioskPinAttack.id);
 
@@ -136,28 +182,55 @@ export function App({ controller }: AppProps = {}) {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>Detection Express</h1>
-        <span className="slice-tag">Slice 1 &mdash; Spot the threat</span>
-      </header>
-      <Hud />
-      <ReactFlowProvider>
-        <Pipeline />
-      </ReactFlowProvider>
-      <Briefing text={kioskPinAttack.briefing} />
-      <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
-      {algoReady ? (
-        <div className="local-ide">
-          {localMode ? (
-            <button type="button" onClick={onStopLocalMode}>
-              Stop editing
+      {/* The shell. While the intro overlay is open it is `inert`, so a screen
+          reader's virtual cursor and the keyboard cannot reach it and the overlay
+          is truly modal. The overlay is a sibling of this container, so it stays
+          interactive. */}
+      <div className="app-shell" inert={introOpen}>
+        <header className="topbar">
+          <h1>Detection Express</h1>
+          <span className="slice-tag">Observe the Engine, then cause chaos</span>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              ref={reopenRef}
+              className="topbar-reopen"
+              onClick={() => setIntroOpen(true)}
+            >
+              How this works
             </button>
-          ) : (
-            <button type="button" onClick={onEnterLocalMode}>
-              Edit in IDE
-            </button>
-          )}
-        </div>
+            <HireMe copy={hireMe} />
+          </div>
+        </header>
+        <Hud />
+        <ReactFlowProvider>
+          <Pipeline />
+        </ReactFlowProvider>
+        <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
+        <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+        <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+        {algoReady ? (
+          <div className="local-ide">
+            {localMode ? (
+              <button type="button" onClick={onStopLocalMode}>
+                Stop editing
+              </button>
+            ) : (
+              <button type="button" onClick={onEnterLocalMode}>
+                Edit in IDE
+              </button>
+            )}
+          </div>
+        ) : null}
+      </div>
+      {introOpen ? (
+        <IntroOverlay
+          copy={introCopy}
+          repoUrl={REPO_URL}
+          onObserve={() => dismissIntro(null)}
+          onCauseChaos={() => dismissIntro("chaos-ladder")}
+          onEditEngine={() => dismissIntro("algorithm-editor")}
+        />
       ) : null}
     </div>
   );
