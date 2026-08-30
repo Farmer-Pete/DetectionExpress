@@ -8,6 +8,7 @@
  * deltas, pruned on dormancy), and the view owns the layout.
  */
 import type { MapNodeId, Presence } from "./world/presence";
+import type { TimedWorldReading } from "./world-reading";
 
 /** One live actor the map draws, with its semantic presence. */
 export interface ActorView {
@@ -34,6 +35,12 @@ export interface WorldSnapshot {
   crowds: readonly { node: MapNodeId; persons: number; grants: number }[];
   /** Recent flashes, within a short window of `nowTick`. */
   flashes: readonly FlashEvent[];
+  /**
+   * Recent normalized readings for the event-log panel, newest first and bounded. A
+   * flash carries only a node and a kind, so the log needs the payload separately;
+   * this feeds the "sensor, place, detail" rows the view shows.
+   */
+  log: readonly TimedWorldReading[];
   counts: { riders: number; trains: number; staff: number };
 }
 
@@ -45,6 +52,7 @@ export function emptyWorldSnapshot(): WorldSnapshot {
     doors: [],
     crowds: [],
     flashes: [],
+    log: [],
     counts: { riders: 0, trains: 0, staff: 0 },
   };
 }

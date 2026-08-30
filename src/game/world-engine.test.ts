@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { Actor } from "../sim/actors/actor";
+import type { Actor, Admission } from "../sim/actors/actor";
+import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import { distanceTable } from "../sim/world/distance";
+import { gateNodeId } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import { world } from "../sim/world/world";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
 import type { WorldSnapshot } from "../sim/world-snapshot";
 import { ManualDriver } from "./clock";
-import { CLOCK_HZ, FLASH_WINDOW_TICKS, GAME_SECONDS_PER_TICK, PUBLISH_HZ } from "./tuning";
+import {
+  CLOCK_HZ,
+  FLASH_WINDOW_TICKS,
+  GAME_SECONDS_PER_TICK,
+  PUBLISH_HZ,
+  WORLD_LOG_RETENTION,
+} from "./tuning";
 import { startWorld, type WorldFixture } from "./world-engine";
 
 const env: WorldEnv = { world, distances: distanceTable(world) };
@@ -164,7 +172,8 @@ describe("world engine snapshot", () => {
     expect(flashes.length).toBeGreaterThan(0);
     for (const flash of flashes) {
       expect(flash.kind).toBe("tap");
-      expect(flash.node).toBe("cen");
+      // The flash lands on the station's gate chip, not the station center.
+      expect(flash.node).toBe(gateNodeId("cen"));
     }
   });
 
@@ -185,6 +194,135 @@ describe("world engine snapshot", () => {
     const last = snapshots.at(-1);
     expect(last?.actors).toHaveLength(0);
     expect(last?.counts.riders).toBe(0);
+  });
+});
+
+/** A stub spawner that admits a fixed cast once, then nothing, so admits are testable. */
+function scriptedSpawner(cards: readonly string[]): RiderSpawner {
+  let admitted = false;
+  return {
+    tick: (nowTick) => {
+      if (admitted) {
+        return [];
+      }
+      admitted = true;
+      return cards.map(
+        (card): Admission<WorldReading, WorldEnv> => ({
+          actor: tapper({ id: card, station: "cen", period: 5, startTick: nowTick }),
+          kind: "rider",
+          initialPresence: (firstTick) => ({
+            kind: "at",
+            node: "cen",
+            fromTick: firstTick,
+            untilTick: firstTick,
+          }),
+        }),
+      );
+    },
+  };
+}
+
+describe("world engine spawner", () => {
+  it("admits the spawner's transients and seeds their views", () => {
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+      spawner: scriptedSpawner(["C000000", "C000001"]),
+    });
+    tick(driver, 6);
+    handle.stop();
+    const last = snapshots.at(-1);
+    expect(last?.actors.map((view) => view.id).sort()).toEqual(["C000000", "C000001"]);
+    expect(last?.counts.riders).toBe(2);
+  });
+});
+
+describe("world engine speed", () => {
+  it("freezes the sim at speed 0 (paused)", () => {
+    const acted: number[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [fixtureAt(tapper({ id: "C1", station: "cen", period: 1, acted }), "cen")],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: () => undefined,
+      driver,
+      bindVisibility: noVisibility,
+      getSpeed: () => 0,
+    });
+    tick(driver, 60);
+    handle.stop();
+    // No sim tick ran, so the actor never acted.
+    expect(acted).toEqual([]);
+  });
+
+  it("accrues a fractional speed and fires whole ticks", () => {
+    const acted: number[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [fixtureAt(tapper({ id: "C1", station: "cen", period: 1, acted }), "cen")],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: () => undefined,
+      driver,
+      bindVisibility: noVisibility,
+      getSpeed: () => 0.5,
+    });
+    // 0.5 per clock tick: a whole sim tick fires only every second clock tick, so
+    // four clock ticks run exactly two sim ticks (0 and 1), never a fractional one.
+    tick(driver, 4);
+    handle.stop();
+    expect(acted).toEqual([0, 1]);
+  });
+
+  it("advances multiple whole ticks per clock tick at speed > 1", () => {
+    const acted: number[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [fixtureAt(tapper({ id: "C1", station: "cen", period: 1, acted }), "cen")],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: () => undefined,
+      driver,
+      bindVisibility: noVisibility,
+      getSpeed: () => 3,
+    });
+    // Three sim ticks per clock tick, so two clock ticks run ticks 0..5 in order.
+    tick(driver, 2);
+    handle.stop();
+    expect(acted).toEqual([0, 1, 2, 3, 4, 5]);
+  });
+});
+
+describe("world engine event log", () => {
+  it("keeps the log bounded and newest-first over a long run", () => {
+    let last: WorldSnapshot | undefined;
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [fixtureAt(tapper({ id: "C1", station: "cen", period: 1 }), "cen")],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => {
+        last = snapshot;
+      },
+      driver,
+      bindVisibility: noVisibility,
+    });
+    tick(driver, WORLD_LOG_RETENTION + 80);
+    handle.stop();
+    const log = last?.log ?? [];
+    expect(log.length).toBeLessThanOrEqual(WORLD_LOG_RETENTION);
+    expect(log.length).toBeGreaterThan(1);
+    // Newest first: one tap per tick, so the ticks strictly decrease down the list.
+    for (let i = 1; i < log.length; i++) {
+      expect(log[i - 1]?.tick ?? 0).toBeGreaterThan(log[i]?.tick ?? 0);
+    }
   });
 });
 

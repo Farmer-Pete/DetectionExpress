@@ -174,8 +174,42 @@ export const CORRECTNESS_FLOOR = 50;
 export const SIM_TICKS_PER_CLOCK_TICK = 1;
 
 /**
- * How many recent sim ticks of flashes the world snapshot carries. A flash older
- * than this behind `nowTick` is pruned, so the flash list stays bounded on a
- * perpetual run.
+ * A sensor flash lives 1.1 sim seconds (87-VIEW-NOTES.md section 5), derived from the
+ * clock rate so its ring expands and fades over its full life. The canvas fades over
+ * this span.
  */
-export const FLASH_WINDOW_TICKS = 30;
+export const FLASH_LIFE_TICKS = Math.round(1.1 * CLOCK_HZ);
+
+/**
+ * How many recent sim ticks of flashes the world snapshot carries. A flash older than
+ * this behind `nowTick` is pruned, so the flash list stays bounded on a perpetual run.
+ * A few ticks beyond a full flash life, so the fractional render estimate can finish a
+ * flash's fade before it is ever pruned.
+ */
+export const FLASH_WINDOW_TICKS = FLASH_LIFE_TICKS + 4;
+
+/**
+ * M1 (living metro, #87) rider population. The seeded spawner keeps a steady cast of
+ * transient riders: it admits a fresh rider on each arrival tick while the live count
+ * is below the target, so the population is bounded by the target and refills as
+ * riders finish. These are first-draft numbers, tuned once M1 is on screen.
+ */
+
+/** The steady concurrent rider count the spawner aims for. The population never exceeds it. */
+export const TARGET_RIDERS = 16;
+
+/** The seeded inter-arrival gap between rider births, in whole ticks (min <= max, min >= 1). */
+export const RIDER_ARRIVAL_MIN_TICKS = 3;
+export const RIDER_ARRIVAL_MAX_TICKS = 12;
+
+/** How long a fresh rider's active window runs, in ticks, before it heads home and exits. */
+export const RIDER_WINDOW_TICKS = 600;
+
+/** A fresh rider's starting balance, high enough to fund a full window of trips. */
+export const RIDER_BALANCE = 2000;
+
+/**
+ * How many recent normalized readings the world snapshot carries for the event log.
+ * Older readings are dropped, so the log stays bounded on a perpetual run.
+ */
+export const WORLD_LOG_RETENTION = 120;

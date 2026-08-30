@@ -10,8 +10,10 @@
  * real clock.
  */
 
+import { createRiderSpawner } from "../sim/actors/rider-spawner";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
+import { TARGET_RIDERS } from "./tuning";
 import {
   startWorld as startWorldDefault,
   type WorldEngineHandle,
@@ -37,6 +39,11 @@ export interface WorldRunControllerDeps {
   onError?: (error: unknown) => void;
   /** Called when a live run tears down on its own. */
   onFinished?: () => void;
+  /**
+   * The sim speed the engine samples each tick (0 pauses, 1 is real time). The header
+   * pause/speed control reads it. Omitted runs at speed 1.
+   */
+  getSpeed?: () => number;
 }
 
 export function createWorldRunController(deps: WorldRunControllerDeps): WorldRunController {
@@ -51,13 +58,27 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
     }
     engine?.stop(); // sync + idempotent
     deps.setWorldSnapshot(emptyWorldSnapshot());
-    const handle = startEngine({
+    const runSeed = deps.getSeed();
+    // A fresh, seeded spawner per run, so the population replays for a seed.
+    const spawner = createRiderSpawner({
+      seed: runSeed,
+      world: deps.env.world,
+      target: TARGET_RIDERS,
+    });
+    const startOptions: WorldStartOptions = {
       fixtures: deps.getFixtures(),
       env: deps.env,
-      runSeed: deps.getSeed(),
+      runSeed,
       setWorldSnapshot: deps.setWorldSnapshot,
       onError: (error) => deps.onError?.(error),
-    });
+      spawner,
+    };
+    // Assign the optional speed reader only when given, so exactOptionalPropertyTypes
+    // never sees an explicit undefined.
+    if (deps.getSpeed !== undefined) {
+      startOptions.getSpeed = deps.getSpeed;
+    }
+    const handle = startEngine(startOptions);
     engine = handle;
     // A disposed completion is ignored; a stale handle sees `engine` moved on.
     void handle.whenStopped.then(() => {

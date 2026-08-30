@@ -14,11 +14,19 @@
  * canvas owns the fractional estimate from M1.
  */
 import { type Actor, createSchedule, type StepResult } from "../sim/actors/actor";
+import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import { gateNodeId } from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent, WorldSnapshot } from "../sim/world-snapshot";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
-import { CLOCK_HZ, FLASH_WINDOW_TICKS, PUBLISH_HZ, SIM_TICKS_PER_CLOCK_TICK } from "./tuning";
+import {
+  CLOCK_HZ,
+  FLASH_WINDOW_TICKS,
+  PUBLISH_HZ,
+  SIM_TICKS_PER_CLOCK_TICK,
+  WORLD_LOG_RETENTION,
+} from "./tuning";
 import { bindVisibility as bindVisibilityDefault } from "./visibility";
 
 /**
@@ -43,6 +51,18 @@ export interface WorldStartOptions {
   bindVisibility?: (clock: Clock) => () => void;
   /** Reports a loop failure (a throwing actor or sink). */
   onError?: (error: unknown) => void;
+  /**
+   * The seeded transient-rider source. When present the engine admits its births each
+   * tick; when absent (M0 tests) it runs the fixtures alone. Deterministic per seed.
+   */
+  spawner?: RiderSpawner;
+  /**
+   * The sim steps per clock tick, sampled each tick. A UI-only float (the pause/speed
+   * control): 0 freezes the sim, 1 is real time, higher speeds it up. It never enters
+   * the schedule; only the whole number of steps it accumulates to does. Defaults to
+   * one step per clock tick.
+   */
+  getSpeed?: () => number;
 }
 
 /** A running world engine. `stop` tears it down; `whenStopped` settles for tests. */
@@ -112,6 +132,23 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
   const flashes: FlashEvent[] = [];
   let nextFlashId = 0;
   let simTick = 0;
+  // A bounded ring of the most recent normalized readings, for the event log. Newest
+  // is pushed to the end; the snapshot publishes it newest-first.
+  const recentLog: TimedWorldReading[] = [];
+  // Fractional step accumulator: the speed multiplier accrues here and only whole
+  // ticks are ever run, so the schedule sees integer ticks only.
+  let stepAccumulator = 0;
+  const speedOf = options.getSpeed ?? (() => 1);
+
+  /** Seed an admitted or fixture actor's view with its initial presence. */
+  const seedView = (id: string, kind: ActorView["kind"], presence: Presence): void => {
+    views.set(id, { id, kind, presence });
+  };
+
+  /** The live rider count, the spawner's ceiling input. */
+  const liveRiders = (): number =>
+    [...views.values()].filter((view) => view.kind === "rider" || view.kind === "account-rider")
+      .length;
 
   let clock: Clock | null = null;
   let detachVisibility: (() => void) | null = null;
@@ -155,14 +192,21 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
     }));
     for (const entry of log) {
       if (entry.reading.sensor === "fare-gate") {
+        // The flash lands on the station's gate chip, not the station center, so the
+        // view draws the ring right on the fare gate.
         flashes.push({
           id: nextFlashId,
           kind: "tap",
-          node: entry.reading.reading.station,
+          node: gateNodeId(entry.reading.reading.station),
           atTick: entry.tick,
         });
         nextFlashId += 1;
       }
+      // Keep the reading for the event log, bounded to the retention window.
+      recentLog.push(entry);
+    }
+    if (recentLog.length > WORLD_LOG_RETENTION) {
+      recentLog.splice(0, recentLog.length - WORLD_LOG_RETENTION);
     }
     for (const [id, presence] of step.presences) {
       const view = views.get(id);
@@ -196,8 +240,22 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
       doors: [],
       crowds: [],
       flashes: [...flashes],
+      // Newest first, so the log panel reads top to bottom as most-recent first.
+      log: [...recentLog].reverse(),
       counts: countKinds(actors),
     };
+  };
+
+  // Admit the spawner's due births at the current frontier and seed each view.
+  const spawnTransients = (): void => {
+    const spawner = options.spawner;
+    if (spawner === undefined) {
+      return;
+    }
+    for (const admission of spawner.tick(simTick, liveRiders())) {
+      const firstTick = schedule.admit(admission);
+      seedView(admission.actor.id, admission.kind, admission.initialPresence(firstTick));
+    }
   };
 
   // The sampler publishes every `ticksPerSample` CLOCK ticks, so the publish rate
@@ -225,10 +283,17 @@ export function startWorld(options: WorldStartOptions): WorldEngineHandle {
         return;
       }
       try {
-        for (let i = 0; i < SIM_TICKS_PER_CLOCK_TICK; i++) {
+        // Accrue the speed multiplier and run only the whole ticks it accumulates to,
+        // so the schedule advances one integer tick at a time and never sees a
+        // fractional step. Speed 0 (paused) accrues nothing and freezes the sim.
+        stepAccumulator += SIM_TICKS_PER_CLOCK_TICK * Math.max(0, speedOf());
+        const steps = Math.floor(stepAccumulator);
+        stepAccumulator -= steps;
+        for (let i = 0; i < steps; i++) {
           const step = schedule.advanceTo(simTick + 1);
           applyStep(step);
           simTick += 1;
+          spawnTransients();
         }
         pruneFlashes();
         maybePublish();

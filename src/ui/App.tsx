@@ -1,24 +1,27 @@
 /**
- * The app shell. A useEffect builds the run controller, runs it on mount, and
- * disposes it on unmount, so render never drives the pipeline. React Strict Mode's
- * mount/unmount/mount cycle is safe: each effect builds a fresh controller and the
- * cleanup disposes it. The Run button reloads the current Algorithm source.
+ * The app shell. It holds a `view` toggle (`"pipeline"` or `"metro"`) and one
+ * conditional effect per mode: each builds a FRESH controller from its factory when
+ * that mode becomes visible and disposes it (permanently) on hide, so only the
+ * visible mode's loop runs. React Strict Mode's mount/unmount/mount cycle is safe:
+ * the factory yields a new controller per epoch and the cleanup disposes the old one.
+ * Render never drives either loop.
  *
- * Under the `DEV_KIT` build flag the same effect also builds the dev-host client and
- * wires it: it connects on mount and disconnects on cleanup, maps the client's state
- * to the store's generic `sourceLocked`, and pushes each watched save into the run.
- * The client and the `DevKitPanel` are both loaded by a dynamic `import` behind the
- * folded `DEV_KIT` gate, so neither is a static input to the CDN build and both drop
- * out entirely when `DEV_KIT` is false.
+ * The dev-host-client lifecycle lives in its OWN unconditional effect, so a mode
+ * switch never tears the dev client down or reconnects it. Under the `DEV_KIT` build
+ * flag that effect builds and wires the client: it connects on mount and disconnects
+ * on cleanup, maps the client's state to the store's generic `sourceLocked`, and
+ * pushes each watched save into the pipeline run. The client and the `DevKitPanel` are
+ * both loaded by a dynamic `import` behind the folded `DEV_KIT` gate, so neither is a
+ * static input to the CDN build and both drop out entirely when `DEV_KIT` is false.
  *
  * The App is the state hub: the client's `onState` sets the store lock (an App
  * concern) and forwards the richer dev state to the panel through `subscribe`. "Stop
  * editing" disconnects the client and drops the ref; the next "Edit in my IDE"
  * rebuilds a fresh client, so reconnecting after a stop still works.
  *
- * Tests inject a controller through `controller` and a dev-client factory through
- * `createDevClient`, so the app never loads the real loader, engine, or EventSource
- * under test.
+ * Tests inject controller factories through `createPipelineController` /
+ * `createWorldController` and a dev-client factory through `createDevClient`, so the
+ * app never loads the real loader, engine, or EventSource under test.
  */
 import { ReactFlowProvider } from "@xyflow/react";
 import { type FunctionComponent, useCallback, useEffect, useRef, useState } from "react";
@@ -26,17 +29,29 @@ import { DEV_KIT, loadDevHostClient, loadDevKitPanel } from "../game/dev-flag";
 import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
 import { createRunController, type RunController } from "../game/run-controller";
 import { getGraph, useGameStore } from "../game/store";
+import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
+import { useWorldStore, worldSpeed } from "../game/world-store";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { distanceTable } from "../sim/world/distance";
+import { world } from "../sim/world/world";
+import type { WorldEnv } from "../sim/world-reading";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import type { DevKitPanelProps } from "./DevKitPanel";
 import { Hud } from "./hud/Hud";
+import { MetroView } from "./MetroView";
 import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
 
 /** Builds a dev-host client from the deps the App wires. Injected in tests. */
 type DevClientFactory = (deps: DevHostClientDeps) => DevHostClient;
+
+/** Which mode is on screen. Only the visible mode's loop runs. */
+type View = "pipeline" | "metro";
+
+/** The world env is fixed data, built once for the world controller. */
+const worldEnv: WorldEnv = { world, distances: distanceTable(world) };
 
 function buildController(): RunController {
   return createRunController({
@@ -49,8 +64,23 @@ function buildController(): RunController {
   });
 }
 
+function buildWorldController(): WorldRunController {
+  return createWorldRunController({
+    // M1 has no persistent fixtures (trains land in M2); the cast is all transient
+    // riders from the seeded spawner the controller builds.
+    getFixtures: () => [],
+    env: worldEnv,
+    getSeed: () => useGameStore.getState().seed,
+    setWorldSnapshot: useWorldStore.getState().setWorldSnapshot,
+    getSpeed: worldSpeed,
+  });
+}
+
 interface AppProps {
-  controller?: RunController;
+  // Controller FACTORIES: each mode builds a FRESH controller when it becomes visible
+  // and disposes it on hide (disposal is permanent). Tests inject stub factories.
+  createPipelineController?: () => RunController;
+  createWorldController?: () => WorldRunController;
   createDevClient?: DevClientFactory;
   // A test seam for the ASYNC load path: an injectable loader that resolves the
   // factory over a promise, mirroring the real dynamic import. Production leaves it
@@ -58,8 +88,15 @@ interface AppProps {
   loadDevClient?: () => Promise<DevClientFactory>;
 }
 
-export function App({ controller, createDevClient, loadDevClient }: AppProps = {}) {
+export function App({
+  createPipelineController,
+  createWorldController,
+  createDevClient,
+  loadDevClient,
+}: AppProps = {}) {
+  const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
+  const worldControllerRef = useRef<WorldRunController | null>(null);
   const devClientRef = useRef<DevHostClient | null>(null);
   const devFactoryRef = useRef<DevClientFactory | null>(null);
   const startClientRef = useRef<((factory: DevClientFactory) => DevHostClient | null) | null>(null);
@@ -125,11 +162,45 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
     [],
   );
 
+  // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
+  // controller per visible epoch; the cleanup disposes it (permanently) on hide or
+  // unmount, including React strict-mode's mount/unmount/mount cycle.
   useEffect(() => {
-    const active = controller ?? buildController();
-    controllerRef.current = active;
-    active.run();
+    if (view !== "pipeline") {
+      return;
+    }
+    const controller = (createPipelineController ?? buildController)();
+    controllerRef.current = controller;
+    controller.run();
+    return () => {
+      controller.dispose();
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+      }
+    };
+  }, [view, createPipelineController]);
 
+  // The world controller lifecycle, conditional on the metro view. Same fresh-per-epoch
+  // rule; a mode switch disposes the hidden mode's loop and builds the shown one's.
+  useEffect(() => {
+    if (view !== "metro") {
+      return;
+    }
+    const controller = (createWorldController ?? buildWorldController)();
+    worldControllerRef.current = controller;
+    controller.run();
+    return () => {
+      controller.dispose();
+      if (worldControllerRef.current === controller) {
+        worldControllerRef.current = null;
+      }
+    };
+  }, [view, createWorldController]);
+
+  // The dev-host-client lifecycle, UNCONDITIONAL, so a mode switch never tears the dev
+  // client down or reconnects it. It only wires the client; the pipeline controller it
+  // pushes sources into is owned by the effect above.
+  useEffect(() => {
     let cancelled = false;
 
     const startClient = (factory: DevClientFactory): DevHostClient | null => {
@@ -196,15 +267,13 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
 
     return () => {
       cancelled = true;
-      active.dispose();
-      controllerRef.current = null;
       devClientRef.current?.disconnect();
       devClientRef.current = null;
       startClientRef.current = null;
       loadClientRef.current = null;
       pendingClientRef.current = null;
     };
-  }, [controller, createDevClient, loadDevClient, buildDeps, reportDev, trackPending]);
+  }, [createDevClient, loadDevClient, buildDeps, reportDev, trackPending]);
 
   // Load the dev panel the same folded-gate way, so it never enters the static build.
   useEffect(() => {
@@ -292,20 +361,33 @@ export function App({ controller, createDevClient, loadDevClient }: AppProps = {
       <header className="topbar">
         <h1>Detection Express</h1>
         <span className="slice-tag">Slice 1 &mdash; Spot the threat</span>
+        <button
+          type="button"
+          className="view-toggle"
+          onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
+        >
+          {view === "pipeline" ? "Metro view" : "Pipeline view"}
+        </button>
       </header>
-      <Hud />
-      <ReactFlowProvider>
-        <Pipeline />
-      </ReactFlowProvider>
-      <Briefing text={kioskPinAttack.briefing} />
-      <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
-      {devEnabled && Panel !== null ? (
-        <Panel
-          onEditInIde={onEditInIde}
-          onStopEditing={onStopEditing}
-          subscribe={subscribeDevState}
-        />
-      ) : null}
+      {view === "pipeline" ? (
+        <>
+          <Hud />
+          <ReactFlowProvider>
+            <Pipeline />
+          </ReactFlowProvider>
+          <Briefing text={kioskPinAttack.briefing} />
+          <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+          {devEnabled && Panel !== null ? (
+            <Panel
+              onEditInIde={onEditInIde}
+              onStopEditing={onStopEditing}
+              subscribe={subscribeDevState}
+            />
+          ) : null}
+        </>
+      ) : (
+        <MetroView />
+      )}
     </div>
   );
 }

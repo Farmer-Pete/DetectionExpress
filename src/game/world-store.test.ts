@@ -24,6 +24,7 @@ describe("world store", () => {
       doors: [{ node: "depot::vault", open: true }],
       crowds: [{ node: "cen", persons: 3, grants: 3 }],
       flashes: [{ id: 0, kind: "tap", node: "cen", atTick: 10 }],
+      log: [],
       counts: { riders: 1, trains: 0, staff: 0 },
     };
     useWorldStore.getState().setWorldSnapshot(snapshot);

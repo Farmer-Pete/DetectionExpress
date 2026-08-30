@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { DevHostClient, DevHostClientDeps, DevState } from "../game/dev-host-client";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
+import type { WorldRunController } from "../game/world-run-controller";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { App } from "./App";
@@ -35,9 +37,29 @@ function stubController(): RunController & { runs: number; disposes: number } {
   };
 }
 
+/** A no-op world controller, the same shape as the real one. */
+function stubWorldController(): WorldRunController & { runs: number; disposes: number } {
+  let runs = 0;
+  let disposes = 0;
+  return {
+    get runs() {
+      return runs;
+    },
+    get disposes() {
+      return disposes;
+    },
+    run() {
+      runs += 1;
+    },
+    dispose() {
+      disposes += 1;
+    },
+  };
+}
+
 describe("App", () => {
   it("renders the heading, both gauges, and the Algorithm editor", () => {
-    render(<App controller={stubController()} />);
+    render(<App createPipelineController={() => stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
@@ -46,10 +68,81 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
   });
 
-  it("runs the controller on mount", () => {
+  it("runs the pipeline controller on mount", () => {
     const controller = stubController();
-    render(<App controller={controller} />);
+    render(<App createPipelineController={() => controller} />);
     expect(controller.runs).toBe(1);
+  });
+});
+
+describe("App view toggle", () => {
+  it("builds the pipeline loop on mount and not the world loop", () => {
+    const pipes: ReturnType<typeof stubController>[] = [];
+    const worlds: ReturnType<typeof stubWorldController>[] = [];
+    render(
+      <App
+        createPipelineController={() => {
+          const stub = stubController();
+          pipes.push(stub);
+          return stub;
+        }}
+        createWorldController={() => {
+          const stub = stubWorldController();
+          worlds.push(stub);
+          return stub;
+        }}
+      />,
+    );
+    expect(pipes).toHaveLength(1);
+    expect(pipes[0]?.runs).toBe(1);
+    expect(worlds).toHaveLength(0);
+  });
+
+  it("disposes the pipeline loop and builds the world loop on toggle to metro", () => {
+    const pipes: ReturnType<typeof stubController>[] = [];
+    const worlds: ReturnType<typeof stubWorldController>[] = [];
+    render(
+      <App
+        createPipelineController={() => {
+          const stub = stubController();
+          pipes.push(stub);
+          return stub;
+        }}
+        createWorldController={() => {
+          const stub = stubWorldController();
+          worlds.push(stub);
+          return stub;
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    // The pipeline loop is disposed; a fresh world loop is built and run.
+    expect(pipes[0]?.disposes).toBe(1);
+    expect(worlds).toHaveLength(1);
+    expect(worlds[0]?.runs).toBe(1);
+    // The metro chrome is on screen now.
+    expect(screen.getByText("LIVING METRO")).toBeDefined();
+  });
+
+  it("builds a fresh controller per epoch under strict-mode double invoke", () => {
+    const pipes: ReturnType<typeof stubController>[] = [];
+    render(
+      <StrictMode>
+        <App
+          createPipelineController={() => {
+            const stub = stubController();
+            pipes.push(stub);
+            return stub;
+          }}
+          createWorldController={() => stubWorldController()}
+        />
+      </StrictMode>,
+    );
+    // Strict mode mounts, unmounts (disposing the first), then remounts a fresh one.
+    expect(pipes.length).toBe(2);
+    expect(pipes[0]?.disposes).toBe(1);
+    expect(pipes[1]?.runs).toBe(1);
+    expect(pipes[1]?.disposes).toBe(0);
   });
 });
 
@@ -97,7 +190,9 @@ describe("App dev wiring", () => {
 
   it("connects the dev client on mount and disconnects it on unmount", () => {
     const dev = fakeDevKit();
-    const { unmount } = render(<App controller={stubController()} createDevClient={dev.factory} />);
+    const { unmount } = render(
+      <App createPipelineController={() => stubController()} createDevClient={dev.factory} />,
+    );
     expect(dev.connects()).toBe(1);
     unmount();
     expect(dev.disconnects()).toBe(1);
@@ -105,7 +200,7 @@ describe("App dev wiring", () => {
 
   it("locks the store when the client reports an active path and unlocks when it clears", () => {
     const dev = fakeDevKit();
-    render(<App controller={stubController()} createDevClient={dev.factory} />);
+    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
     const onState = (state: DevState) => act(() => dev.deps().onState(state));
 
     onState({ status: "connected", path: "/algorithms/x.js", message: null });
@@ -118,7 +213,7 @@ describe("App dev wiring", () => {
   it("applies a pushed source into the store and reruns the controller", () => {
     const dev = fakeDevKit();
     const controller = stubController();
-    render(<App controller={controller} createDevClient={dev.factory} />);
+    render(<App createPipelineController={() => controller} createDevClient={dev.factory} />);
     const runsBefore = controller.runs;
 
     act(() => dev.deps().applySource("// pushed from my IDE"));
@@ -129,7 +224,7 @@ describe("App dev wiring", () => {
 
   it("opens the Scenario file in the IDE with the Scenario slug and reference source", async () => {
     const dev = fakeDevKit();
-    render(<App controller={stubController()} createDevClient={dev.factory} />);
+    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
 
     // The panel is loaded through the folded DEV_KIT gate, so it mounts asynchronously.
     const button = await screen.findByRole("button", { name: "Edit in my IDE" });
@@ -161,7 +256,7 @@ describe("App dev wiring", () => {
       };
     };
 
-    render(<App controller={stubController()} createDevClient={factory} />);
+    render(<App createPipelineController={() => stubController()} createDevClient={factory} />);
 
     // The first build threw, so no client connected yet, but the panel still mounts.
     const button = await screen.findByRole("button", { name: "Edit in my IDE" });
@@ -201,7 +296,7 @@ describe("App dev wiring", () => {
       return Promise.resolve(() => client);
     };
 
-    render(<App controller={stubController()} loadDevClient={loadDevClient} />);
+    render(<App createPipelineController={() => stubController()} loadDevClient={loadDevClient} />);
 
     // The first (mount) load rejected, so nothing connected, but the panel still mounts.
     const button = await screen.findByRole("button", { name: "Edit in my IDE" });
@@ -221,7 +316,7 @@ describe("App dev wiring", () => {
 
   it("replays the last dev state to a panel that subscribes after the event", async () => {
     const dev = fakeDevKit();
-    render(<App controller={stubController()} createDevClient={dev.factory} />);
+    render(<App createPipelineController={() => stubController()} createDevClient={dev.factory} />);
 
     // Emit a dev state before the async panel has mounted and subscribed. Without a
     // replay of the cached state, the panel would stay in its off state.
@@ -241,7 +336,7 @@ describe("App dev wiring", () => {
       },
     });
 
-    render(<App controller={stubController()} createDevClient={factory} />);
+    render(<App createPipelineController={() => stubController()} createDevClient={factory} />);
     const button = await screen.findByRole("button", { name: "Edit in my IDE" });
     fireEvent.click(button);
 

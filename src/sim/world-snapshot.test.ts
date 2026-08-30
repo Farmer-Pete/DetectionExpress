@@ -9,6 +9,7 @@ describe("emptyWorldSnapshot", () => {
     expect(snapshot.doors).toEqual([]);
     expect(snapshot.crowds).toEqual([]);
     expect(snapshot.flashes).toEqual([]);
+    expect(snapshot.log).toEqual([]);
     expect(snapshot.counts).toEqual({ riders: 0, trains: 0, staff: 0 });
   });
 
