@@ -42,17 +42,11 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Verify the static build carries no dev-kit code
+      - name: Verify the production build carries no dev-only local-IDE code
         run: pnpm run verify:static
-
-      - name: Build the dev kit
-        run: pnpm run build:devkit
 
       - name: Verify the profiler worker is bundled and wired
         run: pnpm run verify:worker-build
-
-      - name: Verify the dev-kit tarball is complete
-        run: pnpm run pack:check
 
       - name: Dead code check
         run: pnpm run knip

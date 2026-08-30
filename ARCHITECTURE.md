@@ -73,14 +73,16 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and generates it once; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.
 - `src/sim/scenarios/` holds one folder per Scenario. A Scenario composes Endpoints, drives the intent timeline, injects Attacks, and records the Ground truth. Pure logic, no React.
 - The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
+- Two ways to author it. The in-game editor holds a JavaScript source string. Or a player edits a real TypeScript module at `src/algorithms/<slug>.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine lives at `src/sim/default-engine.ts`. See `docs/adr/0008-native-algorithm-hot-reload.md`.
 
 ## Toolchain
 
 - **Node** (26.5.1, pinned in `.nvmrc` and CI) is the runtime. **pnpm** (10.29.3) is the
   package manager, with a 7-day install cooldown in `pnpm-workspace.yaml`.
-- **Vite** is the dev server and bundler. Dev server: `pnpm run dev`. Builds:
-  `pnpm run build:static` (to `dist`) and `pnpm run build:devkit` (to `dist-devkit`).
-  Vite bundles the profiler Web Worker and serves it over http in every mode.
+- **Vite** is the only dev server and the bundler. Dev server: `pnpm run dev`, which also
+  serves and hot-reloads local-IDE algorithms. Build: `pnpm run build` (to `dist`). Vite
+  bundles the profiler Web Worker and serves it over http. The dev-only local-IDE code is
+  behind `import.meta.env.DEV` and drops from the build; `verify:static` proves it.
 - **Vitest** (happy-dom) is the test runner; **tsx** runs the TypeScript scripts.
 - See `docs/adr/0005-node-toolchain-drop-bun.md` for the move to Node, and
   `docs/adr/0001-all-bun-drop-vite.md` (Superseded) for the Bun era it reverses.

@@ -58,7 +58,7 @@ describe("AlgorithmEditor", () => {
     expect(screen.getByRole("button", { name: "Download this Scenario" })).toBeDefined();
   });
 
-  it("downloads the Scenario as detection-express-<slug>.js", () => {
+  it("downloads the Scenario as <slug>.ts", () => {
     useGameStore.setState({ source: "// my algorithm" });
     render(<AlgorithmEditor onRun={() => {}} slug={SLUG} />);
 
@@ -86,6 +86,6 @@ describe("AlgorithmEditor", () => {
     revokeUrlSpy.mockRestore();
 
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]?.getAttribute("download")).toBe("detection-express-kiosk-pin-attack.js");
+    expect(anchors[0]?.getAttribute("download")).toBe("kiosk-pin-attack.ts");
   });
 });

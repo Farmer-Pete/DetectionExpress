@@ -1,14 +1,7 @@
-// Ambient module declarations so TypeScript accepts non-code imports that
-// Vite's bundler handles at build time.
-declare module "*.css";
-declare module "*.svg";
+/// <reference types="vite/client" />
 
-// The dev-kit flag is read as `process.env.PUBLIC_DEV_KIT` (dot form), which Vite
-// inlines at build time via `define`. Declaring it a real property lets TypeScript
-// accept the dot access under `noPropertyAccessFromIndexSignature`, and Vite still
-// replaces the literal expression.
-declare namespace NodeJS {
-  interface ProcessEnv {
-    PUBLIC_DEV_KIT?: string;
-  }
-}
+// `vite/client` above types `import.meta.env` (including `.DEV`) and `import.meta.hot`,
+// the dev-server HMR channel the local-IDE client rides (86-PLAN.md M2b). It also types
+// `*.css`/`*.svg` and other Vite asset imports, so no manual ambient declarations are
+// needed. `import.meta.env.DEV` is the one dev/production switch: the production build
+// inlines it to `false` and strips the local-IDE code out.

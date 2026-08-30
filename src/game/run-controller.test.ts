@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Checkpoint, GeneratedRun, Scenario } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
-import type { LoadedAlgorithm } from "./algorithm";
+import type { AlgorithmSource, LoadedAlgorithm, LoadTarget } from "./algorithm";
 import type { EngineHandle, StartOptions } from "./engine";
 import {
   createRunController,
@@ -18,6 +18,16 @@ const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [] };
 const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };
 
 const graph = { nodes: [], edges: [] };
+
+/** A source-mode input, the in-game editor's path — the default across most tests. */
+function sourceMode(source = "source"): AlgorithmSource {
+  return { kind: "source", source };
+}
+
+/** A url-mode input, local-IDE mode. `url = path + "?v=" + version`, as the plan sets it. */
+function urlMode(path: string, version: number): AlgorithmSource {
+  return { kind: "url", path, version, url: `${path}?v=${version}` };
+}
 
 const FIXED_RATE: ServiceRate = { num: 7, den: 1 };
 
@@ -55,7 +65,7 @@ function baseDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
   return {
     scenario,
     getGraph: () => graph,
-    getSource: () => "source",
+    getAlgorithmSource: () => sourceMode(),
     getSeed: () => 1,
     setSnapshot: () => undefined,
     setError: () => undefined,
@@ -88,6 +98,35 @@ describe("run controller", () => {
     loads[1]?.resolve(algo); // resolves the current generation 2
     await flush();
     expect(started).toHaveLength(1); // only the newest run started
+  });
+
+  it("drops an OLDER load that resolves AFTER the newer one, never starting or profiling it (M2a)", async () => {
+    const started: string[] = [];
+    const profiles: number[] = [];
+    const loads = [deferred<LoadedAlgorithm>(), deferred<LoadedAlgorithm>()];
+    let loadCall = 0;
+    let profileCall = 0;
+    const controller = createRunController(
+      baseDeps({
+        loadAlgorithm: () => loads[loadCall++]?.promise ?? Promise.resolve(algo),
+        resolveServiceRate: () => {
+          profiles.push(profileCall++);
+          return fixedServiceRate();
+        },
+        start: () => {
+          started.push("engine");
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run(); // generation 1 (the OLDER run), load 0 pending
+    controller.run(); // generation 2 (the NEWER run), load 1 pending
+    loads[1]?.resolve(algo); // the newer run's load resolves FIRST
+    await flush();
+    loads[0]?.resolve(algo); // the older run's load resolves LATER — the guard must drop it
+    await flush();
+    expect(started).toHaveLength(1); // only the newer run started the engine
+    expect(profiles).toEqual([0]); // the older run never even reached the profiler
   });
 
   it("drops a load that resolves after dispose, silently", async () => {
@@ -245,13 +284,147 @@ describe("run controller", () => {
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]?.correctness.rolling).toBe(100); // emptySnapshot reset
   });
+});
 
-  it("reuses the cached rate for an unchanged source, and re-profiles a changed one (M2 review 6)", async () => {
+describe("run controller loader and profiler seam derive from one AlgorithmSource (M2a)", () => {
+  it("derives a url loader target and a url profiler request in url mode", async () => {
+    const workers: FakeProfilerWorker[] = [];
+    const loaded: LoadTarget[] = [];
+    const controller = createRunController(
+      workerDeps({
+        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 4),
+        loadAlgorithm: async (target) => {
+          loaded.push(target);
+          return algo;
+        },
+        spawnProfilerWorker: () => {
+          const worker = new FakeProfilerWorker();
+          workers.push(worker);
+          return worker;
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    // The loader imported the versioned URL, not a source string.
+    expect(loaded).toEqual([{ kind: "url", url: "src/algorithms/kiosk.ts?v=4" }]);
+    // The profiler worker was handed the same discriminated url target.
+    expect(workers[0]?.posted[0]?.target).toEqual({
+      kind: "url",
+      url: "src/algorithms/kiosk.ts?v=4",
+    });
+    workers[0]?.emitMessage(OK_OUTCOME);
+    await flush();
+  });
+
+  it("derives a source loader target and a source profiler request in source mode", async () => {
+    const workers: FakeProfilerWorker[] = [];
+    const loaded: LoadTarget[] = [];
+    const controller = createRunController(
+      workerDeps({
+        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
+        loadAlgorithm: async (target) => {
+          loaded.push(target);
+          return algo;
+        },
+        spawnProfilerWorker: () => {
+          const worker = new FakeProfilerWorker();
+          workers.push(worker);
+          return worker;
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(loaded).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
+    expect(workers[0]?.posted[0]?.target).toEqual({
+      kind: "source",
+      source: "export const detect = () => []",
+    });
+    workers[0]?.emitMessage(OK_OUTCOME);
+    await flush();
+  });
+
+  it("hands the main-thread fallback a url target when the worker cannot spawn", async () => {
+    const targets: LoadTarget[] = [];
+    const controller = createRunController(
+      workerDeps({
+        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 2),
+        spawnProfilerWorker: () => {
+          throw new Error("module Worker forbidden here");
+        },
+        mainThreadResolveServiceRate: (target) => {
+          targets.push(target);
+          return { rate: Promise.resolve(FIXED_RATE), cancel: () => undefined };
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(targets).toEqual([{ kind: "url", url: "src/algorithms/kiosk.ts?v=2" }]);
+  });
+
+  it("hands the main-thread fallback a source target when the worker cannot spawn", async () => {
+    const targets: LoadTarget[] = [];
+    const controller = createRunController(
+      workerDeps({
+        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
+        spawnProfilerWorker: () => {
+          throw new Error("module Worker forbidden here");
+        },
+        mainThreadResolveServiceRate: (target) => {
+          targets.push(target);
+          return { rate: Promise.resolve(FIXED_RATE), cancel: () => undefined };
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(targets).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
+  });
+});
+
+describe("run controller calibration cache key (M2a)", () => {
+  it("keys url mode on path+version: an unchanged ref reuses the rate, a save (version bump) busts it", async () => {
+    let src = urlMode("src/algorithms/kiosk.ts", 1);
+    let calls = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => src,
+        resolveServiceRate: () => {
+          calls += 1;
+          return fixedServiceRate();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    controller.run(); // same path + version: cached, no re-profile
+    await flush();
+    expect(calls).toBe(1);
+
+    src = urlMode("src/algorithms/kiosk.ts", 2); // a save bumps the version -> bust
+    controller.run();
+    await flush();
+    expect(calls).toBe(2);
+
+    src = urlMode("src/algorithms/kiosk.ts", 1); // back to v1: still cached, no collision
+    controller.run();
+    await flush();
+    expect(calls).toBe(2);
+
+    src = urlMode("src/algorithms/other.ts", 1); // a different path -> bust
+    controller.run();
+    await flush();
+    expect(calls).toBe(3);
+  });
+
+  it("keys source mode on the full source string: unchanged reuses, changed re-profiles", async () => {
     let source = "source-A";
     let calls = 0;
     const controller = createRunController(
       baseDeps({
-        getSource: () => source,
+        getAlgorithmSource: () => sourceMode(source),
         resolveServiceRate: () => {
           calls += 1;
           return fixedServiceRate();
@@ -268,6 +441,28 @@ describe("run controller", () => {
     await flush();
     expect(calls).toBe(2);
   });
+
+  it("keeps seed in the key, so a seed change never reuses a stale rate (M2a)", async () => {
+    let seed = 1;
+    let calls = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 1), // fixed ref
+        getSeed: () => seed,
+        resolveServiceRate: () => {
+          calls += 1;
+          return fixedServiceRate();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(calls).toBe(1);
+    seed = 2; // same ref, different seed: the rate must be re-measured
+    controller.run();
+    await flush();
+    expect(calls).toBe(2);
+  });
 });
 
 /** Set `document.hidden` so the defer-and-retry path can be driven deterministically. */
@@ -279,10 +474,10 @@ function setHidden(hidden: boolean): void {
 class FakeProfilerWorker implements ProfilerWorkerLike {
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private errorHandler: ((event: ErrorEvent) => void) | null = null;
-  posted: { source: string; hidden: boolean }[] = [];
+  posted: { target: LoadTarget; hidden: boolean }[] = [];
   terminated = false;
 
-  postMessage(message: { source: string; hidden: boolean }): void {
+  postMessage(message: { target: LoadTarget; hidden: boolean }): void {
     this.posted.push(message);
   }
   terminate(): void {
@@ -315,7 +510,7 @@ function workerDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
   return {
     scenario,
     getGraph: () => graph,
-    getSource: () => "source",
+    getAlgorithmSource: () => sourceMode(),
     getSeed: () => 1,
     setSnapshot: () => undefined,
     setError: () => undefined,
