@@ -49,12 +49,10 @@ describe("buildOptimizationAlgorithm", () => {
     for (const ev of events) {
       const norm = algo.normalize(raw(ev));
       const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-      // Fold Finding[] to Alert[] the same way runDetect does.
-      const alerts = algo
-        .detect(view)
-        .filter((finding) => !finding.isPartial)
-        .map((finding) => finding.alert);
-      scorer.record(alerts, ev);
+      // Hand the scorer the findings the way runDetect does: the scorer skips
+      // partials itself, so pass them all as ScoredFinding (no subject here).
+      const scored = algo.detect(view).map((finding) => ({ finding }));
+      scorer.record(scored, ev);
     }
     scorer.finalize();
 
