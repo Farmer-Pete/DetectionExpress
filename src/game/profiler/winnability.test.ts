@@ -118,17 +118,17 @@ describe("winnability at the shipped tuning (nominal, skew 1)", () => {
     expect(tally).toBeGreaterThan(PEAK * 2); // clears the peak with margin
   });
 
-  it("drowns the naive rule at the final deadline, with the Backlog at the ceiling", () => {
+  it("drowns the naive rule at the final deadline, with the Queue at the ceiling", () => {
     const result = simulate(naiveRate);
     expect(result.outcome).toBe("failed");
     expect(result.failedCheckpoint).toBe(buildSchedule().checkpoints.length - 1); // the final deadline
-    expect(result.backlogAtFailure).toBeGreaterThanOrEqual(CHANNEL_CAP); // a full, unambiguous fail
+    expect(result.queueAtFailure).toBeGreaterThanOrEqual(CHANNEL_CAP); // a full, unambiguous fail
   });
 
-  it("carries the tally rule through every checkpoint with Backlog headroom", () => {
+  it("carries the tally rule through every checkpoint with Queue headroom", () => {
     const result = simulate(tallyRate);
     expect(result.outcome).toBe("won");
-    expect(result.maxBacklog).toBeLessThanOrEqual(CHANNEL_CAP); // never near the ceiling
+    expect(result.maxQueue).toBeLessThanOrEqual(CHANNEL_CAP); // never near the ceiling
   });
 });
 
@@ -200,7 +200,6 @@ async function runRealEngine(algorithm: TaskAlgorithm, rate: ServiceRate) {
     serviceRate: rate,
     checkpoints: run.checkpoints,
     driver,
-    bindVisibility: () => () => undefined,
   });
   const deadline = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
   for (let i = 0; i < deadline + 2; i++) {
@@ -217,10 +216,10 @@ describe("winnability through the real engine (nominal)", () => {
   const naiveRate = rateFor(NAIVE_CODE_PER_ANCHOR, OMEGA, 1);
   const tallyRate = rateFor(TALLY_CODE_PER_ANCHOR, OMEGA, 1);
 
-  it("drowns the naive default: the run fails on Backlog", async () => {
+  it("drowns the naive default: the run fails on Queue", async () => {
     const last = await runRealEngine(taskAlgorithmFor(buildReferenceAlgorithm()), naiveRate);
     expect(last?.status).toBe("failed");
-    expect(last?.failureReason).toBe("backlog");
+    expect(last?.failureReason).toBe("queue");
   });
 
   it("carries the applied tally: the run wins", async () => {
@@ -236,7 +235,7 @@ describe("winnability across the OMEGA and skew band (M2 seam 9)", () => {
       for (const skew of SKEW_BAND) {
         const result = simulate(rateFor(NAIVE_CODE_PER_ANCHOR, omega, skew));
         expect(result.outcome).toBe("failed");
-        expect(result.backlogAtFailure).toBeGreaterThanOrEqual(CHANNEL_CAP);
+        expect(result.queueAtFailure).toBeGreaterThanOrEqual(CHANNEL_CAP);
       }
     }
   });
@@ -246,7 +245,7 @@ describe("winnability across the OMEGA and skew band (M2 seam 9)", () => {
       for (const skew of SKEW_BAND) {
         const result = simulate(rateFor(TALLY_CODE_PER_ANCHOR, omega, 1 / skew));
         expect(result.outcome).toBe("won");
-        expect(result.maxBacklog).toBeLessThanOrEqual(CHANNEL_CAP);
+        expect(result.maxQueue).toBeLessThanOrEqual(CHANNEL_CAP);
       }
     }
   });
@@ -267,7 +266,7 @@ function frozenSimulate(rate: ServiceRate): SimResult {
   let admitted = 0;
   let completed = 0;
   let detectFreeAt = 1; // the next tick Detect may pull, given its governor sleeps
-  let maxBacklog = 0;
+  let maxQueue = 0;
   let nextCheckpoint = 0;
 
   for (let tick = 1; tick <= deadline; tick++) {
@@ -277,18 +276,18 @@ function frozenSimulate(rate: ServiceRate): SimResult {
       if (!cp || cp.atTick > tick) {
         break;
       }
-      const backlog = admitted - completed;
+      const queued = admitted - completed;
       const isFinal = nextCheckpoint === checkpoints.length - 1;
-      if (backlog !== 0) {
+      if (queued !== 0) {
         return {
           outcome: "failed",
           failedCheckpoint: nextCheckpoint,
-          backlogAtFailure: backlog,
-          maxBacklog,
+          queueAtFailure: queued,
+          maxQueue,
         };
       }
       if (isFinal) {
-        return { outcome: "won", failedCheckpoint: -1, backlogAtFailure: 0, maxBacklog };
+        return { outcome: "won", failedCheckpoint: -1, queueAtFailure: 0, maxQueue };
       }
       nextCheckpoint += 1;
     }
@@ -307,15 +306,15 @@ function frozenSimulate(rate: ServiceRate): SimResult {
         break;
       }
     }
-    maxBacklog = Math.max(maxBacklog, admitted - completed);
+    maxQueue = Math.max(maxQueue, admitted - completed);
   }
 
   const remaining = admitted - completed;
   return {
     outcome: remaining === 0 ? "won" : "failed",
     failedCheckpoint: remaining === 0 ? -1 : checkpoints.length - 1,
-    backlogAtFailure: remaining,
-    maxBacklog,
+    queueAtFailure: remaining,
+    maxQueue,
   };
 }
 

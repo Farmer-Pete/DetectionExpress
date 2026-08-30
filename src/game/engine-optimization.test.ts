@@ -24,8 +24,8 @@ import {
 /**
  * M3: the naive default drowns while the applied Optimization wins, through the
  * real engine on a ManualDriver. The naive rule is CORRECT but priced slow, so at
- * a drowning service rate its Backlog outgrows the final deadline and the run fails
- * on Backlog, not on Correctness. The Optimization is the same detector at an O(1)
+ * a drowning service rate its Queue outgrows the final deadline and the run fails
+ * on Queue, not on Correctness. The Optimization is the same detector at an O(1)
  * cost, so at its faster rate the run drains and wins with Correctness held. A run
  * also replays identical traces on a fixed rate (seam 14). See GH3-PLAN.md 6.5, 13,
  * and 9 (seams 13-15).
@@ -123,7 +123,6 @@ async function runToDeadline(opts: RunOptions, flushRounds: number): Promise<Run
     serviceRate: opts.serviceRate,
     checkpoints: opts.checkpoints,
     driver,
-    bindVisibility: () => () => undefined,
   });
   await step(driver, deadline + 2, flushRounds);
   await handle.whenStopped;
@@ -136,7 +135,7 @@ function scheduleOf(events: PipeEvent[]): () => PipeEvent | null {
 }
 
 describe("the naive default drowns through the real engine (M3 integration)", () => {
-  it("fails at the final deadline on Backlog, not on Correctness", async () => {
+  it("fails at the final deadline on Queue, not on Correctness", async () => {
     const run = kioskPinAttack.generate(LEVEL_SEED);
     const result = await runToDeadline(
       {
@@ -149,7 +148,7 @@ describe("the naive default drowns through the real engine (M3 integration)", ()
       300,
     );
     expect(result.last?.status).toBe("failed");
-    expect(result.last?.failureReason).toBe("backlog");
+    expect(result.last?.failureReason).toBe("queue");
     // The rule is correct: the failure is throughput, so no false Alerts were raised.
     expect(result.last?.correctness.falseAlerts).toBe(0);
   });
@@ -173,15 +172,15 @@ describe("the applied Optimization wins through the real engine (M3 integration)
     expect(result.last?.correctness.caught).toBe(run.attacks.length);
     expect(result.last?.correctness.missed).toBe(0);
     expect(result.last?.correctness.rolling).toBeGreaterThanOrEqual(CORRECTNESS_FLOOR);
-    expect(result.last?.backlog).toBe(0);
+    expect(result.last?.queued).toBe(0);
   });
 });
 
 describe("determinism per machine (M3 seam 14)", () => {
-  it("replays identical Backlog, Correctness, and status traces at a fixed rate", async () => {
+  it("replays identical Queue, Correctness, and status traces at a fixed rate", async () => {
     const trace = (result: RunResult) =>
       result.snapshots.map((s) => ({
-        backlog: s.backlog,
+        queued: s.queued,
         correctness: s.correctness,
         status: s.status,
         failureReason: s.failureReason,

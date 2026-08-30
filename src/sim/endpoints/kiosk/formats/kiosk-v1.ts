@@ -24,18 +24,26 @@ export const kioskV1: Endpoint<KioskReading, RawKioskV1> = {
   }),
 };
 
+/** A string primitive, by its tag rather than a `typeof` representation check. */
+function isString(value: unknown): value is string {
+  return !(value instanceof Object) && Object.prototype.toString.call(value) === "[object String]";
+}
+
 /**
  * Recognize a kiosk-v1 payload. Not a production boundary check — no engine or
  * Rule code reads the wire payload this way; it is a shared guard the tests
  * (and the test-only reference-Algorithm adapter) use to narrow `payload:
- * unknown` instead of asserting.
+ * unknown` instead of asserting. It checks acct and term are strings too, so a
+ * consumer that renders them (the log panel) cannot receive a non-string value.
  */
 export function isRawKioskV1(value: unknown): value is RawKioskV1 {
   return (
     value instanceof Object &&
     "t" in value &&
     "acct" in value &&
+    isString(value.acct) &&
     "term" in value &&
+    isString(value.term) &&
     "res" in value &&
     (value.res === "WRONG_PIN" || value.res === "OK")
   );

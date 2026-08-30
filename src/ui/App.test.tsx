@@ -16,14 +16,26 @@ import { markIntroSeen } from "./onboarding-storage";
 // The onboarding overlay covers the shell on first load. Shell tests seed the seen
 // flag so the overlay stays closed; the onboarding tests clear it to see the overlay.
 beforeEach(() => {
-  useGameStore.setState({ source: referenceSource, sourceLocked: false, runPending: false });
+  useGameStore.setState({
+    source: referenceSource,
+    sourceLocked: false,
+    runPending: false,
+    transport: { frozen: false, speed: 1 },
+  });
   markIntroSeen();
 });
 
 /** A no-op controller so the test never touches the real loader or engine. */
-function stubController(): RunController & { runs: number; disposes: number } {
+function stubController(): RunController & {
+  runs: number;
+  disposes: number;
+  frozenCalls: boolean[];
+  speedCalls: number[];
+} {
   let runs = 0;
   let disposes = 0;
+  const frozenCalls: boolean[] = [];
+  const speedCalls: number[] = [];
   return {
     get runs() {
       return runs;
@@ -31,8 +43,16 @@ function stubController(): RunController & { runs: number; disposes: number } {
     get disposes() {
       return disposes;
     },
+    frozenCalls,
+    speedCalls,
     run() {
       runs += 1;
+    },
+    setFrozen(frozen: boolean) {
+      frozenCalls.push(frozen);
+    },
+    setSpeed(speed) {
+      speedCalls.push(speed);
     },
     dispose() {
       disposes += 1;
@@ -67,7 +87,7 @@ describe("App shell", () => {
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
-    expect(screen.getByText("Backlog")).toBeDefined();
+    expect(screen.getByText("Queue")).toBeDefined();
     expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
   });
 
@@ -91,6 +111,20 @@ describe("App shell", () => {
     render(<App createPipelineController={() => stubController()} />);
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
     expect(screen.getByRole("button", { name: /how this works/i })).toBeDefined();
+  });
+
+  it("reflects the store frozen state into the controller on mount", () => {
+    useGameStore.setState({ transport: { frozen: true, speed: 1 } });
+    const controller = stubController();
+    render(<App createPipelineController={() => controller} />);
+    expect(controller.frozenCalls).toContain(true);
+  });
+
+  it("reflects the store speed into the controller on mount", () => {
+    useGameStore.setState({ transport: { frozen: false, speed: 2 } });
+    const controller = stubController();
+    render(<App createPipelineController={() => controller} />);
+    expect(controller.speedCalls).toContain(2);
   });
 
   it("mounts the inspector shell and no React Flow canvas", () => {
@@ -238,6 +272,32 @@ describe("App view toggle", () => {
     expect(worlds[0]?.runs).toBe(1);
     // The metro chrome is on screen now.
     expect(screen.getByText("LIVING METRO")).toBeDefined();
+  });
+
+  it("seeds a freshly built pipeline controller from the store transport after a view round-trip", () => {
+    // A Metro round-trip builds a new pipeline controller; the reflection effects keyed
+    // on [frozen]/[speed] do not re-fire on a view change, so the effect must seed the
+    // fresh controller itself. Otherwise it would run unfrozen at 1x under a frozen/2x panel.
+    useGameStore.setState({ transport: { frozen: true, speed: 2 } });
+    const pipes: ReturnType<typeof stubController>[] = [];
+    render(
+      <App
+        createPipelineController={() => {
+          const stub = stubController();
+          pipes.push(stub);
+          return stub;
+        }}
+        createWorldController={() => stubWorldController()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
+    expect(pipes).toHaveLength(2);
+    const rebuilt = pipes[1];
+    expect(rebuilt).toBeDefined();
+    if (!rebuilt) return;
+    expect(rebuilt.frozenCalls).toContain(true);
+    expect(rebuilt.speedCalls).toContain(2);
   });
 
   it("builds a fresh controller per epoch under strict-mode double invoke", () => {

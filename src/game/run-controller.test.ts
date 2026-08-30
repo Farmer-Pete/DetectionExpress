@@ -57,7 +57,13 @@ async function flush(): Promise<void> {
 }
 
 function fakeHandle(whenStopped: Promise<void> = Promise.resolve()): EngineHandle {
-  return { stop: () => undefined, whenStopped };
+  return {
+    stop: () => undefined,
+    pause: () => undefined,
+    resume: () => undefined,
+    setSpeed: () => undefined,
+    whenStopped,
+  };
 }
 
 /** Base deps with harmless getters; each test overrides what it exercises. */
@@ -87,6 +93,9 @@ function spyHandle(whenStopped: Promise<void> = new Promise(() => undefined)): {
     stop: () => {
       state.stops += 1;
     },
+    pause: () => undefined,
+    resume: () => undefined,
+    setSpeed: () => undefined,
     whenStopped,
   };
   return {
@@ -372,6 +381,9 @@ describe("run controller", () => {
             events.push("start-old");
             const handle: EngineHandle = {
               stop: () => events.push("stop-old"),
+              pause: () => undefined,
+              resume: () => undefined,
+              setSpeed: () => undefined,
               whenStopped: new Promise(() => undefined),
             };
             return handle;
@@ -579,6 +591,157 @@ describe("run controller", () => {
     load.resolve(algo); // the in-flight run resolves after dispose, and stays silent
     await flush();
     expect(pending).toEqual([true, false]); // the guarded finally did not clear it again
+  });
+
+  it("delegates setFrozen to the live engine handle (pause then resume)", async () => {
+    const calls: string[] = [];
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => calls.push("pause"),
+      resume: () => calls.push("resume"),
+      setSpeed: () => undefined,
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    controller.setFrozen(true);
+    expect(calls).toEqual(["pause"]);
+    controller.setFrozen(false);
+    expect(calls).toEqual(["pause", "resume"]);
+  });
+
+  it("setFrozen is a safe no-op when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(() => controller.setFrozen(true)).not.toThrow();
+  });
+
+  it("reapplies the retained freeze on the next startEngine, so a replacement run inherits it", async () => {
+    const pauses: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          const index = call++;
+          return {
+            stop: () => undefined,
+            pause: () => pauses.push(index),
+            resume: () => undefined,
+            setSpeed: () => undefined,
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first engine (index 0) starts
+    await flush();
+    controller.setFrozen(true); // freezes the live engine -> pause index 0
+    controller.run(); // a replacement run (Apply/hot-reload) builds a fresh clock
+    await flush();
+    expect(pauses).toEqual([0, 1]); // the new engine inherited the freeze on start
+  });
+
+  it("delegates setSpeed to the live engine handle", async () => {
+    const speeds: number[] = [];
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      setSpeed: (m) => speeds.push(m),
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    speeds.length = 0; // drop the reapply from startEngine; measure the explicit call
+    controller.setSpeed(2);
+    expect(speeds).toEqual([2]);
+  });
+
+  it("setSpeed is a safe no-op when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(() => controller.setSpeed(2)).not.toThrow();
+  });
+
+  it("rejects a speed outside 0.5|1|2 before it retains it", async () => {
+    const speeds: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: (m) => speeds.push(m),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first start reapplies the default speed 1
+    await flush();
+    const setInvalid = (): void => {
+      // @ts-expect-error 3 is not a Speed: the controller must reject it before retaining
+      controller.setSpeed(3);
+    };
+    expect(setInvalid).toThrow(); // invalid: rejected
+    controller.run(); // a replacement run reapplies the retained speed, still 1
+    await flush();
+    expect(speeds).toEqual([1, 1]); // the invalid 3 never retained, never reapplied
+  });
+
+  it("reapplies the retained speed on the next startEngine, so a replacement run inherits it", async () => {
+    const speeds: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: (m) => speeds.push(m),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first engine: reapply default speed 1
+    await flush();
+    speeds.length = 0;
+    controller.setSpeed(2); // retain and apply to the live engine
+    speeds.length = 0;
+    controller.run(); // a replacement run inherits the retained 2 on start
+    await flush();
+    expect(speeds).toEqual([2]);
+  });
+
+  it("stops the new handle rather than orphan it when a speed reapply throws", async () => {
+    let stops = 0;
+    const controller = createRunController(
+      baseDeps({
+        start: () => ({
+          stop: () => {
+            stops += 1;
+          },
+          pause: () => undefined,
+          resume: () => undefined,
+          setSpeed: () => {
+            throw new Error("setSpeed boom");
+          },
+          whenStopped: new Promise(() => undefined),
+        }),
+      }),
+    );
+    controller.run(); // the reapply calls setSpeed, which throws
+    await flush();
+    expect(stops).toBe(1); // the freshly built handle was stopped, not left running
   });
 });
 

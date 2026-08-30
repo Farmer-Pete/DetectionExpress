@@ -15,6 +15,7 @@ beforeEach(() => {
     sourceLocked: false,
     runPending: false,
     selection: null,
+    transport: { frozen: false, speed: 1 },
   });
 });
 
@@ -70,18 +71,15 @@ describe("store", () => {
 
   it("stores a published snapshot", () => {
     const snapshot: SimSnapshot = {
-      backlog: 42,
+      ...emptySnapshot(),
+      queued: 42,
       throughput: 7,
-      nodes: { sink: { heat: 0.5 } },
-      edges: { e3: { inRate: 8, outRate: 6 } },
       correctness: { rolling: 90, caught: 3, missed: 1, falseAlerts: 0 },
       compute: 0.05,
       status: "running",
       failureReason: null,
       admitted: 50,
       completed: 8,
-      findings: [],
-      events: [],
       processed: 8,
     };
     useGameStore.getState().setSnapshot(snapshot);
@@ -113,6 +111,30 @@ describe("store", () => {
     expect(useGameStore.getState().runPending).toBe(true);
     useGameStore.getState().setRunPending(false);
     expect(useGameStore.getState().runPending).toBe(false);
+  });
+
+  it("starts unfrozen and mirrors the transport freeze through setFrozen", () => {
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    useGameStore.getState().setFrozen(true);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    useGameStore.getState().setFrozen(false);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("starts at speed 1 and mirrors the transport speed through setSpeed", () => {
+    expect(useGameStore.getState().transport.speed).toBe(1);
+    useGameStore.getState().setSpeed(2);
+    expect(useGameStore.getState().transport.speed).toBe(2);
+    useGameStore.getState().setSpeed(0.5);
+    expect(useGameStore.getState().transport.speed).toBe(0.5);
+  });
+
+  it("keeps speed when freeze toggles, and freeze when speed changes", () => {
+    useGameStore.getState().setSpeed(2);
+    useGameStore.getState().setFrozen(true);
+    expect(useGameStore.getState().transport).toEqual({ frozen: true, speed: 2 });
+    useGameStore.getState().setSpeed(0.5);
+    expect(useGameStore.getState().transport).toEqual({ frozen: true, speed: 0.5 });
   });
 });
 

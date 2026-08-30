@@ -22,8 +22,8 @@ export interface SimResult {
   outcome: "won" | "failed";
   /** The failing checkpoint's index, or -1 on a win. */
   failedCheckpoint: number;
-  backlogAtFailure: number;
-  maxBacklog: number;
+  queueAtFailure: number;
+  maxQueue: number;
 }
 
 export interface SimInput {
@@ -45,7 +45,7 @@ export function simulate(input: SimInput): SimResult {
   let admitted = 0;
   let completed = 0;
   let detectFreeAt = 0; // the next tick Detect may pull, given its governor sleeps
-  let maxBacklog = 0;
+  let maxQueue = 0;
   let nextCheckpoint = 0;
 
   for (let tick = 0; tick <= deadline; tick++) {
@@ -55,18 +55,18 @@ export function simulate(input: SimInput): SimResult {
       if (!cp || cp.atTick > tick) {
         break;
       }
-      const backlog = admitted - completed;
+      const queued = admitted - completed;
       const isFinal = nextCheckpoint === checkpoints.length - 1;
-      if (backlog !== 0) {
+      if (queued !== 0) {
         return {
           outcome: "failed",
           failedCheckpoint: nextCheckpoint,
-          backlogAtFailure: backlog,
-          maxBacklog,
+          queueAtFailure: queued,
+          maxQueue,
         };
       }
       if (isFinal) {
-        return { outcome: "won", failedCheckpoint: -1, backlogAtFailure: 0, maxBacklog };
+        return { outcome: "won", failedCheckpoint: -1, queueAtFailure: 0, maxQueue };
       }
       nextCheckpoint += 1;
     }
@@ -85,14 +85,14 @@ export function simulate(input: SimInput): SimResult {
         break;
       }
     }
-    maxBacklog = Math.max(maxBacklog, admitted - completed);
+    maxQueue = Math.max(maxQueue, admitted - completed);
   }
 
   const remaining = admitted - completed;
   return {
     outcome: remaining === 0 ? "won" : "failed",
     failedCheckpoint: remaining === 0 ? -1 : checkpoints.length - 1,
-    backlogAtFailure: remaining,
-    maxBacklog,
+    queueAtFailure: remaining,
+    maxQueue,
   };
 }

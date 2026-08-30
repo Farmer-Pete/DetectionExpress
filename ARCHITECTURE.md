@@ -90,8 +90,8 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 ## Testing
 
 - The test runner is `vitest` (happy-dom environment; see `vitest.config.ts`).
-- Test the transforms, the `Channel`, and the rate and heat math as pure functions. They need no DOM.
-- Keep real time out of the tests. Give the Sink an injectable delay, not a real clock. Drive the `Channel` by hand and assert on counts, rates, and heat.
+- Test the transforms, the `Channel`, and the rate math as pure functions. They need no DOM.
+- Keep real time out of the tests. Give the Sink an injectable delay, not a real clock. Drive the `Channel` by hand and assert on counts and rates.
 - Test React parts with `@testing-library/react`. happy-dom provides the DOM.
 
 ## Anti-slop

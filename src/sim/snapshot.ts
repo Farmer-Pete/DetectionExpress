@@ -6,33 +6,17 @@
 import type { CorrectnessReading, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 
-/** Per-node live reading. */
-interface NodeReading {
-  /** 0..1, ramps while the node's input backs up. */
-  heat: number;
-}
-
-/** Per-edge live reading. */
-interface EdgeReading {
-  /** Admitted rate: Events accepted into the edge per second. */
-  inRate: number;
-  /** Events pulled out per second. Drives the belt scroll speed. */
-  outRate: number;
-}
-
 /** The run lifecycle, as the HUD reads it. */
 export type RunStatus = "running" | "won" | "failed";
 
 /** Why a run failed, or null while it runs or when it wins. */
-export type FailureReason = "backlog" | "correctness" | null;
+export type FailureReason = "queue" | "correctness" | null;
 
 export interface SimSnapshot {
-  /** Total Backlog: the sum of every channel's buffered size. */
-  backlog: number;
+  /** Total Queue: the sum of every channel's buffered size. */
+  queued: number;
   /** Sink completions per second, smoothed. */
   throughput: number;
-  nodes: Record<string, NodeReading>;
-  edges: Record<string, EdgeReading>;
   /** The rolling gauge value plus the global caught / missed / false-alert counts. */
   correctness: CorrectnessReading;
   /** The current rule's cost: `1 / serviceRate`, ticks per Event. Flat per rule. */
@@ -43,7 +27,7 @@ export interface SimSnapshot {
   failureReason: FailureReason;
   /** Real Events admitted into the Pipeline so far. */
   admitted: number;
-  /** Events completed at the Sink so far. Checkpoint backlog is `admitted - completed`. */
+  /** Events completed at the Sink so far. Checkpoint queue is `admitted - completed`. */
   completed: number;
   /** Open findings, seq-ordered. The UI ranks them; T3 publishes a stable order only. */
   findings: readonly LiveFinding[];
@@ -52,7 +36,7 @@ export interface SimSnapshot {
   /**
    * The COUNT of Events Detect has recorded, not an id. Per-event pending state in
    * the UI is `event.id >= processed`, exact only because ids are 0-based dense and
-   * Detect scores in strict FIFO id order. Backlog-behind-cursor (`admitted -
+   * Detect scores in strict FIFO id order. Queue-behind-cursor (`admitted -
    * processed`) is derived in the UI, never stored here.
    */
   processed: number;
@@ -61,10 +45,8 @@ export interface SimSnapshot {
 /** The reading before the first sample: empty, calm, and perfectly correct. */
 export function emptySnapshot(): SimSnapshot {
   return {
-    backlog: 0,
+    queued: 0,
     throughput: 0,
-    nodes: {},
-    edges: {},
     correctness: { rolling: 100, caught: 0, missed: 0, falseAlerts: 0 },
     compute: 0,
     status: "running",
