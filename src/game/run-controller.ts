@@ -175,27 +175,32 @@ function deferredWhileHidden(data: unknown): boolean {
 }
 
 /**
+ * The separator between calibration-cache-key parts. U+241F (SYMBOL FOR UNIT
+ * SEPARATOR) is a printable character that no scenario id, seed, version, path, or
+ * player source contains, so two distinct key tuples never collide onto one rate. It
+ * is ordinary text, not a NUL byte, so git keeps treating this file as text.
+ */
+const CACHE_KEY_SEP = "\u241F";
+
+/**
  * The calibration cache key (GH3-PLAN.md 5.1, 86-PLAN.md "cache identity"): a valid
- * entry is never re-measured. Every fixed dimension is kept — scenario id, numeric
+ * entry is never re-measured. Every fixed dimension is kept: scenario id, numeric
  * seed, and the corpus/profiler versions that bust the cache when either changes.
- * Only the source component varies by mode: in url mode it is `path + version`, so an
- * unchanged file reuses the rate and a save (a bumped version) busts it; in source
- * mode it is the FULL source string, not a hash, so two different sources can never
- * collide onto one rate. The prefix is space-delimited, and every prefix component
- * (scenario slug, seed, corpus/profiler versions, the `url`/`source` mode tag, and in url
- * mode the path and version) is itself space-free; only the free-form source can hold a
- * space, and it comes last. So no two distinct tuples — across scenario, seed, version,
- * or mode — share a key.
+ * Only the source component varies by mode. In url mode it is `path + version`, so an
+ * unchanged file reuses the rate and a save (a bumped version) busts it. In source
+ * mode it is the FULL source string, not a hash. Every part is joined by
+ * `CACHE_KEY_SEP`, which none of the parts can contain, so no two distinct tuples,
+ * across scenario, seed, version, or mode, ever share a key.
  */
 function calibrationCacheKey(
   scenarioId: string,
   seed: number,
   algorithmSource: AlgorithmSource,
 ): string {
-  const prefix = `${scenarioId} ${seed} ${CORPUS_VERSION} ${PROFILER_VERSION}`;
+  const prefix = [scenarioId, seed, CORPUS_VERSION, PROFILER_VERSION].join(CACHE_KEY_SEP);
   return algorithmSource.kind === "url"
-    ? `${prefix} url ${algorithmSource.path} ${algorithmSource.version}`
-    : `${prefix} source ${algorithmSource.source}`;
+    ? [prefix, "url", algorithmSource.path, algorithmSource.version].join(CACHE_KEY_SEP)
+    : [prefix, "source", algorithmSource.source].join(CACHE_KEY_SEP);
 }
 
 /** Cap the memo so a long editing session cannot grow it without bound. */
