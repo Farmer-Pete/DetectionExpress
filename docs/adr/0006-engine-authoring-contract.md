@@ -3,6 +3,27 @@
 - Status: Accepted
 - Date: 2026-08-29
 
+## Update (#99) — 2026-08-30
+
+The original decision below split `Finding` into two arms, `Anchored` and `OneShot`, and
+made the anchor optional so a `OneShot` could fire once with no `eventId`. Every shipped
+detector emitted the `OneShot` form, so entity grouping, the watch state, and watch-to-hit
+promotion were dead paths. This ticket wires the producer side onto the anchored shape and
+removes the unused arm. Three parts of the text below are now superseded:
+
+- The union collapses to one `interface Finding`. Both `Anchored` and `OneShot` are gone.
+  Read `src/sim/finding.ts` for the current shape.
+- `eventId` is now required. `subjectType` and `isPartial` stay optional, and are always
+  safe because an anchor is always present.
+- The parser (`parse-findings.ts`) now requires the anchor unconditionally. The old rules
+  "subjectType requires eventId" and "a partial requires eventId" are subsumed: a finding
+  with no `eventId` is rejected outright, before those checks run.
+
+The rest of the contract holds unchanged: the per-Event pull, the synchronous `detect()`,
+the typed widget vocabulary, and the scorer that reads `finding.alert` and skips partials.
+The sections below are kept intact for history; where they describe the two-arm union or an
+optional anchor, this update governs.
+
 ## Context
 
 The player writes an Engine. The Engine reports what it detects. Today it reports an `Alert`:

@@ -15,10 +15,12 @@ function live(
 ): LiveFinding {
   const { subjectType, ...rest } = over;
   const reason = rest.reason ?? "pin_brute_force";
+  // A real anchor in BOTH the nested alert.eventIds and the top-level snapshot keeps the
+  // fixture consistent; the no-subject branch still carries the now-required eventId.
   const finding: Finding =
     subjectType !== undefined
-      ? { alert: { eventIds: [], reason, at: 0 }, eventId: rest.seq, subjectType }
-      : { alert: { eventIds: [], reason, at: 0 } };
+      ? { alert: { eventIds: [rest.seq], reason, at: 0 }, eventId: rest.seq, subjectType }
+      : { alert: { eventIds: [rest.seq], reason, at: 0 }, eventId: rest.seq };
   const result: LiveFinding = {
     finding,
     state: rest.state ?? "hit",

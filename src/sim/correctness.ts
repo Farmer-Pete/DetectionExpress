@@ -120,9 +120,9 @@ export type Decision = CaughtDecision | FalseDecision | MissedDecision;
 /**
  * One currently-open finding for the findings panel. Frozen in place, not cloned:
  * the finding is already fresh and engine-owned by the time it reaches the scorer.
- * Identity for upsert/replace: an Anchored finding keys on `eventId` + `reason`
- * (matching the promote/replace contract in `finding.ts`); a OneShot finding keys on
- * its own `seq` and is never replaced.
+ * Identity for upsert/replace: every finding keys on `eventId` + `reason`, matching
+ * the promote/replace contract in `finding.ts`. A re-emit on the same key replaces
+ * the entry in place; a watch promotes to a hit without changing its seq.
  */
 export interface LiveFinding {
   /** The emitted finding, frozen in place. */
@@ -235,7 +235,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   const counts: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
   const ring: Outcome[] = [];
   const log: Decision[] = [];
-  // eventId::reason (Anchored) or oneshot:seq (OneShot) -> the open finding.
+  // eventId::reason -> the open finding. Every finding carries an anchor now.
   const live = new Map<string, LiveFinding>();
   let nextLiveSeq = 0;
 
@@ -307,11 +307,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    */
   function dropWatchesForAttack(attackId: number): void {
     for (const [key, entry] of live) {
-      if (
-        entry.state === "watch" &&
-        entry.finding.eventId !== undefined &&
-        owner.get(entry.finding.eventId) === attackId
-      ) {
+      if (entry.state === "watch" && owner.get(entry.finding.eventId) === attackId) {
         live.delete(key);
       }
     }
@@ -319,9 +315,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
 
   /**
    * Upsert one finding into the live set: partial -> watch, final -> hit, keyed by
-   * `eventId::reason` for an Anchored finding or by its own `seq` for a OneShot
-   * (fire-once, never replaced). A promotion replaces the entry in place, keeping
-   * the original `seq` and refreshing `state`/`eventIds`/`finding`/`at`.
+   * `eventId::reason`. Every finding carries an anchor, so the key is always defined.
+   * A promotion replaces the entry in place, keeping the original `seq` and refreshing
+   * `state`/`eventIds`/`finding`/`at`.
    *
    * Freeze-only, no clone. The finding is already fresh and engine-owned: `runDetect`
    * canonicalizes it (`tasks.ts`, JSON round-trip) before `record`, and nothing
@@ -335,18 +331,16 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     // partial that arrives after its attack window would otherwise seed a zombie watch:
     // `scoreFinding` skips partials, so it would never resolve and would linger until
     // the horizon. A partial for a still-pending or unowned attack is a normal watch.
-    if (finding.isPartial === true && finding.eventId !== undefined) {
+    if (finding.isPartial === true) {
       const attackId = owner.get(finding.eventId);
       if (attackId !== undefined && state.get(attackId) !== "pending") {
         return;
       }
     }
     const liveState: "hit" | "watch" = finding.isPartial === true ? "watch" : "hit";
-    const anchorKey =
-      finding.eventId !== undefined ? `${finding.eventId}::${finding.alert.reason}` : undefined;
-    const existing = anchorKey !== undefined ? live.get(anchorKey) : undefined;
+    const key = `${finding.eventId}::${finding.alert.reason}`;
+    const existing = live.get(key);
     const seq = existing ? existing.seq : nextLiveSeq++;
-    const key = anchorKey ?? `oneshot:${seq}`;
     const entry: LiveFinding = {
       finding,
       state: liveState,

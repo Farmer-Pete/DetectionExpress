@@ -563,7 +563,7 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     const events = [ev(0, 0, { acct: "x" })];
     const alertingAlgorithm: TaskAlgorithm = {
       normalize: (raw) => raw,
-      detect: () => [{ alert: { reason: "pin_brute_force", at: 0, eventIds: [0] } }],
+      detect: () => [{ alert: { reason: "pin_brute_force", at: 0, eventIds: [0] }, eventId: 0 }],
     };
     const h = launch({
       generator: scheduleOf(events),

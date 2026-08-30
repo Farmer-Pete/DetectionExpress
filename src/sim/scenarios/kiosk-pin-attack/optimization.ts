@@ -60,9 +60,14 @@ export function detect(e) {
     firing[e.account] = false;
     return [];
   }
-  if (firing[e.account]) return []; // one Alert per burst; no duplicates
+  if (firing[e.account]) return []; // one hit per burst; no duplicates
   firing[e.account] = true;
-  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: recent[e.account].slice() } }];
+  const eventIds = recent[e.account].slice();
+  return [{
+    alert: { reason: "pin_brute_force", at: e.ts, eventIds },
+    eventId: eventIds[0],
+    subjectType: "account",
+  }];
 }
 `;
 
@@ -160,10 +165,17 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         return [];
       }
       if (firing.has(e.account)) {
-        return []; // one Alert per burst; no duplicates
+        return []; // one hit per burst; no duplicates
       }
       firing.add(e.account);
-      return [{ alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds: [...ids] } }];
+      const eventIds = [...ids];
+      return [
+        {
+          alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds },
+          eventId: eventIds[0] ?? e.id,
+          subjectType: "account",
+        },
+      ];
     },
   };
 }

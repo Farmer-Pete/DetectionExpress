@@ -49,13 +49,32 @@ export function detect(e: KioskDetectView): Finding[] {
   f.push({ id: e.id, ts: e.ts });
   const kept = f.filter((x) => x.ts > e.ts - WINDOW);
   fails.set(e.account, kept);
+  // The anchor: the first retained fail. It stays fixed while a burst sits inside one
+  // window, so the watch and the hit share `eventId` + `reason` and the scorer promotes
+  // one row in place. kept always holds the fail we just pushed, so kept[0] exists.
+  const anchor = kept[0]?.id ?? e.id;
+  const eventIds = kept.map((x) => x.id);
   if (kept.length < THRESHOLD) {
     firing.delete(e.account);
-    return [];
+    return [
+      {
+        alert: { reason: "pin_brute_force", at: e.ts, eventIds },
+        eventId: anchor,
+        subjectType: "account",
+        isPartial: true,
+        context: [{ type: "text", text: `${kept.length} of ${THRESHOLD} wrong PINs` }],
+      },
+    ];
   }
   if (firing.has(e.account)) {
-    return []; // one Finding per burst; no duplicates
+    return []; // one hit per burst; no duplicates
   }
   firing.add(e.account);
-  return [{ alert: { reason: "pin_brute_force", at: e.ts, eventIds: kept.map((x) => x.id) } }];
+  return [
+    {
+      alert: { reason: "pin_brute_force", at: e.ts, eventIds },
+      eventId: anchor,
+      subjectType: "account",
+    },
+  ];
 }

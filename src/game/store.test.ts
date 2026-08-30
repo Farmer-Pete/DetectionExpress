@@ -20,11 +20,13 @@ beforeEach(() => {
 
 /** A LiveFinding fixture: the reconciliation logic reads only its `seq`. */
 function finding(seq: number): LiveFinding {
+  // A real anchor in BOTH the nested alert.eventIds and the top-level snapshot, so the
+  // fixture stays a consistent LiveFinding even though this test only reads its seq.
   return {
-    finding: { alert: { eventIds: [], reason: "pin_brute_force", at: 0 } },
+    finding: { alert: { eventIds: [seq], reason: "pin_brute_force", at: 0 }, eventId: seq },
     state: "hit",
     reason: "pin_brute_force",
-    eventIds: [],
+    eventIds: [seq],
     at: 0,
     seq,
   };

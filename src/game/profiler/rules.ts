@@ -91,8 +91,9 @@ export function makeNaiveScan(): Detector {
         return [];
       }
       firing.add(event.account);
+      const eventIds = kept.map((record) => record.id);
       return [
-        { alert: { reason: REASON, at: event.ts, eventIds: kept.map((record) => record.id) } },
+        { alert: { reason: REASON, at: event.ts, eventIds }, eventId: eventIds[0] ?? event.id },
       ];
     },
     retained(): number {
@@ -159,7 +160,7 @@ export function makeIncrementalTally(): Detector {
         return [];
       }
       firing.add(event.account);
-      return [{ alert: { reason: REASON, at: event.ts, eventIds: [event.id] } }];
+      return [{ alert: { reason: REASON, at: event.ts, eventIds: [event.id] }, eventId: event.id }];
     },
     retained(): number {
       return queue.length - head;

@@ -21,9 +21,10 @@ import type {
 } from "./finding";
 
 describe("Finding type contract", () => {
-  it("accepts a minimal OneShot final that carries only an alert", () => {
+  it("accepts a minimal final that carries its required anchor", () => {
     const minimal: Finding = {
       alert: { eventIds: [1], reason: "pin_brute_force", at: 42 },
+      eventId: 1,
     };
     expectTypeOf(minimal).toExtend<Finding>();
   });
@@ -31,6 +32,7 @@ describe("Finding type contract", () => {
   it("accepts a rich final with every widget kind in context", () => {
     const rich: Finding = {
       alert: { eventIds: [1, 2, 3], reason: "pin_brute_force", at: 90 },
+      eventId: 1,
       context: [
         { type: "text", title: "Summary", text: "Five wrong PINs in a row." },
         {
@@ -101,22 +103,12 @@ describe("Finding type contract", () => {
     expectTypeOf(noAlert).toExtend<Finding>();
   });
 
-  it("rejects a partial with no eventId anchor", () => {
-    // @ts-expect-error a partial needs an eventId anchor to promote against.
-    const partialNoAnchor: Finding = {
+  it("rejects any Finding that omits the now-required eventId anchor", () => {
+    // @ts-expect-error every Finding needs an eventId; the OneShot arm is gone.
+    const noAnchor: Finding = {
       alert: { eventIds: [1], reason: "pin_brute_force", at: 1 },
-      isPartial: true,
     };
-    expectTypeOf(partialNoAnchor).toExtend<Finding>();
-  });
-
-  it("rejects a subjectType with no eventId anchor", () => {
-    // @ts-expect-error subjectType needs an eventId anchor to resolve against.
-    const subjectNoAnchor: Finding = {
-      alert: { eventIds: [1], reason: "pin_brute_force", at: 1 },
-      subjectType: "acct",
-    };
-    expectTypeOf(subjectNoAnchor).toExtend<Finding>();
+    expectTypeOf(noAnchor).toExtend<Finding>();
   });
 
   it("rejects a widget with an unknown type", () => {
