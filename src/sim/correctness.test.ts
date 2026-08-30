@@ -335,6 +335,12 @@ describe("scorer decisions", () => {
     expect(d.finding.alert).toEqual({ reason: REASON, at: 50, eventIds: [10, 11] });
   });
 
+  it("sources a caught decision's at from the finding, not the event", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record([sf(found([10, 11], 42))], at(50)); // alert.at 42, but env.ts 50
+    expect(asCaught(s.decisions()[0]).at).toBe(42); // the finding's time, not the event's
+  });
+
   it("emits a false decision carrying the finding and its entity", () => {
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
     s.record([sf(found([99], 60, REASON), "ghost")], at(60));
@@ -400,6 +406,10 @@ describe("scorer decisions", () => {
     const first = s.decisions();
     expect(Object.isFrozen(first)).toBe(true);
     expect(first[0] !== undefined && Object.isFrozen(first[0])).toBe(true);
+    // The snapshot must freeze all the way down, not just the top level.
+    const d = asCaught(first[0]);
+    expect(Object.isFrozen(d.finding)).toBe(true);
+    expect(Object.isFrozen(d.finding.alert)).toBe(true);
     expect(s.decisions()).not.toBe(first); // a new array each call
     expect(s.decisions()).toEqual(first); // with the same contents
   });
