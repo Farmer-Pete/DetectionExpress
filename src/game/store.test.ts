@@ -4,12 +4,8 @@ import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";
 import { LEVEL_SEED } from "./tuning";
 
-const initial = useGameStore.getState();
-
 beforeEach(() => {
   useGameStore.setState({
-    nodes: initial.nodes,
-    edges: initial.edges,
     snapshot: emptySnapshot(),
     source: referenceSource,
     localAlgorithm: null,
@@ -21,10 +17,18 @@ beforeEach(() => {
 });
 
 describe("store", () => {
-  it("seeds the four-node chain the validator accepts", () => {
+  it("returns the fixed four-node chain from getGraph", () => {
     const graph = getGraph();
     expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "normalize", "detect", "sink"]);
     expect(graph.edges).toHaveLength(3);
+  });
+
+  it("no longer exposes the graph as editable store state", () => {
+    const keys = Object.keys(useGameStore.getState());
+    expect(keys).not.toContain("nodes");
+    expect(keys).not.toContain("edges");
+    expect(keys).not.toContain("onNodesChange");
+    expect(keys).not.toContain("onEdgesChange");
   });
 
   it("seeds the Algorithm source and the level seed", () => {
@@ -63,20 +67,6 @@ describe("store", () => {
     };
     useGameStore.getState().setSnapshot(snapshot);
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
-  });
-
-  it("applies node change handlers", () => {
-    useGameStore
-      .getState()
-      .onNodesChange([{ id: "sink", type: "position", position: { x: 900, y: 200 } }]);
-    const sink = useGameStore.getState().nodes.find((node) => node.id === "sink");
-    expect(sink?.position).toEqual({ x: 900, y: 200 });
-  });
-
-  it("applies edge change handlers", () => {
-    useGameStore.getState().onEdgesChange([{ id: "e1", type: "select", selected: true }]);
-    const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "e1");
-    expect(edge?.selected).toBe(true);
   });
 
   it("starts in source mode and holds a local override through setLocalAlgorithm", () => {

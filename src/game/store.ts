@@ -1,40 +1,22 @@
 /**
- * The store bridges the sim to React. It holds the graph topology (the single
- * source of wiring), the player's Algorithm source, the level seed, the current
- * error, and the latest sim snapshot. Fast sim state lives here, not in useState,
- * so a snapshot update re-renders only the gauges through selectors, not the whole
- * graph.
+ * The store bridges the sim to React. It holds the player's Algorithm source, the
+ * level seed, the current error, and the latest sim snapshot. Fast sim state lives
+ * here, not in useState, so a snapshot update re-renders only the gauges through
+ * selectors, not the whole tree.
+ *
+ * The Pipeline topology is no longer store state. Slice 1 locks one shape and the
+ * visual editor is gone, so the wiring lives as a fixed constant in `topology.ts`;
+ * `getGraph()` reads it. The player edits the Rule, not the graph.
  */
-import {
-  applyEdgeChanges,
-  applyNodeChanges,
-  type Edge,
-  type Node,
-  type OnEdgesChange,
-  type OnNodesChange,
-} from "@xyflow/react";
 import { create } from "zustand";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { RuleErrorInfo } from "./run-controller";
+import { PIPELINE_EDGES, PIPELINE_NODES } from "./topology";
 import { LEVEL_SEED } from "./tuning";
 
-/**
- * NodeMeta lives on React Flow's `node.data`, its natural home for node config.
- * A `type` (not an interface) so it satisfies React Flow's `Record<string,
- * unknown>` data constraint. This holds the node's config, NOT the Events flowing
- * through the Pipeline.
- */
-type NodeMeta = {
-  kind: "ingest" | "normalize" | "detect" | "sink";
-};
-
-type PipelineNode = Node<NodeMeta>;
-
 interface GameState {
-  nodes: PipelineNode[];
-  edges: Edge[];
   snapshot: SimSnapshot;
   /** The player's Algorithm source. The editor edits it; the run controller loads it. */
   source: string;
@@ -61,8 +43,6 @@ interface GameState {
    * The run controller drives it; the editor reads it.
    */
   runPending: boolean;
-  onNodesChange: OnNodesChange<PipelineNode>;
-  onEdgesChange: OnEdgesChange;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
   setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
@@ -71,22 +51,7 @@ interface GameState {
   setRunPending: (pending: boolean) => void;
 }
 
-const initialNodes: PipelineNode[] = [
-  { id: "ingest", type: "ingest", position: { x: 40, y: 140 }, data: { kind: "ingest" } },
-  { id: "normalize", type: "normalize", position: { x: 260, y: 140 }, data: { kind: "normalize" } },
-  { id: "detect", type: "detect", position: { x: 480, y: 140 }, data: { kind: "detect" } },
-  { id: "sink", type: "sink", position: { x: 700, y: 140 }, data: { kind: "sink" } },
-];
-
-const initialEdges: Edge[] = [
-  { id: "e1", source: "ingest", target: "normalize", type: "stream" },
-  { id: "e2", source: "normalize", target: "detect", type: "stream" },
-  { id: "e3", source: "detect", target: "sink", type: "stream" },
-];
-
 export const useGameStore = create<GameState>((set) => ({
-  nodes: initialNodes,
-  edges: initialEdges,
   snapshot: emptySnapshot(),
   source: referenceSource,
   localAlgorithm: null,
@@ -94,8 +59,6 @@ export const useGameStore = create<GameState>((set) => ({
   error: null,
   sourceLocked: false,
   runPending: false,
-  onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) })),
-  onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) })),
   setSnapshot: (snapshot) => set({ snapshot }),
   setAlgorithmSource: (source) => set({ source }),
   setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
@@ -104,11 +67,18 @@ export const useGameStore = create<GameState>((set) => ({
   setRunPending: (pending) => set({ runPending: pending }),
 }));
 
-/** The store graph, mapped to the validator's shape for the engine. */
+/**
+ * The fixed topology, mapped to the validator's shape for the engine. Each call
+ * returns fresh arrays of fresh objects, so no consumer can mutate the shared
+ * `topology.ts` constants, not the array and not an object field.
+ */
 export function getGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const state = useGameStore.getState();
   return {
-    nodes: state.nodes.map((node) => ({ id: node.id, kind: node.data.kind })),
-    edges: state.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+    nodes: PIPELINE_NODES.map((node) => ({ id: node.id, kind: node.kind })),
+    edges: PIPELINE_EDGES.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+    })),
   };
 }

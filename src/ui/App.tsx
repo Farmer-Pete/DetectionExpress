@@ -14,7 +14,6 @@
  * Tests inject a controller through `controller`, so the app never loads the real
  * loader or engine under test.
  */
-import { ReactFlowProvider } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
 import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
@@ -30,7 +29,6 @@ import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
 import { IntroOverlay } from "./IntroOverlay";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
-import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
 
 function buildController(): RunController {
@@ -203,9 +201,10 @@ export function App({ controller }: AppProps = {}) {
           </div>
         </header>
         <Hud />
-        <ReactFlowProvider>
-          <Pipeline />
-        </ReactFlowProvider>
+        <section className="inspector-shell" aria-label="Inspector">
+          {/* M1 placeholder. M2 mounts the two-column inspector shell here. */}
+          <p className="inspector-shell-note">Inspector coming</p>
+        </section>
         <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
         <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
         <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
