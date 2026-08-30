@@ -1,5 +1,5 @@
 /**
- * The fare-gate-rush run entry point (GH89-PLAN.md section 7). Turns benign rider
+ * The fare-gate-rush run entry point (issue #89). Turns benign rider
  * traffic into a `GeneratedRun` from code: the wave schedule sets the arrival
  * ticks, one single-trip rider fills each arrival slot, the heap scheduler runs
  * them, and the composer sorts their tap-in/tap-out readings into events. Not a

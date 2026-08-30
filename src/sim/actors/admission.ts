@@ -1,5 +1,5 @@
 /**
- * The wave admission controller (GH89-PLAN.md section 4). It reads the wave
+ * The wave admission controller (issue #89). It reads the wave
  * schedule and returns the tick of every admitted arrival. It reproduces the
  * kiosk benign accumulator exactly, including the per-wave reset: for a whole
  * rate the per-tick count equals `eventsPerTick`; for a fractional rate it

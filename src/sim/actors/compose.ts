@@ -1,5 +1,5 @@
 /**
- * The GeneratedRun composer (GH89-PLAN.md section 5). It turns actor readings
+ * The GeneratedRun composer (issue #89). It turns actor readings
  * into sorted, id-assigned events. Generic over the reading type, so any future
  * actor slots in without a new composer. This ticket injects no Attack, so it
  * always returns `attacks: []`; the run builder attaches the checkpoints.

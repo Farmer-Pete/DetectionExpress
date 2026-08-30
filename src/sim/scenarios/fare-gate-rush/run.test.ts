@@ -1,21 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DRAIN_GAP_TICKS, GAME_SECONDS_PER_TICK, LEVEL_SEED } from "../../../game/tuning";
-import { isRawGatekeepGate, type RawGatekeepGate } from "../../endpoints/fare-gate/gatekeep";
-import type { PipeEvent } from "../../event";
+import { DRAIN_GAP_TICKS, LEVEL_SEED } from "../../../game/tuning";
+import type { RawGatekeepGate } from "../../endpoints/fare-gate/gatekeep";
 import { buildFareGateRun } from "./run";
-
-/** Read an Event's gatekeep-turnkey payload, narrowing at the boundary. */
-function raw(ev: PipeEvent): RawGatekeepGate {
-  if (!isRawGatekeepGate(ev.payload)) {
-    throw new Error("expected a gatekeep-turnkey payload");
-  }
-  return ev.payload;
-}
-
-/** Every event's tick, from its ts (game seconds). */
-function tickOf(ev: PipeEvent): number {
-  return ev.ts / GAME_SECONDS_PER_TICK;
-}
+import { raw, tickOf } from "./test-helpers";
 
 describe("buildFareGateRun: determinism", () => {
   it("replays the same run for the same seed", () => {

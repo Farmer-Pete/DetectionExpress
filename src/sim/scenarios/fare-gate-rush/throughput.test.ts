@@ -6,9 +6,8 @@ import {
   REFERENCE_FAST_RATE,
   REFERENCE_SLOW_RATE,
 } from "../../../game/profiler/kiosk-band-calibration";
-import { CHANNEL_CAP, GAME_SECONDS_PER_TICK, LEVEL_SEED } from "../../../game/tuning";
+import { CHANNEL_CAP, LEVEL_SEED } from "../../../game/tuning";
 import { createScorer, type ScorerConfig } from "../../correctness";
-import { isRawGatekeepGate, type RawGatekeepGate } from "../../endpoints/fare-gate/gatekeep";
 import type { PipeEvent } from "../../event";
 import type { GraphEdge, GraphNode } from "../../graph";
 import type { GeneratedRun } from "../../scenario";
@@ -17,9 +16,10 @@ import type { ServiceRate } from "../../service-governor";
 import type { SimSnapshot } from "../../snapshot";
 import type { TaskAlgorithm } from "../../tasks";
 import { buildFareGateRun } from "./run";
+import { raw, tickOf } from "./test-helpers";
 
 /**
- * The fare-gate-rush throughput regression (GH89-PLAN.md sections 7-9). With
+ * The fare-gate-rush throughput regression (issue #89). With
  * `attacks: []` and a no-alert Rule, Correctness stays vacuous (100), so this
  * isolates throughput. It checks three things: fidelity (the generated tap-ins
  * per tick match `WAVE_RATES`, and the intro and drain gaps carry none), the win
@@ -28,18 +28,6 @@ import { buildFareGateRun } from "./run";
  * the squeeze (the real total event curve, tap-ins and tap-outs together, still
  * separates the two reference rates through the generic band `simulate`).
  */
-
-/** Read an Event's gatekeep-turnkey payload, narrowing at the boundary. */
-function raw(ev: PipeEvent): RawGatekeepGate {
-  if (!isRawGatekeepGate(ev.payload)) {
-    throw new Error("expected a gatekeep-turnkey payload");
-  }
-  return ev.payload;
-}
-
-function tickOf(ev: PipeEvent): number {
-  return ev.ts / GAME_SECONDS_PER_TICK;
-}
 
 // --- Fidelity ----------------------------------------------------------------
 
@@ -61,6 +49,9 @@ describe("fare-gate-rush throughput: fidelity", () => {
   const counts = tapInCountsByTick(run);
 
   it("admits exactly WAVE_RATES tap-ins per tick, inside each wave", () => {
+    // The exact per-tick equality holds because WAVE_RATES are whole numbers. For a
+    // fractional rate the count would be floor or ceil of the rate; that contract is
+    // covered by the accumulator parity tests in admission.test.ts.
     for (const wave of waves) {
       for (let tick = wave.startTick; tick < wave.startTick + wave.durationTicks; tick++) {
         expect(counts.get(tick) ?? 0).toBe(wave.eventsPerTick);

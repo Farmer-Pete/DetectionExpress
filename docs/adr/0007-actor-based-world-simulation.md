@@ -345,7 +345,7 @@ governor or the wave math: it is the real last event's tick, plus one, plus `DRA
 a guard test pins the contract (`admitted === completed === events.length` on a win) so an engine
 change would fail loudly rather than drift silently. Checkpoints clear records already admitted and
 completed so far, never a wave's full eventual count. See `src/sim/scenarios/fare-gate-rush/run.ts`
-and GH89-PLAN.md.
+and issue #89.
 
 ## Anomaly injection
 

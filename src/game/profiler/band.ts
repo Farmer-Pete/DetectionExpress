@@ -1,11 +1,12 @@
 /**
- * The generic checkpoint-squeeze simulator (GH89-PLAN.md section 8.1). A faithful
- * integer model of a run: arrivals follow an injected per-tick curve; the Detect
- * node completes events at the real governor's rate; a backpressure ceiling of
- * `2 * channelCap` caps how far admitted may lead completed, exactly as two
- * bounded upstream Channels do. A checkpoint is read at the start-of-tick
- * boundary, before that tick's service, so an event completing on the checkpoint
- * tick still counts as outstanding.
+ * The generic checkpoint-squeeze simulator (issue #89). A faithful integer model
+ * of a run: arrivals follow an injected per-tick curve; the Detect node completes
+ * events at the real governor's rate; a backpressure ceiling of `2 * channelCap`
+ * caps how far admitted may lead completed, exactly as two bounded upstream
+ * Channels do. A checkpoint is read at the start-of-tick boundary, before that
+ * tick's service, so an event completing on the checkpoint tick still counts as
+ * outstanding. The clock is 0-based, matching the game Clock: tick 0 is the first
+ * step, so `arrivalsByTick[0]` is admitted like any other index.
  *
  * A controlled generalization of the kiosk winnability test's `simulate(rate)`:
  * the arrivals and the checkpoints are injected instead of built from the wave
@@ -26,7 +27,7 @@ export interface SimResult {
 }
 
 export interface SimInput {
-  /** Events entering per tick; index is the tick. */
+  /** Events entering per tick; the array index is the (0-based) tick. */
   arrivalsByTick: readonly number[];
   serviceRate: ServiceRate;
   channelCap: number;
@@ -43,11 +44,11 @@ export function simulate(input: SimInput): SimResult {
   let scheduledCum = 0;
   let admitted = 0;
   let completed = 0;
-  let detectFreeAt = 1; // the next tick Detect may pull, given its governor sleeps
+  let detectFreeAt = 0; // the next tick Detect may pull, given its governor sleeps
   let maxBacklog = 0;
   let nextCheckpoint = 0;
 
-  for (let tick = 1; tick <= deadline; tick++) {
+  for (let tick = 0; tick <= deadline; tick++) {
     // Start-of-tick checkpoint evaluation, before this tick's arrivals and service.
     while (nextCheckpoint < checkpoints.length) {
       const cp = checkpoints[nextCheckpoint];

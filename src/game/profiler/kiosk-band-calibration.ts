@@ -1,6 +1,6 @@
 /**
  * The kiosk cost model and the two locked reference service rates
- * (GH89-PLAN.md section 8.2). Every kiosk-specific number the winnability band
+ * (issue #89). Every kiosk-specific number the winnability band
  * needs lives here: the counted-cost model that prices the naive raw-log scan
  * against the incremental tally, the resulting code-per-anchor multipliers, and
  * the rate helper that turns a multiplier into the real quantized `ServiceRate`

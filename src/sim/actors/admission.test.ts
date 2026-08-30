@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { Wave } from "../scenario";
 import { admitArrivals } from "./admission";
 
-/** One tick per admitted arrival, from a wave's own fractional accumulator, reset per wave. */
+/**
+ * A frozen oracle of the kiosk benign accumulator: one tick per admitted arrival,
+ * from a wave's own fractional accumulator, reset per wave. It is an independent
+ * copy of the algorithm `admitArrivals` must reproduce, so drift in `admitArrivals`
+ * shows up as a mismatch. The kiosk scenario keeps its own live copy of this loop
+ * by plan decision, so this oracle guards the reproduction, not that live copy.
+ */
 function kioskAccumulator(wave: Wave): number[] {
   const arrivals: number[] = [];
   let acc = 0;

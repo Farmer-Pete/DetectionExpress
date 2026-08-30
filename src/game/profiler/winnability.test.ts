@@ -320,6 +320,10 @@ function frozenSimulate(rate: ServiceRate): SimResult {
 }
 
 describe("band extraction parity (frozen oracle)", () => {
+  // The oracle is 1-based; the extracted `simulate` is now 0-based. They agree on
+  // this curve because the schedule places no arrival at tick 0 (the intro alone
+  // is 120 ticks), so the extra tick 0 the 0-based loop visits is a no-op. This
+  // sweep is what proves that equivalence.
   it("matches the frozen pre-extraction simulate on every SimResult field, across the OMEGA/skew sweep", () => {
     for (const omega of OMEGA_BAND) {
       for (const skew of SKEW_BAND) {
