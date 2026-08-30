@@ -67,7 +67,8 @@ export interface Finding extends FindingBase {
    * and the finding is not grouped.
    */
   subjectType?: string;
-  /** A partial "watch", promoted later to a final with the same `eventId` and `reason`. */
+  /** A partial "watch", promoted later to a final for the same subject and `reason`. Each
+   *  emission carries a valid `eventId`; the anchor may differ across emissions. */
   isPartial?: boolean;
 }
 
