@@ -43,12 +43,22 @@ interface GameState {
    * The run controller drives it; the editor reads it.
    */
   runPending: boolean;
+  /**
+   * The selected finding, keyed on its stable `seq`, or null. UI state, not sim
+   * state, so it survives snapshot churn (ARCHITECTURE rule 4). T9, T12, and T13
+   * read it; this slice writes it.
+   */
+  selection: { seq: number } | null;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
   setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
   setError: (error: RuleErrorInfo | null) => void;
   setSourceLocked: (locked: boolean) => void;
   setRunPending: (pending: boolean) => void;
+  /** Select a finding by seq. Re-selecting the same seq clears the selection. */
+  selectFinding: (seq: number) => void;
+  /** Clear the selection. Esc and a click on the empty panel call it. */
+  clearSelection: () => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -59,12 +69,30 @@ export const useGameStore = create<GameState>((set) => ({
   error: null,
   sourceLocked: false,
   runPending: false,
-  setSnapshot: (snapshot) => set({ snapshot }),
+  selection: null,
+  // Reconcile the selection on every snapshot. `seq` is stable within one run, but a
+  // run restart (Apply or reload) builds a fresh scorer, so `seq` resets from zero. So
+  // keep the selection only while its seq still appears in the new snapshot's findings;
+  // otherwise clear it. This also clears a selection whose finding aged out by horizon.
+  setSnapshot: (snapshot) =>
+    set((state) => {
+      if (state.selection !== null) {
+        const seq = state.selection.seq;
+        const present = snapshot.findings.some((live) => live.seq === seq);
+        if (!present) {
+          return { snapshot, selection: null };
+        }
+      }
+      return { snapshot };
+    }),
   setAlgorithmSource: (source) => set({ source }),
   setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
   setRunPending: (pending) => set({ runPending: pending }),
+  selectFinding: (seq) =>
+    set((state) => ({ selection: state.selection?.seq === seq ? null : { seq } })),
+  clearSelection: () => set({ selection: null }),
 }));
 
 /**

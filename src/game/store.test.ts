@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { LiveFinding } from "../sim/correctness";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";
@@ -13,8 +14,26 @@ beforeEach(() => {
     error: null,
     sourceLocked: false,
     runPending: false,
+    selection: null,
   });
 });
+
+/** A LiveFinding fixture: the reconciliation logic reads only its `seq`. */
+function finding(seq: number): LiveFinding {
+  return {
+    finding: { alert: { eventIds: [], reason: "pin_brute_force", at: 0 } },
+    state: "hit",
+    reason: "pin_brute_force",
+    eventIds: [],
+    at: 0,
+    seq,
+  };
+}
+
+/** A snapshot carrying the given findings, otherwise empty. */
+function snapshotWith(findings: LiveFinding[]): SimSnapshot {
+  return { ...emptySnapshot(), findings };
+}
 
 describe("store", () => {
   it("returns the fixed four-node chain from getGraph", () => {
@@ -94,5 +113,58 @@ describe("store", () => {
     expect(useGameStore.getState().runPending).toBe(true);
     useGameStore.getState().setRunPending(false);
     expect(useGameStore.getState().runPending).toBe(false);
+  });
+});
+
+describe("store selection", () => {
+  it("starts with no selection", () => {
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("selects a finding by seq through selectFinding", () => {
+    useGameStore.getState().selectFinding(7);
+    expect(useGameStore.getState().selection).toEqual({ seq: 7 });
+  });
+
+  it("toggles: re-selecting the same seq clears the selection", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().selectFinding(7);
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("switches selection when a different seq is selected", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().selectFinding(9);
+    expect(useGameStore.getState().selection).toEqual({ seq: 9 });
+  });
+
+  it("clears the selection through clearSelection", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().clearSelection();
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("setSnapshot keeps a selection whose seq is still present", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(3)]));
+    expect(useGameStore.getState().selection).toEqual({ seq: 3 });
+  });
+
+  it("setSnapshot clears a selection whose seq aged out of the findings", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(2)]));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("setSnapshot clears a selection when a run restart resets seq from zero", () => {
+    useGameStore.getState().selectFinding(42);
+    // A fresh run's first snapshot carries low seqs; the old seq 42 is gone.
+    useGameStore.getState().setSnapshot(snapshotWith([finding(0), finding(1)]));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("setSnapshot leaves a null selection null", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1)]));
+    expect(useGameStore.getState().selection).toBeNull();
   });
 });

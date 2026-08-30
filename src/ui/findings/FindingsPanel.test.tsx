@@ -1,0 +1,149 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useGameStore } from "../../game/store";
+import type { LiveFinding } from "../../sim/correctness";
+import type { Finding } from "../../sim/finding";
+import { emptySnapshot } from "../../sim/snapshot";
+import { InspectorShell } from "./InspectorShell";
+
+// The zustand store is a singleton shared across test files, so reset the fields this
+// file reads before each test, or a leaked snapshot or selection would bleed across.
+beforeEach(() => {
+  useGameStore.setState({ snapshot: emptySnapshot(), selection: null });
+});
+
+/** Build a LiveFinding; `subjectType` lands on the emitted (Anchored) Finding. */
+function live(
+  over: { seq: number; subjectType?: string; entity?: string } & Partial<LiveFinding>,
+): LiveFinding {
+  const { subjectType, entity, ...rest } = over;
+  const reason = rest.reason ?? "pin_brute_force";
+  const finding: Finding =
+    subjectType !== undefined
+      ? { alert: { eventIds: [], reason, at: 0 }, eventId: over.seq, subjectType }
+      : { alert: { eventIds: [], reason, at: 0 } };
+  const result: LiveFinding = {
+    finding,
+    state: rest.state ?? "hit",
+    reason,
+    eventIds: rest.eventIds ?? [over.seq],
+    at: rest.at ?? 0,
+    seq: over.seq,
+  };
+  // `exactOptionalPropertyTypes`: only set `entity` when present, never to `undefined`.
+  if (entity !== undefined) {
+    result.entity = entity;
+  }
+  return result;
+}
+
+/** Publish a snapshot carrying the given findings. */
+function publish(findings: LiveFinding[]): void {
+  useGameStore.setState({ snapshot: { ...emptySnapshot(), findings } });
+}
+
+describe("FindingsPanel", () => {
+  it("renders a group with its entity chip and agreement badge", () => {
+    publish([
+      live({ seq: 1, subjectType: "account", entity: "acct-7", reason: "pin_brute_force" }),
+      live({ seq: 2, subjectType: "account", entity: "acct-7", reason: "impossible_travel" }),
+    ]);
+    render(<InspectorShell />);
+    expect(screen.getByText("acct-7")).toBeDefined();
+    expect(screen.getByText("account")).toBeDefined();
+    expect(screen.getByText("Agreement")).toBeDefined();
+    expect(screen.getByText("Pin brute force")).toBeDefined();
+    expect(screen.getByText("Impossible travel")).toBeDefined();
+  });
+
+  it("renders each row as a button carrying aria-pressed", () => {
+    publish([live({ seq: 1, subjectType: "account", entity: "a" })]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    expect(row.tagName).toBe("BUTTON");
+    expect(row.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("exposes rows as native buttons the browser activates on Enter or Space", () => {
+    publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    // A native <button> fires a click on Enter and Space, so its onClick IS the keyboard
+    // activation path. happy-dom does not synthesize that click from a raw keydown, so we
+    // assert the semantic-button contract and drive its activation directly.
+    expect(row.tagName).toBe("BUTTON");
+    row.focus();
+    expect(document.activeElement).toBe(row); // focusable, so keyboard can reach it
+    fireEvent.click(row); // the event a browser dispatches for Enter/Space on a button
+    expect(useGameStore.getState().selection).toEqual({ seq: 5 });
+  });
+
+  it("selects and highlights a row on click, and deselects on re-click", () => {
+    publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    fireEvent.click(row);
+    expect(useGameStore.getState().selection).toEqual({ seq: 5 });
+    expect(
+      screen.getByRole("button", { name: /pin brute force/i }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("clears the selection on Esc from inside the shell", () => {
+    publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    fireEvent.click(row);
+    expect(useGameStore.getState().selection).toEqual({ seq: 5 });
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("does not clear on Esc that a child already handled (defaultPrevented)", () => {
+    publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
+    const { container } = render(<InspectorShell />);
+    useGameStore.getState().selectFinding(5);
+    const shell = container.querySelector(".inspector-shell");
+    if (!shell) {
+      throw new Error("expected the inspector shell");
+    }
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    event.preventDefault(); // a nested widget consumed it first
+    shell.dispatchEvent(event);
+    expect(useGameStore.getState().selection).toEqual({ seq: 5 });
+  });
+
+  it("clears the selection on a click on the panel background", () => {
+    publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
+    const { container } = render(<InspectorShell />);
+    useGameStore.getState().selectFinding(5);
+    const panel = container.querySelector(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    fireEvent.click(panel);
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("shows the empty state when there are no findings", () => {
+    publish([]);
+    render(<InspectorShell />);
+    expect(screen.getByText(/no findings yet/i)).toBeDefined();
+  });
+
+  it("shows a +N more line past the cap and expands it", () => {
+    const many = Array.from({ length: 15 }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, at: 15 - i }),
+    );
+    publish(many);
+    render(<InspectorShell />);
+    const more = screen.getByRole("button", { name: /\+3 more/i });
+    expect(more).toBeDefined();
+    // Before expanding, the 13th-ranked group (entity e12) is hidden.
+    expect(screen.queryByText("e12")).toBeNull();
+    fireEvent.click(more);
+    expect(screen.getByText("e12")).toBeDefined();
+  });
+});

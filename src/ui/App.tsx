@@ -25,6 +25,7 @@ import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
 import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { InspectorShell } from "./findings/InspectorShell";
 import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
 import { IntroOverlay } from "./IntroOverlay";
@@ -201,10 +202,7 @@ export function App({ controller }: AppProps = {}) {
           </div>
         </header>
         <Hud />
-        <section className="inspector-shell" aria-label="Inspector">
-          {/* M1 placeholder. M2 mounts the two-column inspector shell here. */}
-          <p className="inspector-shell-note">Inspector coming</p>
-        </section>
+        <InspectorShell />
         <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
         <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
         <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
