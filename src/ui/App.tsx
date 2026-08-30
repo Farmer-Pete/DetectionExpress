@@ -1,18 +1,22 @@
 /**
- * The app shell. A useEffect builds the run controller, runs it on mount, and
- * disposes it on unmount, so render never drives the pipeline. React Strict Mode's
- * mount/unmount/mount cycle is safe: each effect builds a fresh controller and the
- * cleanup disposes it. The Apply button reloads the current Algorithm source.
+ * The app shell. It holds a `view` toggle (`"pipeline"` or `"metro"`) and one
+ * conditional effect per mode: each builds a FRESH controller from its factory when
+ * that mode becomes visible and disposes it (permanently) on hide, so only the
+ * visible mode's loop runs. React Strict Mode's mount/unmount/mount cycle is safe:
+ * the factory yields a new controller per epoch and the cleanup disposes the old one.
+ * Render never drives either loop. The Apply button reloads the current Algorithm
+ * source.
  *
  * A second, dev-only effect wires the local-IDE (algorithms hot-reload) client. Its
  * whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
  * production build inlines the gate to `false` and strips both the client and its
  * loader out entirely; under test there is no `import.meta.hot`, so it stays inert
  * too. That client maps a watched save into the run and drives the store's generic
- * `sourceLocked` while a local file is authoritative.
+ * `sourceLocked` while a local file is authoritative. It lives in its own effect, so
+ * a mode switch never tears the dev client down or reconnects it.
  *
- * Tests inject a controller through `controller`, so the app never loads the real
- * loader or engine under test.
+ * Tests inject controller factories through `createPipelineController` /
+ * `createWorldController`, so the app never loads the real loader or engine under test.
  */
 import { ReactFlowProvider } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
@@ -21,7 +25,11 @@ import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-f
 import { localAlgorithmUrl } from "../game/algorithms-resolve";
 import { createRunController, type RunController } from "../game/run-controller";
 import { getGraph, useGameStore } from "../game/store";
+import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
+import { useWorldStore, worldSpeed } from "../game/world-store";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { distanceTable } from "../sim/world/distance";
+import { world } from "../sim/world/world";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
@@ -29,9 +37,16 @@ import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./conten
 import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
 import { IntroOverlay } from "./IntroOverlay";
+import { MetroView } from "./MetroView";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
+
+/** Which mode is on screen. Only the visible mode's loop runs. */
+type View = "pipeline" | "metro";
+
+/** The station distances are fixed data, built once for the world controller. */
+const worldDistances = distanceTable(world);
 
 function buildController(): RunController {
   return createRunController({
@@ -54,11 +69,28 @@ function buildController(): RunController {
   });
 }
 
-interface AppProps {
-  controller?: RunController;
+function buildWorldController(): WorldRunController {
+  return createWorldRunController({
+    // The controller derives the timetable and builds the four trains (T1..T4) as
+    // persistent fixtures; there are no other fixtures yet (M6 adds operators and hosts).
+    world,
+    distances: worldDistances,
+    getFixtures: () => [],
+    getSeed: () => useGameStore.getState().seed,
+    setWorldSnapshot: useWorldStore.getState().setWorldSnapshot,
+    getSpeed: worldSpeed,
+  });
 }
 
-export function App({ controller }: AppProps = {}) {
+interface AppProps {
+  // Controller FACTORIES: each mode builds a FRESH controller when it becomes visible
+  // and disposes it on hide (disposal is permanent). Tests inject stub factories.
+  createPipelineController?: () => RunController;
+  createWorldController?: () => WorldRunController;
+}
+
+export function App({ createPipelineController, createWorldController }: AppProps = {}) {
+  const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
 
   // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
@@ -111,15 +143,36 @@ export function App({ controller }: AppProps = {}) {
 
   const slug = scenarioSlug(kioskPinAttack.id);
 
+  // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
+  // controller per visible epoch; the cleanup disposes it (permanently) on hide or
+  // unmount, including React strict-mode's mount/unmount/mount cycle.
   useEffect(() => {
-    const active = controller ?? buildController();
+    if (view !== "pipeline") {
+      return;
+    }
+    const active = (createPipelineController ?? buildController)();
     controllerRef.current = active;
     active.run();
     return () => {
       active.dispose();
-      controllerRef.current = null;
+      if (controllerRef.current === active) {
+        controllerRef.current = null;
+      }
     };
-  }, [controller]);
+  }, [view, createPipelineController]);
+
+  // The world controller lifecycle, conditional on the metro view. Same fresh-per-epoch
+  // rule; a mode switch disposes the hidden mode's loop and builds the shown one's.
+  useEffect(() => {
+    if (view !== "metro") {
+      return;
+    }
+    const active = (createWorldController ?? buildWorldController)();
+    active.run();
+    return () => {
+      active.dispose();
+    };
+  }, [view, createWorldController]);
 
   // Build the dev-only local-IDE client on mount, behind the folded `import.meta.env.DEV`
   // gate and a live HMR channel. On a forced reload (Vite reloads when the active file is
@@ -193,6 +246,13 @@ export function App({ controller }: AppProps = {}) {
           <div className="topbar-actions">
             <button
               type="button"
+              className="view-toggle"
+              onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
+            >
+              {view === "pipeline" ? "Metro view" : "Pipeline view"}
+            </button>
+            <button
+              type="button"
               ref={reopenRef}
               className="topbar-reopen"
               onClick={() => setIntroOpen(true)}
@@ -202,26 +262,32 @@ export function App({ controller }: AppProps = {}) {
             <HireMe copy={hireMe} />
           </div>
         </header>
-        <Hud />
-        <ReactFlowProvider>
-          <Pipeline />
-        </ReactFlowProvider>
-        <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
-        <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
-        <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
-        {algoReady ? (
-          <div className="local-ide">
-            {localMode ? (
-              <button type="button" onClick={onStopLocalMode}>
-                Stop editing
-              </button>
-            ) : (
-              <button type="button" onClick={onEnterLocalMode}>
-                Edit in IDE
-              </button>
-            )}
-          </div>
-        ) : null}
+        {view === "pipeline" ? (
+          <>
+            <Hud />
+            <ReactFlowProvider>
+              <Pipeline />
+            </ReactFlowProvider>
+            <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
+            <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+            <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+            {algoReady ? (
+              <div className="local-ide">
+                {localMode ? (
+                  <button type="button" onClick={onStopLocalMode}>
+                    Stop editing
+                  </button>
+                ) : (
+                  <button type="button" onClick={onEnterLocalMode}>
+                    Edit in IDE
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <MetroView />
+        )}
       </div>
       {introOpen ? (
         <IntroOverlay
