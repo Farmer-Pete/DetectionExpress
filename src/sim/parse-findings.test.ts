@@ -32,6 +32,45 @@ function expectDetectRejectMessage(value: unknown, message: string): void {
   }
 }
 
+describe("parseFindings: rejects with a precise message across defect types", () => {
+  // Spread the exact-message assertion beyond the required-anchor rule, so a fixture
+  // aimed at one defect cannot silently pass on a different rejection (e.g. the anchor
+  // check firing first). Each fixture carries a valid anchor so it reaches its target rule.
+  it("names an unknown field on a finding", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, mystery: 1 }],
+      'Unknown field "mystery" on a finding.',
+    );
+  });
+
+  it("names an unknown context widget type", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1, context: [{ type: "bogus" }] }],
+      "A context widget has an unknown type.",
+    );
+  });
+
+  it("names a non-rectangular table widget", () => {
+    expectDetectRejectMessage(
+      [
+        {
+          alert: { eventIds: [1], reason: "r", at: 1 },
+          eventId: 1,
+          context: [{ type: "table", columns: ["a", "b"], rows: [["only-one"]] }],
+        },
+      ],
+      "A table row length must equal the columns length.",
+    );
+  });
+
+  it("names a non-member eventId anchor", () => {
+    expectDetectRejectMessage(
+      [{ alert: { eventIds: [1, 2], reason: "r", at: 1 }, eventId: 3 }],
+      "eventId must be a member of alert.eventIds.",
+    );
+  });
+});
+
 describe("parseFindings: accepts", () => {
   it("a minimal final that carries its required anchor", () => {
     const findings = parseFindings([{ alert: { eventIds: [1], reason: "r", at: 1 }, eventId: 1 }]);

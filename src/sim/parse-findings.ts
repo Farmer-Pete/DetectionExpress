@@ -256,7 +256,7 @@ function parseAlert(alert: unknown): number[] {
   return alert.eventIds;
 }
 
-/** Validate one Finding: its alert, then the optional anchor, grouping, and display. */
+/** Validate one Finding: its alert, then the required anchor, grouping, and display. */
 function parseFinding(finding: unknown): void {
   if (!isPlainObject(finding)) {
     reject("Each finding must be an object.");
@@ -268,9 +268,8 @@ function parseFinding(finding: unknown): void {
   );
   const eventIds = parseAlert("alert" in finding ? finding.alert : undefined);
 
-  // The anchor is now required. Checked right after `parseAlert`, so its cited ids
-  // exist for the membership test, and before the subject, partial, and context
-  // checks, all of which read a resolved anchor.
+  // The anchor is now required. Checked right after `parseAlert` so the cited ids
+  // exist for the membership test below.
   if (!("eventId" in finding) || finding.eventId === undefined) {
     reject("Each finding needs an eventId.");
   }
