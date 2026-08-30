@@ -11,6 +11,14 @@
  */
 import type { Wave } from "../scenario";
 
+/**
+ * Far above any real wave rate (the shipped peak is 60). It caps `eventsPerTick`
+ * so a pathological rate cannot stall the accumulator or materialize an unbounded
+ * arrival array. Past `Number.MAX_SAFE_INTEGER` the `acc -= 1` step stops making
+ * progress, so an unbounded rate would loop forever; this bound forbids that.
+ */
+const MAX_EVENTS_PER_TICK = 10_000;
+
 /** Reject a wave whose bounds are not non-negative integers, so every emitted tick stays whole. */
 function assertTickBounds(wave: Wave, index: number): void {
   if (!Number.isInteger(wave.startTick) || wave.startTick < 0) {
@@ -30,6 +38,29 @@ function assertRate(wave: Wave, index: number): void {
     throw new Error(
       `admitArrivals: wave ${index} eventsPerTick must be a finite, non-negative number.`,
     );
+  }
+  if (wave.eventsPerTick > MAX_EVENTS_PER_TICK) {
+    throw new Error(
+      `admitArrivals: wave ${index} eventsPerTick ${wave.eventsPerTick} exceeds the ${MAX_EVENTS_PER_TICK} cap.`,
+    );
+  }
+}
+
+/**
+ * Reject waves that are not in non-decreasing `startTick` order. Together with the
+ * no-overlap check this makes the emitted ticks come out sorted, since each wave's
+ * ticks then all precede the next wave's. Callers build waves left to right.
+ */
+function assertChronological(waves: readonly Wave[]): void {
+  for (let i = 1; i < waves.length; i++) {
+    const prev = waves[i - 1];
+    const cur = waves[i];
+    if (prev === undefined || cur === undefined) {
+      continue;
+    }
+    if (cur.startTick < prev.startTick) {
+      throw new Error(`admitArrivals: wave ${i} starts before wave ${i - 1}.`);
+    }
   }
 }
 
@@ -68,6 +99,7 @@ export function admitArrivals(waves: readonly Wave[]): number[] {
     assertTickBounds(wave, index);
     assertRate(wave, index);
   });
+  assertChronological(waves);
   assertNoOverlap(waves);
 
   const arrivals: number[] = [];

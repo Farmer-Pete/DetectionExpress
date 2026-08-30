@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { admitArrivals } from "../../sim/actors/admission";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../sim/event";
@@ -54,18 +55,12 @@ import {
 // A faithful integer model of the run: arrivals follow the wave schedule; the
 // generic band `simulate` runs the real channel and governor math against them.
 
-/** Events arriving at each tick, from the wave schedule's carried accumulator. */
+/** Events arriving at each tick, binned from the admission controller's arrivals. */
 function arrivalsByTick(deadline: number): number[] {
   const arrivals = new Array<number>(deadline + 1).fill(0);
-  for (const wave of buildSchedule().waves) {
-    let acc = 0;
-    const end = wave.startTick + wave.durationTicks;
-    for (let tick = wave.startTick; tick < end && tick <= deadline; tick++) {
-      acc += wave.eventsPerTick;
-      while (acc >= 1) {
-        acc -= 1;
-        arrivals[tick] = (arrivals[tick] ?? 0) + 1;
-      }
+  for (const tick of admitArrivals(buildSchedule().waves)) {
+    if (tick <= deadline) {
+      arrivals[tick] = (arrivals[tick] ?? 0) + 1;
     }
   }
   return arrivals;

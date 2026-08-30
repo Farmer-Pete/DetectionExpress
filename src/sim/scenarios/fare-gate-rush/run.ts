@@ -155,7 +155,8 @@ export function buildFareGateRun(seed: number): GeneratedRun {
     endpointId: gatekeepGate.id,
   });
 
-  const lastEventTs = events.reduce((max, event) => Math.max(max, event.ts), 0);
+  // composeRun returns events sorted ascending by ts, so the last one is the latest.
+  const lastEventTs = events.at(-1)?.ts ?? 0;
   const lastEventTick = lastEventTs / GAME_SECONDS_PER_TICK;
   const finalDeadline = lastEventTick + 1 + DRAIN_GAP_TICKS;
 

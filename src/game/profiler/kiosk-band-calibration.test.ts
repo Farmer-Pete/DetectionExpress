@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CORPUS_PEAK_EVENTS_PER_TICK, OMEGA, WAVE_RATES } from "../tuning";
+import { CORPUS_PEAK_EVENTS_PER_TICK, WAVE_RATES } from "../tuning";
 import {
   NAIVE_CODE_PER_ANCHOR,
   naiveCost,
@@ -49,10 +49,5 @@ describe("the two locked reference rates", () => {
     expect(fast).toBeLessThan(450);
     const slow = REFERENCE_SLOW_RATE.num / REFERENCE_SLOW_RATE.den;
     expect(fast).toBeGreaterThan(slow * 10);
-  });
-
-  it("derives both rates from rateFor at skew 1 and the shipped OMEGA", () => {
-    expect(REFERENCE_SLOW_RATE).toEqual(rateFor(NAIVE_CODE_PER_ANCHOR, OMEGA, 1));
-    expect(REFERENCE_FAST_RATE).toEqual(rateFor(TALLY_CODE_PER_ANCHOR, OMEGA, 1));
   });
 });

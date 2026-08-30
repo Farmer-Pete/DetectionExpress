@@ -188,9 +188,11 @@ describe("fare-gate-rush throughput: squeeze on the real event curve", () => {
     expect(result.failedCheckpoint).toBe(-1);
     // The real total curve (tap-ins plus their echoing tap-outs) peaks well above
     // a kiosk-only wave: two overlapping waves of the same actor can both land in
-    // one tick, so Backlog transiently crosses CHANNEL_CAP without failing any
-    // checkpoint. Real headroom means staying clear of the backpressure ceiling
-    // (2 * CHANNEL_CAP) that would otherwise start clamping admission.
-    expect(result.maxBacklog).toBeLessThan(2 * CHANNEL_CAP);
+    // one tick, so Backlog transiently crosses CHANNEL_CAP (measured peak ~105)
+    // without failing any checkpoint. The bound sits at 1.5 * CHANNEL_CAP: loose
+    // enough for that real transient, tight enough to catch a regression drifting
+    // toward the 2 * CHANNEL_CAP clamp ceiling. The win invariant is proven
+    // separately through the real engine.
+    expect(result.maxBacklog).toBeLessThan(1.5 * CHANNEL_CAP);
   });
 });

@@ -139,4 +139,21 @@ describe("admitArrivals: bad input throws", () => {
     ];
     expect(() => admitArrivals(waves)).toThrow();
   });
+
+  it("rejects disjoint waves given out of chronological order", () => {
+    const waves: Wave[] = [
+      { startTick: 20, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+    ];
+    expect(() => admitArrivals(waves)).toThrow();
+  });
+
+  it("rejects a rate above the cap, so the accumulator cannot stall", () => {
+    expect(() =>
+      admitArrivals([{ startTick: 0, durationTicks: 1, eventsPerTick: 20_000 }]),
+    ).toThrow();
+    expect(() =>
+      admitArrivals([{ startTick: 0, durationTicks: 1, eventsPerTick: Number.MAX_VALUE }]),
+    ).toThrow();
+  });
 });
