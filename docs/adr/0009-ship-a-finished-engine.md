@@ -1,4 +1,4 @@
-# ADR 0009 — Ship a finished engine; observe, then perturb
+# ADR 0009 — Ship a finished Engine, observe then perturb
 
 - Status: Accepted
 - Date: 2026-08-30

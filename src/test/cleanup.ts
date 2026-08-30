@@ -3,9 +3,10 @@
 // the DOM clean, and clears localStorage so the onboarding seen flag never leaks
 // from one case into the next.
 //
-// happy-dom exposes the `Storage` class but does not wire a `localStorage` onto the
-// global, so this setup installs one real store. The app reads it through the guarded
-// `onboarding-storage` wrapper, so production uses the browser's own `localStorage`.
+// Under the pinned Node 26 runtime a global `localStorage` already exists, so the
+// guard below installs a store only when none is present. Either way the app reads it
+// through the guarded `onboarding-storage` wrapper, and the `localStorage.clear()`
+// after each test keeps the onboarding seen flag from leaking between cases.
 
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";

@@ -19,9 +19,9 @@ describe("Briefing", () => {
     expect(screen.getByText(liveScenario.tagline)).toBeDefined();
   });
 
-  it("describes the burst raising one alarm, in the new voice", () => {
+  it("describes the burst raising one Alert, in the new voice", () => {
     renderBriefing();
-    expect(screen.getByText(/one alarm for the whole burst/)).toBeDefined();
+    expect(screen.getByText(/one Alert for the whole burst/)).toBeDefined();
   });
 
   it("states the 5-in-5-minutes pattern plainly", () => {

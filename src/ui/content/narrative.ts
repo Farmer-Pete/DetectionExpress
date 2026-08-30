@@ -54,13 +54,13 @@ export const introCopy: IntroCopy = {
   title: "Detection Express",
   paragraphs: [
     "This is a working metro, modeled down to the last detail. Every rider, every fare tap, every door, every camera. It all runs live.",
-    "Watching over it is a finished detection engine. It reads the whole stream of sensor data and finds the threats hiding inside ordinary traffic. It stays fast under heavy load.",
+    "Watching over it is a finished detection Engine. It reads the whole stream of sensor data and finds the threats hiding inside ordinary traffic. It stays fast under heavy load.",
   ],
   invitation: "Watch it run clean. Then cause chaos and see it hold.",
   observeLabel: "Observe the simulation",
   chaosLabel: "Cause chaos",
   sourceLabel: "Get the source",
-  editLabel: "Edit the engine",
+  editLabel: "Edit the Engine",
 };
 
 export const hireMe: HireMeCopy = {
@@ -82,7 +82,7 @@ export const chaosLevels: readonly ChaosLevel[] = [
   {
     level: 2,
     label: "Under Load",
-    blurb: "More attackers arrive. The engine holds state and leans in.",
+    blurb: "More attackers arrive. The Engine holds state and leans in.",
     playable: false,
   },
   {
@@ -100,7 +100,7 @@ export const chaosLevels: readonly ChaosLevel[] = [
   {
     level: 5,
     label: "Nightmare",
-    blurb: "Everything at once. The engine learns normal and scores the drift.",
+    blurb: "Everything at once. The Engine learns normal and scores the drift.",
     playable: false,
   },
 ];

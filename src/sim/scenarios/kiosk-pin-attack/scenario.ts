@@ -215,18 +215,18 @@ function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
 }
 
 /**
- * The briefing for the live scenario, shown above the engine. It carries the new
- * voice: what the chaos is, and how the finished engine answers it. It keeps the
- * real facts, five wrong PINs in five minutes and one alarm per burst, and it
- * describes the engine at work rather than asking the player to write a Rule.
+ * The briefing for the live scenario, shown above the Engine. It carries the new
+ * voice: what the chaos is, and how the finished Engine answers it. It keeps the
+ * real facts, five wrong PINs in five minutes and one Alert per burst, and it
+ * describes the Engine at work rather than asking the player to write a Rule.
  */
 const briefing =
   "A PIN brute force hits a station kiosk. One rider account takes five or more " +
-  "wrong PINs inside five minutes. That burst is the attack. Watch the engine " +
-  "read the raw kiosk taps, normalize them, and count the failures per account. " +
-  "When a burst crosses the line, it raises one alarm for the whole burst, not " +
-  "one per tap. Normal traffic keeps rising in waves. Watch the Compute gauge: " +
-  "the engine holds its speed and stays ahead of the backlog while it catches " +
+  "wrong PINs inside five minutes. That burst is the Attack. Watch the Engine " +
+  "read the raw kiosk PIN entries, normalize them, and count the failures per account. " +
+  "When a burst crosses the line, it raises one Alert for the whole burst, not " +
+  "one per entry. Normal traffic keeps rising in waves. Watch the Compute gauge: " +
+  "the Engine holds its speed and stays ahead of the backlog while it catches " +
   "every burst.";
 
 export const kioskPinAttack: Scenario = {
