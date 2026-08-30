@@ -57,6 +57,9 @@ describe("store", () => {
       failureReason: null,
       admitted: 50,
       completed: 8,
+      findings: [],
+      events: [],
+      processed: 8,
     };
     useGameStore.getState().setSnapshot(snapshot);
     expect(useGameStore.getState().snapshot).toEqual(snapshot);

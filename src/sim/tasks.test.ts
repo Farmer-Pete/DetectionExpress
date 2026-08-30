@@ -4,6 +4,7 @@ import { Channel } from "./channel";
 import type { ScoredFinding } from "./correctness";
 import { END_OF_STREAM, isEndOfStream, type PipeEvent, type PipeMessage } from "./event";
 import type { Alert, DetectView, Finding } from "./finding";
+import type { TaskInspector } from "./inspector";
 import { RuleError } from "./rule-error";
 import type { ServiceRate } from "./service-governor";
 import {
@@ -111,6 +112,39 @@ function stubScorer(): TaskScorer & {
   };
 }
 
+/** An inspector that does nothing, for tests that do not exercise the tap. */
+const noopInspector: TaskInspector = {
+  captureNormalized: () => undefined,
+  markProcessed: () => undefined,
+};
+
+/** An inspector stub that records its calls, so a task test can observe them. */
+function stubInspector(): TaskInspector & {
+  captures: Array<{ id: number; ts: number; endpoint: string; raw: unknown; normalized: unknown }>;
+  processedCalls: number;
+} {
+  const captures: Array<{
+    id: number;
+    ts: number;
+    endpoint: string;
+    raw: unknown;
+    normalized: unknown;
+  }> = [];
+  let processedCalls = 0;
+  return {
+    captures,
+    get processedCalls() {
+      return processedCalls;
+    },
+    captureNormalized(id, ts, endpoint, raw, normalized) {
+      captures.push({ id, ts, endpoint, raw, normalized });
+    },
+    markProcessed() {
+      processedCalls += 1;
+    },
+  };
+}
+
 describe("runIngest schedule", () => {
   it("pushes same-tick Events in order, then exactly one marker at exhaustion", async () => {
     const driver = new ManualDriver();
@@ -192,9 +226,15 @@ describe("runNormalize", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     guard(
-      runNormalize(input, output, idleClock, (raw) => ({
-        user: raw instanceof Object && "u" in raw ? raw.u : null,
-      })),
+      runNormalize(
+        input,
+        output,
+        idleClock,
+        (raw) => ({
+          user: raw instanceof Object && "u" in raw ? raw.u : null,
+        }),
+        noopInspector,
+      ),
     );
     await input.push(ev(5, 100, { u: "bob" }));
     await flush();
@@ -208,10 +248,16 @@ describe("runNormalize", () => {
     const output = new Channel<PipeMessage>(10);
     let calls = 0;
     let done = false;
-    runNormalize(input, output, idleClock, (raw) => {
-      calls += 1;
-      return raw;
-    })
+    runNormalize(
+      input,
+      output,
+      idleClock,
+      (raw) => {
+        calls += 1;
+        return raw;
+      },
+      noopInspector,
+    )
       .then(() => {
         done = true;
       })
@@ -227,9 +273,11 @@ describe("runNormalize", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     let err: unknown;
-    runNormalize(input, output, idleClock, () => "not-an-object").catch((e: unknown) => {
-      err = e;
-    });
+    runNormalize(input, output, idleClock, () => "not-an-object", noopInspector).catch(
+      (e: unknown) => {
+        err = e;
+      },
+    );
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
@@ -240,7 +288,7 @@ describe("runNormalize", () => {
     const input = new Channel<PipeMessage>(5);
     const output = new Channel<PipeMessage>(1); // tiny cap forces backpressure
     let done = false;
-    runNormalize(input, output, idleClock, (raw) => raw)
+    runNormalize(input, output, idleClock, (raw) => raw, noopInspector)
       .then(() => {
         done = true;
       })
@@ -259,13 +307,78 @@ describe("runNormalize", () => {
   });
 });
 
+// Seam: the inspector tap runNormalize writes to (GH28-PLAN.md).
+describe("runNormalize inspector capture", () => {
+  it("captures raw paired with normalized, keyed by id/ts/endpoint", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const inspector = stubInspector();
+    guard(
+      runNormalize(
+        input,
+        output,
+        idleClock,
+        (raw) => ({ user: raw instanceof Object && "u" in raw ? raw.u : null }),
+        inspector,
+      ),
+    );
+    await input.push(ev(5, 100, { u: "bob" }));
+    await flush();
+    expect(inspector.captures).toEqual([
+      { id: 5, ts: 100, endpoint: "kiosk-v1", raw: { u: "bob" }, normalized: { user: "bob" } },
+    ]);
+    input.close();
+  });
+
+  it("captures even when the downstream push is blocked by backpressure", async () => {
+    const input = new Channel<PipeMessage>(5);
+    const output = new Channel<PipeMessage>(1); // tiny cap: the second push blocks
+    const inspector = stubInspector();
+    guard(runNormalize(input, output, idleClock, (raw) => raw, inspector));
+    await input.push(ev(1, 0, { u: "a" }));
+    await input.push(ev(2, 0, { u: "b" }));
+    await flush();
+    // Capture runs before the push, so a blocked downstream never gates it.
+    expect(inspector.captures.map((c) => c.id)).toEqual([1, 2]);
+    input.close();
+  });
+
+  it("captures nothing when normalize throws: the ring is never half-written", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const inspector = stubInspector();
+    runNormalize(
+      input,
+      output,
+      idleClock,
+      () => {
+        throw new Error("boom");
+      },
+      inspector,
+    ).catch(() => undefined);
+    await input.push(ev(1, 0));
+    await flush();
+    expect(inspector.captures).toHaveLength(0);
+  });
+
+  it("captures nothing on the end-of-stream marker", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const inspector = stubInspector();
+    guard(runNormalize(input, output, idleClock, (raw) => raw, inspector));
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(inspector.captures).toHaveLength(0);
+  });
+});
+
 describe("runDetect", () => {
   it("records the finding against the Event and forwards the Event downstream", async () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     const alert: Alert = { reason: "pin_brute_force", at: 100, eventIds: [1, 2] };
-    guard(runDetect(input, output, idleClock, () => [{ alert }], scorer, FAST_RATE));
+    guard(runDetect(input, output, idleClock, () => [{ alert }], scorer, noopInspector, FAST_RATE));
     await input.push(ev(5, 100, { user: "bob" }));
     await flush();
     expect(scorer.records).toHaveLength(1);
@@ -287,7 +400,17 @@ describe("runDetect", () => {
     };
     const resolved: Finding = { alert: { reason: "pin_brute_force", at: 9, eventIds: [2] } };
     // The task no longer folds out partials; both reach the scorer as ScoredFinding.
-    guard(runDetect(input, output, idleClock, () => [partial, resolved], scorer, FAST_RATE));
+    guard(
+      runDetect(
+        input,
+        output,
+        idleClock,
+        () => [partial, resolved],
+        scorer,
+        noopInspector,
+        FAST_RATE,
+      ),
+    );
     await input.push(ev(3, 0));
     await flush();
     expect(scorer.records[0]?.findings).toEqual([{ finding: partial }, { finding: resolved }]);
@@ -304,7 +427,7 @@ describe("runDetect", () => {
       eventId: 3,
       subjectType: "user",
     };
-    guard(runDetect(input, output, idleClock, () => [finding], scorer, FAST_RATE));
+    guard(runDetect(input, output, idleClock, () => [finding], scorer, noopInspector, FAST_RATE));
     await input.push(ev(3, 0, { user: "amy" }));
     await flush();
     expect(scorer.records[0]?.findings).toEqual([{ finding, entity: "amy" }]);
@@ -325,6 +448,7 @@ describe("runDetect", () => {
           return [];
         },
         stubScorer(),
+        noopInspector,
         FAST_RATE,
       ),
     );
@@ -351,7 +475,7 @@ describe("runDetect", () => {
     const output = new Channel<PipeMessage>(10);
     const scorer = stubScorer();
     let done = false;
-    runDetect(input, output, idleClock, () => [], scorer, FAST_RATE)
+    runDetect(input, output, idleClock, () => [], scorer, noopInspector, FAST_RATE)
       .then(() => {
         done = true;
       })
@@ -377,6 +501,7 @@ describe("runDetect", () => {
         throw new Error("boom in detect");
       },
       stubScorer(),
+      noopInspector,
       FAST_RATE,
     ).catch((e: unknown) => {
       err = e;
@@ -391,11 +516,17 @@ describe("runDetect", () => {
     const input = new Channel<PipeMessage>(10);
     const output = new Channel<PipeMessage>(10);
     let err: unknown;
-    runDetect(input, output, idleClock, () => ({ nope: 1 }), stubScorer(), FAST_RATE).catch(
-      (e: unknown) => {
-        err = e;
-      },
-    );
+    runDetect(
+      input,
+      output,
+      idleClock,
+      () => ({ nope: 1 }),
+      stubScorer(),
+      noopInspector,
+      FAST_RATE,
+    ).catch((e: unknown) => {
+      err = e;
+    });
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
@@ -407,7 +538,9 @@ describe("runDetect", () => {
     const output = new Channel<PipeMessage>(10);
     const clock = recordingClock();
     // 0.5 records per tick -> the governor sleeps two whole ticks per Event.
-    guard(runDetect(input, output, clock, () => [], stubScorer(), { num: 1, den: 2 }));
+    guard(
+      runDetect(input, output, clock, () => [], stubScorer(), noopInspector, { num: 1, den: 2 }),
+    );
     await input.push(ev(1, 0));
     await input.push(ev(2, 0));
     await input.push(ev(3, 0));
@@ -421,12 +554,66 @@ describe("runDetect", () => {
     const output = new Channel<PipeMessage>(10);
     const clock = recordingClock();
     // 20 records per tick: the first Events owe a zero-tick charge, so no sleep.
-    guard(runDetect(input, output, clock, () => [], stubScorer(), { num: 20, den: 1 }));
+    guard(
+      runDetect(input, output, clock, () => [], stubScorer(), noopInspector, { num: 20, den: 1 }),
+    );
     await input.push(ev(1, 0));
     await input.push(ev(2, 0));
     await input.push(END_OF_STREAM);
     await flush();
     expect(clock.sleeps).toEqual([]); // charge returned zero, so Detect never slept
+  });
+});
+
+// Seam: the inspector watermark runDetect writes to (GH28-PLAN.md).
+describe("runDetect inspector watermark", () => {
+  it("marks processed once per real Event, after record and before the governor charge", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const order: string[] = [];
+    const orderedScorer: TaskScorer = {
+      record: () => {
+        order.push("record");
+      },
+      finalize: () => undefined,
+    };
+    const orderedInspector: TaskInspector = {
+      captureNormalized: () => undefined,
+      markProcessed: () => {
+        order.push("markProcessed");
+      },
+    };
+    const clock = recordingClock();
+    const orderedClock: TaskClock = {
+      now: clock.now,
+      gate: clock.gate,
+      sleep: (ticks) => {
+        order.push("charge");
+        return clock.sleep(ticks);
+      },
+    };
+    // 0.5 records per tick: the governor sleeps, so its charge lands in order.
+    guard(
+      runDetect(input, output, orderedClock, () => [], orderedScorer, orderedInspector, {
+        num: 1,
+        den: 2,
+      }),
+    );
+    await input.push(ev(1, 0));
+    await flush();
+    expect(order).toEqual(["record", "markProcessed", "charge"]);
+  });
+
+  it("increments the watermark once per real Event, never for the marker", async () => {
+    const input = new Channel<PipeMessage>(10);
+    const output = new Channel<PipeMessage>(10);
+    const inspector = stubInspector();
+    guard(runDetect(input, output, idleClock, () => [], stubScorer(), inspector, FAST_RATE));
+    await input.push(ev(1, 0));
+    await input.push(ev(2, 0));
+    await input.push(END_OF_STREAM);
+    await flush();
+    expect(inspector.processedCalls).toBe(2);
   });
 });
 
@@ -490,6 +677,7 @@ describe("resolveEntity", () => {
       idleClock,
       () => [{ alert: { reason: "r", at: 0, eventIds: [1] }, eventId: 1, subjectType: "nope" }],
       stubScorer(),
+      noopInspector,
       FAST_RATE,
     ).catch((e: unknown) => {
       err = e;
@@ -519,7 +707,7 @@ describe("runDetect canonicalization (Seam I)", () => {
         },
       },
     );
-    runDetect(input, output, idleClock, () => [trap], stubScorer(), FAST_RATE).catch(
+    runDetect(input, output, idleClock, () => [trap], stubScorer(), noopInspector, FAST_RATE).catch(
       (e: unknown) => {
         err = e;
       },
@@ -537,11 +725,17 @@ describe("runDetect canonicalization (Seam I)", () => {
     // Well-formed to the first parse, but toJSON serializes to {} with no alert.
     const finding = { alert: { reason: "r", at: 1, eventIds: [1] } };
     Object.defineProperty(finding, "toJSON", { enumerable: false, value: () => ({}) });
-    runDetect(input, output, idleClock, () => [finding], stubScorer(), FAST_RATE).catch(
-      (e: unknown) => {
-        err = e;
-      },
-    );
+    runDetect(
+      input,
+      output,
+      idleClock,
+      () => [finding],
+      stubScorer(),
+      noopInspector,
+      FAST_RATE,
+    ).catch((e: unknown) => {
+      err = e;
+    });
     await input.push(ev(1, 0));
     await flush();
     expect(err).toBeInstanceOf(RuleError);
@@ -556,7 +750,7 @@ describe("runDetect canonicalization (Seam I)", () => {
       alert: { reason: "pin_brute_force", at: 5, eventIds: [1, 2] },
       context: [{ type: "text", text: "caught" }],
     };
-    guard(runDetect(input, output, idleClock, () => [finding], scorer, FAST_RATE));
+    guard(runDetect(input, output, idleClock, () => [finding], scorer, noopInspector, FAST_RATE));
     await input.push(ev(1, 0));
     await flush();
     const passed = scorer.records[0]?.findings[0]?.finding;
@@ -593,6 +787,7 @@ describe("NODE_TASKS registry", () => {
     onAdmit: () => undefined,
     algorithm: { normalize: (raw) => raw, detect: () => [] },
     scorer: { record: () => undefined, finalize: () => undefined },
+    inspector: noopInspector,
     nextEvent: () => null,
     serviceRate: FAST_RATE,
   };

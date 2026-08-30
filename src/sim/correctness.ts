@@ -49,6 +49,12 @@ export interface ScorerConfig {
   wFp: number;
   /** Match a finding that carries an entity by entity+evidence first. Default false. */
   entityMatch?: boolean;
+  /**
+   * Game seconds a live finding lingers, unrefreshed, before it ages out of
+   * `liveFindings()`. Optional, mirroring `entityMatch`; `createScorer` supplies
+   * `DEFAULT_LIVE_HORIZON` when omitted.
+   */
+  liveHorizon?: number;
 }
 
 /** The reading the sampler publishes: the gauge value plus the global counts. */
@@ -111,11 +117,40 @@ export interface MissedDecision extends DecisionBase {
 /** One resolved judgement in the decision log. */
 export type Decision = CaughtDecision | FalseDecision | MissedDecision;
 
+/**
+ * One currently-open finding for the findings panel. Frozen in place, not cloned:
+ * the finding is already fresh and engine-owned by the time it reaches the scorer.
+ * Identity for upsert/replace: an Anchored finding keys on `eventId` + `reason`
+ * (matching the promote/replace contract in `finding.ts`); a OneShot finding keys on
+ * its own `seq` and is never replaced.
+ */
+export interface LiveFinding {
+  /** The emitted finding, frozen in place. */
+  finding: Finding;
+  /** The resolved subject, when the finding names one. */
+  entity?: string;
+  /** "watch" for a partial (isPartial), "hit" for a final. */
+  state: "hit" | "watch";
+  /** `alert.reason`: the hunt id. */
+  reason: string;
+  /** Cited evidence. */
+  eventIds: number[];
+  /** `env.ts` of the last emission. TRUSTED game seconds, never `alert.at`. */
+  at: number;
+  /** Stable insertion id for the UI. */
+  seq: number;
+}
+
 export interface Scorer {
   /**
-   * Fold one Event's Findings, in order, after closing expired Attacks. A finding
-   * with `isPartial === true` is skipped (neither caught nor false). "No finding"
+   * Fold one Event's Findings, in order, after a horizon sweep and closing expired
+   * Attacks. A finding with `isPartial === true` is skipped by scoring (neither
+   * caught nor false) but still upserts into the live set as a watch. "No finding"
    * is an empty array.
+   *
+   * Pinned order: (1) horizon-sweep the live set at `env.ts`, (2) close expired
+   * Attacks (and drop any watch linked to a now-missed one), (3) upsert every
+   * finding into the live set, (4) score every finding.
    *
    * Precondition: each `finding` must be plain, canonical data (no throwing getter,
    * `toJSON`, or `Proxy`). The one production caller, `runDetect`, guarantees this by
@@ -127,10 +162,12 @@ export interface Scorer {
   /**
    * Close every pending Attack whose window ended before `gameTs` as a miss,
    * without a real Event. A checkpoint fires in a drain gap where no later Event
-   * exists, so it settles misses on demand before Correctness is read.
+   * exists, so it settles misses on demand before Correctness is read. Also
+   * horizon-sweeps the live set at `gameTs` first, and drops any watch linked to a
+   * newly missed Attack.
    */
   advanceTo(gameTs: number): void;
-  /** Close every remaining pending Attack as a miss at end of stream. */
+  /** Close every remaining pending Attack as a miss at end of stream. Clears the live set. */
   finalize(): void;
   /** The current gauge and global counts. Never mutates scoring state. */
   reading(): CorrectnessReading;
@@ -141,6 +178,13 @@ export interface Scorer {
    * by `seq`; the UI reverses for newest-first.
    */
   decisions(): readonly Decision[];
+  /**
+   * The current live findings, seq-ordered. Returns a frozen fresh array
+   * (`Object.freeze([...live.values()])`) of already-frozen entries: a shallow
+   * copy, since each entry froze once at insert and is replaced, never mutated,
+   * on promotion. Ranking is a UI concern; this is a stable insertion order only.
+   */
+  liveFindings(): readonly LiveFinding[];
 }
 
 /** One resolved judgement, held in the rolling ring. */
@@ -169,6 +213,12 @@ function freezeDeep<T>(value: T): T {
   return value;
 }
 
+/**
+ * Game seconds a live finding lingers, unrefreshed, before `createScorer`'s
+ * horizon sweep ages it out, absent a `ScorerConfig.liveHorizon` override.
+ */
+const DEFAULT_LIVE_HORIZON = 240;
+
 export function createScorer(attacks: readonly Attack[], config: ScorerConfig): Scorer {
   const state = new Map<number, AttackState>();
   // eventId -> the Attack that owns it, built once from Ground truth.
@@ -180,9 +230,14 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     }
   }
 
+  const liveHorizon = config.liveHorizon ?? DEFAULT_LIVE_HORIZON;
+
   const counts: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
   const ring: Outcome[] = [];
   const log: Decision[] = [];
+  // eventId::reason (Anchored) or oneshot:seq (OneShot) -> the open finding.
+  const live = new Map<string, LiveFinding>();
+  let nextLiveSeq = 0;
 
   function push(outcome: Outcome): void {
     ring.push(outcome);
@@ -225,8 +280,85 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       if (state.get(attack.id) === "pending" && attack.window.endTs < ts) {
         resolve(attack, "missed");
         append(missDecision(attack));
+        dropWatchesForAttack(attack.id);
       }
     }
+  }
+
+  /**
+   * Primary live-set eviction: drop any live entry whose last emission is now
+   * `liveHorizon` seconds or more behind `ts`. Covers hits (caught or false) and
+   * orphan watches uniformly; no code path here observes a "caught" transition, so
+   * age is the only universal signal. A catch lingers `liveHorizon` seconds after
+   * its last emission, then fades.
+   */
+  function sweepHorizon(ts: number): void {
+    for (const [key, entry] of live) {
+      if (ts - entry.at >= liveHorizon) {
+        live.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Early-drop (watches only): when `attackId` resolves missed, drop any watch
+   * anchored to an Event that Attack owns. An anchor-only link, weaker than
+   * `hitsFor`'s full cited-id scan; the horizon sweep covers any watch this misses.
+   */
+  function dropWatchesForAttack(attackId: number): void {
+    for (const [key, entry] of live) {
+      if (
+        entry.state === "watch" &&
+        entry.finding.eventId !== undefined &&
+        owner.get(entry.finding.eventId) === attackId
+      ) {
+        live.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Upsert one finding into the live set: partial -> watch, final -> hit, keyed by
+   * `eventId::reason` for an Anchored finding or by its own `seq` for a OneShot
+   * (fire-once, never replaced). A promotion replaces the entry in place, keeping
+   * the original `seq` and refreshing `state`/`eventIds`/`finding`/`at`.
+   *
+   * Freeze-only, no clone. The finding is already fresh and engine-owned: `runDetect`
+   * canonicalizes it (`tasks.ts`, JSON round-trip) before `record`, and nothing
+   * mutates it afterward. So this freezes that object in place rather than making a
+   * second copy. The scorer never mutates a stored entry afterward.
+   */
+  function upsertLive(scored: ScoredFinding, ts: number): void {
+    const finding = scored.finding;
+    // Drop a partial "watch" whose owning attack has already resolved. `record`
+    // closes expired attacks (dropping their linked watches) BEFORE this upsert, so a
+    // partial that arrives after its attack window would otherwise seed a zombie watch:
+    // `scoreFinding` skips partials, so it would never resolve and would linger until
+    // the horizon. A partial for a still-pending or unowned attack is a normal watch.
+    if (finding.isPartial === true && finding.eventId !== undefined) {
+      const attackId = owner.get(finding.eventId);
+      if (attackId !== undefined && state.get(attackId) !== "pending") {
+        return;
+      }
+    }
+    const liveState: "hit" | "watch" = finding.isPartial === true ? "watch" : "hit";
+    const anchorKey =
+      finding.eventId !== undefined ? `${finding.eventId}::${finding.alert.reason}` : undefined;
+    const existing = anchorKey !== undefined ? live.get(anchorKey) : undefined;
+    const seq = existing ? existing.seq : nextLiveSeq++;
+    const key = anchorKey ?? `oneshot:${seq}`;
+    const entry: LiveFinding = {
+      finding,
+      state: liveState,
+      reason: finding.alert.reason,
+      eventIds: finding.alert.eventIds,
+      at: ts,
+      seq,
+    };
+    if (scored.entity !== undefined) {
+      entry.entity = scored.entity;
+    }
+    live.set(key, freezeDeep(entry));
   }
 
   /**
@@ -300,12 +432,21 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
 
   return {
     record(findings, env) {
+      // Pinned order: horizon sweep, close expired (+ its early watch-drop),
+      // upsert every finding into the live set, then score every finding. Upsert
+      // runs as its own pass, before scoring, so it never depends on which Attack
+      // a finding ends up crediting.
+      sweepHorizon(env.ts);
       closeExpired(env.ts);
+      for (const scored of findings) {
+        upsertLive(scored, env.ts);
+      }
       for (const scored of findings) {
         scoreFinding(scored);
       }
     },
     advanceTo(gameTs) {
+      sweepHorizon(gameTs);
       closeExpired(gameTs);
     },
     finalize() {
@@ -315,6 +456,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
           append(missDecision(attack));
         }
       }
+      live.clear();
     },
     reading() {
       const rung: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
@@ -336,6 +478,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     },
     decisions() {
       return Object.freeze([...log]);
+    },
+    liveFindings() {
+      return Object.freeze([...live.values()]);
     },
   };
 }

@@ -9,7 +9,7 @@ import type { Checkpoint } from "../sim/scenario";
 import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import type { ServiceRate } from "../sim/service-governor";
-import type { SimSnapshot } from "../sim/snapshot";
+import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
 import { ManualDriver, type TickDriver } from "./clock";
 import { type StartOptions, start } from "./engine";
@@ -550,5 +550,55 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
     expect(h.last()?.status).toBe("failed");
     expect(h.last()?.failureReason).toBe("correctness");
     expect(h.last()?.correctness.missed).toBe(1); // settled by advanceTo, not EOS
+  });
+});
+
+// Seam: the snapshot's findings, events, and processed watermark (GH28-PLAN.md T3).
+describe("engine publishes findings, events, and the processed watermark", () => {
+  it("carries a live finding and its ring event while Detect still holds the Event in service", async () => {
+    // One Event, and a governor slow enough that Detect is still sleeping off its
+    // charge when we sample: the end-of-stream marker cannot have reached Detect
+    // yet (finalize() would otherwise have cleared the live set), so this is the
+    // one window where a short run's live finding is guaranteed to be observable.
+    const events = [ev(0, 0, { acct: "x" })];
+    const alertingAlgorithm: TaskAlgorithm = {
+      normalize: (raw) => raw,
+      detect: () => [{ alert: { reason: "pin_brute_force", at: 0, eventIds: [0] } }],
+    };
+    const h = launch({
+      generator: scheduleOf(events),
+      algorithm: alertingAlgorithm,
+      serviceRate: { num: 1, den: 10 }, // 0.1 records/tick: a ~10-tick charge
+      checkpoints: deadlineAt(50),
+    });
+    await step(h.driver, 3); // well inside the charge, before Detect reaches the marker
+    const midway = h.last();
+    expect(midway).toBeDefined();
+    if (!midway) return;
+    expect(midway.status).toBe("running"); // still mid-charge, not yet at the deadline
+    expect(midway.findings.length).toBeGreaterThan(0); // the scorer's live set folded in
+    expect(midway.events.length).toBeGreaterThan(0); // the ring folded in
+    expect(midway.events[0]).toMatchObject({ id: 0, endpoint: "kiosk-v1" });
+    expect(midway.processed).toBe(1); // Detect already recorded and marked this Event
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+
+  it("keeps admitted - processed at 0 after a full drain (guards the off-by-one)", async () => {
+    const events = [0, 1, 2, 3, 4].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
+    const h = launch({ generator: scheduleOf(events), checkpoints: deadlineAt(40) });
+    await step(h.driver, 41);
+    await h.handle.whenStopped;
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    expect(snap.admitted - snap.processed).toBe(0);
+  });
+
+  it("emptySnapshot has empty findings and events arrays and a zero watermark", () => {
+    const snap = emptySnapshot();
+    expect(snap.findings).toEqual([]);
+    expect(snap.events).toEqual([]);
+    expect(snap.processed).toBe(0);
   });
 });

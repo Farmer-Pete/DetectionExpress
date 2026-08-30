@@ -9,6 +9,9 @@ export const CLOCK_HZ = 60;
 /** Snapshot publishes per second. CLOCK_HZ must divide by this. */
 export const PUBLISH_HZ = 20;
 
+/** The inspector's recent-events ring: how many Events it keeps, id-ordered. */
+export const RING_SIZE = 256;
+
 /** Backlog channel capacity. A push waits when the channel is full. */
 export const CHANNEL_CAP = 100;
 
