@@ -468,9 +468,14 @@ export function createRunController(deps: RunControllerDeps): RunController {
           }
         });
       } catch (error) {
-        // The old engine was already stopped just above, so dropping the reference here
-        // orphans nothing.
-        engine = null;
+        // Null the engine only once `phase` reaches "start", the point past `engine?.stop()`:
+        // there the old engine is stopped, so dropping the reference orphans nothing, and the
+        // null also suppresses the stopped handle's `onFinished`. A "setup" throw (a bad
+        // `scenario.generate`/`createScorer`) happens BEFORE the stop, so the old engine is
+        // still live and must keep its reference, or a later Apply or dispose() cannot stop it.
+        if (phase === "start") {
+          engine = null;
+        }
         deps.setError(toErrorInfo(phase, error)); // "setup" vs "start"
       }
     } finally {

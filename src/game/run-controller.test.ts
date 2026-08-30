@@ -443,6 +443,48 @@ describe("run controller", () => {
     expect(live.stops).toBe(1);
   });
 
+  it("keeps ownership of the live engine when a commit-phase setup throw happens", async () => {
+    // A throw inside the commit block BEFORE `engine?.stop()` (a bad
+    // `scenario.generate`/`createScorer`) is a "setup" phase error. The live engine
+    // has not been stopped, so the controller must keep its reference, not null it.
+    const live = spyHandle();
+    let source = "good";
+    let generateCall = 0;
+    const throwingScenario: Scenario = {
+      id: "test",
+      briefing: "b",
+      generate: () => {
+        if (generateCall++ === 1) {
+          throw new Error("bad scenario build"); // the second run's commit setup throws
+        }
+        return emptyRun;
+      },
+    };
+    const errors: RuleErrorInfo[] = [];
+    const controller = createRunController(
+      baseDeps({
+        scenario: throwingScenario,
+        getAlgorithmSource: () => sourceMode(source),
+        start: () => live.handle,
+        setError: (error) => {
+          if (error) {
+            errors.push(error);
+          }
+        },
+      }),
+    );
+    controller.run(); // start the live engine
+    await flush();
+    expect(live.stops).toBe(0);
+    source = "changed"; // a fresh Apply; its commit reaches generate, which throws
+    controller.run();
+    await flush();
+    expect(errors.at(-1)?.phase).toBe("setup"); // the commit-phase setup error surfaced
+    expect(live.stops).toBe(0); // the still-live engine was never stopped by the failed Apply
+    controller.dispose(); // the controller still owns it, so dispose stops it exactly once
+    expect(live.stops).toBe(1);
+  });
+
   it("fires onFinished when the live engine completes during a failing preflight (handle identity)", async () => {
     let finishes = 0;
     const done = deferred<void>();
