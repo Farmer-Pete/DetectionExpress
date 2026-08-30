@@ -12,7 +12,7 @@ Engineer" letter, and per-hunt briefings written in the "you write the rule" voi
 
 That frame no longer holds. The game now ships with a finished detection engine that
 Peter wrote. The player does not build it. The player watches it run against a
-modeled metro, then causes chaos and watches it hold under load. The engine is the
+modeled metro, then causes chaos and watches it hold under pressure. The engine is the
 demonstration, not the exercise.
 
 The old voice is now wrong wherever it survives. It tells the player to do work the
@@ -55,6 +55,6 @@ used for the `kiosk-pin-attack` briefing in this ticket.
   events, normalizes them, counts, and raises one alarm per burst.
 - Keep the real facts. State the exact pattern (five wrong PINs in five minutes) and
   the exact response (one alarm per burst, not one per event).
-- Write the engine as done. Present tense. The engine holds its speed under load.
+- Write the engine as done. Present tense. The engine holds its speed under pressure.
 - Do not ask the player to write a Rule, hire them, or hand them a task. They watch.
 - Plain words. Short sentences. Active voice. No hype. One idea per line.

@@ -16,7 +16,11 @@ describe("Briefing", () => {
 
   it("shows the tagline above the briefing", () => {
     renderBriefing();
-    expect(screen.getByText(liveScenario.tagline)).toBeDefined();
+    const tagline = screen.getByText(liveScenario.tagline);
+    const briefing = screen.getByText(kioskPinAttack.briefing);
+    // The briefing follows the tagline in the DOM, so the tagline sits above it.
+    const position = tagline.compareDocumentPosition(briefing);
+    expect(Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   it("describes the burst raising one Alert, in the new voice", () => {
