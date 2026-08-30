@@ -1,8 +1,8 @@
 # Detection Express
 
-The player builds a detection Engine and runs it against a rising stream of sensor readings from a train station. New sensors, new reading formats, and new threats keep arriving, and the player keeps re-architecting the Engine to handle them. The Engine strains, and the game is the ongoing adaptation.
+The game ships with a finished detection Engine that runs against a rising stream of sensor readings from a train station. The player watches it run clean, then causes chaos: more attackers, new sensors, new reading formats, new threats. The Engine strains under the rising load, and the game is watching it hold.
 
-The player runs the station watch. They do not stop anyone at the gate. They watch readings arrive from the station's sensors, spot the pattern that marks an intruder, and raise the alarm.
+The player observes the station watch. They do not stop anyone at the gate, and they do not build the Engine to progress. They watch readings arrive from the station's sensors, watch the Engine spot the pattern that marks an intruder, and watch it raise the alarm.
 
 ## Language
 
