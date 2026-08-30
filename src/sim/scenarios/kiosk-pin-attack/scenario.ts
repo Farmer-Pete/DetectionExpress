@@ -176,7 +176,7 @@ function assertFair(drafts: Draft[], victims: Set<string>, attacks: Attack[]): v
  * worst window in one pass.
  */
 function assertNoStrayThreshold(drafts: Draft[], attacks: Attack[]): void {
-  const windowByAccount = new Map(attacks.map((a) => [a.account, a.window]));
+  const windowByAccount = new Map(attacks.map((a) => [a.entity, a.window]));
   const failsByAccount = new Map<string, Draft[]>();
   for (const d of drafts) {
     if (d.outcome !== "fail") {
