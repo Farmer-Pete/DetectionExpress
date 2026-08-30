@@ -93,6 +93,14 @@ describe("App shell", () => {
     expect(screen.getByRole("button", { name: /how this works/i })).toBeDefined();
   });
 
+  it("mounts the inspector shell and no React Flow canvas", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    expect(screen.getByRole("region", { name: "Inspector" })).toBeDefined();
+    // The React Flow canvas is gone: its root wrapper class must be absent.
+    expect(container.querySelector(".react-flow")).toBeNull();
+    expect(container.querySelector(".pipeline")).toBeNull();
+  });
+
   it("renders the chaos ladder in the shell", () => {
     const { container } = render(<App createPipelineController={() => stubController()} />);
     expect(container.querySelector("#chaos-ladder")).not.toBeNull();

@@ -27,7 +27,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 | ----------- | ----------------------------------------------------------- | ----------------- |
 | `src/sim/`  | The Engine, Events, Rules, the tick. Pure logic.            | No. Never.        |
 | `src/game/` | The glue: the run loop and the store that bridges sim to UI. | Only the store.   |
-| `src/ui/`   | React components, gauges, panels, the React Flow canvas.     | Yes.              |
+| `src/ui/`   | React components, gauges, the inspector shell, the findings panel. | Yes.              |
 
 ## The rules
 
@@ -41,7 +41,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 
 5. **Throttle the UI.** Push snapshots to the HUD at about 10 to 30 Hz, even when the sim ticks faster. The eye does not need 60 Hz gauges.
 
-6. **The graph is the single source of topology.** The player edits nodes and edges in the store. The sim reads that graph as its wiring. Do not copy the graph into a second sim-only structure. Two truths drift apart.
+6. **The topology is a fixed constant the engine reads.** The chain lives as sim-shaped values in `src/game/topology.ts`, and `getGraph()` maps them to the wiring the sim reads. The player edits the Rule, not the graph. Do not copy the topology into a second sim-only structure. Two truths drift apart.
 
 7. **No ECS.** For dozens of Nodes and Events, plain typed modules with arrays and maps win. Revisit only if entity counts reach the thousands.
 
@@ -93,12 +93,6 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 - Test the transforms, the `Channel`, and the rate and heat math as pure functions. They need no DOM.
 - Keep real time out of the tests. Give the Sink an injectable delay, not a real clock. Drive the `Channel` by hand and assert on counts, rates, and heat.
 - Test React parts with `@testing-library/react`. happy-dom provides the DOM.
-
-## React Flow
-
-- React Flow (`@xyflow/react`) lands in Slice 0, not before.
-- Keep it controlled. Nodes and edges live in the store, not in component state.
-- Every change to the `nodes` array re-renders dependent components. So memoize custom nodes. Use store selectors to feed live data into one node without re-rendering the whole graph.
 
 ## Anti-slop
 

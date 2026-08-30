@@ -18,7 +18,6 @@
  * Tests inject controller factories through `createPipelineController` /
  * `createWorldController`, so the app never loads the real loader or engine under test.
  */
-import { ReactFlowProvider } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
 import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
@@ -34,12 +33,12 @@ import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
 import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { InspectorShell } from "./findings/InspectorShell";
 import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
 import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
-import { Pipeline } from "./Pipeline";
 import { scenarioSlug } from "./scenarios";
 
 /** Which mode is on screen. Only the visible mode's loop runs. */
@@ -265,9 +264,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
         {view === "pipeline" ? (
           <>
             <Hud />
-            <ReactFlowProvider>
-              <Pipeline />
-            </ReactFlowProvider>
+            <InspectorShell />
             <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
             <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
             <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />

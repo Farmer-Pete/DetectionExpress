@@ -1,6 +1,6 @@
 /**
- * Graph validation. The store graph is the single source of topology; the engine
- * reads it, validates it, and only then allocates channels and starts tasks.
+ * Graph validation. The fixed topology constant is the single source of topology; the
+ * engine reads it, validates it, and only then allocates channels and starts tasks.
  *
  * Slice 1 locks one shape: the ordered linear chain ingest -> normalize -> detect
  * -> sink (four nodes, three edges). Anything else (an unknown kind, a missing

@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { LiveFinding } from "../sim/correctness";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";
 import { LEVEL_SEED } from "./tuning";
 
-const initial = useGameStore.getState();
-
 beforeEach(() => {
   useGameStore.setState({
-    nodes: initial.nodes,
-    edges: initial.edges,
     snapshot: emptySnapshot(),
     source: referenceSource,
     localAlgorithm: null,
@@ -17,14 +14,40 @@ beforeEach(() => {
     error: null,
     sourceLocked: false,
     runPending: false,
+    selection: null,
   });
 });
 
+/** A LiveFinding fixture: the reconciliation logic reads only its `seq`. */
+function finding(seq: number): LiveFinding {
+  return {
+    finding: { alert: { eventIds: [], reason: "pin_brute_force", at: 0 } },
+    state: "hit",
+    reason: "pin_brute_force",
+    eventIds: [],
+    at: 0,
+    seq,
+  };
+}
+
+/** A snapshot carrying the given findings, otherwise empty. */
+function snapshotWith(findings: LiveFinding[]): SimSnapshot {
+  return { ...emptySnapshot(), findings };
+}
+
 describe("store", () => {
-  it("seeds the four-node chain the validator accepts", () => {
+  it("returns the fixed four-node chain from getGraph", () => {
     const graph = getGraph();
     expect(graph.nodes.map((node) => node.kind)).toEqual(["ingest", "normalize", "detect", "sink"]);
     expect(graph.edges).toHaveLength(3);
+  });
+
+  it("no longer exposes the graph as editable store state", () => {
+    const keys = Object.keys(useGameStore.getState());
+    expect(keys).not.toContain("nodes");
+    expect(keys).not.toContain("edges");
+    expect(keys).not.toContain("onNodesChange");
+    expect(keys).not.toContain("onEdgesChange");
   });
 
   it("seeds the Algorithm source and the level seed", () => {
@@ -65,20 +88,6 @@ describe("store", () => {
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
   });
 
-  it("applies node change handlers", () => {
-    useGameStore
-      .getState()
-      .onNodesChange([{ id: "sink", type: "position", position: { x: 900, y: 200 } }]);
-    const sink = useGameStore.getState().nodes.find((node) => node.id === "sink");
-    expect(sink?.position).toEqual({ x: 900, y: 200 });
-  });
-
-  it("applies edge change handlers", () => {
-    useGameStore.getState().onEdgesChange([{ id: "e1", type: "select", selected: true }]);
-    const edge = useGameStore.getState().edges.find((candidate) => candidate.id === "e1");
-    expect(edge?.selected).toBe(true);
-  });
-
   it("starts in source mode and holds a local override through setLocalAlgorithm", () => {
     expect(useGameStore.getState().localAlgorithm).toBeNull();
     useGameStore.getState().setLocalAlgorithm({ path: "/src/algorithms/kiosk.ts", version: 4 });
@@ -104,5 +113,63 @@ describe("store", () => {
     expect(useGameStore.getState().runPending).toBe(true);
     useGameStore.getState().setRunPending(false);
     expect(useGameStore.getState().runPending).toBe(false);
+  });
+});
+
+describe("store selection", () => {
+  it("starts with no selection", () => {
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("selects a finding by seq through selectFinding", () => {
+    useGameStore.getState().selectFinding(7);
+    expect(useGameStore.getState().selection).toEqual({ seq: 7 });
+  });
+
+  it("toggles: re-selecting the same seq clears the selection", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().selectFinding(7);
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("switches selection when a different seq is selected", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().selectFinding(9);
+    expect(useGameStore.getState().selection).toEqual({ seq: 9 });
+  });
+
+  it("clears the selection through clearSelection", () => {
+    useGameStore.getState().selectFinding(7);
+    useGameStore.getState().clearSelection();
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("setSnapshot keeps a selection whose seq is still present", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(3)]));
+    expect(useGameStore.getState().selection).toEqual({ seq: 3 });
+  });
+
+  it("setSnapshot clears a selection whose seq aged out of the findings", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(2)]));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("clears a stale selection across a run restart so a reused seq cannot alias", () => {
+    useGameStore.getState().selectFinding(0);
+    // A restart publishes an empty snapshot first (run-controller), which clears the
+    // selection because seq 0 is no longer present.
+    useGameStore.getState().setSnapshot(snapshotWith([]));
+    expect(useGameStore.getState().selection).toBeNull();
+    // The fresh run then reuses seq 0 for a different finding; selection stays cleared,
+    // so the old selection never aliases the new seq-0 finding.
+    useGameStore.getState().setSnapshot(snapshotWith([finding(0)]));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("setSnapshot leaves a null selection null", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1)]));
+    expect(useGameStore.getState().selection).toBeNull();
   });
 });
