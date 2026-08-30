@@ -18,6 +18,18 @@
   --threat: #f94144;
   --alert: #f9c74f;
   --ok: #43aa8b;
+
+  /* Living Metro per-sensor tokens (87-VIEW-NOTES.md section 7). One per sensor
+     code; several intentionally double up with a line or HUD color. */
+  --s-kiosk: #f9c74f;
+  --s-gate: #f2a900;
+  --s-tvm: #90be6d;
+  --s-cam: #4cc9f0;
+  --s-reader: #43aa8b;
+  --s-contact: #577590;
+  --s-train: #cfe3ea;
+  --s-relay: #f8961e;
+  --s-console: #f94144;
 }
 
 * {
@@ -453,6 +465,300 @@ body {
   color: var(--threat);
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* View toggle in the topbar. */
+.view-toggle {
+  margin-left: auto;
+  padding: 0.3rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* ---- Living Metro view ---- */
+.metro-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.metro-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.metro-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--ink);
+}
+
+.metro-counts {
+  display: flex;
+  gap: 1rem;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.metro-counts b {
+  color: var(--ink);
+}
+
+.metro-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.metro-btn {
+  padding: 0.25rem 0.8rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.metro-speed {
+  accent-color: var(--s-gate);
+  cursor: pointer;
+}
+
+.metro-speed-read {
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+}
+
+/* The legend is the left column (full height); the map fills the top-right; the log
+   is the bottom-right region. No panel overlays the map, so the whole network is
+   visible. Column and row extents follow 87-VIEW-NOTES.md section 1's gutter/log clamps. */
+.metro-stage {
+  display: grid;
+  grid-template-columns: clamp(210px, 26%, 300px) 1fr;
+  grid-template-rows: 1fr clamp(150px, 28%, 300px);
+  gap: 10px;
+  padding: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.metro-map-region {
+  grid-column: 2;
+  grid-row: 1;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.metro-map {
+  position: absolute;
+  inset: 0;
+}
+
+.metro-svg,
+.metro-actors {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.metro-network-link {
+  stroke: rgba(251, 213, 123, 0.1);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.metro-line {
+  fill: none;
+  stroke-width: 5.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.9;
+}
+
+.metro-station {
+  fill: var(--bg);
+  stroke: var(--ink);
+  stroke-width: 2.5;
+}
+
+.metro-station-name {
+  fill: var(--ink);
+  font:
+    11px ui-monospace,
+    monospace;
+  text-anchor: middle;
+}
+
+.metro-badge {
+  stroke: rgba(251, 213, 123, 0.35);
+  stroke-width: 1.5;
+}
+
+.metro-badge-name {
+  fill: #dfeaee;
+  font:
+    9px ui-monospace,
+    monospace;
+  text-anchor: middle;
+}
+
+.metro-badge-zone {
+  fill: rgba(251, 213, 123, 0.7);
+  font:
+    8px ui-monospace,
+    monospace;
+  text-anchor: middle;
+}
+
+.metro-chip rect {
+  opacity: 0.55;
+}
+
+.metro-chip-label {
+  fill: #0f303d;
+  font:
+    700 6px ui-monospace,
+    monospace;
+  text-anchor: middle;
+  opacity: 0.9;
+}
+
+/* Legend: the left column, spanning both rows, with its own scroll. */
+.metro-legend {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(21, 68, 87, 0.86);
+  backdrop-filter: blur(3px);
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.metro-legend-head {
+  margin-top: 0.4rem;
+  color: var(--ink);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.metro-legend-head:first-child {
+  margin-top: 0;
+}
+
+.metro-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.metro-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.metro-swatch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+/* The staff swatch mirrors the map glyph: a small filled green square, not a dot. */
+.metro-swatch-staff {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+}
+
+.metro-chip-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  color: #0f303d;
+  font:
+    700 8px ui-monospace,
+    monospace;
+}
+
+/* Event log: the bottom-right region, below the map. */
+.metro-log {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(15, 48, 61, 0.92);
+  backdrop-filter: blur(3px);
+}
+
+.metro-log-head {
+  color: var(--ink);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.3rem;
+}
+
+.metro-log-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metro-log-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metro-log-time {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 5ch;
+}
+
+.metro-log-msg {
+  color: #cfe0e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Topbar actions: the reopen control and the Hire Me surface, pushed to the right. */
