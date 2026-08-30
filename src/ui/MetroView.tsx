@@ -26,14 +26,17 @@ const placeName = new Map<string, string>([
   [world.controlCenter.id, world.controlCenter.name],
 ]);
 
+/** The map's line draw order; any line not listed sorts last. */
+const LINE_ORDER: readonly string[] = ["red", "blue", "green", "circle"];
+
+/** A line's rank in the draw order, or `Infinity` for an unlisted line (sorts last). */
+const lineRank = (id: string): number => {
+  const index = LINE_ORDER.indexOf(id);
+  return index === -1 ? Number.POSITIVE_INFINITY : index;
+};
+
 /** The four lines, for the legend, in the map's draw order. */
-const LEGEND_LINES = world.lines
-  .slice()
-  .sort(
-    (a, b) =>
-      ["red", "blue", "green", "circle"].indexOf(a.id) -
-      ["red", "blue", "green", "circle"].indexOf(b.id),
-  );
+const LEGEND_LINES = world.lines.slice().sort((a, b) => lineRank(a.id) - lineRank(b.id));
 
 /** The nine sensors, for the legend: code, color token, and name. */
 const LEGEND_SENSORS: readonly { code: string; color: string; name: string }[] = [
@@ -236,7 +239,8 @@ function EventLog() {
         {rows.map((entry, index) => {
           const row = logRow(entry);
           return (
-            <div className="metro-log-row" key={`${entry.tick}-${entry.actorId ?? index}`}>
+            // biome-ignore lint/suspicious/noArrayIndexKey: two readings from one actor on one tick share (tick, actorId); the row index is the only field that disambiguates them, and these rows hold no state, so a shifting index is harmless.
+            <div className="metro-log-row" key={`${entry.tick}-${entry.actorId ?? "?"}-${index}`}>
               <span className="metro-log-time">
                 {(entry.tick * GAME_SECONDS_PER_TICK).toFixed(1)}s
               </span>

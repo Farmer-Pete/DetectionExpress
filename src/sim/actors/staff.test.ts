@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
-import type { Badge } from "../entities/badge";
 import { distanceTable } from "../world/distance";
 import type { Presence } from "../world/presence";
 import { buildTimetable } from "../world/timetable";
@@ -143,13 +142,11 @@ describe("createStaff", () => {
 
 describe("initialStaffPresence", () => {
   it("stands the staff at its nearest station until its first tick", () => {
-    const badge: Badge = { id: "B1", grade: 3 };
     expect(initialStaffPresence("jct", 12)).toEqual({
       kind: "at",
       node: "jct",
       fromTick: 12,
       untilTick: 12,
     });
-    expect(badge.grade).toBe(3);
   });
 });

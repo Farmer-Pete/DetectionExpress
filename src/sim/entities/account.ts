@@ -50,6 +50,14 @@ export function buildAccounts(count: number, rng: () => number): Account[] {
   if (!Number.isInteger(count) || count < 0) {
     throw new Error(`buildAccounts: count must be a finite non-negative integer, got ${count}.`);
   }
+  // The name space is one `stem.letter` per (stem, a-z) pair. Asking for more distinct
+  // names than exist would spin the fill loop forever, so fail fast instead of hanging.
+  const ceiling = STEMS.length * 26;
+  if (count > ceiling) {
+    throw new Error(
+      `buildAccounts: count ${count} exceeds the unique-name ceiling of ${ceiling} (${STEMS.length} stems x 26 letters).`,
+    );
+  }
   const names = new Set<string>();
   while (names.size < count) {
     const stem = STEMS[Math.floor(rng() * STEMS.length)] ?? STEMS[0] ?? "rider";

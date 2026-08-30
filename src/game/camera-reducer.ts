@@ -17,6 +17,8 @@
  * perpetual run: a bucket older than the window is pruned the moment it ages out.
  */
 
+import { byCodeUnit } from "./order";
+
 /** A fare-gate grant the camera counts, keyed by its station and derived gate id. */
 export interface CameraGrant {
   station: string;
@@ -93,7 +95,7 @@ export function createCameraReducer(windowTicks: number): CameraReducer {
       }
 
       // 4. Sort by gate id, so the emitted counts are deterministic across ticks.
-      return [...totals.values()].sort((a, b) => a.gate.localeCompare(b.gate));
+      return [...totals.values()].sort((a, b) => byCodeUnit(a.gate, b.gate));
     },
   };
 }

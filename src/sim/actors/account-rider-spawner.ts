@@ -26,6 +26,7 @@ import {
   initialAccountRiderPresence,
 } from "./account-rider";
 import { type Admission, actorSeedHash } from "./actor";
+import { seededArrivalProcess } from "./arrival-process";
 
 /** Everything the spawner needs. `seed` is the run seed; the spawner derives its own stream. */
 export interface AccountRiderSpawnerConfig {
@@ -54,14 +55,8 @@ export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): Ac
   const rng = randomLcg(actorSeedHash(config.seed, "account-rider-spawner"));
   const accounts = buildAccounts(ACCOUNT_POOL, rng);
   const stations = config.world.stations;
-  const gapSpan = ACCOUNT_ARRIVAL_MAX_TICKS - ACCOUNT_ARRIVAL_MIN_TICKS + 1;
 
   let births = 0;
-  // The next tick an arrival is considered. Starts at 0 so the cast fills from the
-  // first tick, then advances by a seeded gap after each arrival.
-  let nextArrival = 0;
-
-  const drawGap = (): number => ACCOUNT_ARRIVAL_MIN_TICKS + Math.floor(rng() * gapSpan);
 
   const pick = <T>(items: readonly T[]): T | undefined => items[Math.floor(rng() * items.length)];
 
@@ -85,18 +80,11 @@ export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): Ac
     };
   };
 
-  return {
-    tick: (nowTick, liveAccountRiders) => {
-      const admissions: Admission<WorldReading, WorldEnv>[] = [];
-      while (nextArrival <= nowTick) {
-        if (liveAccountRiders + admissions.length < config.target) {
-          admissions.push(makeAdmission(nowTick));
-        }
-        // Advance past this arrival whether or not it was filled, so a full cast drops
-        // the arrival rather than backing up unboundedly.
-        nextArrival += drawGap();
-      }
-      return admissions;
-    },
-  };
+  return seededArrivalProcess({
+    minGap: ACCOUNT_ARRIVAL_MIN_TICKS,
+    maxGap: ACCOUNT_ARRIVAL_MAX_TICKS,
+    rng,
+    target: config.target,
+    admit: makeAdmission,
+  });
 }

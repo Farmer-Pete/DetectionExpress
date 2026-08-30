@@ -101,13 +101,13 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
   // issuing commands in lockstep.
   const occId = deps.world.controlCenter.id;
   const buildOperators = (): readonly WorldFixture[] =>
-    controlReference.consoles.map((console, index): WorldFixture => {
+    controlReference.consoles.map((consoleRef, index): WorldFixture => {
       const id = `OP${index + 1}`;
       return {
         actor: createOperator({
           id,
           node: occId,
-          console,
+          console: consoleRef,
           startTick: index * CONTROL_LAUNCH_PHASE_TICKS,
           cadenceTicks: OPERATOR_COMMAND_TICKS,
         }),

@@ -176,9 +176,10 @@ export const SIM_TICKS_PER_CLOCK_TICK = 1;
 /**
  * A sensor flash lives 1.1 sim seconds (87-VIEW-NOTES.md section 5), derived from the
  * clock rate so its ring expands and fades over its full life. The canvas fades over
- * this span.
+ * this span. The sim advances SIM_TICKS_PER_CLOCK_TICK sim ticks per clock tick, so the
+ * life is scaled by it to hold the 1.1s wall intent whatever the sim step multiplier.
  */
-export const FLASH_LIFE_TICKS = Math.round(1.1 * CLOCK_HZ);
+export const FLASH_LIFE_TICKS = Math.round(1.1 * CLOCK_HZ * SIM_TICKS_PER_CLOCK_TICK);
 
 /**
  * How many recent sim ticks of flashes the world snapshot carries. A flash older than

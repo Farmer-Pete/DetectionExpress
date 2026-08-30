@@ -21,6 +21,7 @@ import {
 import type { World } from "../world/world";
 import type { WorldEnv, WorldReading } from "../world-reading";
 import { type Admission, actorSeedHash } from "./actor";
+import { seededArrivalProcess } from "./arrival-process";
 import type { RiderTripConfig } from "./rider-core";
 import { createWorldRider, initialRiderPresence } from "./world-rider";
 
@@ -52,15 +53,9 @@ export function createRiderSpawner(config: RiderSpawnerConfig): RiderSpawner {
   // so the spawn cadence never shares a stream with a rider's own draws.
   const rng = randomLcg(actorSeedHash(config.seed, "rider-spawner"));
   const stations = config.world.stations;
-  const gapSpan = RIDER_ARRIVAL_MAX_TICKS - RIDER_ARRIVAL_MIN_TICKS + 1;
   const balanceSpan = RIDER_BALANCE_MAX - RIDER_BALANCE_MIN + 1;
 
   let births = 0;
-  // The next tick at which an arrival is considered. Starts at 0 so the population
-  // fills from the first tick, then advances by a seeded gap after each arrival.
-  let nextArrival = 0;
-
-  const drawGap = (): number => RIDER_ARRIVAL_MIN_TICKS + Math.floor(rng() * gapSpan);
 
   const makeAdmission = (atTick: number): Admission<WorldReading, WorldEnv> => {
     const id = `C${String(births++).padStart(6, "0")}`;
@@ -85,18 +80,11 @@ export function createRiderSpawner(config: RiderSpawnerConfig): RiderSpawner {
     };
   };
 
-  return {
-    tick: (nowTick, liveRiders) => {
-      const admissions: Admission<WorldReading, WorldEnv>[] = [];
-      while (nextArrival <= nowTick) {
-        if (liveRiders + admissions.length < config.target) {
-          admissions.push(makeAdmission(nowTick));
-        }
-        // Advance past this arrival whether or not it was filled, so a full
-        // population drops the arrival rather than backing up unboundedly.
-        nextArrival += drawGap();
-      }
-      return admissions;
-    },
-  };
+  return seededArrivalProcess({
+    minGap: RIDER_ARRIVAL_MIN_TICKS,
+    maxGap: RIDER_ARRIVAL_MAX_TICKS,
+    rng,
+    target: config.target,
+    admit: makeAdmission,
+  });
 }

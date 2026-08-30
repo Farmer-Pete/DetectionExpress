@@ -33,7 +33,7 @@ const CHIP_COLOR: Record<SensorCode, string> = {
 const nodes = metroNodes(world);
 const lines = metroLines(world);
 const sites = nodes.filter((node) => node.kind !== "station");
-const occPoint = nodes.find((node) => node.id === "occ")?.point;
+const occPoint = nodes.find((node) => node.id === world.controlCenter.id)?.point;
 
 export function MetroMap() {
   return (

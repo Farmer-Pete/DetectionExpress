@@ -89,8 +89,13 @@ export function createTrain(config: TrainConfig): Actor<WorldReading, WorldEnv> 
         let leg: ReturnType<typeof stepLeg>;
         try {
           leg = stepLeg(schedule, here, pending.dir, tick);
-        } catch {
-          throw new Error(`train "${config.id}": bad hop on line "${config.line}".`);
+        } catch (error) {
+          throw new Error(
+            `train "${config.id}": bad hop on line "${config.line}" at stop index ${here} (dir ${pending.dir}).`,
+            {
+              cause: error,
+            },
+          );
         }
         const nextTick = leg.arrTick;
         const reading: WorldReading = {

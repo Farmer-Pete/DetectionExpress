@@ -281,6 +281,14 @@ function offsetPoints(points: readonly Point[], offset: number): Point[] {
 /** Each line as an offset-parallel polyline in its world.json color, in the fixed order. */
 export function metroLines(world: World): LinePolyline[] {
   const lineById = new Map(world.lines.map((line) => [line.id, line]));
+  // LINE_ORDER fixes both draw order and parallel offset, so a world line missing from
+  // it has no place to draw. Fail loudly at load rather than silently dropping it.
+  const drawOrder = new Set<string>(LINE_ORDER);
+  for (const line of world.lines) {
+    if (!drawOrder.has(line.id)) {
+      throw new Error(`metroLayout: line "${line.id}" is not in the draw order (LINE_ORDER).`);
+    }
+  }
   const lines: LinePolyline[] = [];
   for (const id of LINE_ORDER) {
     const line = lineById.get(id);

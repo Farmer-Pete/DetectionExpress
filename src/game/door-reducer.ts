@@ -13,6 +13,8 @@
  * grants arrived in. It reads no wall clock (ARCHITECTURE rule 8).
  */
 
+import { byCodeUnit } from "./order";
+
 /** A grant that opens a door, keyed by its location and door name. */
 export interface DoorGrant {
   location: string;
@@ -53,8 +55,8 @@ function keyOf(grant: DoorGrant): string {
 /** Stable order for events and open doors: by location, then door name. */
 function byLocationDoor(a: DoorGrant, b: DoorGrant): number {
   return a.location === b.location
-    ? a.door.localeCompare(b.door)
-    : a.location.localeCompare(b.location);
+    ? byCodeUnit(a.door, b.door)
+    : byCodeUnit(a.location, b.location);
 }
 
 export function createDoorReducer(dwellTicks: number): DoorReducer {

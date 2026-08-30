@@ -75,6 +75,12 @@ function eligibleDoors(
 export function createStaff(config: StaffConfig): Actor<WorldReading, WorldEnv> {
   let phase: Phase = { kind: "arriving" };
 
+  // The eligible door list is a pure function of the frozen world, this staff's
+  // location, and its badge grade, all stable across the run (ADR-0007 freezes env).
+  // env only reaches `act`, so it is computed once on the first act and reused, rather
+  // than re-derived (filter + sort over every world door) on every tick.
+  let doorsMemo: readonly { name: string; zone: string }[] | undefined;
+
   /** One door-reader grant `WorldReading` at `tick`, in the game-second domain. */
   const grant = (door: { name: string; zone: string }, tick: number): WorldReading => ({
     sensor: "door-reader",
@@ -92,7 +98,10 @@ export function createStaff(config: StaffConfig): Actor<WorldReading, WorldEnv> 
     id: config.id,
     start: () => config.startTick,
     act: ({ env, tick }) => {
-      const doors = eligibleDoors(env.world, config.location, config.badge.grade);
+      if (doorsMemo === undefined) {
+        doorsMemo = eligibleDoors(env.world, config.location, config.badge.grade);
+      }
+      const doors = doorsMemo;
 
       if (phase.kind === "arriving") {
         // Walk in from the nearest station to the site over `walkTicks`, no reading.

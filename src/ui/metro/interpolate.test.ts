@@ -68,4 +68,9 @@ describe("stepBetween (board / alight)", () => {
   it("clamps to the start before the window opens", () => {
     expect(stepBetween(platform, train, 100, 10, 40)).toEqual(platform);
   });
+
+  it("snaps to the end point for a non-positive duration", () => {
+    // A zero (or negative) window has no span to blend across, so it lands on the end.
+    expect(stepBetween(platform, train, 100, 0, 100)).toEqual(train);
+  });
 });

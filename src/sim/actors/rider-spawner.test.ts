@@ -21,7 +21,6 @@ function run(seed: number, liveOf: (tick: number, born: number) => number, ticks
   const spawner = createRiderSpawner({ seed, world, target: TARGET_RIDERS });
   const ids: string[] = [];
   const origins: string[] = [];
-  let maxConcurrent = 0;
   let born = 0;
   for (let tick = 1; tick <= ticks; tick++) {
     const live = liveOf(tick, born);
@@ -35,10 +34,9 @@ function run(seed: number, liveOf: (tick: number, born: number) => number, ticks
         origins.push(presence.node);
       }
       born += 1;
-      maxConcurrent = Math.max(maxConcurrent, live + admissions.length);
     }
   }
-  return { ids, origins, maxConcurrent };
+  return { ids, origins };
 }
 
 describe("createRiderSpawner", () => {

@@ -23,6 +23,7 @@ import { type Badge, buildBadges } from "../entities/badge";
 import type { World } from "../world/world";
 import type { WorldEnv, WorldReading } from "../world-reading";
 import { type Admission, actorSeedHash } from "./actor";
+import { seededArrivalProcess } from "./arrival-process";
 import { createStaff, initialStaffPresence, type StaffConfig } from "./staff";
 
 /** Everything the spawner needs. `seed` is the run seed; the spawner derives its own stream. */
@@ -70,14 +71,8 @@ export function createStaffSpawner(config: StaffSpawnerConfig): StaffSpawner {
   const rng = randomLcg(actorSeedHash(config.seed, "staff-spawner"));
   const badges = buildBadges(STAFF_BADGE_POOL, rng);
   const places = destinations(config.world);
-  const gapSpan = STAFF_ARRIVAL_MAX_TICKS - STAFF_ARRIVAL_MIN_TICKS + 1;
 
   let births = 0;
-  // The next tick an arrival is considered. Starts at 0 so the cast fills from the
-  // first tick, then advances by a seeded gap after each arrival.
-  let nextArrival = 0;
-
-  const drawGap = (): number => STAFF_ARRIVAL_MIN_TICKS + Math.floor(rng() * gapSpan);
 
   const pick = <T>(items: readonly T[]): T | undefined => items[Math.floor(rng() * items.length)];
 
@@ -102,18 +97,11 @@ export function createStaffSpawner(config: StaffSpawnerConfig): StaffSpawner {
     };
   };
 
-  return {
-    tick: (nowTick, liveStaff) => {
-      const admissions: Admission<WorldReading, WorldEnv>[] = [];
-      while (nextArrival <= nowTick) {
-        if (liveStaff + admissions.length < config.target) {
-          admissions.push(makeAdmission(nowTick));
-        }
-        // Advance past this arrival whether or not it was filled, so a full cast drops
-        // the arrival rather than backing up unboundedly.
-        nextArrival += drawGap();
-      }
-      return admissions;
-    },
-  };
+  return seededArrivalProcess({
+    minGap: STAFF_ARRIVAL_MIN_TICKS,
+    maxGap: STAFF_ARRIVAL_MAX_TICKS,
+    rng,
+    target: config.target,
+    admit: makeAdmission,
+  });
 }

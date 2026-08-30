@@ -55,12 +55,22 @@ describe("createStaffSpawner", () => {
     expect(ids).toHaveLength(0);
   });
 
-  it("walks staff in from real stations of door-bearing locations", () => {
+  it("walks staff in from the nearest station of a door-bearing location", () => {
     const { stations } = run(5, () => 0, 2000);
-    const stationIds = new Set(world.stations.map((station) => station.id));
+    // Each door-bearing location (every site, plus the OCC) has exactly one station a
+    // staffer walks in from. The OCC carries no nearestStation of its own; staff reach it
+    // from Central ("cen"), matching the spawner's OCC_NEAREST_STATION. This set is a
+    // strict subset of all stations, so it is a tighter check than mere membership.
+    const doorLocationStations = new Set<string>([
+      ...world.sites.map((site) => site.nearestStation),
+      "cen",
+    ]);
+    const allStations = new Set(world.stations.map((station) => station.id));
+    expect(doorLocationStations.size).toBeLessThan(allStations.size);
     expect(stations.length).toBeGreaterThan(0);
     for (const station of stations) {
-      expect(stationIds.has(station)).toBe(true);
+      // The origin pairs with a door-bearing location, not just any station on the map.
+      expect(doorLocationStations.has(station)).toBe(true);
     }
   });
 });
