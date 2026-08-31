@@ -27,30 +27,32 @@
  * it ticks too fast to announce; a separate `role="status"` region carries
  * only the low-frequency phase change ("wave incoming", then "wave arrived"
  * once the wave starts), which fires at most a few times per run. On the
- * incoming -> active edge the panel's own column
- * flashes once (`useWavePhaseEdge`, one-shot ownership: this component owns
- * its `.waveflash` class and clears it itself, independent of App's
- * `.shake`). The queue bar also gains a `queue-bar-danger` pulse class at
- * danger severity (juice item 2).
+ * incoming -> active edge the panel's own column flashes once
+ * (`useWavePhaseEdge` feeding its own `useOneShotFlag` call, one-shot
+ * ownership: this component holds its own hook instance and clears
+ * `.waveflash` itself, independent of App's `.shake`, which calls the same
+ * shared hook from its own instance). The queue bar also gains a
+ * `queue-bar-danger` pulse class at danger severity (juice item 2).
  *
  * The conclusion gate (F004+F006): severity COLORS persist on the frozen
  * terminal frame (`severityFill` stays ungated), but ANIMATED cues — the
  * flash edge and the danger pulse — gate on `snapshot.status === "running"`.
  * `running` is derived once, early, and feeds `useWavePhaseEdge` a `"calm"`
  * input while not running, so a status flip alone can never manufacture an
- * edge; `running` is deliberately left out of the flash effect's own deps
- * (only `edgeToken` drives it), since adding it would re-fire the last edge
- * on a status flip instead of gating admission at the source. This is about
- * conclusion, never the transport freeze: pausing (`transport.frozen`) leaves
- * every cue live, since the run can still resume.
+ * edge; `running` is deliberately left out of `useOneShotFlag`'s own token
+ * input (only `edgeToken` drives it), since folding it in there would re-fire
+ * the last edge on a status flip instead of gating admission at the source.
+ * This is about conclusion, never the transport freeze: pausing
+ * (`transport.frozen`) leaves every cue live, since the run can still resume.
  */
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect } from "react";
 import type { Speed } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
 import { GAME_SECONDS_PER_TICK, LOG_QUEUE_MAX } from "../../game/tuning";
 import type { RingEvent } from "../../sim/inspector";
 import type { SimSnapshot } from "../../sim/snapshot";
 import { severityFill, severityLevel } from "../hud/severity";
+import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
 import { formatRow } from "./formatters";
 
@@ -75,6 +77,12 @@ const WAVE_COUNTDOWN_BUCKET_S = 30;
  * (active, or calm with no wave left). `incoming` drives the pulsing style.
  * The countdown quantizes to `WAVE_COUNTDOWN_BUCKET_S`-second buckets (see
  * that constant's comment for why a plain per-second ceil does not work).
+ * Honest caveat, at the shipped tuning: `DRAIN_GAP_TICKS` (45) is the whole
+ * calm gap before a successor wave, so every calm tick that gap can ever
+ * produce buckets to the same constant "next wave in 90s" right up until the
+ * phase flips to INCOMING — the reader never sees it count down. That is a
+ * consequence of `WAVE_COUNTDOWN_BUCKET_S` (a #40 felt-pace knob) sized close
+ * to the gap itself, not a bug; this comment records it, not fixes it.
  */
 function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
   if (wave.phase === "incoming") {
@@ -186,15 +194,7 @@ export function LogPanel() {
   // out of the effect's own deps below (only `edgeToken` drives it) — adding it
   // there would re-fire the last edge on a status flip instead.
   const edgeToken = useWavePhaseEdge(running ? wave.phase : "calm");
-  const [flashing, setFlashing] = useState(false);
-  useEffect(() => {
-    if (edgeToken === 0) {
-      return;
-    }
-    setFlashing(true);
-    const timer = setTimeout(() => setFlashing(false), WAVEFLASH_MS);
-    return () => clearTimeout(timer);
-  }, [edgeToken]);
+  const flashing = useOneShotFlag(edgeToken, WAVEFLASH_MS);
 
   // The panel owns a Space-to-freeze listener: added on mount, removed on unmount. It
   // ignores key repeats and editable targets, and it reads the freeze state fresh from

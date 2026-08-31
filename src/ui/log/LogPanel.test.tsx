@@ -265,16 +265,22 @@ describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)"
 
 describe("LogPanel wave countdown bucketing (GH38 review round 4, F014)", () => {
   it("renders known tick values at their 30-game-second bucket", () => {
-    // 30 ticks * GAME_SECONDS_PER_TICK (2) = 60 raw game-seconds, already a
+    // waveStateAt only reports "calm" once ticksUntilNext > WAVE_WARN_TICKS
+    // (30); at or below that it is "incoming" instead. Both fixtures below
+    // use the smallest producible-calm tick counts, not arbitrary round
+    // numbers, so this test only encodes states the engine can actually emit.
+    //
+    // 60 ticks * GAME_SECONDS_PER_TICK (2) = 120 raw game-seconds, already a
     // bucket multiple, so it renders unchanged.
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 60, eventsPerTick: null });
     const { rerender } = render(<LogPanel />);
-    expect(screen.getByText("next wave in 60s")).toBeDefined();
+    expect(screen.getByText("next wave in 120s")).toBeDefined();
 
-    // 1 tick * 2 = 2 raw game-seconds, rounding up into the first bucket.
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+    // 31 ticks (the smallest tick count waveStateAt ever reports as "calm") *
+    // 2 = 62 raw game-seconds, rounding up into the 90 bucket.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
     rerender(<LogPanel />);
-    expect(screen.getByText("next wave in 30s")).toBeDefined();
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
   });
 
   it("renders adjacent tick values inside one 30s bucket identically", () => {

@@ -328,12 +328,12 @@ describe("App wave shake (#38 juice item 1)", () => {
     useGameStore.setState({ snapshot: { ...emptySnapshot(), wave } });
   }
 
-  it("adds .shake to the app root on the incoming -> active edge, then clears it", () => {
+  it("adds .shake to .app-shell on the incoming -> active edge, then clears it", () => {
     vi.useFakeTimers();
     try {
       setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
       const { container } = render(<App createPipelineController={() => stubController()} />);
-      const shell = container.querySelector(".app");
+      const shell = container.querySelector(".app-shell");
       expect(shell?.className).not.toMatch(/shake/);
 
       act(() => {
@@ -353,11 +353,34 @@ describe("App wave shake (#38 juice item 1)", () => {
   it("does not shake on a rerender that is not an incoming -> active edge", () => {
     setWave({ phase: "calm", index: 0, ticksUntilNext: 10, eventsPerTick: null });
     const { container } = render(<App createPipelineController={() => stubController()} />);
-    const shell = container.querySelector(".app");
+    const shell = container.querySelector(".app-shell");
     act(() => {
       setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
     });
     expect(shell?.className).not.toMatch(/shake/);
+  });
+
+  it("shakes .app-shell, not the intro overlay's ancestor, so the overlay escapes it (F006)", () => {
+    localStorage.clear(); // show the overlay so it is on screen while .app-shell shakes
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+      const overlay = container.querySelector(".intro-overlay-backdrop");
+      expect(overlay).not.toBeNull();
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      expect(shell?.className).toMatch(/shake/);
+      // The overlay is a sibling of the shaken .app-shell, not a descendant of it, so
+      // its `position: fixed` backdrop never inherits the shake transform's containing
+      // block.
+      expect(shell?.contains(overlay)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -374,7 +397,7 @@ describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006
         "running",
       );
       const { container } = render(<App createPipelineController={() => stubController()} />);
-      const shell = container.querySelector(".app");
+      const shell = container.querySelector(".app-shell");
       expect(shell?.className).not.toMatch(/shake/);
 
       act(() => {
@@ -402,7 +425,7 @@ describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006
         "running",
       );
       const { container } = render(<App createPipelineController={() => stubController()} />);
-      const shell = container.querySelector(".app");
+      const shell = container.querySelector(".app-shell");
 
       act(() => {
         setWaveAndStatus(
@@ -426,7 +449,7 @@ describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006
         "running",
       );
       const { container } = render(<App createPipelineController={() => stubController()} />);
-      const shell = container.querySelector(".app");
+      const shell = container.querySelector(".app-shell");
       act(() => {
         setWaveAndStatus(
           { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },

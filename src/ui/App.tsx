@@ -19,12 +19,16 @@
  * `createWorldController`, so the app never loads the real loader or engine under test.
  *
  * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
- * (`useWavePhaseEdge`) toggles `.shake` on the app root for `SHAKE_MS` on the
- * incoming -> active edge, independent of LogPanel's own `.waveflash`. The
- * shake gates on run conclusion (F004+F006): `useWavePhaseEdge` reads
- * `"calm"` once `snapshot.status` is no longer `"running"`, so a shake never
- * fires off a frozen terminal frame, and a fresh run re-arms the edge once it
- * starts running again.
+ * (`useWavePhaseEdge`) toggles `.shake` on `.app-shell` for `SHAKE_MS` on the
+ * incoming -> active edge, independent of LogPanel's own `.waveflash`. It
+ * lands on `.app-shell`, not the outer `.app` wrapper, because the `shake`
+ * keyframe's `transform` makes its own element a containing block for any
+ * `position: fixed` descendant (F006): `.app-shell` and `IntroOverlay` are
+ * siblings inside `.app`, so shaking `.app-shell` never drags the overlay's
+ * fixed backdrop along with it. The shake gates on run conclusion
+ * (F004+F006): `useWavePhaseEdge` reads `"calm"` once `snapshot.status` is no
+ * longer `"running"`, so a shake never fires off a frozen terminal frame, and
+ * a fresh run re-arms the edge once it starts running again.
  */
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
@@ -48,6 +52,7 @@ import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { scenarioSlug } from "./scenarios";
+import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
 /** Matches the CSS `shake` keyframes' 0.3s duration (`src/index.css`). */
@@ -114,15 +119,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
   const wavePhase = useGameStore((s) => s.snapshot.wave.phase);
   const status = useGameStore((s) => s.snapshot.status);
   const edgeToken = useWavePhaseEdge(status === "running" ? wavePhase : "calm");
-  const [shaking, setShaking] = useState(false);
-  useEffect(() => {
-    if (edgeToken === 0) {
-      return;
-    }
-    setShaking(true);
-    const timer = setTimeout(() => setShaking(false), SHAKE_MS);
-    return () => clearTimeout(timer);
-  }, [edgeToken]);
+  const shaking = useOneShotFlag(edgeToken, SHAKE_MS);
 
   // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
   // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
@@ -289,12 +286,14 @@ export function App({ createPipelineController, createWorldController }: AppProp
   };
 
   return (
-    <div className={shaking ? "app shake" : "app"}>
+    <div className="app">
       {/* The shell. While the intro overlay is open it is `inert`, so a screen
           reader's virtual cursor and the keyboard cannot reach it and the overlay
           is truly modal. The overlay is a sibling of this container, so it stays
-          interactive. */}
-      <div className="app-shell" inert={introOpen}>
+          interactive. The shake class also lands here, not on the outer wrapper
+          above, so its transform never turns into a containing block for the
+          overlay's `position: fixed` backdrop (F006). */}
+      <div className={shaking ? "app-shell shake" : "app-shell"} inert={introOpen}>
         <header className="topbar">
           <h1>Detection Express</h1>
           <span className="slice-tag">Observe the Engine, then cause chaos</span>
