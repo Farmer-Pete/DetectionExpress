@@ -346,10 +346,23 @@ describe("App view toggle", () => {
     expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+
+    // The pipeline teardown reset the snapshot to empty (F024) on the way out above.
+    // Repopulate it before re-entering, so the fresh FxLayer built on re-entry mounts
+    // over a genuinely populated store — the F004 scenario this test is named for —
+    // rather than an empty one that would pass this assertion trivially.
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        findings: [liveFinding(2, [20])],
+        decisions: [caughtDecision(2)],
+      },
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
 
-    // The pipeline teardown reset the snapshot to empty (F024); the fresh FxLayer that
-    // remounts over it, or any future populated re-entry, both fire nothing.
+    // The fresh FxLayer seeds its mount baseline from that already-populated store,
+    // the same as the very first mount above, so re-entry fires nothing either.
     expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
     expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
   });
