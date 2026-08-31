@@ -8,7 +8,6 @@ import type { GraphEdge, GraphNode } from "../../sim/graph";
 import { buildOptimizedRule } from "../../sim/scenarios/pin-brute-force/optimization";
 import { buildReferenceAlgorithm } from "../../sim/scenarios/pin-brute-force/reference";
 import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import { buildSchedule } from "../../sim/schedule";
 import { makeGovernor, type ServiceRate } from "../../sim/service-governor";
 import type { SimSnapshot } from "../../sim/snapshot";
@@ -166,7 +165,6 @@ const EDGES: GraphEdge[] = [
   { id: "e3", source: "detect", target: "sink" },
 ];
 const REAL_SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,

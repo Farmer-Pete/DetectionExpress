@@ -50,8 +50,19 @@ export interface GeneratedRun {
 
 export interface Scenario {
   readonly id: string;
-  /** The Hunt text shown to the player before they touch the Rule. */
-  readonly briefing: string;
-  /** Plan the whole run from a seed. Deterministic. */
-  generate(seed: number): GeneratedRun;
+  /**
+   * Plan the whole run from a seed. Deterministic: the same seed (and, when
+   * given, the same partition) always returns the same run.
+   *
+   * `partition` is the composable-streams seam (GH42-PLAN.md "the merge seam"),
+   * promoted here from the scenario-specific `generate` a scenario module used to
+   * expose on the side: omitted, a scenario draws its identity pool from its own
+   * seeded rng, exactly as a solo run always has. Given an explicit partition, a
+   * scenario that supports it draws instead from a fixed, seed-independent
+   * namespace slice, so two runs generated from different seeds but different
+   * partitions are guaranteed to draw disjoint entities — `mergeRuns`'s
+   * entity-disjointness invariant depends on this. A scenario with nothing to
+   * partition may simply ignore the argument.
+   */
+  generate(seed: number, partition?: number): GeneratedRun;
 }

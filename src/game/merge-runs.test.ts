@@ -3,19 +3,22 @@ import { createScorer } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { DetectView } from "../sim/finding";
 import { mergeRuns } from "../sim/merge-runs";
-import { generate } from "../sim/scenarios/pin-brute-force/scenario";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
-import { buildEngine } from "./registry";
+import { buildEngine, scenarioEntry } from "./registry";
 import { CORRECTNESS_W_FN, CORRECTNESS_W_FP, CORRECTNESS_WINDOW, LEVEL_SEED } from "./tuning";
 
 // GH42-PLAN.md "Composable streams: the merge seam" + "Scoring for mixed hunts": two
 // pin-brute-force runs, differently seeded and drawn from disjoint identity
 // partitions, merge into one stream that the ONE composed engine scores as if it
-// were a single run.
+// were a single run. `partition` rides the PUBLIC `Scenario.generate` seam here
+// (via the registry join), not a scenario-specific function.
 describe("mergeRuns + the registry-composed engine (M4)", () => {
   it("scores 100 across two merged, partitioned pin-brute-force runs thrown at one engine", () => {
-    const runA = generate(LEVEL_SEED, 0);
-    const runB = generate(2026, 1);
+    const entry = scenarioEntry("pin-brute-force");
+    if (!entry) {
+      throw new Error("pin-brute-force is not registered");
+    }
+    const runA = entry.scenario.generate(LEVEL_SEED, 0);
+    const runB = entry.scenario.generate(2026, 1);
     const merged = mergeRuns([runA, runB]);
 
     // The visible shape a caller relies on: every Attack survives the merge with a
@@ -27,7 +30,6 @@ describe("mergeRuns + the registry-composed engine (M4)", () => {
 
     const engine = buildEngine();
     const scorer = createScorer(merged.attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,

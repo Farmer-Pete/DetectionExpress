@@ -14,9 +14,10 @@ import { admitArrivals } from "../../actors/admission";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
+import type { GeneratedRun } from "../../scenario";
 import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm } from "./reference";
-import { generate, pinBruteForce } from "./scenario";
+import { pinBruteForce } from "./scenario";
 import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, PIN_BRUTE_FORCE_WINDOW_S } from "./tuning";
 
 /** The total attackers across all waves; the globally distinct victim count. */
@@ -158,7 +159,6 @@ describe("pinBruteForce.generate", () => {
   it("lets the in-process reference Algorithm score 100 via the scorer", () => {
     const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
@@ -285,15 +285,21 @@ describe("referenceSource", () => {
   });
 });
 
+// GH42-PLAN.md's minimal merge seam: `partition` rides the PUBLIC `Scenario.generate`
+// contract, not a scenario-specific function only this module's own tests could reach.
+// Every case below drives it through `pinBruteForce.generate` (the `Scenario` object),
+// exactly as `mergeRuns`'s own caller (`game/merge-runs.test.ts`) does.
 describe("generate's partition parameter (GH42-PLAN.md's minimal merge seam)", () => {
-  it("with no partition, replays exactly the pre-GH42 behavior for a given seed", () => {
-    expect(generate(LEVEL_SEED)).toEqual(pinBruteForce.generate(LEVEL_SEED));
+  it("with no partition, generates the same run as an explicit undefined partition", () => {
+    expect(pinBruteForce.generate(LEVEL_SEED)).toEqual(
+      pinBruteForce.generate(LEVEL_SEED, undefined),
+    );
   });
 
   it("draws disjoint accounts for two different partitions, even across different seeds", () => {
-    const a = generate(LEVEL_SEED, 0);
-    const b = generate(2026, 1);
-    const accountsOf = (run: ReturnType<typeof generate>): Set<string> =>
+    const a = pinBruteForce.generate(LEVEL_SEED, 0);
+    const b = pinBruteForce.generate(2026, 1);
+    const accountsOf = (run: GeneratedRun): Set<string> =>
       new Set(run.attacks.map((attack) => attack.entity));
     const aAccounts = accountsOf(a);
     const bAccounts = accountsOf(b);
@@ -303,8 +309,8 @@ describe("generate's partition parameter (GH42-PLAN.md's minimal merge seam)", (
   });
 
   it("is deterministic for a given seed and partition", () => {
-    const a = generate(LEVEL_SEED, 1);
-    const b = generate(LEVEL_SEED, 1);
+    const a = pinBruteForce.generate(LEVEL_SEED, 1);
+    const b = pinBruteForce.generate(LEVEL_SEED, 1);
     expect(a).toEqual(b);
   });
 });

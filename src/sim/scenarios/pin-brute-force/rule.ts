@@ -13,17 +13,20 @@
  * fail, so a watch and its hit share `eventId` + `reason` and the scorer promotes one
  * row in place. A benign fumble never reaches the threshold, so it never fires a hit.
  *
- * The constants and the reason string are inlined literals, not cross-file imports,
- * because the assembler drops this file's relative imports when it inlines the rule
- * into the editor source. `rule.test.ts` guards them against drift.
+ * `WINDOW`/`THRESHOLD` import from this hunt's own `tuning.ts`, the single source
+ * for those numbers (`attacks.ts` and `scenario.ts` read the same constants). The
+ * assembler is dependency-aware: it inlines `tuning.ts` (and whatever it in turn
+ * imports) into this rule's own block in the editor source, rather than dropping
+ * the import and leaving `WINDOW`/`THRESHOLD` unresolved. The reason string stays
+ * an inlined literal, guarded against drift by `rule.test.ts`.
  */
 import { withinWindow } from "../../engine/core";
 import type { EngineRule } from "../../engine/engine";
 import type { DetectView, Finding } from "../../finding";
-
-/** Five wrong PINs on one account inside five minutes (game seconds) is an Attack. */
-const WINDOW = 300;
-const THRESHOLD = 5;
+import {
+  PIN_BRUTE_FORCE_THRESHOLD as THRESHOLD,
+  PIN_BRUTE_FORCE_WINDOW_S as WINDOW,
+} from "./tuning";
 
 /** The reason this hunt names. Stays an underscore token, matched by the scorer. */
 const REASON = "pin_brute_force";

@@ -13,7 +13,6 @@ import type { Finding } from "../../finding";
 import { resolveEntity } from "../../tasks";
 import { buildReferenceAlgorithm, type ReferenceAlgorithm } from "./reference";
 import { pinBruteForce } from "./scenario";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "./tuning";
 
 /**
  * The live game loads the `referenceSource` STRING, not the typed twin, so its watch,
@@ -134,7 +133,6 @@ describe("reference anchor stability over the real run (seam 9)", () => {
   }, () => {
     const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,

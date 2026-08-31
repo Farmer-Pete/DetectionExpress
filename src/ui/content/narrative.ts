@@ -5,12 +5,14 @@
  * consumed by a component through its props, so the values reach the screen and
  * Knip stays clean.
  *
- * The live scenario's briefing string is not here. It belongs to the Scenario
- * contract, so it stays on the sim scenario. The live scenario's display name and
- * tagline come from the registry's catalogue join (GH42-PLAN.md "Registry and
- * catalogue metadata"), not from a hardcoded singleton here: `liveScenarioFrom`
- * below only shapes a joined `ScenarioRegistryEntry` into the UI's `LiveScenario`
- * view, at the one chaos-ladder level today's single shipped hunt occupies.
+ * The live scenario's briefing string is not here either. Display text comes
+ * from the registry's catalogue join, the one source of it (GH42-PLAN.md
+ * "Registry and catalogue metadata"): `Scenario` (the sim contract) carries no
+ * briefing of its own, so there is nothing to drift against. The live scenario's
+ * display name and tagline come from that same join, not from a hardcoded
+ * singleton here: `liveScenarioFrom` below only shapes a joined
+ * `ScenarioRegistryEntry` into the UI's `LiveScenario` view, at the one
+ * chaos-ladder level today's single shipped hunt occupies.
  */
 import type { ScenarioRegistryEntry } from "../../game/registry";
 

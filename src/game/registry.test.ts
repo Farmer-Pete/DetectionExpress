@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createScorer } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { DetectView } from "../sim/finding";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import {
   buildEngine,
   type CatalogueEntry,
@@ -38,7 +37,6 @@ describe("the registry-composed engine", () => {
     const { events, attacks } = entry.scenario.generate(LEVEL_SEED);
     const engine = buildEngine();
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
@@ -75,22 +73,85 @@ function catalogueEntry(id: string): CatalogueEntry {
   };
 }
 
-const goodModule = { scenario: { id: "x", generate: () => ({}) }, buildRule: () => ({}) };
+/** A rule factory that builds a shape-valid `EngineRule`, for the pure-composition tests. */
+function goodBuildRule() {
+  return { id: "x", endpoints: ["e"], detect: () => [] };
+}
+
+const goodModule = {
+  scenario: { id: "x", generate: () => ({}) },
+  buildRule: goodBuildRule,
+  corpus: {},
+};
 
 describe("composeRegistry validation", () => {
   it("rejects a module with no valid scenario", () => {
     expect(() =>
-      composeRegistry({ "./a": { buildRule: () => ({}) } }, indexCatalogue([catalogueEntry("x")])),
+      composeRegistry(
+        { "./a": { buildRule: goodBuildRule, corpus: {} } },
+        indexCatalogue([catalogueEntry("x")]),
+      ),
     ).toThrow(/valid `scenario`/);
   });
 
   it("rejects a module with no buildRule factory", () => {
     expect(() =>
       composeRegistry(
-        { "./a": { scenario: { id: "x", generate: () => ({}) } } },
+        { "./a": { scenario: { id: "x", generate: () => ({}) }, corpus: {} } },
         indexCatalogue([catalogueEntry("x")]),
       ),
     ).toThrow(/buildRule/);
+  });
+
+  it("rejects a module with no corpus export", () => {
+    expect(() =>
+      composeRegistry(
+        { "./a": { scenario: { id: "x", generate: () => ({}) }, buildRule: goodBuildRule } },
+        indexCatalogue([catalogueEntry("x")]),
+      ),
+    ).toThrow(/corpus/);
+  });
+
+  it("rejects a Scenario missing generate", () => {
+    expect(() =>
+      composeRegistry(
+        { "./a": { scenario: { id: "x" }, buildRule: goodBuildRule, corpus: {} } },
+        indexCatalogue([catalogueEntry("x")]),
+      ),
+    ).toThrow(/valid `scenario`/);
+  });
+
+  it("rejects a built rule with no id", () => {
+    const badModule = {
+      scenario: { id: "x", generate: () => ({}) },
+      buildRule: () => ({ endpoints: ["e"], detect: () => [] }),
+      corpus: {},
+    };
+    expect(() =>
+      composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
+    ).toThrow(/EngineRule/);
+  });
+
+  it("rejects a built rule with empty endpoints", () => {
+    const badModule = {
+      scenario: { id: "x", generate: () => ({}) },
+      buildRule: () => ({ id: "x", endpoints: [], detect: () => [] }),
+      corpus: {},
+    };
+    expect(() =>
+      composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
+    ).toThrow(/EngineRule/);
+  });
+
+  it("rejects a built rule whose detect is not a function", () => {
+    const badModule = {
+      scenario: { id: "x", generate: () => ({}) },
+      buildRule: () => ({ id: "x", endpoints: ["e"], detect: "nope" }),
+      corpus: {},
+    };
+    expect(() =>
+      composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
+    ).toThrow(/EngineRule/);
   });
 
   it("rejects two scenarios sharing one id", () => {
@@ -106,6 +167,14 @@ describe("composeRegistry validation", () => {
     expect(() => composeRegistry({ "./a": goodModule }, indexCatalogue([]))).toThrow(
       /no matching catalogue/i,
     );
+  });
+});
+
+describe("indexCatalogue validation", () => {
+  it("rejects two catalogue entries sharing one id, naming both", () => {
+    const a = catalogueEntry("dup");
+    const b = { ...catalogueEntry("dup"), name: "Second Dup" };
+    expect(() => indexCatalogue([a, b])).toThrow(/dup.*Second Dup|Second Dup.*dup/i);
   });
 });
 

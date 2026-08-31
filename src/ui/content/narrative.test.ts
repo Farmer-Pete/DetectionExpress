@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { defaultEntry } from "../../game/registry";
-import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
 import { chaosLevels, hireMe, introCopy, liveScenarioFrom, REPO_URL } from "./narrative";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 // Stale phrases from the old "you build the engine" voice. None may survive in the
-// shipped prose. The live briefing string lives on the sim scenario, so it is checked
-// here alongside the narrative copy.
+// shipped prose. The live briefing string is the catalogue join's display text
+// (GH42-PLAN.md "Registry and catalogue metadata"), so it is checked here
+// alongside the narrative copy.
 const STALE_PHRASES = ["you write the rule", "you are hired", "write the Match Rule"];
 
 function allProse(): string {
@@ -24,7 +24,7 @@ function allProse(): string {
     ...chaosLevels.map((level) => `${level.label} ${level.blurb}`),
     liveScenario.displayName,
     liveScenario.tagline,
-    pinBruteForce.briefing,
+    defaultEntry.catalogue.security.briefing,
   ]
     .join(" ")
     .toLowerCase();

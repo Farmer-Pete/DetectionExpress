@@ -70,7 +70,6 @@ import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
-import { scenarioSlug } from "./scenarios";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
@@ -221,8 +220,6 @@ export function App({ createPipelineController, createWorldController }: AppProp
       reopenRef.current?.focus({ preventScroll: true });
     }
   }, [introOpen]);
-
-  const slug = scenarioSlug(defaultScenario.id);
 
   // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
   // controller per visible epoch; the cleanup disposes it (permanently) on hide or
@@ -405,8 +402,11 @@ export function App({ createPipelineController, createWorldController }: AppProp
           <Hud />
           <InspectorShell findingsPanelRef={findingsPanelRef} />
           <DecisionsPanel panelRef={decisionsPanelRef} />
-          <Briefing tagline={liveScenario.tagline} text={defaultScenario.briefing} />
-          <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+          <Briefing
+            tagline={liveScenario.tagline}
+            text={defaultEntry.catalogue.security.briefing}
+          />
+          <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
           <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
           {algoReady ? (
             <div className="local-ide">

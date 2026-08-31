@@ -84,7 +84,6 @@ describe("buildOptimizationAlgorithm", () => {
   it("scores 100 via the scorer over the whole run, catching every Attack", () => {
     const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,

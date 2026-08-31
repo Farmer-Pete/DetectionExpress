@@ -32,7 +32,6 @@ import {
 } from "./tuning";
 
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
@@ -575,6 +574,7 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 10 },
       eventIds: [0, 1, 2, 3, 4],
+      threshold: PIN_BRUTE_FORCE_THRESHOLD,
     };
     // Events at ts 0..8 (ticks 0..4), all before the window close and the gap.
     const events = [0, 1, 2, 3, 4].map((k) => ev(k, k * GAME_SECONDS_PER_TICK));
@@ -778,8 +778,9 @@ describe("engine publishes decisions bound to the inspector ring (T10)", () => {
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 100 },
       eventIds: [0],
+      threshold: 1,
     };
-    return { events, scorer: createScorer([attack], { threshold: 1, window: 10, wFn: 3, wFp: 1 }) };
+    return { events, scorer: createScorer([attack], { window: 10, wFn: 3, wFp: 1 }) };
   }
 
   const alertingAlgorithm: TaskAlgorithm = {
@@ -903,6 +904,7 @@ describe("engine carries a finalize decision through to the terminal snapshot", 
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 100_000 },
       eventIds: [0, 1],
+      threshold: 2,
     };
     const events = [ev(0, 0), ev(1, GAME_SECONDS_PER_TICK)];
     const h = launch({

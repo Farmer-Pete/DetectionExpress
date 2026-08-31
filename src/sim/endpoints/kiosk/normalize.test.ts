@@ -9,6 +9,21 @@ describe("normalizeKiosk", () => {
     const ok: RawKioskV1 = { t: 5, acct: "root", term: "K1", res: "OK" };
     expect(normalizeKiosk(ok).outcome).toBe("success");
   });
+
+  it("rejects a res outside {WRONG_PIN, OK} rather than defaulting it to success", () => {
+    const malformed = { t: 5, acct: "root", term: "K1", res: "GARBAGE" };
+    expect(() => normalizeKiosk(malformed)).toThrow(/res.*"WRONG_PIN"|"OK"/);
+  });
+
+  it("rejects a non-string res the same way", () => {
+    const malformed = { t: 5, acct: "root", term: "K1", res: 1 };
+    expect(() => normalizeKiosk(malformed)).toThrow(/res/);
+  });
+
+  it("rejects a res that only differs in case from the known tokens", () => {
+    const malformed = { t: 5, acct: "root", term: "K1", res: "ok" };
+    expect(() => normalizeKiosk(malformed)).toThrow(/res/);
+  });
 });
 
 describe("kiosk normalizers registry", () => {

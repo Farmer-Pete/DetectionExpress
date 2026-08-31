@@ -1,14 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { LEVEL_SEED } from "../game/tuning";
-import { detect as defaultDetect, normalize as defaultNormalize } from "./default-engine";
-import { isRawKioskV1, type RawKioskV1 } from "./endpoints/kiosk/formats/kiosk-v1";
-import type { PipeEvent } from "./event";
-import type { DetectView, Finding } from "./finding";
+import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
+import type { PipeEvent } from "../sim/event";
+import type { DetectView, Finding } from "../sim/finding";
 import {
   buildReferenceAlgorithm,
   type ReferenceAlgorithm,
-} from "./scenarios/pin-brute-force/reference";
-import { pinBruteForce } from "./scenarios/pin-brute-force/scenario";
+} from "../sim/scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { detect as defaultDetect, normalize as defaultNormalize } from "./default-engine";
+import { buildEngine, scenarioRegistry } from "./registry";
+import { LEVEL_SEED } from "./tuning";
+
+// GH42-PLAN.md code review: the DEV fallback used to hand-list the kiosk normalizer
+// and the pin-brute-force rule, so a new scenario folder would silently never show
+// up in it. It must instead be backed by the SAME discovery the registry uses.
+describe("the default engine is backed by the registry's discovery, not a hand list", () => {
+  it("dispatches the same endpoints the registry's own buildEngine() dispatches", () => {
+    const registryEngine = buildEngine();
+    const rawPayload = { t: 1, acct: "amy", term: "K1", res: "WRONG_PIN" };
+    expect(defaultNormalize(rawPayload, "kiosk-v1")).toEqual(
+      registryEngine.normalize(rawPayload, "kiosk-v1"),
+    );
+  });
+
+  it("routes every registered scenario's rule, not just one hard-coded one", () => {
+    // If a future scenario folder registered a second rule, a hand list here would
+    // silently miss it; discovery cannot, because it reads scenarioRegistry itself.
+    // A distinct account, never touched by the other tests in this file: the
+    // module-level engine below is a singleton for this whole test file, and its
+    // rule state persists across tests, so probing it here must not disturb the
+    // "amy" fail-count the watch-to-hit tests rely on starting clean.
+    const view: DetectView = {
+      account: "discovery-probe",
+      terminal: "K1",
+      outcome: "fail",
+      id: 0,
+      ts: 0,
+      endpoint: "kiosk-v1",
+    };
+    const registryEngine = buildEngine();
+    expect(defaultDetect(view)).toEqual(registryEngine.detect(view));
+    // Sanity: this only proves something if at least one scenario is registered.
+    expect(scenarioRegistry.length).toBeGreaterThan(0);
+  });
+});
 
 /** Read an Event's kiosk-v1 payload, narrowing at the boundary. */
 function raw(ev: PipeEvent): RawKioskV1 {

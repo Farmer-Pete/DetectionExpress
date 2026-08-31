@@ -197,18 +197,21 @@ function assertSeparable(records: FairRecord[], attacks: Attack[]): void {
 }
 
 /**
- * Plan the whole run from a seed. Deterministic: the same seed always returns the
- * same run.
+ * Plan the whole run from a seed. Deterministic: the same seed (and, when given,
+ * the same partition) always returns the same run. `pinBruteForce.generate` below
+ * IS this function, so `partition` rides the public `Scenario.generate` contract
+ * (GH42-PLAN.md "the merge seam"), not a scenario-specific side channel. Module-
+ * private: every caller, in and out of this package, reaches it through
+ * `pinBruteForce.generate`, the public seam, not by importing this name directly.
  *
- * `partition` is the composable-streams seam (GH42-PLAN.md "the merge seam"):
- * omitted (the `Scenario.generate` contract every other caller uses), the account
- * pool is drawn from this run's own seeded `rng`, exactly as before. Given an
- * explicit partition, the account pool comes instead from a fixed, seed-independent
- * namespace slice (`buildPartitionedIdentityPools`), so two runs generated from
- * different seeds but different partitions are guaranteed to draw disjoint
- * accounts — `mergeRuns`'s entity-disjointness invariant depends on this.
+ * Omitted, the account pool is drawn from this run's own seeded `rng`, exactly as
+ * a solo run always has. Given an explicit partition, the account pool comes
+ * instead from a fixed, seed-independent namespace slice
+ * (`buildPartitionedIdentityPools`), so two runs generated from different seeds
+ * but different partitions are guaranteed to draw disjoint accounts —
+ * `mergeRuns`'s entity-disjointness invariant depends on this.
  */
-export function generate(seed: number, partition?: number): GeneratedRun {
+function generate(seed: number, partition?: number): GeneratedRun {
   return composeScenario(
     {
       id: "pin-brute-force",
@@ -226,24 +229,7 @@ export function generate(seed: number, partition?: number): GeneratedRun {
   );
 }
 
-/**
- * The briefing for the live scenario, shown above the Engine. It carries the new
- * voice: what the chaos is, and how the finished Engine answers it. It keeps the
- * real facts, five wrong PINs in five minutes and one Alert per burst, and it
- * describes the Engine at work rather than asking the player to write a Rule.
- */
-const briefing =
-  "PIN brute-force bursts hit the station kiosks. Each burst is one rider account " +
-  "taking five or more wrong PINs inside five minutes, and the waves carry more of " +
-  "them at once. Those bursts are the Attacks. Watch the Engine read the raw kiosk " +
-  "PIN entries, normalize them, and count the failures per account. When a burst " +
-  "crosses the line, it raises one Alert for the whole burst, not one per entry, and " +
-  "the odd benign fumble never trips it. Normal traffic keeps rising in waves. Watch " +
-  "the Compute gauge: the Engine holds its speed and stays ahead of the queue while " +
-  "it catches every burst.";
-
 export const pinBruteForce: Scenario = {
   id: "pin-brute-force",
-  briefing,
   generate,
 };

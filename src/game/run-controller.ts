@@ -24,7 +24,6 @@ import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { Scenario } from "../sim/scenario";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import {
@@ -153,14 +152,13 @@ export interface RunControllerDeps {
 }
 
 /**
- * `threshold` here is only the fallback default for an Attack that carries none
- * (GH42-PLAN.md "Scoring for mixed hunts"): pin-brute-force's own Attacks already
- * set `Attack.threshold` in `attackFromPlan`, so the scorer credits them by that
- * value. A future mixed run of scenarios with differing thresholds still scores
- * correctly with this one shared fallback, because each Attack overrides it.
+ * `Attack.threshold` is required (GH42-PLAN.md "Scoring for mixed hunts"): every
+ * scenario's own Attacks set it (pin-brute-force's in `attackFromPlan`), so the
+ * scorer always credits by each hunt's own evidence bar. No threshold lives here:
+ * a config-level default tuned for one hunt would silently misscore any other
+ * hunt whose Attacks forgot to set their own value.
  */
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,

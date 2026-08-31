@@ -216,11 +216,17 @@ function assertEntitiesDisjoint(runs: readonly GeneratedRun[]): void {
 }
 
 /**
- * Reject a remap that changed any Attack's evidence count. Each source run
- * already proved its own separability before merging (every Attack carries at
- * least its threshold of evidence, and only that Attack's own account crosses
- * it); the merge's only job is to preserve that proof, never to drop or
- * duplicate evidence while renumbering ids.
+ * Reject a remap that changed any Attack's evidence count, or one that is not a
+ * true bijection on evidence ids: an array-length match alone cannot catch a
+ * remap bug that maps two distinct source ids onto the same merged id, because
+ * `remapAttacks` maps `eventIds` element-wise, so the array length is always
+ * preserved even when a collision silently collapses two ids into one. This
+ * checks the DISTINCT id count survives instead, which a collision or a
+ * duplicate cannot pass. Each source run already proved its own separability
+ * before merging (every Attack carries at least its threshold of evidence, and
+ * only that Attack's own account crosses it); the merge's only job is to
+ * preserve that proof exactly, never to drop, duplicate, or collapse evidence
+ * while renumbering ids.
  */
 function assertSeparabilityPreserved(
   originals: readonly Attack[],
@@ -238,6 +244,16 @@ function assertSeparabilityPreserved(
         `mergeRuns: Attack ${original.id}'s evidence count changed during remap (` +
           `${original.eventIds.length} -> ${remapped?.eventIds.length ?? "missing"}). Each run already ` +
           "proved its own separability before merging; the merge must preserve it exactly.",
+      );
+    }
+    const originalDistinct = new Set(original.eventIds).size;
+    const remappedDistinct = new Set(remapped.eventIds).size;
+    if (originalDistinct !== original.eventIds.length || remappedDistinct !== originalDistinct) {
+      throw new Error(
+        `mergeRuns: Attack ${original.id}'s remap is not a bijection on evidence ids ` +
+          `(${originalDistinct} distinct source ids, ${original.eventIds.length} total; ` +
+          `${remappedDistinct} distinct merged ids). Each of an Attack's own event ids must be ` +
+          "distinct, and the remap must carry that uniqueness through one-to-one.",
       );
     }
   });

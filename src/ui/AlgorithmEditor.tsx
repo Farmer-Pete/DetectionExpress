@@ -14,20 +14,22 @@
  *
  * "Download this Scenario" is generic too, so it ships in every build: it saves the
  * current source to a file, so a player can carry their engine into their own editor as a
- * starting point for `src/algorithms/<slug>.ts`.
+ * starting point for the one fixed local override file, `src/algorithms/engine.ts`
+ * (`game/algorithms-resolve.ts`'s `ENGINE_OVERRIDE_PATH`). One engine, no slug: the
+ * download name is that file's own basename, not a per-Scenario filename.
  */
 import { referenceSource } from "../game/engine-source";
 import { useGameStore } from "../game/store";
-import { scenarioFileName } from "./scenarios";
+
+/** The local-IDE override file's basename (`ENGINE_OVERRIDE_PATH` sans directory). */
+const DOWNLOAD_FILENAME = "engine.ts";
 
 interface AlgorithmEditorProps {
   /** Reload the current source and restart the run. */
   onRun: () => void;
-  /** The current Scenario's slug, for the download filename. */
-  slug: string;
 }
 
-export function AlgorithmEditor({ onRun, slug }: AlgorithmEditorProps) {
+export function AlgorithmEditor({ onRun }: AlgorithmEditorProps) {
   const source = useGameStore((state) => state.source);
   const setAlgorithmSource = useGameStore((state) => state.setAlgorithmSource);
   const error = useGameStore((state) => state.error);
@@ -39,7 +41,7 @@ export function AlgorithmEditor({ onRun, slug }: AlgorithmEditorProps) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = scenarioFileName(slug);
+    anchor.download = DOWNLOAD_FILENAME;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();

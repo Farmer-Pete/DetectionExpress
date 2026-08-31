@@ -8,7 +8,7 @@
  * always catch it. The scorer reads the resulting Attacks; the Rule never sees them.
  */
 import { GAME_SECONDS_PER_TICK } from "../../../game/tuning";
-import type { Attack } from "../../attack";
+import { type Attack, assertValidThreshold } from "../../attack";
 import type { Wave } from "../../scenario";
 import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "./tuning";
 
@@ -123,9 +123,13 @@ export function planAttacks(
   return plans;
 }
 
-/** The Attack ground truth for a plan, once its failures have their Event ids. */
+/**
+ * The Attack ground truth for a plan, once its failures have their Event ids.
+ * Validates its own threshold before returning it (the generation seam): a bad
+ * tuning value fails loudly here rather than reaching the scorer.
+ */
 export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
-  return {
+  const attack: Attack = {
     id: plan.id,
     entity: plan.account,
     reason: PIN_BRUTE_FORCE_REASON,
@@ -136,4 +140,6 @@ export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
     // by its own evidence bar.
     threshold: PIN_BRUTE_FORCE_THRESHOLD,
   };
+  assertValidThreshold(attack);
+  return attack;
 }

@@ -22,13 +22,16 @@ function counts(caught: number, missed: number, falseAlerts: number): Counts {
   return { caught, missed, falseAlerts };
 }
 
+// The pre-GH42 suite's implicit global threshold was 2 (the old `cfg()` default);
+// this fixture default keeps every call site that never cared about the exact
+// value unchanged now that `Attack.threshold` is required per-Attack.
 function attack(
   id: number,
   entity: string,
   startTs: number,
   endTs: number,
   eventIds: number[],
-  threshold?: number,
+  threshold = 2,
 ): Attack {
   return {
     id,
@@ -36,7 +39,7 @@ function attack(
     reason: REASON,
     window: { startTs, endTs },
     eventIds,
-    ...(threshold === undefined ? {} : { threshold }),
+    threshold,
   };
 }
 
@@ -69,7 +72,7 @@ function one(eventIds: number[], ts: number, reason = REASON): ScoredFinding[] {
 }
 
 function cfg(over: Partial<ScorerConfig> = {}): ScorerConfig {
-  return { threshold: 2, window: 40, wFn: 3, wFp: 1, ...over };
+  return { window: 40, wFn: 3, wFp: 1, ...over };
 }
 
 /** Narrow a decision to `caught`, failing the test if it is any other outcome. */
@@ -135,14 +138,14 @@ describe("scorer (reason path, entityMatch off)", () => {
   });
 
   it("needs the threshold of DISTINCT cited ids; repeats do not qualify", () => {
-    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ threshold: 2 }));
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
     s.record(one([10, 10, 10], 50), at(50)); // one distinct id, threshold is two
     expect(s.reading().falseAlerts).toBe(1);
     expect(s.reading().caught).toBe(0);
   });
 
   it("treats a too-little-evidence Finding as false", () => {
-    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12])], cfg({ threshold: 3 }));
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12], 3)], cfg());
     s.record(one([10, 11], 50), at(50)); // two of three, below threshold
     expect(s.reading().falseAlerts).toBe(1);
     expect(s.reading().caught).toBe(0);
@@ -250,16 +253,15 @@ describe("scorer (reason path, entityMatch off)", () => {
 // config value.
 describe("scorer (per-attack threshold, GH42 mixed hunts)", () => {
   it("credits each Attack by its own threshold, ignoring the other Attack's threshold", () => {
-    // Two pending Attacks, different entities and different thresholds. The global
-    // config threshold (2) would wrongly credit "b" too if it were used for both.
+    // Two pending Attacks, different entities and different thresholds.
     const s = createScorer(
       [attack(1, "a", 0, 100, [10, 11], 2), attack(2, "b", 0, 100, [20, 21, 22, 23], 4)],
-      cfg({ threshold: 2 }),
+      cfg(),
     );
     // "a" needs only 2 distinct cited ids: its own threshold is satisfied.
     s.record(one([10, 11], 50), at(50));
     // "b" needs 4, but this Finding cites only 3 of its owned ids: below ITS OWN
-    // threshold even though it clears the global config's threshold of 2.
+    // threshold.
     s.record(one([20, 21, 22], 60), at(60));
     const r = s.reading();
     expect(r.caught).toBe(1); // only "a"
@@ -267,19 +269,26 @@ describe("scorer (per-attack threshold, GH42 mixed hunts)", () => {
     expect(r.missed).toBe(0);
   });
 
-  it("catches an Attack once its own (higher-than-config) threshold is met", () => {
-    const s = createScorer([attack(1, "b", 0, 100, [20, 21, 22, 23], 4)], cfg({ threshold: 2 }));
+  it("catches an Attack once its own threshold is met", () => {
+    const s = createScorer([attack(1, "b", 0, 100, [20, 21, 22, 23], 4)], cfg());
     s.record(one([20, 21, 22, 23], 60), at(60)); // all 4 of its owned ids
     expect(s.reading().caught).toBe(1);
     expect(s.reading().falseAlerts).toBe(0);
   });
 
-  it("falls back to the config threshold when an Attack sets none", () => {
-    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12])], cfg({ threshold: 3 }));
-    s.record(one([10, 11], 50), at(50)); // two of three: below the config fallback
-    expect(s.reading().falseAlerts).toBe(1);
-    s.record(one([10, 11, 12], 60), at(60)); // now meets the config fallback
-    expect(s.reading().caught).toBe(1);
+  it("rejects a non-positive-integer threshold at the scorer seam, naming the failure mode", () => {
+    // GH42 code review: Attack.threshold is required and validated, with no
+    // config-level fallback, so a bad tuning value must fail loudly here rather
+    // than silently under- or over-crediting an Alert.
+    const bad: Attack = {
+      id: 1,
+      entity: "root",
+      reason: REASON,
+      window: { startTs: 0, endTs: 100 },
+      eventIds: [10, 11],
+      threshold: 0,
+    };
+    expect(() => createScorer([bad], cfg())).toThrow(/threshold must be a positive integer/);
   });
 });
 

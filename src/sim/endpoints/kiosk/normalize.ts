@@ -37,6 +37,9 @@ export function normalizeKiosk(raw: unknown): NormalizedKiosk {
   if (!isString(acct) || !isString(term)) {
     throw new Error("a kiosk-v1 payload's acct and term must be strings.");
   }
+  if (res !== "WRONG_PIN" && res !== "OK") {
+    throw new Error('a kiosk-v1 payload\'s res must be "WRONG_PIN" or "OK".');
+  }
   return { account: acct, terminal: term, outcome: res === "WRONG_PIN" ? "fail" : "success" };
 }
 

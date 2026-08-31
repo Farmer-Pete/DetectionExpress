@@ -12,7 +12,13 @@
  */
 
 import catalogue from "../../docs/world/scenarios.json";
-import { type BuildRule, createEngine, type Engine, type Normalizer } from "../sim/engine/engine";
+import {
+  type BuildRule,
+  createEngine,
+  type Engine,
+  type EngineRule,
+  type Normalizer,
+} from "../sim/engine/engine";
 import type { Scenario } from "../sim/scenario";
 
 /** One catalogue entry, as the display join reads it. Loose: `docs/world` owns the schema. */
@@ -42,6 +48,8 @@ export interface ScenarioRegistryEntry {
 export interface ScenarioModule {
   scenario?: unknown;
   buildRule?: unknown;
+  /** The profiler's stable contract (GH42-PLAN.md "the cast and the profiler"). */
+  corpus?: unknown;
 }
 
 /** The exports an endpoint `normalize.ts` carries. */
@@ -56,9 +64,24 @@ const normalizerModules = import.meta.glob<NormalizerModule>("../sim/endpoints/*
   eager: true,
 });
 
-/** Index the catalogue by id, so each join is a lookup. Pure, so tests inject their own. */
+/**
+ * Index the catalogue by id, so each join is a lookup. Pure, so tests inject their
+ * own. Throws on a duplicate id rather than letting the later entry silently win:
+ * a duplicate is a data bug in `docs/world/scenarios.json`, so it fails loudly here
+ * instead of quietly dropping one hunt's metadata.
+ */
 export function indexCatalogue(entries: readonly CatalogueEntry[]): Map<string, CatalogueEntry> {
-  return new Map(entries.map((entry) => [entry.id, entry]));
+  const byId = new Map<string, CatalogueEntry>();
+  for (const entry of entries) {
+    const existing = byId.get(entry.id);
+    if (existing !== undefined) {
+      throw new Error(
+        `Duplicate catalogue id "${entry.id}": both "${existing.name}" and "${entry.name}" claim it.`,
+      );
+    }
+    byId.set(entry.id, entry);
+  }
+  return byId;
 }
 
 /** A string primitive, by its tag rather than a `typeof` representation check. */
@@ -83,8 +106,30 @@ function isBuildRule(value: unknown): value is BuildRule {
 }
 
 /**
- * Gather and join scenario modules, validating each at the seam: a module missing its
- * `scenario`/`buildRule`, a duplicate scenario id, or an id with no catalogue entry all
+ * Is `value` a usable `EngineRule`: a string `id`, a non-empty `endpoints` array of
+ * strings, and a `detect` function? Checked against the rule a `buildRule()` probe
+ * call actually produces, not just that `buildRule` is callable: a factory that is
+ * a function but yields the wrong shape would otherwise only fail later, deep
+ * inside `createEngine`'s detect routing, far from this seam.
+ */
+function isEngineRuleShape(value: unknown): value is EngineRule {
+  return (
+    value instanceof Object &&
+    "id" in value &&
+    isString(value.id) &&
+    "endpoints" in value &&
+    Array.isArray(value.endpoints) &&
+    value.endpoints.length > 0 &&
+    value.endpoints.every(isString) &&
+    "detect" in value &&
+    value.detect instanceof Function
+  );
+}
+
+/**
+ * Gather and join scenario modules, validating each at the seam: a module missing
+ * its `scenario`/`buildRule`/`corpus`, a `buildRule` that does not produce a valid
+ * `EngineRule`, a duplicate scenario id, or an id with no catalogue entry all
  * throw. Pure over its inputs, so the failure paths are unit-tested without the glob.
  */
 export function composeRegistry(
@@ -100,6 +145,18 @@ export function composeRegistry(
     }
     if (!isBuildRule(mod.buildRule)) {
       throw new Error(`Scenario module "${path}" does not export a \`buildRule\` factory.`);
+    }
+    if (mod.corpus === undefined) {
+      throw new Error(`Scenario module "${path}" does not export a \`corpus\`.`);
+    }
+    // A probe build: cheap (a fresh rule instance with empty state) and thrown
+    // away, since the engine builds its own instance later. It only proves the
+    // factory's shape at load time, not at first detect().
+    if (!isEngineRuleShape(mod.buildRule())) {
+      throw new Error(
+        `Scenario module "${path}"'s \`buildRule()\` does not produce a valid EngineRule ` +
+          "(needs a string id, a non-empty endpoints array of strings, and a detect function).",
+      );
     }
     const id = mod.scenario.id;
     if (seen.has(id)) {

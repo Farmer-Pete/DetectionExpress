@@ -109,4 +109,13 @@ describe("mergeRuns", () => {
   it("requires at least one run", () => {
     expect(() => mergeRuns([])).toThrow(/at least one/);
   });
+
+  it("throws when an Attack cites a duplicate event id, rather than letting the remap collapse it", () => {
+    // eventIds [0, 0, 1] carries only 2 distinct ids across 3 entries. The old
+    // length-only check would pass this silently (the remap preserves array
+    // length one-for-one); the bijection check must catch the collapsed distinct
+    // count instead.
+    const a = run([ev(0, 10), ev(1, 20)], [attack(1, "x", [0, 0, 1], 2)]);
+    expect(() => mergeRuns([a])).toThrow(/distinct|bijection/);
+  });
 });

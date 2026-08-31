@@ -22,7 +22,7 @@
  * silently dropped.
  */
 
-import type { Attack } from "./attack";
+import { type Attack, assertValidThreshold } from "./attack";
 import type { PipeEvent } from "./event";
 import type { AlertReason, Finding } from "./finding";
 import type { RingEvent } from "./inspector";
@@ -48,14 +48,6 @@ export function score(counts: Counts, wFn: number, wFp: number): number {
 
 /** The scorer's tuning: injected so `sim/` stays free of `game/` constants. */
 export interface ScorerConfig {
-  /**
-   * The default count of distinct cited ids an Alert must share with an Attack to
-   * credit it. A per-Attack `Attack.threshold` (GH42-PLAN.md "Scoring for mixed
-   * hunts") takes precedence when set; this value is the fallback for an Attack
-   * that carries none, which keeps every caller that never set `Attack.threshold`
-   * scoring exactly as before.
-   */
-  threshold: number;
   /** Outcomes kept in the rolling gauge ring. */
   window: number;
   /** False-negative (missed Attack) weight. */
@@ -287,6 +279,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   // eventId -> the Attack that owns it, built once from Ground truth.
   const owner = new Map<number, number>();
   for (const attack of attacks) {
+    // The scorer seam: a bad threshold fails loudly here, before it can silently
+    // under- or over-credit an Alert.
+    assertValidThreshold(attack);
     state.set(attack.id, "pending");
     for (const eventId of attack.eventIds) {
       owner.set(eventId, attack.id);
@@ -514,11 +509,12 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       const predicate = useEntity
         ? attack.entity === scored.entity
         : attack.reason === alert.reason;
-      // Per-attack threshold (GH42-PLAN.md "Scoring for mixed hunts"): an Attack that
-      // carries its own `threshold` is credited by that value; one that carries none
-      // falls back to the injected config default, so every pre-GH42 caller (whose
-      // Attacks never set this field) scores exactly as before.
-      const threshold = attack.threshold ?? config.threshold;
+      // Per-attack threshold (GH42-PLAN.md "Scoring for mixed hunts"): every Attack
+      // carries its own required `threshold`, validated at construction, so a mixed
+      // run always credits each hunt by its own evidence bar. No config-level
+      // fallback: a fallback tuned for one hunt (e.g. pin-brute-force's) would
+      // silently misscore any other hunt that forgot to set its own value.
+      const threshold = attack.threshold;
       if (predicate && (hits.get(attack.id) ?? 0) >= threshold) {
         resolve(attack, "caught");
         append({

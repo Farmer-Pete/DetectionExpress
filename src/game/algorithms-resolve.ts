@@ -7,9 +7,9 @@
  * One engine, not one algorithm per slug. The player's local override is a single
  * fixed file, `src/algorithms/engine.ts`. When it exists on disk the run loads it;
  * otherwise the run falls back to the committed default engine at
- * `src/sim/default-engine.ts` (which is itself the composed single engine). The
- * handshake carries no slug: `algo:hello` asks for the one engine, and the plugin
- * replies `algo:changed { path, version }`.
+ * `src/game/default-engine.ts` (composed from the same registry discovery the
+ * production engine uses). The handshake carries no slug: `algo:hello` asks for
+ * the one engine, and the plugin replies `algo:changed { path, version }`.
  *
  * The override path is a compile-time constant, so there is no slug-to-path step and no
  * traversal surface at all: the resolver can only ever name `src/algorithms/engine.ts`
@@ -24,7 +24,7 @@ export const ALGORITHMS_DIR = "/src/algorithms";
 export const ENGINE_OVERRIDE_PATH = `${ALGORITHMS_DIR}/engine.ts`;
 
 /** The committed fallback engine, loaded when the override file is absent. */
-export const DEFAULT_ENGINE_PATH = "/src/sim/default-engine.ts";
+export const DEFAULT_ENGINE_PATH = "/src/game/default-engine.ts";
 
 /**
  * Resolve the active engine file: the override when it exists on disk, else the default
