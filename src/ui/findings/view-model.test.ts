@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
-import { buildFindingGroups, prettifyReason } from "./view-model";
+import { buildFindingGroups, countActiveHits, prettifyReason } from "./view-model";
 
 /**
  * Build a LiveFinding fixture. `subjectType` lands on the emitted Finding (an
@@ -268,5 +269,41 @@ describe("buildFindingGroups row shape", () => {
     );
     expect(hit.groups[0]?.rows[0]?.seq).toBe(4);
     expect(hit.groups[0]?.rows[0]?.state).toBe("hit");
+  });
+});
+
+describe("countActiveHits (#38 juice item 3+4)", () => {
+  it("counts zero and reads not urgent with no findings", () => {
+    expect(countActiveHits([])).toEqual({ count: 0, urgent: false });
+  });
+
+  it("counts only hit-state findings, ignoring watches", () => {
+    const findings = [
+      live({ seq: 1, state: "hit" }),
+      live({ seq: 2, state: "watch" }),
+      live({ seq: 3, state: "hit" }),
+    ];
+    expect(countActiveHits(findings)).toEqual({ count: 2, urgent: false });
+  });
+
+  it("is not urgent one hit below URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS - 1, urgent: false });
+  });
+
+  it("flips urgent exactly at URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS, urgent: true });
+  });
+
+  it("stays urgent past URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS + 2 }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS + 2, urgent: true });
   });
 });

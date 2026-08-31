@@ -16,7 +16,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
-import { buildFindingGroups, type FindingGroup, type FindingRow, VISIBLE_CAP } from "./view-model";
+import {
+  buildFindingGroups,
+  countActiveHits,
+  type FindingGroup,
+  type FindingRow,
+  VISIBLE_CAP,
+} from "./view-model";
 
 export function FindingsPanel() {
   const findings = useGameStore((state) => state.snapshot.findings);
@@ -42,13 +48,21 @@ export function FindingsPanel() {
   const selectedSeq = selection?.seq ?? null;
   const { groups, hiddenCount } = buildFindingGroups(findings, selectedSeq);
   const visible = expanded ? groups : groups.slice(0, VISIBLE_CAP);
+  const { count: activeCount, urgent } = countActiveHits(findings);
+  // Static outside any reduced-motion guard: the threat border reads even with
+  // motion off (GH38-PLAN.md decision 4). The CSS layers the `urgentborder`
+  // pulse on top of it, gated behind `prefers-reduced-motion: no-preference`.
+  const panelClass = urgent ? "findings-panel urgent" : "findings-panel";
 
   return (
-    <section ref={panelRef} className="findings-panel" aria-label="Findings">
+    <section ref={panelRef} className={panelClass} aria-label="Findings">
       {findings.length === 0 ? (
         <EmptyState />
       ) : (
         <>
+          <div className="findings-header">
+            <span className="findings-active">⚠ {activeCount} active</span>
+          </div>
           <ul className="findings-list">
             {visible.map((group) => (
               <FindingGroupCard

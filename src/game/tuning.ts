@@ -173,6 +173,20 @@ export const CORRECTNESS_FLOOR = 50;
 export const WAVE_WARN_TICKS = 30;
 
 /**
+ * The shared severity ramp's thresholds (`src/ui/hud/severity.ts`), promoted to
+ * tuning constants so #40 can tune them. Generic names, not "queue"-specific:
+ * the ramp also colors the Compute gauge.
+ */
+export const SEVERITY_WARN_FRAC = 0.5;
+export const SEVERITY_DANGER_FRAC = 0.8;
+
+/**
+ * The live-hit count at which the findings panel throbs (`FindingsPanel.tsx`
+ * gains the `urgent` border-pulse class at or above this count).
+ */
+export const URGENT_HITS = 3;
+
+/**
  * M0 (living metro, #87). The world loop steps the actor schedule ONE tick at a
  * time; this many such steps run per clock tick. A positive integer, default 1, so
  * the sim advances at CLOCK_HZ by default. Raising it speeds the world without

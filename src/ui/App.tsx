@@ -17,6 +17,10 @@
  *
  * Tests inject controller factories through `createPipelineController` /
  * `createWorldController`, so the app never loads the real loader or engine under test.
+ *
+ * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
+ * (`useWavePhaseEdge`) toggles `.shake` on the app root for `SHAKE_MS` on the
+ * incoming -> active edge, independent of LogPanel's own `.waveflash`.
  */
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
@@ -40,6 +44,10 @@ import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { scenarioSlug } from "./scenarios";
+import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
+
+/** Matches the CSS `shake` keyframes' 0.3s duration (`src/index.css`). */
+const SHAKE_MS = 300;
 
 /** Which mode is on screen. Only the visible mode's loop runs. */
 type View = "pipeline" | "metro";
@@ -91,6 +99,22 @@ interface AppProps {
 export function App({ createPipelineController, createWorldController }: AppProps = {}) {
   const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
+
+  // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
+  // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
+  // never shakes. This fires in the metro view too (the wave reading just stays
+  // calm there, since only the pipeline engine publishes it), which is harmless.
+  const wavePhase = useGameStore((s) => s.snapshot.wave.phase);
+  const edgeToken = useWavePhaseEdge(wavePhase);
+  const [shaking, setShaking] = useState(false);
+  useEffect(() => {
+    if (edgeToken === 0) {
+      return;
+    }
+    setShaking(true);
+    const timer = setTimeout(() => setShaking(false), SHAKE_MS);
+    return () => clearTimeout(timer);
+  }, [edgeToken]);
 
   // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
   // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
@@ -257,7 +281,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
   };
 
   return (
-    <div className="app">
+    <div className={shaking ? "app shake" : "app"}>
       {/* The shell. While the intro overlay is open it is `inert`, so a screen
           reader's virtual cursor and the keyboard cannot reach it and the overlay
           is truly modal. The overlay is a sibling of this container, so it stays

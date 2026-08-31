@@ -4,7 +4,7 @@ import { useGameStore } from "../../game/store";
 import { CHANNEL_CAP, OMEGA } from "../../game/tuning";
 import type { FailureReason, RunStatus } from "../../sim/snapshot";
 import { Gauge } from "../gauges/Gauge";
-import { severityFill } from "./severity";
+import { severityFill, severityLevel } from "./severity";
 
 /** The effective Queue ceiling: the two upstream channels fill; the Sink drains at once. */
 const QUEUE_MAX = 2 * CHANNEL_CAP;
@@ -68,6 +68,7 @@ export function Hud() {
         max={QUEUE_MAX}
         unit=""
         fill={severityFill(queued / QUEUE_MAX)}
+        pulse={severityLevel(queued / QUEUE_MAX) === "danger"}
       />
       <Gauge
         label="Compute"

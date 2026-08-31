@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
+import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
 import { emptySnapshot } from "../../sim/snapshot";
@@ -133,6 +134,35 @@ describe("FindingsPanel", () => {
     publish([]);
     render(<InspectorShell />);
     expect(screen.getByText(/no findings yet/i)).toBeDefined();
+  });
+
+  it("shows the active hit count in the header, ignoring watches", () => {
+    publish([
+      live({ seq: 1, subjectType: "account", entity: "a", state: "hit" }),
+      live({ seq: 2, subjectType: "account", entity: "b", state: "watch" }),
+      live({ seq: 3, subjectType: "account", entity: "c", state: "hit" }),
+    ]);
+    render(<InspectorShell />);
+    expect(screen.getByText("⚠ 2 active")).toBeDefined();
+  });
+
+  it("carries no urgent class below URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    const { container } = render(<InspectorShell />);
+    expect(container.querySelector(".findings-panel")?.className).not.toMatch(/urgent/);
+  });
+
+  it("gains the urgent class at URGENT_HITS live hits", () => {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    const { container } = render(<InspectorShell />);
+    expect(screen.getByText(`⚠ ${URGENT_HITS} active`)).toBeDefined();
+    expect(container.querySelector(".findings-panel")?.className).toMatch(/urgent/);
   });
 
   it("shows a +N more line past the cap and expands it", () => {

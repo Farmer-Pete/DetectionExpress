@@ -13,14 +13,41 @@
  *      stream's bottom reads "engine N behind".
  * State 3 is decided purely from `events`/`processed`/`admitted`, never from
  * DOM measurement.
+ *
+ * The transport row also carries the wave readout (#38 juice item 1): "next
+ * wave in N" while calm, a pulsing "◈ WAVE INCOMING" while incoming, and
+ * nothing while a wave is active or after the last one (no countdown to show).
+ * On the incoming -> active edge the panel's own column flashes once
+ * (`useWavePhaseEdge`, one-shot ownership: this component owns its `.waveflash`
+ * class and clears it itself, independent of App's `.shake`). The queue bar
+ * also gains a `queue-bar-danger` pulse class at danger severity (juice item 2).
  */
-import { memo, useEffect } from "react";
+import { memo, useEffect, useState } from "react";
 import type { Speed } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
 import { LOG_QUEUE_MAX } from "../../game/tuning";
 import type { RingEvent } from "../../sim/inspector";
-import { severityFill } from "../hud/severity";
+import type { SimSnapshot } from "../../sim/snapshot";
+import { severityFill, severityLevel } from "../hud/severity";
+import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
 import { formatRow } from "./formatters";
+
+/** Matches the CSS `waveflash` keyframes' 0.6s duration (`src/index.css`). */
+const WAVEFLASH_MS = 600;
+
+/**
+ * The wave readout's text and urgency, or null when there is nothing to show
+ * (active, or calm with no wave left). `incoming` drives the pulsing style.
+ */
+function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
+  if (wave.phase === "incoming") {
+    return { text: "◈ WAVE INCOMING", incoming: true };
+  }
+  if (wave.ticksUntilNext !== null) {
+    return { text: `next wave in ${wave.ticksUntilNext}`, incoming: false };
+  }
+  return null;
+}
 
 /** The speed choices the transport offers, in ascending order, with their labels. */
 const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
@@ -75,10 +102,26 @@ export function LogPanel() {
   const events = useGameStore((s) => s.snapshot.events);
   const processed = useGameStore((s) => s.snapshot.processed);
   const admitted = useGameStore((s) => s.snapshot.admitted);
+  const wave = useGameStore((s) => s.snapshot.wave);
   const frozen = useGameStore((s) => s.transport.frozen);
   const speed = useGameStore((s) => s.transport.speed);
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
+
+  // One-shot ownership (GH38-PLAN.md, "Wave indicator + flash + shake"): this
+  // panel owns its own `.waveflash` class and clears it itself, independent of
+  // App's `.shake`. `edgeToken` changes exactly once per incoming -> active
+  // edge; skip its initial `0` so mount never flashes.
+  const edgeToken = useWavePhaseEdge(wave.phase);
+  const [flashing, setFlashing] = useState(false);
+  useEffect(() => {
+    if (edgeToken === 0) {
+      return;
+    }
+    setFlashing(true);
+    const timer = setTimeout(() => setFlashing(false), WAVEFLASH_MS);
+    return () => clearTimeout(timer);
+  }, [edgeToken]);
 
   // The panel owns a Space-to-freeze listener: added on mount, removed on unmount. It
   // ignores key repeats and editable targets, and it reads the freeze state fresh from
@@ -119,9 +162,11 @@ export function LogPanel() {
   const showSticky = !caughtUp && !cursorVisible;
 
   const newestFirst = events.slice().reverse();
+  const readout = waveReadout(wave);
+  const dangerPulse = severityLevel(frac) === "danger";
 
   return (
-    <div className="log-panel">
+    <div className={flashing ? "log-panel waveflash" : "log-panel"}>
       <div className="log-header">
         <div className="transport">
           <button
@@ -149,12 +194,17 @@ export function LogPanel() {
               );
             })}
           </div>
+          {readout ? (
+            <span className={`wave-readout${readout.incoming ? " wave-readout-incoming" : ""}`}>
+              {readout.text}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="engine-bar">
         <div className="queue-bar">
           <div
-            className="queue-bar-fill"
+            className={dangerPulse ? "queue-bar-fill queue-bar-danger" : "queue-bar-fill"}
             data-testid="queue-bar-fill"
             style={{ width: `${frac * 100}%`, background: severityFill(frac) }}
           />

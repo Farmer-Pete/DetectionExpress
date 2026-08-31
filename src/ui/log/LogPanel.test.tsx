@@ -1,9 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../../game/store";
 import type { RingEvent } from "../../sim/inspector";
-import { emptySnapshot } from "../../sim/snapshot";
+import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { LogPanel } from "./LogPanel";
+
+/** Publish a snapshot carrying only the given wave reading; everything else stays empty. */
+function setWave(wave: SimSnapshot["wave"]): void {
+  useGameStore.setState({ snapshot: { ...emptySnapshot(), wave } });
+}
 
 function kioskEvent(id: number, overrides: Partial<RingEvent> = {}): RingEvent {
   return {
@@ -188,5 +193,82 @@ describe("LogPanel speed control", () => {
     expect(screen.getByRole("button", { name: "0.5x" }).className).not.toMatch(
       /transport-speed-on/,
     );
+  });
+});
+
+describe("LogPanel wave readout (#38 juice item 1)", () => {
+  it("shows the countdown to the next wave while calm", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByText("next wave in 42")).toBeDefined();
+  });
+
+  it("swaps to the WAVE INCOMING readout while incoming", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByText("◈ WAVE INCOMING")).toBeDefined();
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+  });
+
+  it("shows no readout while a wave is active (no countdown to show)", () => {
+    setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+
+  it("shows no readout after the last wave (calm with a null index)", () => {
+    setWave({ phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+});
+
+describe("LogPanel queue-bar danger pulse (#38 juice item 2)", () => {
+  it("adds the pulse class at danger severity", () => {
+    setSnapshot([], 0, 45); // 45 / LOG_QUEUE_MAX(50) = 0.9, past SEVERITY_DANGER_FRAC (0.8)
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
+  });
+
+  it("omits the pulse class below danger severity", () => {
+    setSnapshot([], 0, 10); // 10 / 50 = 0.2
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
+  });
+});
+
+describe("LogPanel wave flash (one-shot on incoming -> active)", () => {
+  it("adds .waveflash to the log column on the edge, then clears it after the animation", () => {
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash on a rerender that is not an incoming -> active edge", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 10, eventsPerTick: null });
+    const { container } = render(<LogPanel />);
+    const panel = container.querySelector(".log-panel");
+    act(() => {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    });
+    expect(panel?.className).not.toMatch(/waveflash/);
   });
 });

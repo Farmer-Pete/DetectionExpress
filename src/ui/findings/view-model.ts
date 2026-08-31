@@ -4,6 +4,7 @@
  * tests with no DOM, and it is the sole home for the UI-only concerns of grouping,
  * ranking, and display prettification. The sim never sees any of this.
  */
+import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 
 /** One finding, shaped for a row. */
@@ -49,6 +50,24 @@ export interface GroupedFindings {
 /** The panel shows this many groups before the "+N more" line. The panel imports this
  * same constant, so the cap it slices by and the hidden count reported here cannot drift. */
 export const VISIBLE_CAP = 12;
+
+/** The header's "N active" count, plus whether the panel should throb (#38 juice items 3-4). */
+export interface ActiveHits {
+  /** Live findings with `state === "hit"`. Watches never count. */
+  count: number;
+  /** True at or above `URGENT_HITS`, the tuning threshold the panel's throb reads. */
+  urgent: boolean;
+}
+
+/**
+ * Count the live hits and flag urgency, flat over every finding (not grouped, so
+ * a busy run's hit count matches what a player would tally by eye across the
+ * whole panel, not just the visible groups).
+ */
+export function countActiveHits(findings: readonly LiveFinding[]): ActiveHits {
+  const count = findings.reduce((total, f) => total + (f.state === "hit" ? 1 : 0), 0);
+  return { count, urgent: count >= URGENT_HITS };
+}
 
 /**
  * Prettify a raw reason token for display. Splits on `_` and camelCase boundaries,
