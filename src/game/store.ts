@@ -26,6 +26,24 @@ interface TransportState {
   speed: Speed;
 }
 
+/**
+ * One cited log row's flash, keyed by the row's `eventId` (GH37-PLAN.md "Comets").
+ * `gen` is a monotonic spawn counter FxLayer owns: a re-spawn on the same row carries
+ * a higher gen, so `LogRow` remounts the flash instead of extending the old one, and
+ * a stale timer (armed for an older gen) can tell it no longer owns the row.
+ */
+export interface FlashEntry {
+  colorVar: string;
+  gen: number;
+}
+
+/** One row to flash, as FxLayer spawns it. */
+export interface FlashSpawn {
+  eventId: number;
+  colorVar: string;
+  gen: number;
+}
+
 interface GameState {
   snapshot: SimSnapshot;
   /** The player's Algorithm source. The editor edits it; the run controller loads it. */
@@ -67,6 +85,17 @@ interface GameState {
   decisionSelection: { seq: number } | null;
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
+  /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
+  flashes: Map<number, FlashEntry>;
+  /**
+   * A counter FxLayer watches to detect a restart (Apply or reload) and reset its own
+   * state, since the scorer's `seq` and decision log both reset to zero on a fresh
+   * engine. Monotonic and argless: the run controller's own `generation` is per-
+   * controller and a rebuilt controller (a fresh Metro-to-Pipeline mount) restarts it
+   * from 0, so writing that value here could reissue a token FxLayer already saw and
+   * skip the reset it exists to trigger.
+   */
+  runToken: number;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
   setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
@@ -89,6 +118,19 @@ interface GameState {
   setFrozen: (frozen: boolean) => void;
   /** Sets the transport speed mirror. The App reflects it into the run controller. */
   setSpeed: (speed: Speed) => void;
+  /** Spawn one batch of cited-row flashes, merging into a fresh Map. */
+  spawnFlashes: (entries: readonly FlashSpawn[]) => void;
+  /**
+   * Clear one row's flash, but only if `gen` still matches its current entry. A
+   * stale timer (armed for an older gen) is a no-op, so it can never clip a newer
+   * flash spawned on the same row after it fired.
+   */
+  clearFlash: (eventId: number, gen: number) => void;
+  /** Clear every flash at once. Called on a run-token reset, so old-run flashes
+   *  never survive into the new run. */
+  clearFlashes: () => void;
+  /** Bump the run token by one. Called on every fresh engine install. */
+  bumpRunToken: () => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -102,6 +144,8 @@ export const useGameStore = create<GameState>((set) => ({
   selection: null,
   decisionSelection: null,
   transport: { frozen: false, speed: 1 },
+  flashes: new Map(),
+  runToken: 0,
   // Reconcile both selections on every snapshot, independently. `seq` is stable
   // within one run, but a run restart (Apply or reload) builds a fresh scorer, so
   // `seq` resets from zero. So keep a selection only while its seq still appears in
@@ -148,6 +192,28 @@ export const useGameStore = create<GameState>((set) => ({
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),
   setSpeed: (speed) => set((s) => ({ transport: { ...s.transport, speed } })),
+  // Always a NEW Map: zustand's default equality is per-field reference, so a
+  // mutated-in-place Map would never notify a `flashes` selector.
+  spawnFlashes: (entries) =>
+    set((state) => {
+      const next = new Map(state.flashes);
+      for (const entry of entries) {
+        next.set(entry.eventId, { colorVar: entry.colorVar, gen: entry.gen });
+      }
+      return { flashes: next };
+    }),
+  clearFlash: (eventId, gen) =>
+    set((state) => {
+      const current = state.flashes.get(eventId);
+      if (current === undefined || current.gen !== gen) {
+        return { flashes: state.flashes }; // stale or already gone: no-op
+      }
+      const next = new Map(state.flashes);
+      next.delete(eventId);
+      return { flashes: next };
+    }),
+  clearFlashes: () => set({ flashes: new Map() }),
+  bumpRunToken: () => set((s) => ({ runToken: s.runToken + 1 })),
 }));
 
 /**

@@ -18,6 +18,7 @@ export interface EvidenceDecisionOverrides {
   entity?: string;
   resolvedAt?: number;
   context?: Context;
+  liveSeq?: number;
 }
 
 /** Overrides for `missedDecision`. */
@@ -44,6 +45,7 @@ export function caughtDecision(over: EvidenceDecisionOverrides): CaughtDecision 
     entity: over.entity ?? "acct-7",
     finding,
     citedEvents: over.citedEvents ?? [],
+    liveSeq: over.liveSeq ?? 0,
   };
 }
 
@@ -61,6 +63,7 @@ export function falseDecision(over: EvidenceDecisionOverrides): FalseDecision {
       ...(over.context !== undefined ? { context: over.context } : {}),
     },
     citedEvents: over.citedEvents ?? [],
+    liveSeq: over.liveSeq ?? 0,
   };
   if (over.entity !== undefined) {
     decision.entity = over.entity;

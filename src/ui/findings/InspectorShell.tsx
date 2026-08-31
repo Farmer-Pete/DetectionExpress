@@ -24,6 +24,7 @@
  */
 import { type RefObject, useRef } from "react";
 import { useGameStore } from "../../game/store";
+import { FxLayer } from "../fx/FxLayer";
 import { LogPanel } from "../log/LogPanel";
 import { FindingsPanel } from "./FindingsPanel";
 import { TraceOverlay } from "./TraceOverlay";
@@ -56,6 +57,7 @@ export function InspectorShell({
         fallbackFocusRef={findingsPanelRef}
         decisionsFallbackFocusRef={decisionsPanelRef}
       />
+      <FxLayer />
     </section>
   );
 }

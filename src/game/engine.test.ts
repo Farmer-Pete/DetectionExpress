@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Attack } from "../sim/attack";
-import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
+import {
+  createScorer,
+  type Decision,
+  type MissedDecision,
+  type Scorer,
+  type ScorerConfig,
+} from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
@@ -180,18 +186,18 @@ describe("engine start guards", () => {
   });
 });
 
-describe("engine integration with the reference Algorithm", () => {
-  // Adapt the reference twin (typed to its concrete records) to the engine's
-  // untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it kiosk-v1
-  // payloads, and Normalize produces the record the reference detect expects.
-  function referenceTaskAlgorithm(): TaskAlgorithm {
-    const algo = buildReferenceAlgorithm();
-    return {
-      normalize: (raw) => (isRawKioskV1(raw) ? algo.normalize(raw) : raw),
-      detect: (view) => (isReferenceView(view) ? algo.detect(view) : []),
-    };
-  }
+// Adapt the reference twin (typed to its concrete records) to the engine's
+// untyped TaskAlgorithm, narrowing at the boundary. The engine feeds it kiosk-v1
+// payloads, and Normalize produces the record the reference detect expects.
+function referenceTaskAlgorithm(): TaskAlgorithm {
+  const algo = buildReferenceAlgorithm();
+  return {
+    normalize: (raw) => (isRawKioskV1(raw) ? algo.normalize(raw) : raw),
+    detect: (view) => (isReferenceView(view) ? algo.detect(view) : []),
+  };
+}
 
+describe("engine integration with the reference Algorithm", () => {
   function runReference(): { harness: Harness; finalTick: number } {
     const run = kioskPinAttack.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
@@ -629,9 +635,10 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.admitted - snap.processed).toBe(0);
   });
 
-  it("emptySnapshot has empty findings and events arrays and a zero watermark", () => {
+  it("emptySnapshot has empty findings, decisions, and events arrays and a zero watermark", () => {
     const snap = emptySnapshot();
     expect(snap.findings).toEqual([]);
+    expect(snap.decisions).toEqual([]);
     expect(snap.events).toEqual([]);
     expect(snap.processed).toBe(0);
   });
@@ -699,5 +706,93 @@ describe("engine publishes decisions bound to the inspector ring (T10)", () => {
     const snap = emptySnapshot();
     expect(snap.decisions).toEqual([]);
     expect(Object.isFrozen(snap.decisions)).toBe(true);
+  });
+});
+
+// GH37-PLAN.md: the scorer's decision log rides along in the same snapshot.
+describe("engine publishes the scorer's decision log", () => {
+  it("carries every decision the reference run resolves, in the final snapshot", async () => {
+    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+    const harness = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+    });
+    await step(harness.driver, finalTick + 2, 300);
+    await harness.handle.whenStopped;
+    const snap = harness.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    expect(snap.decisions).toHaveLength(run.attacks.length);
+    expect(snap.decisions.every((d) => d.outcome === "caught")).toBe(true);
+  });
+
+  it("reuses the array reference across publishes while decisionCount is unchanged, and refreshes it once it grows", async () => {
+    let log: Decision[] = [];
+    const missed: MissedDecision = {
+      outcome: "missed",
+      seq: 0,
+      at: 10,
+      resolvedAt: 10,
+      attackId: 1,
+      entity: "root",
+      reason: "pin_brute_force",
+      window: { startTs: 0, endTs: 10 },
+    };
+    const fakeScorer: Scorer = {
+      record: () => undefined,
+      advanceTo: () => undefined,
+      finalize: () => undefined,
+      reading: () => ({ rolling: 100, caught: 0, missed: 0, falseAlerts: 0 }),
+      bindEventResolver: () => undefined,
+      decisionCount: () => log.length,
+      decisions: () => Object.freeze([...log]),
+      liveFindings: () => Object.freeze([]),
+    };
+    const h = launch({ generator: () => null, scorer: fakeScorer, checkpoints: [] });
+    await step(h.driver, CLOCK_HZ); // several publish ticks, decisionCount stays 0
+    const first = h.last();
+    await step(h.driver, CLOCK_HZ);
+    const second = h.last();
+    expect(second?.decisions).toBe(first?.decisions); // no growth: the sampler reused it
+    log = [missed]; // decisionCount grows from 0 to 1
+    await step(h.driver, CLOCK_HZ);
+    const third = h.last();
+    expect(third?.decisions).not.toBe(first?.decisions); // grew: a fresh array was read
+    expect(third?.decisions).toEqual([missed]);
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+});
+
+// GH37-PLAN.md: a decision `finalize()` appends at end-of-stream (not a checkpoint's
+// advanceTo) must still reach the terminal snapshot.
+describe("engine carries a finalize decision through to the terminal snapshot", () => {
+  it("publishes a decision finalize resolves for an Attack whose window outlives the deadline", async () => {
+    // The window ends far past the deadline, so only finalize (end-of-stream, which
+    // closes EVERY pending Attack regardless of window) can resolve it; a checkpoint's
+    // advanceTo cannot, since the window has not yet "ended" by the deadline's ts.
+    const attack: Attack = {
+      id: 1,
+      entity: "root",
+      reason: "pin_brute_force",
+      window: { startTs: 0, endTs: 100_000 },
+      eventIds: [0, 1],
+    };
+    const events = [ev(0, 0), ev(1, GAME_SECONDS_PER_TICK)];
+    const h = launch({
+      generator: scheduleOf(events),
+      scorer: createScorer([attack], SCORER_CONFIG),
+      checkpoints: deadlineAt(40),
+    });
+    await step(h.driver, 41);
+    await h.handle.whenStopped;
+    const last = h.last();
+    expect(last).toBeDefined();
+    if (!last) return;
+    const missed = last.decisions.find((d) => d.outcome === "missed");
+    expect(missed).toMatchObject({ attackId: 1, entity: "root" });
   });
 });

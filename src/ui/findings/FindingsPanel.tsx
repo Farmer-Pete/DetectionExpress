@@ -152,6 +152,9 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
         type="button"
         className={selected ? "findings-row is-selected" : "findings-row"}
         aria-pressed={selected}
+        // T12's FxLayer measures this row's rect to anchor a caught/false pop and
+        // comet; see GH37-PLAN.md "Comets and pops".
+        data-finding-seq={row.seq}
         onClick={(event) => {
           // Safari does not focus a clicked <button> by default, unlike Chrome and
           // Firefox. TraceOverlay's open-effect captures `document.activeElement` as

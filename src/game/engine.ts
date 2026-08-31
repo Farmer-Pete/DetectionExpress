@@ -131,6 +131,11 @@ function makeSampler(
   let lastSampleTick = clock.now();
   let lastCompleted = 0;
   let throughput = 0;
+  // Cached decisions read: `decisions()` allocates a frozen copy on every call, so the
+  // sampler only re-reads it when `decisionCount()` grew. The log is append-only, so
+  // count equality means identity: reusing the prior array reference is always correct.
+  let lastDecisionCount = scorer.decisionCount();
+  let decisions = scorer.decisions();
 
   return (force: boolean): void => {
     const now = clock.now();
@@ -155,6 +160,12 @@ function makeSampler(
       queued += channel.size;
     }
 
+    const decisionCount = scorer.decisionCount();
+    if (decisionCount !== lastDecisionCount) {
+      decisions = scorer.decisions();
+      lastDecisionCount = decisionCount;
+    }
+
     const ring = inspector.snapshot();
     setSnapshot({
       queued,
@@ -166,7 +177,7 @@ function makeSampler(
       admitted: run.getAdmitted(),
       completed: run.getCompleted(),
       findings: scorer.liveFindings(),
-      decisions: scorer.decisions(),
+      decisions,
       events: ring.events,
       processed: ring.processed,
     });

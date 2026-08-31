@@ -13,10 +13,16 @@
  *      stream's bottom reads "engine N behind".
  * State 3 is decided purely from `events`/`processed`/`admitted`, never from
  * DOM measurement.
+ *
+ * A row also reads its entry in the store's `flashes` map (T12, GH37-PLAN.md
+ * "Comets"): FxLayer spawns one when the row is cited evidence for a just-landed
+ * finding. The row's React `key` folds in the flash's `gen`, so a re-spawn on the
+ * same row (a higher gen) remounts the node and restarts the CSS keyframe, rather
+ * than extending whatever the old flash had already animated.
  */
-import { memo, useEffect } from "react";
+import { type CSSProperties, memo, useEffect } from "react";
 import type { Speed } from "../../game/run-controller";
-import { useGameStore } from "../../game/store";
+import { type FlashEntry, useGameStore } from "../../game/store";
 import { LOG_QUEUE_MAX } from "../../game/tuning";
 import type { RingEvent } from "../../sim/inspector";
 import { severityFill } from "../hud/severity";
@@ -38,13 +44,20 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
 }
 
+/** `CSSProperties` plus the one custom property a cited-row flash sets. */
+interface CitedRowStyle extends CSSProperties {
+  "--hunt-color"?: string;
+}
+
 interface LogRowProps {
   event: RingEvent;
   pending: boolean;
   cursor: boolean;
+  /** Present while this row is cited evidence for a just-landed finding. */
+  flash: FlashEntry | undefined;
 }
 
-const LogRow = memo(function LogRow({ event, pending, cursor }: LogRowProps) {
+const LogRow = memo(function LogRow({ event, pending, cursor, flash }: LogRowProps) {
   const view = formatRow(event.endpoint, event.raw);
   const classes = ["log-row", `log-row-${view.tone}`];
   if (pending) {
@@ -53,8 +66,12 @@ const LogRow = memo(function LogRow({ event, pending, cursor }: LogRowProps) {
   if (cursor) {
     classes.push("log-row-cursor");
   }
+  if (flash) {
+    classes.push("log-row-cited");
+  }
+  const style: CitedRowStyle | undefined = flash ? { "--hunt-color": flash.colorVar } : undefined;
   return (
-    <div className={classes.join(" ")} data-testid={`log-row-${event.id}`}>
+    <div className={classes.join(" ")} data-testid={`log-row-${event.id}`} style={style}>
       <span className="log-row-time">{formatClock(event.ts)}</span>
       <span className="log-row-who">{view.who}</span>
       <span className="log-row-where">{view.where}</span>
@@ -69,6 +86,7 @@ export function LogPanel() {
   const admitted = useGameStore((s) => s.snapshot.admitted);
   const frozen = useGameStore((s) => s.transport.frozen);
   const speed = useGameStore((s) => s.transport.speed);
+  const flashes = useGameStore((s) => s.flashes);
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
 
@@ -154,14 +172,21 @@ export function LogPanel() {
         <span className="queue-count">{queued} queued</span>
       </div>
       <div className="log-stream">
-        {newestFirst.map((event) => (
-          <LogRow
-            key={event.id}
-            event={event}
-            pending={event.id >= processed}
-            cursor={!caughtUp && event.id === processed}
-          />
-        ))}
+        {newestFirst.map((event) => {
+          const flash = flashes.get(event.id);
+          // The key folds in the flash's gen, so a re-spawn on the same row (a higher
+          // gen) remounts the node instead of extending the running keyframe.
+          const key = flash ? `${event.id}:${flash.gen}` : event.id;
+          return (
+            <LogRow
+              key={key}
+              event={event}
+              pending={event.id >= processed}
+              cursor={!caughtUp && event.id === processed}
+              flash={flash}
+            />
+          );
+        })}
         {showSticky ? (
           <div className="log-sticky" data-testid="log-sticky">
             engine {queued} behind

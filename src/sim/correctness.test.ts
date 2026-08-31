@@ -344,6 +344,40 @@ describe("scorer decisions", () => {
     expect(d.finding.alert).toEqual({ reason: REASON, at: 50, eventIds: [10, 11] });
   });
 
+  it("decisionCount tracks the log length, matching decisions().length, without allocating", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    expect(s.decisionCount()).toBe(0);
+    s.record(one([10, 11], 50), at(50));
+    expect(s.decisionCount()).toBe(1);
+    expect(s.decisionCount()).toBe(s.decisions().length);
+    s.record(one([99], 60), at(60)); // a second, false decision
+    expect(s.decisionCount()).toBe(2);
+  });
+
+  it("carries the liveSeq of the row a caught finding upserted", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record([sf(found([10, 11], 50), "root")], at(50));
+    const live = s.liveFindings();
+    expect(live).toHaveLength(1);
+    expect(asCaught(s.decisions()[0]).liveSeq).toBe(live[0]?.seq);
+  });
+
+  it("carries the liveSeq of the row a false, entity-less finding upserted", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([99], 60), at(60)); // cites no owned evidence and names no entity
+    const live = s.liveFindings();
+    expect(live).toHaveLength(1);
+    expect(asFalse(s.decisions()[0]).liveSeq).toBe(live[0]?.seq);
+  });
+
+  it("keeps the same liveSeq across a duplicate finding that replaces the same live row", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([10, 11], 50), at(50)); // caught, seeds the row's seq
+    s.record(one([10, 11], 60), at(60)); // a duplicate on a caught Attack scores false
+    const [caught, falseDec] = s.decisions();
+    expect(asFalse(falseDec).liveSeq).toBe(asCaught(caught).liveSeq); // one row, one seq
+  });
+
   it("sources a caught decision's at from the finding, not the event", () => {
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
     s.record([sf(found([10, 11], 42))], at(50)); // alert.at 42, but env.ts 50
