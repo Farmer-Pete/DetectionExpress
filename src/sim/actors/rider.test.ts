@@ -32,7 +32,7 @@ const base = {
 
 function ride(over: Partial<typeof base> = {}) {
   const rider = createRider({ ...base, ...over });
-  return runActors({ actors: [rider], env, runSeed: 4242, horizon: HORIZON });
+  return runActors({ actors: [rider], env, runSeed: 4242, horizon: HORIZON }).map((t) => t.reading);
 }
 
 describe("createRider journeys", () => {
