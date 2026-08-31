@@ -72,11 +72,15 @@ export function IntroOverlay({
     if (first === undefined || last === undefined) {
       return;
     }
-    // Wrap the two edges so focus stays inside the dialog.
-    if (event.shiftKey && document.activeElement === first) {
+    // Wrap the two edges so focus stays inside the dialog. `!inControls` is a no-op
+    // here in practice (open-focus always lands on `controls[0]`), kept only so this
+    // trap stays aligned with TraceOverlay's (`src/ui/focus.ts`).
+    const active = document.activeElement;
+    const inControls = controls.some((control) => control === active);
+    if (event.shiftKey && (active === first || !inControls)) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (!event.shiftKey && (active === last || !inControls)) {
       event.preventDefault();
       first.focus();
     }

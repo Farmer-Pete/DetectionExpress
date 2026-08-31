@@ -10,9 +10,17 @@ import type { RefObject } from "react";
 const FOCUSABLE_SELECTOR =
   'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
-/** A dialog's focusable controls, in DOM order. */
+/**
+ * A dialog's focusable controls, in DOM order. Attribute-only checks (no
+ * `offsetWidth`/`getClientRects`, which happy-dom never lays out): a disabled
+ * control, or one sitting inside an `aria-hidden`, `hidden`, or `inert`
+ * subtree, is excluded even though it matches the selector above.
+ */
 export function focusableControls(dialog: HTMLElement): HTMLElement[] {
-  return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
+  return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
+    (el) =>
+      !el.matches(":disabled") && el.closest('[aria-hidden="true"], [hidden], [inert]') === null,
+  );
 }
 
 /**

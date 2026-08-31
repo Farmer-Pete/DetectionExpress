@@ -319,6 +319,18 @@ describe("TraceOverlay", () => {
     expect(screen.queryByRole("dialog")).not.toBeNull();
   });
 
+  it("wraps Shift+Tab to the last control when the dialog container itself holds focus, not yet on any inner control", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    // Opening always focuses the container itself, never a specific control, so this
+    // is the dialog's ordinary state right after open, not a contrived setup.
+    expect(document.activeElement).toBe(dialog);
+    const notCanceled = fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(notCanceled).toBe(false); // dispatchEvent reports false when preventDefault fired
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /close/i }));
+  });
+
   it("wraps Tab at the edges to keep focus within the dialog", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);

@@ -203,10 +203,16 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
     if (first === undefined || last === undefined) {
       return;
     }
-    if (event.shiftKey && document.activeElement === first) {
+    // Whether focus already sits on one of the trap's own controls. When it does not
+    // (e.g. the container itself is focused, because open-focus landed there before any
+    // control took it), Tab/Shift+Tab still has to land somewhere sane, so both edges
+    // wrap in that case too, not just the first/last exact match.
+    const active = document.activeElement;
+    const inControls = controls.some((control) => control === active);
+    if (event.shiftKey && (active === first || !inControls)) {
       event.preventDefault();
       last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
+    } else if (!event.shiftKey && (active === last || !inControls)) {
       event.preventDefault();
       first.focus();
     }
