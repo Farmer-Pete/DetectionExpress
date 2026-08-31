@@ -232,7 +232,7 @@ describe("TraceOverlay", () => {
     expect(dialog.getByText("Watching")).toBeDefined();
   });
 
-  it("renders one card per cited event, raw over normalized, with its endpoint and time", () => {
+  it("renders one card per cited event, raw over normalized, pretty-printed, with its endpoint, time, and payload labels", () => {
     publish(
       [live({ seq: 1, eventIds: [3], entity: "acct-1" })],
       [
@@ -245,10 +245,19 @@ describe("TraceOverlay", () => {
       ],
     );
     openTraceByClick(/pin brute force/i);
-    const inDialog = within(screen.getByRole("dialog"));
+    const dialog = screen.getByRole("dialog");
+    const inDialog = within(dialog);
     expect(inDialog.getByText("kiosk-v1")).toBeDefined();
-    expect(inDialog.getByText(JSON.stringify({ acct: "amy" }))).toBeDefined();
-    expect(inDialog.getByText(JSON.stringify({ account: "amy" }))).toBeDefined();
+    expect(inDialog.getByText("Ingest")).toBeDefined();
+    expect(inDialog.getByText("Normalized")).toBeDefined();
+    // getByText normalizes whitespace, which would fold the pretty-printed newlines away,
+    // so compare the raw/normalized <pre> elements' textContent exactly instead.
+    expect(dialog.querySelector(".trace-card-raw")?.textContent).toBe(
+      JSON.stringify({ acct: "amy" }, null, 2),
+    );
+    expect(dialog.querySelector(".trace-card-normalized")?.textContent).toBe(
+      JSON.stringify({ account: "amy" }, null, 2),
+    );
   });
 
   it("renders an aged-out placeholder card for a cited id evicted from the ring", () => {
@@ -567,13 +576,18 @@ describe("TraceOverlay decision mode (T10)", () => {
       ],
     );
     openDecisionTraceByClick(/pin brute force/i);
-    const dialog = within(screen.getByRole("dialog"));
+    const dialogEl = screen.getByRole("dialog");
+    const dialog = within(dialogEl);
     expect(dialog.getByText("caught")).toBeDefined();
     expect(dialog.getByText("acct-7")).toBeDefined();
     // The card resolves against the decision's frozen citedEvents, never the live ring
     // (which carries a decoy for the same id, proving the card is not reading it).
-    expect(dialog.getByText(JSON.stringify({ acct: "amy" }))).toBeDefined();
-    expect(dialog.queryByText(JSON.stringify({ acct: "LIVE" }))).toBeNull();
+    // getByText normalizes whitespace, folding away the pretty-print's newlines, so
+    // compare the <pre>'s textContent exactly instead.
+    expect(dialogEl.querySelector(".trace-card-raw")?.textContent).toBe(
+      JSON.stringify({ acct: "amy" }, null, 2),
+    );
+    expect(dialogEl.textContent).not.toContain("LIVE");
     expect(dialog.getByText("5 of 5 wrong PINs")).toBeDefined();
   });
 

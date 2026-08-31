@@ -392,8 +392,10 @@ function TraceCardItem({ card }: { card: TraceCard }) {
         <span className="trace-card-endpoint">{card.endpoint}</span>
         <span className="trace-card-time">{formatClock(card.ts)}</span>
       </div>
-      <pre className="trace-card-raw">{JSON.stringify(card.raw)}</pre>
-      <pre className="trace-card-normalized">{JSON.stringify(card.normalized)}</pre>
+      <span className="trace-card-payload-label">Ingest</span>
+      <pre className="trace-card-raw">{JSON.stringify(card.raw, null, 2)}</pre>
+      <span className="trace-card-payload-label">Normalized</span>
+      <pre className="trace-card-normalized">{JSON.stringify(card.normalized, null, 2)}</pre>
     </li>
   );
 }

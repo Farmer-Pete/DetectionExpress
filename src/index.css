@@ -539,6 +539,15 @@ body {
   font-size: 0.72rem;
 }
 
+.trace-card-payload-label {
+  display: block;
+  margin: 0.3rem 0 0.15rem;
+  color: var(--dim);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .trace-card-raw,
 .trace-card-normalized {
   margin: 0;
@@ -552,7 +561,6 @@ body {
 }
 
 .trace-card-normalized {
-  margin-top: 0.3rem;
   color: var(--a4);
 }
 
