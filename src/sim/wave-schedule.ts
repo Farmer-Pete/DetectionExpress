@@ -1,19 +1,32 @@
 /**
  * The shared wave-schedule guard (F003 hardening, F002 field validation). Every
  * wave's own fields must be well-formed, waves must sit in non-decreasing
- * `startTick` order, and their half-open `[startTick, startTick +
- * durationTicks)` ranges must never overlap. The wave admission controller
+ * `startTick` order, their half-open `[startTick, startTick + durationTicks)`
+ * ranges must never overlap, and each successor must leave a drain gap wide
+ * enough for its own `incoming` cue to publish. The wave admission controller
  * (`sim/actors/admission.ts`) and the engine's `start()` seam both call this,
  * so a malformed `StartOptions.waves` throws before a run allocates, instead of
- * producing arrivals in the wrong order, double-counted ticks, or a stalled
- * accumulator.
+ * producing arrivals in the wrong order, double-counted ticks, a stalled
+ * accumulator, or a successor whose arrival cue never shows.
  *
- * Pure and total. `assertWaveScheduleOrdered` covers all three checks (fields,
- * order, overlap) in one call; the only thing left to a caller is any
- * accumulator-specific cap on `eventsPerTick` it needs on top (see
+ * Pure and total. `assertWaveScheduleOrdered` covers all four checks (fields,
+ * order, overlap, successor gap) in one call; the only thing left to a caller is
+ * any accumulator-specific cap on `eventsPerTick` it needs on top (see
  * `sim/actors/admission.ts`'s `MAX_EVENTS_PER_TICK`).
  */
+import { CLOCK_HZ, PUBLISH_HZ } from "../game/tuning";
 import type { Wave } from "./scenario";
+
+/**
+ * The smallest tick gap a successor wave needs after the prior wave ends for its
+ * `incoming` cue to publish at all. In `waveStateAt` the `active` phase outranks
+ * the next wave's warn window, so a successor's `incoming` reading only exists at
+ * ticks strictly after the prior wave's end; the sampler catches one of those
+ * only if that drain window is at least the publish stride (`CLOCK_HZ /
+ * PUBLISH_HZ`) ticks wide. See `wave-state.ts` and the `DRAIN_GAP_TICKS` note in
+ * `tuning.ts`, which the real schedule already honors.
+ */
+const MIN_SUCCESSOR_GAP_TICKS = CLOCK_HZ / PUBLISH_HZ;
 
 /**
  * Reject a wave whose own fields are malformed, independent of its position in
@@ -91,11 +104,40 @@ function assertNoOverlap(waves: readonly Wave[]): void {
 }
 
 /**
+ * Reject a successor wave that crowds the wave before it. Because `active`
+ * outranks `incoming` in `waveStateAt`, a successor's `incoming` phase can only
+ * occupy ticks that sit strictly after the prior wave's end, so it needs a drain
+ * gap of at least `MIN_SUCCESSOR_GAP_TICKS` for the sampler to catch even one
+ * `incoming` tick and fire the arrival cue. Touching (gap 0) or barely-separated
+ * waves would publish no `incoming` reading for the successor at all. Waves are
+ * non-decreasing and non-overlapping by the time this runs, so consecutive
+ * entries are the adjacent pair and `cur.startTick - prevEnd` is their gap,
+ * never negative.
+ */
+function assertSuccessorGap(waves: readonly Wave[]): void {
+  for (let i = 1; i < waves.length; i++) {
+    const prev = waves[i - 1];
+    const cur = waves[i];
+    if (prev === undefined || cur === undefined) {
+      continue;
+    }
+    const gap = cur.startTick - (prev.startTick + prev.durationTicks);
+    if (gap < MIN_SUCCESSOR_GAP_TICKS) {
+      throw new Error(
+        `assertWaveScheduleOrdered: wave ${i} starts ${gap} tick(s) after wave ${i - 1} ends; a successor needs at least ${MIN_SUCCESSOR_GAP_TICKS} (CLOCK_HZ / PUBLISH_HZ) to publish its incoming cue.`,
+      );
+    }
+  }
+}
+
+/**
  * Throws unless every wave's own fields are well-formed (`assertWaveFields`)
  * AND `waves` sits in non-decreasing `startTick` order with no overlapping
- * half-open ranges. One call covers all three checks, so a caller needs no
- * separate field pass of its own. Touching boundaries (one wave's end equal to
- * the next wave's start) are allowed.
+ * half-open ranges AND each successor sits at least `MIN_SUCCESSOR_GAP_TICKS`
+ * past the prior wave's end. One call covers all of those checks, so a caller
+ * needs no separate field pass of its own. Touching boundaries (one wave's end
+ * equal to the next wave's start) are rejected: a successor with too small a
+ * drain gap never publishes its `incoming` cue (see `assertSuccessorGap`).
  */
 export function assertWaveScheduleOrdered(waves: readonly Wave[]): void {
   waves.forEach((wave, index) => {
@@ -103,4 +145,5 @@ export function assertWaveScheduleOrdered(waves: readonly Wave[]): void {
   });
   assertChronological(waves);
   assertNoOverlap(waves);
+  assertSuccessorGap(waves);
 }
