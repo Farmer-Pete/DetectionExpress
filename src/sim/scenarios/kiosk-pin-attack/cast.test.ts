@@ -65,6 +65,29 @@ describe("budgetFumbles", () => {
     const b = budgetFumbles(visits, new Set(), randomLcg(5));
     expect(a).toEqual(b);
   });
+
+  it("keeps at most 4 fails in a rolling window straddling a bucket boundary", () => {
+    // The adversarial case: fumbles crowd the end of one bucket and the start of the
+    // next, both within one rolling 150-tick window. Each fixed bucket caps at 2, so
+    // the rolling window sees at most 4 — below the threshold of 5. Ticks 149 and 150
+    // sit in adjacent buckets one tick apart.
+    const lateBucketZero: BenignVisit[] = Array.from({ length: 20 }, () => ({
+      account: "river.k",
+      tick: SCAN_WINDOW_TICKS - 1,
+    }));
+    const earlyBucketOne: BenignVisit[] = Array.from({ length: 20 }, () => ({
+      account: "river.k",
+      tick: SCAN_WINDOW_TICKS,
+    }));
+    const counts = budgetFumbles([...lateBucketZero, ...earlyBucketOne], new Set(), randomLcg(2));
+    const bucketZeroTotal = counts
+      .slice(0, lateBucketZero.length)
+      .reduce((s: number, c) => s + c, 0);
+    const bucketOneTotal = counts.slice(lateBucketZero.length).reduce((s: number, c) => s + c, 0);
+    expect(bucketZeroTotal).toBeLessThanOrEqual(2);
+    expect(bucketOneTotal).toBeLessThanOrEqual(2);
+    expect(bucketZeroTotal + bucketOneTotal).toBeLessThanOrEqual(4);
+  });
 });
 
 describe("assembleAttacker", () => {

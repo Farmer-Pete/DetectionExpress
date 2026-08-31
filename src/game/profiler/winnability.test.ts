@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { admitArrivals } from "../../sim/actors/admission";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../sim/event";
@@ -20,6 +19,7 @@ import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
   OMEGA,
   PIN_BRUTE_FORCE_THRESHOLD,
@@ -55,10 +55,18 @@ import {
 // A faithful integer model of the run: arrivals follow the wave schedule; the
 // generic band `simulate` runs the real channel and governor math against them.
 
-/** Events arriving at each tick, binned from the admission controller's arrivals. */
+/**
+ * Events arriving at each tick, binned from the assembled canonical run. It consumes
+ * the same LEVEL_SEED stream the engine does, so the bins carry the benign
+ * successes, the benign fumble fails, AND the attack fails at their exact ticks
+ * (GH102 D7): the whole event load the queue actually sees, not just benign
+ * arrivals.
+ */
 function arrivalsByTick(deadline: number): number[] {
   const arrivals = new Array<number>(deadline + 1).fill(0);
-  for (const tick of admitArrivals(buildSchedule().waves)) {
+  const { events } = kioskPinAttack.generate(LEVEL_SEED);
+  for (const ev of events) {
+    const tick = ev.ts / GAME_SECONDS_PER_TICK;
     if (tick <= deadline) {
       arrivals[tick] = (arrivals[tick] ?? 0) + 1;
     }

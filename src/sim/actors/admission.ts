@@ -1,11 +1,11 @@
 /**
- * The wave admission controller (issue #89). It reads the wave
- * schedule and returns the tick of every admitted arrival. It reproduces the
- * kiosk benign accumulator exactly, including the per-wave reset: for a whole
- * rate the per-tick count equals `eventsPerTick`; for a fractional rate it
- * matches the kiosk generator's cumulative count, spread the same way. Arrivals
- * land only inside each wave's half-open `[startTick, startTick + durationTicks)`,
- * so the intro and every drain gap carry no new arrivals.
+ * The wave admission controller (issue #89). It reads the wave schedule and returns
+ * the tick of every admitted arrival. Since GH102 it is the ONE benign accumulator:
+ * the kiosk scenario builds its benign patron slots from this, so no second copy of
+ * the accumulator math exists. Per-wave reset holds: for a whole rate the per-tick
+ * count equals `eventsPerTick`; for a fractional rate the cumulative count spreads
+ * evenly. Arrivals land only inside each wave's half-open `[startTick, startTick +
+ * durationTicks)`, so the intro and every drain gap carry no new arrivals.
  *
  * Deterministic and pure. No rng: the accumulator alone fixes the ticks.
  */
