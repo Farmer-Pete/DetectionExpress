@@ -16,6 +16,8 @@ beforeEach(() => {
     runPending: false,
     selection: null,
     transport: { frozen: false, speed: 1 },
+    flashes: new Map(),
+    runToken: 0,
   });
 });
 
@@ -195,5 +197,45 @@ describe("store selection", () => {
   it("setSnapshot leaves a null selection null", () => {
     useGameStore.getState().setSnapshot(snapshotWith([finding(1)]));
     expect(useGameStore.getState().selection).toBeNull();
+  });
+});
+
+describe("store fx slice", () => {
+  it("spawns a flash and round-trips it through clearFlash", () => {
+    useGameStore.getState().spawnFlashes([{ eventId: 5, colorVar: "var(--hunt-1)", gen: 1 }]);
+    expect(useGameStore.getState().flashes.get(5)).toEqual({ colorVar: "var(--hunt-1)", gen: 1 });
+    useGameStore.getState().clearFlash(5, 1);
+    expect(useGameStore.getState().flashes.has(5)).toBe(false);
+  });
+
+  it("spawns several flashes from one batch", () => {
+    useGameStore.getState().spawnFlashes([
+      { eventId: 1, colorVar: "var(--hunt-1)", gen: 1 },
+      { eventId: 2, colorVar: "var(--hunt-1)", gen: 1 },
+    ]);
+    expect(useGameStore.getState().flashes.size).toBe(2);
+  });
+
+  it("builds a new Map reference on every spawn, so a shallow-equal selector sees the update", () => {
+    const before = useGameStore.getState().flashes;
+    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-1)", gen: 1 }]);
+    expect(useGameStore.getState().flashes).not.toBe(before);
+  });
+
+  it("leaves a stale-gen clearFlash as a no-op: a newer flash already owns the row", () => {
+    useGameStore.getState().spawnFlashes([{ eventId: 5, colorVar: "var(--hunt-2)", gen: 2 }]);
+    useGameStore.getState().clearFlash(5, 1); // stale: the row is now on gen 2
+    expect(useGameStore.getState().flashes.get(5)).toEqual({ colorVar: "var(--hunt-2)", gen: 2 });
+  });
+
+  it("leaves clearFlash on an absent row as a no-op", () => {
+    useGameStore.getState().clearFlash(9, 1);
+    expect(useGameStore.getState().flashes.has(9)).toBe(false);
+  });
+
+  it("starts runToken at 0 and sets it on demand", () => {
+    expect(useGameStore.getState().runToken).toBe(0);
+    useGameStore.getState().setRunToken(3);
+    expect(useGameStore.getState().runToken).toBe(3);
   });
 });

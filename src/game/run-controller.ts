@@ -123,6 +123,13 @@ export interface RunControllerDeps {
    * false once it commits, fails, or is superseded. The editor reads it to disable Apply.
    */
   setRunPending: (pending: boolean) => void;
+  /**
+   * Set the store's `runToken` to this run's generation, once its engine actually
+   * installs (never on a dry-run that only fails setup). FxLayer watches this to
+   * reset its own state on a restart, since the scorer's seq and decision log both
+   * reset to zero on a fresh engine.
+   */
+  setRunToken: (token: number) => void;
   /** Defaults to the real loader; tests inject a deterministic one. */
   loadAlgorithm?: (target: LoadTarget) => Promise<LoadedAlgorithm>;
   /**
@@ -490,6 +497,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;
+        deps.setRunToken(gen); // the engine actually installed: publish this generation
         // Reapply the retained transport state to the fresh clock. Apply and hot-reload
         // build a new clock, so without this a frozen or 2x session would drive a new
         // unpaused 1x one. The reapply is transactional: if pause or setSpeed throws, the
