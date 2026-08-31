@@ -345,6 +345,28 @@ describe("TraceOverlay", () => {
     expect(screen.queryByRole("dialog")).not.toBeNull();
   });
 
+  it("does not dismiss when a gesture starts on the backdrop but ends inside the dialog (F003)", () => {
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    const pre = dialog.querySelector(".trace-card-raw");
+    if (pre === null) {
+      throw new Error("expected a raw payload <pre>");
+    }
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    // The mirror case of the drag-out test above: the gesture STARTS on the backdrop
+    // (e.g. a mis-click that slides onto the dialog before release) but its pointerup
+    // ENDS inside the dialog. Neither endpoint alone was outside-and-inside; the
+    // dismiss must not fire, matching the "either endpoint inside never dismisses" rule.
+    fireEvent.pointerDown(backdrop);
+    fireEvent.pointerUp(pre);
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+
   it("wraps Shift+Tab to the last control when the dialog container itself holds focus, not yet on any inner control", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);

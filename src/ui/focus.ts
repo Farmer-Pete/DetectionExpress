@@ -26,25 +26,30 @@ export function focusableControls(dialog: HTMLElement): HTMLElement[] {
 /**
  * Dismiss a dialog on a genuine outside click, never on a gesture that merely
  * ENDS outside it (e.g. selecting text inside the dialog and releasing the
- * mouse over the backdrop). A `pointerdown` records whether it started outside
- * the dialog; the paired `click` only dismisses when BOTH the pointerdown and
- * the click landed outside. Each new pointerdown overwrites the remembered
+ * mouse over the backdrop) — and, symmetrically, never on a gesture that
+ * merely STARTS outside it (e.g. a mis-click on the backdrop that slides onto
+ * the dialog before release). A `pointerdown` and a `pointerup` each record
+ * whether THEY landed outside the dialog; the paired `click` only dismisses
+ * when the click itself landed outside AND neither recorded endpoint says it
+ * was inside. A gesture with either endpoint inside the dialog never
+ * dismisses. Each new pointerdown/pointerup overwrites its own remembered
  * value, so only the click's own gesture is ever consulted.
  *
- * happy-dom's `fireEvent.click` fires no paired `pointerdown` at all, so with
- * no pointerdown recorded since install the check falls back to the click
- * target alone (outside-agnostic) — this keeps a plain backdrop-click test
- * green without a synthesized pointerdown, while a real drag that starts
- * inside the dialog still stays open.
+ * happy-dom's `fireEvent.click` fires no paired `pointerdown`/`pointerup` at
+ * all, so with neither recorded since install the check falls back to the
+ * click target alone (outside-agnostic) — this keeps a plain backdrop-click
+ * test green without synthesized pointer events, while a real drag that
+ * starts or ends inside the dialog still stays open.
  *
- * Returns a cleanup that removes both listeners.
+ * Returns a cleanup that removes all three listeners.
  */
 export function installOutsidePointerDismiss(
   dialogRef: RefObject<HTMLElement | null>,
   onDismiss: () => void,
 ): () => void {
-  // undefined: no pointerdown recorded since install.
+  // undefined: no pointerdown/pointerup recorded since install.
   let pointerDownOutside: boolean | undefined;
+  let pointerUpOutside: boolean | undefined;
 
   const isOutside = (target: EventTarget | null): boolean => {
     const dialog = dialogRef.current;
@@ -55,17 +60,27 @@ export function installOutsidePointerDismiss(
     pointerDownOutside = isOutside(event.target);
   };
 
+  const onPointerUp = (event: PointerEvent): void => {
+    pointerUpOutside = isOutside(event.target);
+  };
+
   const onClick = (event: MouseEvent): void => {
     const clickOutside = isOutside(event.target);
-    if (clickOutside && (pointerDownOutside === undefined || pointerDownOutside)) {
+    if (
+      clickOutside &&
+      (pointerDownOutside === undefined || pointerDownOutside) &&
+      (pointerUpOutside === undefined || pointerUpOutside)
+    ) {
       onDismiss();
     }
   };
 
   document.addEventListener("pointerdown", onPointerDown);
+  document.addEventListener("pointerup", onPointerUp);
   document.addEventListener("click", onClick);
   return () => {
     document.removeEventListener("pointerdown", onPointerDown);
+    document.removeEventListener("pointerup", onPointerUp);
     document.removeEventListener("click", onClick);
   };
 }

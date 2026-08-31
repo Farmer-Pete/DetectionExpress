@@ -18,7 +18,7 @@
  * Tests inject controller factories through `createPipelineController` /
  * `createWorldController`, so the app never loads the real loader or engine under test.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
 import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
 import { localAlgorithmUrl } from "../game/algorithms-resolve";
@@ -115,11 +115,22 @@ export function App({ createPipelineController, createWorldController }: AppProp
   // Dismiss the overlay. Every dismissing action marks the intro seen and records its
   // scroll target for the post-close effect. A storage failure never blocks the close,
   // since the wrapper swallows it.
-  const dismissIntro = (target: string | null): void => {
+  //
+  // Stable identity (F020): `useCallback`'d, with `onObserve`/`onCauseChaos`/
+  // `onEditEngine` below wrapping it the same way, so the handlers IntroOverlay
+  // receives keep one identity across App re-renders. IntroOverlay's own
+  // outside-pointer-dismiss effect (`src/ui/focus.ts`) keys its cleanup/re-install
+  // on `onObserve`'s identity; a fresh function every render would tear that
+  // listener down and reinstall it on every App render, not just on open/close.
+  const dismissIntro = useCallback((target: string | null): void => {
     markIntroSeen();
     pendingDismiss.current = { scrollTarget: target };
     setIntroOpen(false);
-  };
+  }, []);
+
+  const onObserve = useCallback(() => dismissIntro(null), [dismissIntro]);
+  const onCauseChaos = useCallback(() => dismissIntro("chaos-ladder"), [dismissIntro]);
+  const onEditEngine = useCallback(() => dismissIntro("algorithm-editor"), [dismissIntro]);
 
   // After the overlay unmounts, act on the recorded dismiss intent exactly once.
   // A scroll action scrolls to its target, then moves focus there without a second
@@ -319,9 +330,9 @@ export function App({ createPipelineController, createWorldController }: AppProp
         <IntroOverlay
           copy={introCopy}
           repoUrl={REPO_URL}
-          onObserve={() => dismissIntro(null)}
-          onCauseChaos={() => dismissIntro("chaos-ladder")}
-          onEditEngine={() => dismissIntro("algorithm-editor")}
+          onObserve={onObserve}
+          onCauseChaos={onCauseChaos}
+          onEditEngine={onEditEngine}
         />
       ) : null}
     </div>
