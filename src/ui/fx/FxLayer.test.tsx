@@ -568,22 +568,27 @@ describe("FxLayer verdict announcements (F007)", () => {
     expect(live.textContent).toContain("acct-6");
   });
 
-  it("renders exactly the cap's worth of announcements from a single burst over the cap, keeping the latest", () => {
+  it("collapses a single burst over the cap into one outcome-count summary, not a truncated list", () => {
     const clock = new ManualFxClock();
     renderHarness(clock, [], []);
     stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
-    // One publish carrying 7 missed decisions at once: more than ANNOUNCEMENT_CAP (5).
-    const decisions = [1, 2, 3, 4, 5, 6, 7].map((n) => missedDecision(`acct-${n}`));
+    // One publish carrying 7 decisions at once: more than ANNOUNCEMENT_CAP (5). A
+    // per-decision list would drop verdicts no matter which end the cap kept, so this
+    // must render as exactly one summary entry instead.
+    const decisions = [
+      caughtDecision(1, "acct-1"),
+      caughtDecision(1, "acct-2"),
+      falseDecision(1, "acct-3"),
+      missedDecision("acct-4"),
+      missedDecision("acct-5"),
+      missedDecision("acct-6"),
+      missedDecision("acct-7"),
+    ];
     publish([], decisions);
 
     const live = screen.getByTestId("fx-announcements");
-    expect(live.childElementCount).toBe(5);
-    // The latest 5 of the batch survive, not the earliest.
-    for (const n of [3, 4, 5, 6, 7]) {
-      expect(live.textContent).toContain(`acct-${n}`);
-    }
-    expect(live.textContent).not.toContain("acct-1");
-    expect(live.textContent).not.toContain("acct-2");
+    expect(live.childElementCount).toBe(1);
+    expect(live.textContent).toBe("7 decisions: 2 caught, 1 false alert, 4 missed");
   });
 });
 

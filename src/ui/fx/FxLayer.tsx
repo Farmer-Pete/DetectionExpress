@@ -225,6 +225,39 @@ function announcementFor(decision: Decision): string {
   return `Missed: ${decision.entity}`;
 }
 
+/**
+ * F007: the single announcement for a tick that lands more decisions than
+ * `ANNOUNCEMENT_CAP` can hold. A per-decision entry per landed decision would mean
+ * some verdicts are never read regardless of which end of the batch the cap keeps, so
+ * the burst collapses to one line naming every outcome's count instead, e.g.
+ * "7 decisions: 5 missed, 2 caught".
+ */
+function burstSummaryFor(decisions: readonly Decision[]): string {
+  let caught = 0;
+  let falseAlert = 0;
+  let missed = 0;
+  for (const decision of decisions) {
+    if (decision.outcome === "caught") {
+      caught++;
+    } else if (decision.outcome === "false") {
+      falseAlert++;
+    } else {
+      missed++;
+    }
+  }
+  const parts: string[] = [];
+  if (caught > 0) {
+    parts.push(`${caught} caught`);
+  }
+  if (falseAlert > 0) {
+    parts.push(`${falseAlert} false alert${falseAlert === 1 ? "" : "s"}`);
+  }
+  if (missed > 0) {
+    parts.push(`${missed} missed`);
+  }
+  return `${decisions.length} decisions: ${parts.join(", ")}`;
+}
+
 /** How many announcements the live region keeps. Older ones age out; a screen reader
  *  only needs the recent handful, not the full run history. */
 const ANNOUNCEMENT_CAP = 5;
@@ -390,12 +423,20 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
     if (newDecisions.length > 0) {
       // F007: a plain-word announcement per decision, appended in order, into the
       // aria-live region — independent of `reducedMotion`, so it fires under it too.
-      const newAnnouncements = newDecisions.map(
-        (decision): Announcement => ({
-          id: nextAnnouncementIdRef.current++,
-          text: announcementFor(decision),
-        }),
-      );
+      // A single tick that lands more decisions than the region can hold collapses to
+      // ONE summary entry instead: a per-decision list would silently drop verdicts
+      // from assistive tech no matter how the cap is sliced (whichever tail survives,
+      // the rest were never announced), so the burst gets one combined line naming
+      // every outcome instead.
+      const newAnnouncements: Announcement[] =
+        newDecisions.length > ANNOUNCEMENT_CAP
+          ? [{ id: nextAnnouncementIdRef.current++, text: burstSummaryFor(newDecisions) }]
+          : newDecisions.map(
+              (decision): Announcement => ({
+                id: nextAnnouncementIdRef.current++,
+                text: announcementFor(decision),
+              }),
+            );
       // A same-tick batch at or over the cap fills the region on its own: spreading
       // `current` first would only be discarded by the slice below, so skip it to keep
       // the result exactly the newest ANNOUNCEMENT_CAP entries of THIS batch.
