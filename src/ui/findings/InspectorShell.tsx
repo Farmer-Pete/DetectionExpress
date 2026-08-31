@@ -10,6 +10,7 @@
  * editor or the intro overlay, both of which live outside the shell.
  */
 import { useGameStore } from "../../game/store";
+import { FxLayer } from "../fx/FxLayer";
 import { LogPanel } from "../log/LogPanel";
 import { FindingsPanel } from "./FindingsPanel";
 
@@ -29,6 +30,7 @@ export function InspectorShell() {
       </div>
       <FindingsPanel />
       <TraceOverlayMount />
+      <FxLayer />
     </section>
   );
 }

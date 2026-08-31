@@ -38,7 +38,7 @@ export interface FlashEntry {
 }
 
 /** One row to flash, as FxLayer spawns it. */
-interface FlashSpawn {
+export interface FlashSpawn {
   eventId: number;
   colorVar: string;
   gen: number;

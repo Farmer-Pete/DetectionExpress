@@ -30,6 +30,17 @@
   --s-train: #cfe3ea;
   --s-relay: #f8961e;
   --s-console: #f94144;
+
+  /* T12 hunt palette (GH37-PLAN.md "Hunt colors"): a fixed cycling set, assigned to a
+     reason token on its first appearance in the run. Several intentionally double up
+     with an existing HUD or sensor token, the same convention the metro tokens above
+     use, since they read as one visual vocabulary rather than a second, clashing one. */
+  --hunt-1: #4cc9f0;
+  --hunt-2: #c77dff;
+  --hunt-3: #f2a900;
+  --hunt-4: #90be6d;
+  --hunt-5: #f8961e;
+  --hunt-6: #577590;
 }
 
 * {
@@ -1182,6 +1193,26 @@ body {
   box-shadow: inset 2px 0 0 var(--a1);
 }
 
+/* T12 (GH37-PLAN.md "Comets"): a row FxLayer cited as evidence for a just-landed
+   finding, flashing in the finding's hunt color (`--hunt-color`, set inline). */
+.log-row-cited {
+  animation: fx-cite 1.2s ease;
+}
+
+@keyframes fx-cite {
+  0% {
+    background: var(--hunt-color);
+    box-shadow: 0 0 16px var(--hunt-color);
+  }
+  55% {
+    background: var(--hunt-color);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 .log-sticky {
   position: sticky;
   bottom: 0;
@@ -1203,4 +1234,97 @@ body {
   font-size: 0.9rem;
   font-weight: 700;
   line-height: 1.4;
+}
+
+/* T12 FX overlay (GH37-PLAN.md): a fixed, full-viewport layer FxLayer owns outright.
+   Every child's `left`/`top` is a viewport coordinate from `getBoundingClientRect()`,
+   so positioning it `absolute` inside this `fixed` root needs no further offset. */
+.fx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fx-comet {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 14px currentColor;
+  animation: fx-comet-fly 0.52s cubic-bezier(0.32, 0.72, 0.28, 1) forwards;
+}
+
+@keyframes fx-comet-fly {
+  from {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--comet-dx), var(--comet-dy));
+    opacity: 0.2;
+  }
+}
+
+/* A verdict pop: CAUGHT / FALSE ALERT / MISSED, in a verdict color (never a hunt
+   color) — `--ok` / `--alert` / `--threat`, the same tokens the HUD gauges use. */
+.fx-pop {
+  position: absolute;
+  transform: translate(-50%, 0);
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-shadow: 0 0 14px currentColor;
+  animation: fx-pop-rise 1.1s cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+}
+
+@keyframes fx-pop-rise {
+  0% {
+    transform: translate(-50%, 0) scale(0.6);
+    opacity: 0;
+  }
+  18% {
+    transform: translate(-50%, -8px) scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -64px) scale(1);
+    opacity: 0;
+  }
+}
+
+/* prefers-reduced-motion (GH37-PLAN.md): no flight paths, no scale or translate
+   movement. A cited row holds a static highlight instead of the pulsing keyframe; a
+   verdict pop fades in place instead of rising. Same durations either way. FxLayer
+   itself skips spawning a comet at all under reduced motion, so no override is
+   needed here for `.fx-comet`. */
+@media (prefers-reduced-motion: reduce) {
+  .log-row-cited {
+    animation: none;
+    background: color-mix(in srgb, var(--hunt-color) 35%, transparent);
+  }
+
+  .fx-pop {
+    transform: translate(-50%, 0);
+    animation: fx-pop-fade 1.1s ease forwards;
+  }
+}
+
+@keyframes fx-pop-fade {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
