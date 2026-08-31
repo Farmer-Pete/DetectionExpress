@@ -3,7 +3,7 @@
  * and its decision log. No DOM, no store, no timing: FxLayer decides what to spawn
  * from what these return (GH37-PLAN.md "What 'a finding lands' means").
  */
-import type { Decision, LiveFinding } from "../../sim/correctness";
+import type { CaughtDecision, Decision, FalseDecision, LiveFinding } from "../../sim/correctness";
 
 /**
  * The findings that just landed: a `LiveFinding` reaching state "hit" for the FIRST
@@ -44,4 +44,29 @@ export function diffDecisions(
   decisions: readonly Decision[],
 ): readonly Decision[] {
   return decisions.slice(prevLength);
+}
+
+/**
+ * F012: the caught/false decisions among `newDecisions` whose crediting finding never
+ * landed through `diffFindings` this run. A fast rule can record a decision and
+ * consume the end-of-stream marker inside the same tick's microtask phase, so
+ * `finalize()` clears the live set before any snapshot samples the hit — the decision
+ * lands durably in the log, but its finding never appears in a sampled `findings`
+ * array, so `diffFindings` never fires for it. `firedSeqs` is keyed on `liveSeq`
+ * exactly like a finding's own `seq`, so a decision whose finding WAS sampled first
+ * (already in `firedSeqs`) is excluded here, and a missed decision (no finding, no
+ * `liveSeq`) is excluded outright.
+ */
+export function unfiredLandingDecisions(
+  newDecisions: readonly Decision[],
+  firedSeqs: ReadonlySet<number>,
+): readonly (CaughtDecision | FalseDecision)[] {
+  const unfired: (CaughtDecision | FalseDecision)[] = [];
+  for (const decision of newDecisions) {
+    if (decision.outcome === "missed" || firedSeqs.has(decision.liveSeq)) {
+      continue;
+    }
+    unfired.push(decision);
+  }
+  return unfired;
 }

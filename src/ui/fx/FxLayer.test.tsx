@@ -169,24 +169,28 @@ function liveFinding(opts: LiveOptions): LiveFinding {
   return result;
 }
 
-function caughtDecision(liveSeq: number, entity = "acct-1"): CaughtDecision {
+function caughtDecision(
+  liveSeq: number,
+  entity = "acct-1",
+  eventIds: number[] = [1],
+): CaughtDecision {
   return {
     outcome: "caught",
     seq: 0,
     at: 0,
     attackId: 1,
     entity,
-    finding: { alert: { reason: "brute", at: 0, eventIds: [1] }, eventId: 1 },
+    finding: { alert: { reason: "brute", at: 0, eventIds }, eventId: eventIds[0] ?? 1 },
     liveSeq,
   };
 }
 
-function falseDecision(liveSeq: number, entity?: string): FalseDecision {
+function falseDecision(liveSeq: number, entity?: string, eventIds: number[] = [1]): FalseDecision {
   const decision: FalseDecision = {
     outcome: "false",
     seq: 0,
     at: 0,
-    finding: { alert: { reason: "brute", at: 0, eventIds: [1] }, eventId: 1 },
+    finding: { alert: { reason: "brute", at: 0, eventIds }, eventId: eventIds[0] ?? 1 },
     liveSeq,
   };
   if (entity !== undefined) {
@@ -266,6 +270,81 @@ describe("FxLayer landing a finding", () => {
     );
     expect(screen.getAllByTestId("fx-comet")).toHaveLength(2);
     expect(screen.getAllByTestId("fx-pop")).toHaveLength(2);
+  });
+});
+
+describe("FxLayer F012 fallback landing FX for an unsampled hit", () => {
+  it("spawns the landing flash, comet, and pop for a caught decision whose liveSeq never appeared in a findings array", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [30, 31], [5]);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(requireEl("[data-finding-seq='5']"), rect(40, 50, 60, 70));
+    publish([], [caughtDecision(5, "acct-7", [30, 31])]);
+    expect(useGameStore.getState().flashes.size).toBe(2); // one per cited eventId
+    expect(screen.getAllByTestId("fx-comet")).toHaveLength(2);
+    expect(screen.getAllByTestId("fx-pop")).toHaveLength(1);
+  });
+
+  it("de-dupes: a hit sampled in the same delta as its own decision produces exactly one flash+comet set", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    publish(
+      [liveFinding({ seq: 1, reason: "brute", eventIds: [10] })],
+      [caughtDecision(1, "acct-1", [10])],
+    );
+    expect(useGameStore.getState().flashes.size).toBe(1); // not two: findings loop already fired it
+    expect(screen.getAllByTestId("fx-comet")).toHaveLength(1);
+  });
+
+  it("under reduced motion, the fallback spawns the cited flash and the pop but no comet", () => {
+    stubReducedMotion(true);
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    publish([], [caughtDecision(1, "acct-1", [10])]);
+    expect(useGameStore.getState().flashes.size).toBe(1);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.getAllByTestId("fx-pop")).toHaveLength(1);
+  });
+
+  it("regression: when the hit was sampled and fired in an earlier tick, a later decision for the same liveSeq does not refire", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    publish([liveFinding({ seq: 1, eventIds: [10] })]); // the hit lands first, no decision yet
+    expect(screen.getAllByTestId("fx-comet")).toHaveLength(1);
+
+    publish([liveFinding({ seq: 1, eventIds: [10] })], [caughtDecision(1, "acct-1", [10])]); // the decision arrives a tick later, for the same liveSeq
+    expect(screen.getAllByTestId("fx-comet")).toHaveLength(1); // still one: the fallback did not refire
+    expect(screen.getAllByTestId("fx-pop")).toHaveLength(1); // the pop is unaffected
+  });
+});
+
+describe("FxLayer stacked pops (F009)", () => {
+  it("gives each pop in a same-anchor batch of missed decisions a distinct position", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], []);
+    stubRect(requireEl(".findings-panel"), rect(100, 200, 300, 400));
+    publish([], [missedDecision("acct-1"), missedDecision("acct-2"), missedDecision("acct-3")]);
+    const pops = screen.getAllByTestId("fx-pop");
+    expect(pops).toHaveLength(3);
+    const coords = pops.map((pop) => `${pop.style.left},${pop.style.top}`);
+    expect(new Set(coords).size).toBe(3); // every pop lands at a distinct point
+  });
+});
+
+describe("FxLayer anchor clamping", () => {
+  it("clamps a straddling row's center into the panel's visible bottom edge, even though the row overlaps the panel", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    stubRect(requireEl(".log-stream"), rect(0, 0, 200, 200));
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(screen.getByTestId("log-row-10"), rect(5, 5, 15, 15));
+    // The finding row's rect overlaps the panel (its top, 190, is inside the panel's
+    // 0..200 span) but its own center, 220, sits below the panel's bottom edge — a
+    // row straddling the edge, not fully off-screen.
+    stubRect(requireEl("[data-finding-seq='1']"), rect(10, 190, 30, 250));
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    const comet = screen.getByTestId("fx-comet");
+    expect(cometTo(comet)).toEqual({ x: 20, y: 200 }); // clamped to the panel's visible bottom edge
   });
 });
 

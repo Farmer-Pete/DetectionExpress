@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Decision, LiveFinding, MissedDecision } from "../../sim/correctness";
+import type {
+  CaughtDecision,
+  Decision,
+  FalseDecision,
+  LiveFinding,
+  MissedDecision,
+} from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
-import { diffDecisions, diffFindings } from "./fx-events";
+import { diffDecisions, diffFindings, unfiredLandingDecisions } from "./fx-events";
 
 /** A minimal LiveFinding fixture; only `seq` and `state` matter to the diff. */
 function finding(seq: number, state: "hit" | "watch", reason = "pin_brute_force"): LiveFinding {
@@ -18,6 +24,28 @@ function missed(seq: number): MissedDecision {
     entity: `entity-${seq}`,
     reason: "pin_brute_force",
     window: { startTs: 0, endTs: 0 },
+  };
+}
+
+function caught(seq: number, liveSeq: number): CaughtDecision {
+  return {
+    outcome: "caught",
+    seq,
+    at: 0,
+    attackId: seq,
+    entity: `entity-${seq}`,
+    finding: { alert: { reason: "pin_brute_force", at: 0, eventIds: [liveSeq] }, eventId: liveSeq },
+    liveSeq,
+  };
+}
+
+function falseAlert(seq: number, liveSeq: number): FalseDecision {
+  return {
+    outcome: "false",
+    seq,
+    at: 0,
+    finding: { alert: { reason: "pin_brute_force", at: 0, eventIds: [liveSeq] }, eventId: liveSeq },
+    liveSeq,
   };
 }
 
@@ -88,5 +116,33 @@ describe("diffDecisions", () => {
   it("survives a simulated run reset: a fresh short log from prevLength 0 reads as all new", () => {
     const freshLog: Decision[] = [missed(0)];
     expect(diffDecisions(0, freshLog)).toEqual(freshLog);
+  });
+});
+
+describe("unfiredLandingDecisions", () => {
+  it("picks a caught decision whose liveSeq never fired", () => {
+    const unfired = unfiredLandingDecisions([caught(0, 5)], new Set());
+    expect(unfired.map((d) => d.liveSeq)).toEqual([5]);
+  });
+
+  it("picks a false decision whose liveSeq never fired", () => {
+    const unfired = unfiredLandingDecisions([falseAlert(0, 7)], new Set());
+    expect(unfired.map((d) => d.liveSeq)).toEqual([7]);
+  });
+
+  it("skips a missed decision: it has no liveSeq and carries no finding", () => {
+    const unfired = unfiredLandingDecisions([missed(0)], new Set());
+    expect(unfired).toEqual([]);
+  });
+
+  it("skips a caught/false decision whose liveSeq already fired", () => {
+    const unfired = unfiredLandingDecisions([caught(0, 5), falseAlert(1, 7)], new Set([5, 7]));
+    expect(unfired).toEqual([]);
+  });
+
+  it("returns a mixed batch's unfired caught and false decisions, in order", () => {
+    const decisions = [caught(0, 1), missed(1), falseAlert(2, 2), caught(3, 3)];
+    const unfired = unfiredLandingDecisions(decisions, new Set([3]));
+    expect(unfired.map((d) => d.liveSeq)).toEqual([1, 2]);
   });
 });

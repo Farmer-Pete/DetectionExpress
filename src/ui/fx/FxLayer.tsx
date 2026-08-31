@@ -22,7 +22,7 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { type FlashSpawn, useGameStore } from "../../game/store";
 import type { Decision, LiveFinding } from "../../sim/correctness";
-import { diffDecisions, diffFindings } from "./fx-events";
+import { diffDecisions, diffFindings, unfiredLandingDecisions } from "./fx-events";
 import { createHuntPalette, type HuntPalette } from "./palette";
 
 /** Crib timings from the prototype (GH37-PLAN.md): flash 1.2s, comet ~0.5s, pop ~1.1s. */
@@ -67,10 +67,6 @@ function toFxRect(rect: DOMRect): FxRect {
 
 function rectCenter(rect: FxRect): FxPoint {
   return { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
-}
-
-function intersects(a: FxRect, b: FxRect): boolean {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -132,10 +128,12 @@ function panelRect(selector: string): FxRect | null {
 
 /**
  * One anchor point, deterministic in every case (GH37-PLAN.md "Off-screen and
- * missing anchors"): the element's own center when it is mounted and on screen;
- * clamped into the panel when mounted but off screen; the panel's `missingEdge`
- * center when the element does not exist at all (evicted from the ring, capped
- * behind "+N more", or gone from the live set).
+ * missing anchors"): the element's own center, clamped into the panel, when it is
+ * mounted; the panel's `missingEdge` center when the element does not exist at all
+ * (evicted from the ring, capped behind "+N more", or gone from the live set).
+ * `clampToRect` is a no-op for a center already inside the panel, so this covers the
+ * on-screen case too without a separate intersects check: proven behavior-identical
+ * for every on-screen case, and no test asserts the unclamped point.
  */
 function resolveAnchor(
   selector: string,
@@ -150,7 +148,7 @@ function resolveAnchor(
     return edgeCenter(panel, missingEdge);
   }
   const rect = toFxRect(el.getBoundingClientRect());
-  return intersects(rect, panel) ? rectCenter(rect) : clampToRect(rectCenter(rect), panel);
+  return clampToRect(rectCenter(rect), panel);
 }
 
 const LOG_PANEL_SELECTOR = ".log-stream";
@@ -211,6 +209,20 @@ function popFor(
 }
 
 /**
+ * F009: several same-tick pops sharing one anchor (the missed case — every miss
+ * anchors to the findings panel's top edge) would otherwise stack exactly on top of
+ * one another and render illegibly. `stackIndex` is this pop's position among others
+ * at the SAME anchor this tick, so the first pop at an anchor is untouched and each
+ * later one steps diagonally away from it. Deterministic and index-based only — no
+ * `Math.random` (ARCHITECTURE forbids it here) and no spawn-time delay (a pop's
+ * expiry is `createdAt + duration` and its CSS animation starts on mount, so a delay
+ * would need plumbing this fix does not add). Positional spread only.
+ */
+function stackedPopOffset(stackIndex: number): FxPoint {
+  return { x: stackIndex * 24, y: stackIndex * -20 };
+}
+
+/**
  * The screen-reader announcement for one decision (F007): plain words, not the pop's
  * symbol-and-dot label, since PopNode's text is inside the `aria-hidden` overlay and
  * is otherwise the only per-entity verdict surface.
@@ -230,7 +242,7 @@ function announcementFor(decision: Decision): string {
  * `ANNOUNCEMENT_CAP` can hold. A per-decision entry per landed decision would mean
  * some verdicts are never read regardless of which end of the batch the cap keeps, so
  * the burst collapses to one line naming every outcome's count instead, e.g.
- * "7 decisions: 5 missed, 2 caught".
+ * "7 decisions: 2 caught, 5 missed".
  */
 function burstSummaryFor(decisions: readonly Decision[]): string {
   let caught = 0;
@@ -382,10 +394,16 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
     const flashSpawns: FlashSpawn[] = [];
     const newItems: FxOverlayItem[] = [];
 
-    for (const finding of landed) {
-      const huntColor = paletteRef.current.colorFor(finding.reason);
-      const to = resolveAnchor(findingRowSelector(finding.seq), findingsPanel, "bottom");
-      for (const eventId of new Set(finding.eventIds)) {
+    /**
+     * The shared per-landing spawn: one cited-row flash, plus (unless reduced motion)
+     * one comet per distinct cited event id, for the finding whose live row's `seq`
+     * this is. The findings loop below and the F012 fallback after it both call this,
+     * so the "a finding landed" -> flashes-and-comets logic exists exactly once.
+     */
+    const spawnLanding = (seq: number, reason: string, eventIds: readonly number[]): void => {
+      const huntColor = paletteRef.current.colorFor(reason);
+      const to = resolveAnchor(findingRowSelector(seq), findingsPanel, "bottom");
+      for (const eventId of new Set(eventIds)) {
         const gen = nextGenRef.current++;
         flashSpawns.push({ eventId, colorVar: huntColor, gen });
         pendingFlashesRef.current.push({ eventId, gen, expiresAt: now + FLASH_DURATION_MS });
@@ -401,14 +419,45 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
           });
         }
       }
+    };
+
+    for (const finding of landed) {
+      spawnLanding(finding.seq, finding.reason, finding.eventIds);
     }
 
+    // F012: a decision whose crediting hit never appeared in a sampled findings array
+    // still landed durably in the decision log. A fast rule can record the hit and
+    // consume the end-of-stream marker inside the same tick's microtask phase, so
+    // `finalize()` clears the live set before any snapshot samples it — the finding
+    // never shows up in `landed` above, but the decision that credited it is right
+    // here, carrying its own copy of the finding. Replay the same landing FX from
+    // that copy, then mark the seq fired so it cannot double-fire later.
+    for (const decision of unfiredLandingDecisions(newDecisions, firedSeqsRef.current)) {
+      spawnLanding(
+        decision.liveSeq,
+        decision.finding.alert.reason,
+        decision.finding.alert.eventIds,
+      );
+      firedSeqsRef.current.add(decision.liveSeq);
+    }
+
+    // F009: track how many pops this tick have already landed on each anchor point,
+    // so a same-tick batch of misses (every miss shares the findings panel's top
+    // edge) staggers instead of stacking exactly on top of itself.
+    const popsPerAnchor = new Map<string, number>();
     for (const decision of newDecisions) {
+      const pop = popFor(decision, findingsPanel);
+      const anchorKey = `${pop.at.x},${pop.at.y}`;
+      const stackIndex = popsPerAnchor.get(anchorKey) ?? 0;
+      popsPerAnchor.set(anchorKey, stackIndex + 1);
+      const offset = stackedPopOffset(stackIndex);
       newItems.push({
         id: nextItemIdRef.current++,
         kind: "pop",
         createdAt: now,
-        ...popFor(decision, findingsPanel),
+        text: pop.text,
+        colorVar: pop.colorVar,
+        at: { x: pop.at.x + offset.x, y: pop.at.y + offset.y },
       });
     }
 
@@ -437,14 +486,14 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
                 text: announcementFor(decision),
               }),
             );
-      // A same-tick batch at or over the cap fills the region on its own: spreading
-      // `current` first would only be discarded by the slice below, so skip it to keep
-      // the result exactly the newest ANNOUNCEMENT_CAP entries of THIS batch.
-      setAnnouncements((current) =>
-        newAnnouncements.length >= ANNOUNCEMENT_CAP
-          ? newAnnouncements.slice(-ANNOUNCEMENT_CAP)
-          : [...current, ...newAnnouncements].slice(-ANNOUNCEMENT_CAP),
-      );
+      // Plain concat-and-slice covers every reachable batch size, with no separate
+      // over-cap case: an over-cap burst is already collapsed to one summary line
+      // above, well under the cap, so it only ever needs appending. The remaining
+      // edge case, a batch that fills the cap exactly, still comes out right without
+      // help — appending a full cap's worth and slicing to the newest ANNOUNCEMENT_CAP
+      // naturally displaces every prior entry, the same result the old "at or over
+      // the cap" special case existed to force.
+      setAnnouncements((current) => [...current, ...newAnnouncements].slice(-ANNOUNCEMENT_CAP));
     }
     if (flashSpawns.length > 0 || newItems.length > 0) {
       wakeLoopRef.current(); // F011: a spawn wakes a parked loop
