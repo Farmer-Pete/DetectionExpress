@@ -5,6 +5,7 @@
  */
 import type { CorrectnessReading, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
+import type { WaveReading } from "./wave-state";
 
 /** The run lifecycle, as the HUD reads it. */
 export type RunStatus = "running" | "won" | "failed";
@@ -40,6 +41,12 @@ export interface SimSnapshot {
    * processed`) is derived in the UI, never stored here.
    */
   processed: number;
+  /**
+   * The wave reading at this publish tick (`waveStateAt`, `wave-state.ts`). The UI
+   * never derives sim truth: this is the same reading the sampler computed off the
+   * run's waves, not a value the UI infers on its own (GH38-PLAN.md decision 2).
+   */
+  wave: WaveReading;
 }
 
 /** The reading before the first sample: empty, calm, and perfectly correct. */
@@ -56,5 +63,6 @@ export function emptySnapshot(): SimSnapshot {
     findings: [],
     events: [],
     processed: 0,
+    wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
   };
 }

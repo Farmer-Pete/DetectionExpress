@@ -160,5 +160,5 @@ export function buildFareGateRun(seed: number): GeneratedRun {
   const lastEventTick = lastEventTs / GAME_SECONDS_PER_TICK;
   const finalDeadline = lastEventTick + 1 + DRAIN_GAP_TICKS;
 
-  return { events, attacks, checkpoints: withFinalDeadline(checkpoints, finalDeadline) };
+  return { events, attacks, checkpoints: withFinalDeadline(checkpoints, finalDeadline), waves };
 }

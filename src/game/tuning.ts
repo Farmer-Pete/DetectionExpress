@@ -161,6 +161,18 @@ export const DRAIN_GAP_TICKS = 45;
 export const CORRECTNESS_FLOOR = 50;
 
 /**
+ * Wave juice (#38). First-draft numbers; #40's tuning pass revisits them once it
+ * starts (see GH38+40-PLAN.md Part 3, gated on GH102 merging).
+ */
+
+/**
+ * How many ticks before a wave's `startTick` the reading flips from "calm" to
+ * "incoming" (`waveStateAt` in `wave-state.ts`). Roughly the prototype's warn
+ * fraction of its cycle.
+ */
+export const WAVE_WARN_TICKS = 30;
+
+/**
  * M0 (living metro, #87). The world loop steps the actor schedule ONE tick at a
  * time; this many such steps run per clock tick. A positive integer, default 1, so
  * the sim advances at CLOCK_HZ by default. Raising it speeds the world without

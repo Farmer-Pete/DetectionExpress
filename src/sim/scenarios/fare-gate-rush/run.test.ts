@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DRAIN_GAP_TICKS, LEVEL_SEED } from "../../../game/tuning";
 import type { RawGatekeepGate } from "../../endpoints/fare-gate/gatekeep";
+import { buildSchedule } from "../../schedule";
 import { buildFareGateRun } from "./run";
 import { raw, tickOf } from "./test-helpers";
 
@@ -127,5 +128,12 @@ describe("buildFareGateRun: final deadline", () => {
     for (const ev of run.events) {
       expect(tickOf(ev)).toBeLessThan(deadlineTicks);
     }
+  });
+});
+
+describe("buildFareGateRun: waves (GH38-PLAN.md Part 1)", () => {
+  it("carries the schedule's waves through into the generated run unchanged", () => {
+    const run = buildFareGateRun(LEVEL_SEED);
+    expect(run.waves).toEqual(buildSchedule().waves);
   });
 });

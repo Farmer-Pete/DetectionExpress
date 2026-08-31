@@ -102,6 +102,7 @@ interface RunOptions {
   generator: () => PipeEvent | null;
   serviceRate: ServiceRate;
   checkpoints: ReturnType<typeof kioskPinAttack.generate>["checkpoints"];
+  waves: ReturnType<typeof kioskPinAttack.generate>["waves"];
 }
 
 interface RunResult {
@@ -122,6 +123,7 @@ async function runToDeadline(opts: RunOptions, flushRounds: number): Promise<Run
     generator: opts.generator,
     serviceRate: opts.serviceRate,
     checkpoints: opts.checkpoints,
+    waves: opts.waves,
     driver,
   });
   await step(driver, deadline + 2, flushRounds);
@@ -144,6 +146,7 @@ describe("the naive default drowns through the real engine (M3 integration)", ()
         generator: scheduleOf(run.events),
         serviceRate: NAIVE_RATE,
         checkpoints: run.checkpoints,
+        waves: run.waves,
       },
       300,
     );
@@ -164,6 +167,7 @@ describe("the applied Optimization wins through the real engine (M3 integration)
         generator: scheduleOf(run.events),
         serviceRate: OPTIMIZATION_RATE,
         checkpoints: run.checkpoints,
+        waves: run.waves,
       },
       300,
     );
@@ -196,6 +200,7 @@ describe("determinism per machine (M3 seam 14)", () => {
         generator: scheduleOf(run.events),
         serviceRate: NAIVE_RATE,
         checkpoints: run.checkpoints,
+        waves: run.waves,
       };
     };
 

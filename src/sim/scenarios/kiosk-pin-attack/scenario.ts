@@ -124,7 +124,7 @@ function generate(seed: number): GeneratedRun {
 
   const attacks = plans.map((plan) => attackFromPlan(plan, eventIdsByAttack.get(plan.id) ?? []));
   assertFair(drafts, victimSet, attacks);
-  return { events, attacks, checkpoints };
+  return { events, attacks, checkpoints, waves };
 }
 
 /**

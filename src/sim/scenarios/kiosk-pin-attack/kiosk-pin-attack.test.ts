@@ -221,6 +221,11 @@ describe("buildSchedule (M2 schedule invariant)", () => {
     // The final deadline clears the last wave.
     expect(run.checkpoints[run.checkpoints.length - 1]?.clearsThroughWave).toBe(WAVE_COUNT - 1);
   });
+
+  it("carries the waves through into the generated run unchanged (GH38-PLAN.md Part 1)", () => {
+    const run = kioskPinAttack.generate(LEVEL_SEED);
+    expect(run.waves).toEqual(buildSchedule().waves);
+  });
 });
 
 describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () => {

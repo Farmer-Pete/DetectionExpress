@@ -22,10 +22,11 @@ import type { PipeEvent, PipeMessage } from "../sim/event";
 import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/graph";
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
-import type { Checkpoint } from "../sim/scenario";
+import type { Checkpoint, Wave } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
+import { waveStateAt } from "../sim/wave-state";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
@@ -35,6 +36,7 @@ import {
   PUBLISH_HZ,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
+  WAVE_WARN_TICKS,
 } from "./tuning";
 
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
@@ -51,6 +53,8 @@ export interface StartOptions {
   serviceRate: ServiceRate;
   /** The wave boundaries plus the final deadline, in tick order. */
   checkpoints: Checkpoint[];
+  /** The wave boundaries the sampler reads to publish `snapshot.wave` each tick. */
+  waves: Wave[];
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Reports an engine or Rule failure. */
@@ -123,6 +127,7 @@ function makeSampler(
   inspector: Inspector,
   setSnapshot: (snapshot: SimSnapshot) => void,
   run: RunState,
+  waves: readonly Wave[],
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
@@ -168,6 +173,7 @@ function makeSampler(
       findings: scorer.liveFindings(),
       events: ring.events,
       processed: ring.processed,
+      wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
     });
   };
 }
@@ -302,13 +308,21 @@ export function start(options: StartOptions): EngineHandle {
     // Correctness. The run does NOT end here: it waits for the final deadline.
     void Promise.allSettled(tasks);
 
-    publish = makeSampler(clock, channelMap, options.scorer, inspector, options.setSnapshot, {
-      compute,
-      getAdmitted: () => admitted,
-      getCompleted: () => completed,
-      getStatus: () => status,
-      getFailureReason: () => failureReason,
-    });
+    publish = makeSampler(
+      clock,
+      channelMap,
+      options.scorer,
+      inspector,
+      options.setSnapshot,
+      {
+        compute,
+        getAdmitted: () => admitted,
+        getCompleted: () => completed,
+        getStatus: () => status,
+        getFailureReason: () => failureReason,
+      },
+      options.waves,
+    );
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it
     // does not try to force-publish through the same broken sink.

@@ -112,6 +112,7 @@ async function runRealEngine(
     generator,
     serviceRate: rate,
     checkpoints: run.checkpoints,
+    waves: run.waves,
     driver,
   });
   const deadline = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
