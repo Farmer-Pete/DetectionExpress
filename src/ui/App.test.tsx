@@ -354,6 +354,26 @@ describe("App view toggle", () => {
     expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
   });
 
+  it("resets the findings panel to the empty state on pipeline re-entry, before the new controller commits (F024)", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), findings: [liveFinding(1, [10])] },
+    });
+    render(
+      <App
+        createPipelineController={() => stubController()}
+        createWorldController={() => stubWorldController()}
+      />,
+    );
+    expect(screen.queryByText("No findings yet")).toBeNull(); // the landed finding shows
+
+    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
+
+    // The stub controller's run() never calls setSnapshot, so this proves the teardown
+    // reset repainted the empty state itself, not a real engine commit.
+    expect(screen.getByText("No findings yet")).toBeDefined();
+  });
+
   it("builds a fresh controller per epoch under strict-mode double invoke", () => {
     const pipes: ReturnType<typeof stubController>[] = [];
     render(

@@ -27,6 +27,7 @@ import { getGraph, useGameStore } from "../game/store";
 import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
 import { useWorldStore, worldSpeed } from "../game/world-store";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { emptySnapshot } from "../sim/snapshot";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
 import { AlgorithmEditor } from "./AlgorithmEditor";
@@ -164,6 +165,13 @@ export function App({ createPipelineController, createWorldController }: AppProp
       if (controllerRef.current === active) {
         controllerRef.current = null;
       }
+      // The engine is gone. Repaint the empty state now, not left showing this run's
+      // rows, so a later Metro-to-Pipeline remount does not flash stale panels during
+      // the next controller's load+profile window (F024). This only runs on teardown
+      // (a view switch or unmount), never inside run()'s awaits, so a mid-run Apply
+      // still leaves the old run's snapshot on screen until the new engine commits.
+      useGameStore.getState().setSnapshot(emptySnapshot());
+      useGameStore.getState().clearSelection();
     };
   }, [view, createPipelineController]);
 
