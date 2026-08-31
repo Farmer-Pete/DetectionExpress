@@ -217,9 +217,18 @@ function popFor(
  * `Math.random` (ARCHITECTURE forbids it here) and no spawn-time delay (a pop's
  * expiry is `createdAt + duration` and its CSS animation starts on mount, so a delay
  * would need plumbing this fix does not add). Positional spread only.
+ *
+ * `stackIndex` wraps over a small ring: a large same-tick burst at one anchor (e.g.
+ * many misses landing in the same tick) would otherwise step diagonally without
+ * bound and walk later pops off the viewport. Wrapping re-stacks past the ring size
+ * rather than growing the offset forever, trading exact stacking order for staying
+ * on screen.
  */
+const STACK_RING_SIZE = 6;
+
 function stackedPopOffset(stackIndex: number): FxPoint {
-  return { x: stackIndex * 24, y: stackIndex * -20 };
+  const ring = stackIndex % STACK_RING_SIZE;
+  return { x: ring * 24, y: ring * -20 };
 }
 
 /**
@@ -366,7 +375,7 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       itemsRef.current = [];
       setItems([]);
       setAnnouncements([]);
-      useGameStore.setState({ flashes: new Map() });
+      useGameStore.getState().clearFlashes();
     }
 
     // Reserve a palette slot for every reason in seq order, watches included, on its

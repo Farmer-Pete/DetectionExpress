@@ -169,6 +169,11 @@ function liveFinding(opts: LiveOptions): LiveFinding {
   return result;
 }
 
+// DecisionBase.seq is documented as append order: strictly monotonic. A shared
+// counter keeps every fixture built through these helpers honoring that contract,
+// regardless of which helper or how many decisions a single test builds.
+let nextFixtureSeq = 0;
+
 function caughtDecision(
   liveSeq: number,
   entity = "acct-1",
@@ -176,7 +181,7 @@ function caughtDecision(
 ): CaughtDecision {
   return {
     outcome: "caught",
-    seq: 0,
+    seq: nextFixtureSeq++,
     at: 0,
     attackId: 1,
     entity,
@@ -188,7 +193,7 @@ function caughtDecision(
 function falseDecision(liveSeq: number, entity?: string, eventIds: number[] = [1]): FalseDecision {
   const decision: FalseDecision = {
     outcome: "false",
-    seq: 0,
+    seq: nextFixtureSeq++,
     at: 0,
     finding: { alert: { reason: "brute", at: 0, eventIds }, eventId: eventIds[0] ?? 1 },
     liveSeq,
@@ -202,7 +207,7 @@ function falseDecision(liveSeq: number, entity?: string, eventIds: number[] = [1
 function missedDecision(entity = "acct-1"): MissedDecision {
   return {
     outcome: "missed",
-    seq: 0,
+    seq: nextFixtureSeq++,
     at: 0,
     attackId: 1,
     entity,

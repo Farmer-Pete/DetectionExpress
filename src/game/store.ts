@@ -112,6 +112,9 @@ interface GameState {
    * flash spawned on the same row after it fired.
    */
   clearFlash: (eventId: number, gen: number) => void;
+  /** Clear every flash at once. Called on a run-token reset, so old-run flashes
+   *  never survive into the new run. */
+  clearFlashes: () => void;
   /** Bump the run token by one. Called on every fresh engine install. */
   bumpRunToken: () => void;
 }
@@ -175,6 +178,7 @@ export const useGameStore = create<GameState>((set) => ({
       next.delete(eventId);
       return { flashes: next };
     }),
+  clearFlashes: () => set({ flashes: new Map() }),
   bumpRunToken: () => set((s) => ({ runToken: s.runToken + 1 })),
 }));
 
