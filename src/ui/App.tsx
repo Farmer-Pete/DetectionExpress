@@ -53,7 +53,7 @@ import { createRunController, type RunController } from "../game/run-controller"
 import { getGraph, useGameStore } from "../game/store";
 import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
 import { useWorldStore, worldSpeed } from "../game/world-store";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { emptySnapshot } from "../sim/snapshot";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
@@ -85,7 +85,7 @@ const worldDistances = distanceTable(world);
 
 function buildController(): RunController {
   return createRunController({
-    scenario: kioskPinAttack,
+    scenario: pinBruteForce,
     getGraph,
     // The one discriminated input. A local override (set by the dev-only algorithms
     // client) drives url mode; otherwise the in-game editor drives source mode.
@@ -219,7 +219,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
     }
   }, [introOpen]);
 
-  const slug = scenarioSlug(kioskPinAttack.id);
+  const slug = scenarioSlug(pinBruteForce.id);
 
   // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
   // controller per visible epoch; the cleanup disposes it (permanently) on hide or
@@ -403,7 +403,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
           <Hud />
           <InspectorShell findingsPanelRef={findingsPanelRef} />
           <DecisionsPanel panelRef={decisionsPanelRef} />
-          <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
+          <Briefing tagline={liveScenario.tagline} text={pinBruteForce.briefing} />
           <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
           <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
           {algoReady ? (

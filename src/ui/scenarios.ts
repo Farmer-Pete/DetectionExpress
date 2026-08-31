@@ -7,7 +7,7 @@
  * this lives in `ui/`, not the Scenario.
  */
 export const SCENARIO_SLUGS: Record<string, string> = {
-  "kiosk-pin-attack": "kiosk-pin-attack",
+  "pin-brute-force": "pin-brute-force",
 };
 
 /**

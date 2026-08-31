@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
+import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
 import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./narrative";
 
 // Stale phrases from the old "you build the engine" voice. None may survive in the
@@ -21,7 +21,7 @@ function allProse(): string {
     ...chaosLevels.map((level) => `${level.label} ${level.blurb}`),
     liveScenario.displayName,
     liveScenario.tagline,
-    kioskPinAttack.briefing,
+    pinBruteForce.briefing,
   ]
     .join(" ")
     .toLowerCase();
@@ -44,7 +44,7 @@ describe("narrative content", () => {
   });
 
   it("describes the one live scenario", () => {
-    expect(liveScenario.id).toBe("kiosk-pin-attack");
+    expect(liveScenario.id).toBe("pin-brute-force");
     expect(liveScenario.displayName).toBe("PIN Brute Force");
     expect(liveScenario.level).toBe(1);
     expect(liveScenario.tagline.length).toBeGreaterThan(0);

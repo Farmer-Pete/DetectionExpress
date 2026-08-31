@@ -29,8 +29,8 @@ import {
   assemblePatron,
   buildIdentityPools,
   pickSeeded,
-} from "../../sim/scenarios/kiosk-pin-attack/cast";
-import { ARRIVE_LEAD_TICKS } from "../../sim/scenarios/kiosk-pin-attack/pin-attacker";
+} from "../../sim/scenarios/pin-brute-force/cast";
+import { ARRIVE_LEAD_TICKS } from "../../sim/scenarios/pin-brute-force/pin-attacker";
 import { distanceTable } from "../../sim/world/distance";
 import { buildTimetable } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";

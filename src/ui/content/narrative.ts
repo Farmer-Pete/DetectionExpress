@@ -106,7 +106,7 @@ export const chaosLevels: readonly ChaosLevel[] = [
 ];
 
 export const liveScenario: LiveScenario = {
-  id: "kiosk-pin-attack",
+  id: "pin-brute-force",
   displayName: "PIN Brute Force",
   tagline: "One angry rider, one PIN pad, a thousand guesses.",
   level: 1,

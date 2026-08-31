@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { referenceAlgorithm } from "../../scenarios/kiosk-pin-attack/reference";
+import { referenceAlgorithm } from "../../scenarios/pin-brute-force/reference";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "./formats/kiosk-v1";
 import type { AccountKioskReading } from "./internal";
 

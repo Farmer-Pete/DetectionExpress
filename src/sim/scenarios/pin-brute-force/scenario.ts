@@ -1,5 +1,5 @@
 /**
- * The kiosk-pin-attack Scenario. It builds an actor cast over the shared kiosk
+ * The pin-brute-force Scenario. It builds an actor cast over the shared kiosk
  * cast (`cast.ts`), runs the deterministic scheduler, and composes the emitted
  * readings into a `GeneratedRun`. One benign account rider fills each admitted
  * arrival slot; each wave carries `ATTACKS_PER_WAVE` PIN attackers on distinct
@@ -249,8 +249,8 @@ const briefing =
   "the Compute gauge: the Engine holds its speed and stays ahead of the queue while " +
   "it catches every burst.";
 
-export const kioskPinAttack: Scenario = {
-  id: "kiosk-pin-attack",
+export const pinBruteForce: Scenario = {
+  id: "pin-brute-force",
   briefing,
   generate,
 };

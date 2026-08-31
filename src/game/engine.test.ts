@@ -11,8 +11,8 @@ import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
-import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -245,7 +245,7 @@ function referenceTaskAlgorithm(): TaskAlgorithm {
 
 describe("engine integration with the reference Algorithm", () => {
   function runReference(): { harness: Harness; finalTick: number } {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
     const harness = launch({
       generator: scheduleOf(run.events),
@@ -257,7 +257,7 @@ describe("engine integration with the reference Algorithm", () => {
   }
 
   it("wins at the final deadline with full Correctness and every Attack caught", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const { harness, finalTick } = runReference();
     await step(harness.driver, finalTick + 2, 300);
     await harness.handle.whenStopped;
@@ -835,7 +835,7 @@ describe("engine publishes decisions bound to the inspector ring (T10)", () => {
 // GH37-PLAN.md: the scorer's decision log rides along in the same snapshot.
 describe("engine publishes the scorer's decision log", () => {
   it("carries every decision the reference run resolves, in the final snapshot", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
     const harness = launch({
       generator: scheduleOf(run.events),

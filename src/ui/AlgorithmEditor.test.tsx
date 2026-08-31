@@ -1,10 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../game/store";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
+import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 
-const SLUG = "kiosk-pin-attack";
+const SLUG = "pin-brute-force";
 
 beforeEach(() => {
   useGameStore.setState({ sourceLocked: false, runPending: false });
@@ -110,6 +110,6 @@ describe("AlgorithmEditor", () => {
     revokeUrlSpy.mockRestore();
 
     expect(anchors).toHaveLength(1);
-    expect(anchors[0]?.getAttribute("download")).toBe("kiosk-pin-attack.ts");
+    expect(anchors[0]?.getAttribute("download")).toBe("pin-brute-force.ts");
   });
 });

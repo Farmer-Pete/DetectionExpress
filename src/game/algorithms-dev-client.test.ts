@@ -8,7 +8,7 @@ import {
   type SessionStorageLike,
 } from "./algorithms-dev-client";
 
-const SLUG = "kiosk-pin-attack";
+const SLUG = "pin-brute-force";
 
 /** A string primitive, by its tag rather than a `typeof` representation check. */
 function isString(value: unknown): value is string {
@@ -163,8 +163,8 @@ describe("algorithms dev client", () => {
   it("applies a matching algo:changed frame and runs", () => {
     const h = harness();
     h.client.enter();
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 3 });
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 3 });
+    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 3 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/pin-brute-force.ts", version: 3 });
     expect(h.runs()).toBe(1);
   });
 
@@ -173,8 +173,8 @@ describe("algorithms dev client", () => {
     h.client.enter();
     // First the default-engine fallback, then a create of the override switches to it.
     h.channel.emitChanged({ slug: SLUG, path: "/src/sim/default-engine.ts", version: 1 });
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
+    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 2 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/pin-brute-force.ts", version: 2 });
     expect(h.runs()).toBe(2);
   });
 
@@ -194,7 +194,7 @@ describe("algorithms dev client", () => {
     expect(h.store.local).toBeNull();
     expect(h.runs()).toBe(0);
     // A good frame still applies after a bad one, so the channel is not wedged.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 1 });
+    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 1 });
     expect(h.runs()).toBe(1);
   });
 
@@ -203,7 +203,7 @@ describe("algorithms dev client", () => {
     h.client.enter();
     const stray = h.channel; // same channel, but the listener is torn down on stop
     h.client.stop();
-    stray.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 4 });
+    stray.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 4 });
     expect(h.store.local).toBeNull();
     expect(h.runs()).toBe(0);
   });
@@ -218,16 +218,16 @@ describe("algorithms dev client", () => {
     h.client.stop();
     h.client.enter(); // epoch 2, a fresh subscribe over the same channel
     // The frame reaches BOTH the epoch-1 and epoch-2 listeners; only epoch 2 acts.
-    channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 7 });
+    channel.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 7 });
     expect(h.runs()).toBe(1);
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 7 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/pin-brute-force.ts", version: 7 });
   });
 
   it("restores the snapshot and unlocks on stop", () => {
     const h = harness();
     h.client.enter();
     // A local frame drives the run and stashes the override.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 1 });
+    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/pin-brute-force.ts", version: 1 });
     // Simulate the editor being driven elsewhere while locked.
     h.store.setSource("// something else");
     h.client.stop();

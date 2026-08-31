@@ -7,8 +7,8 @@ import type { Finding } from "./finding";
 import {
   buildReferenceAlgorithm,
   type ReferenceAlgorithm,
-} from "./scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "./scenarios/kiosk-pin-attack/scenario";
+} from "./scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "./scenarios/pin-brute-force/scenario";
 
 /** Read an Event's kiosk-v1 payload, narrowing at the boundary. */
 function raw(ev: PipeEvent): RawKioskV1 {
@@ -35,7 +35,7 @@ function collectFindings(algo: ReferenceAlgorithm, events: PipeEvent[]): Finding
 
 describe("default engine parity with the reference Algorithm", () => {
   it("raises the same Findings as the reference twin on the kiosk stream", () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
 
     // The default engine holds module-level state, so this single pass is one clean run,
     // the way a fresh module import would replay it. The reference twin is a fresh

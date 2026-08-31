@@ -22,8 +22,8 @@ describe("scenarios", () => {
     expect(Object.keys(SCENARIO_SLUGS).length).toBeLessThan(MAX_SLUGS);
   });
 
-  it("resolves the kiosk-pin-attack scenario to its slug", () => {
-    expect(scenarioSlug("kiosk-pin-attack")).toBe("kiosk-pin-attack");
+  it("resolves the pin-brute-force scenario to its slug", () => {
+    expect(scenarioSlug("pin-brute-force")).toBe("pin-brute-force");
   });
 
   it("rejects an unknown scenario id rather than inventing a slug", () => {
@@ -31,6 +31,6 @@ describe("scenarios", () => {
   });
 
   it("builds the src/algorithms/<slug>.ts filename the editor's download uses", () => {
-    expect(scenarioFileName("kiosk-pin-attack")).toBe("kiosk-pin-attack.ts");
+    expect(scenarioFileName("pin-brute-force")).toBe("pin-brute-force.ts");
   });
 });

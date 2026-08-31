@@ -1,5 +1,5 @@
 /**
- * Burst planning and Ground truth for the kiosk-pin-attack Scenario. Each wave
+ * Burst planning and Ground truth for the pin-brute-force Scenario. Each wave
  * carries `ATTACKS_PER_WAVE[wave]` bursts (2, 4, 8), each on its own globally
  * distinct victim, so its evidence lands while the wave is active and never in a
  * drain gap. Bursts inside one wave are staggered so they spread across it; bursts

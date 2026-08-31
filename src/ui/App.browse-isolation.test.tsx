@@ -12,7 +12,7 @@ import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
 import type { LiveFinding } from "../sim/correctness";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
+import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { caughtDecision } from "./decisions/decision-fixtures";

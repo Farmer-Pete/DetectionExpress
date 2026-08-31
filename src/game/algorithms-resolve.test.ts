@@ -12,7 +12,7 @@ import {
 
 describe("isValidAlgorithmSlug", () => {
   it("accepts lowercase letters, digits, and hyphens up to 64 chars", () => {
-    expect(isValidAlgorithmSlug("kiosk-pin-attack")).toBe(true);
+    expect(isValidAlgorithmSlug("pin-brute-force")).toBe(true);
     expect(isValidAlgorithmSlug("a")).toBe(true);
     expect(isValidAlgorithmSlug("a1-b2-c3")).toBe(true);
     expect(isValidAlgorithmSlug("x".repeat(64))).toBe(true);
@@ -64,11 +64,11 @@ describe("resolveActiveFile", () => {
 
   it("passes the exact slug to the exists predicate", () => {
     const seen: string[] = [];
-    resolveActiveFile("kiosk-pin-attack", (slug) => {
+    resolveActiveFile("pin-brute-force", (slug) => {
       seen.push(slug);
       return false;
     });
-    expect(seen).toEqual(["kiosk-pin-attack"]);
+    expect(seen).toEqual(["pin-brute-force"]);
   });
 });
 

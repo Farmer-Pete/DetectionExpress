@@ -17,7 +17,7 @@
  * starting point for `src/algorithms/<slug>.ts`.
  */
 import { useGameStore } from "../game/store";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
+import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { scenarioFileName } from "./scenarios";
 
 interface AlgorithmEditorProps {

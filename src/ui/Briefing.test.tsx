@@ -1,23 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { Briefing } from "./Briefing";
 import { liveScenario } from "./content/narrative";
 
 function renderBriefing() {
-  render(<Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />);
+  render(<Briefing tagline={liveScenario.tagline} text={pinBruteForce.briefing} />);
 }
 
 describe("Briefing", () => {
   it("renders the scenario's briefing text", () => {
     renderBriefing();
-    expect(screen.getByText(kioskPinAttack.briefing)).toBeDefined();
+    expect(screen.getByText(pinBruteForce.briefing)).toBeDefined();
   });
 
   it("shows the tagline above the briefing", () => {
     renderBriefing();
     const tagline = screen.getByText(liveScenario.tagline);
-    const briefing = screen.getByText(kioskPinAttack.briefing);
+    const briefing = screen.getByText(pinBruteForce.briefing);
     // The briefing follows the tagline in the DOM, so the tagline sits above it.
     const position = tagline.compareDocumentPosition(briefing);
     expect(Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);

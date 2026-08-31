@@ -12,7 +12,7 @@ import type { PipeEvent } from "../../event";
 import type { Finding } from "../../finding";
 import { resolveEntity } from "../../tasks";
 import { buildReferenceAlgorithm, type ReferenceAlgorithm, referenceSource } from "./reference";
-import { kioskPinAttack } from "./scenario";
+import { pinBruteForce } from "./scenario";
 
 /**
  * The live game loads the `referenceSource` STRING, not the typed twin, so its watch,
@@ -131,7 +131,7 @@ describe("reference anchor stability over the real run (seam 9)", () => {
   it("never holds a watch and a hit for one account+reason at the same time", {
     timeout: 30_000,
   }, () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
       threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,

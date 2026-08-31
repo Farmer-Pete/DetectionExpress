@@ -22,14 +22,14 @@ Run this smoke by hand after any change to `algorithms-hmr.ts`,
 3. Click **Edit in IDE**. The in-game editor locks. The client sends `algo:hello`; the
    plugin replies `algo:changed` with the default engine path (no override yet), so the
    run switches to url mode on `/src/sim/default-engine.ts` with no page reload.
-4. Create `src/algorithms/kiosk-pin-attack.ts` (a copy of `default-engine.ts` is a good
+4. Create `src/algorithms/pin-brute-force.ts` (a copy of `default-engine.ts` is a good
    start). The plugin re-resolves the slug to the new override and pings it; the run
    re-imports the override with no reload.
 5. Edit `match` in that file and save. The run updates on every save — fresh code, no full
    page reload. The profiler re-measures the new module (Chrome or Firefox).
 6. Save a syntax error. The run reports a **load** error with no reload. Fix it; the run
    recovers cleanly on the next save.
-7. Delete `src/algorithms/kiosk-pin-attack.ts`. Vite forces ONE full page reload
+7. Delete `src/algorithms/pin-brute-force.ts`. Vite forces ONE full page reload
    (an imported module vanished — accepted degradation). After the reload the page
    re-enters local mode from `sessionStorage`, falls back to the default engine, and the
    in-game editor stays locked.

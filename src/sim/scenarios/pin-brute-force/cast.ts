@@ -1,6 +1,6 @@
 /**
  * The shared kiosk cast: the seeded identity pools and the actor assembly, used by
- * the kiosk-pin-attack scenario and the calibration corpus. Both callers
+ * the pin-brute-force scenario and the calibration corpus. Both callers
  * keep their own timing policies; this module only mints identities, budgets benign
  * fumbles, and constructs the two actor kinds. No strategy pattern: a strategy
  * interface waits for a third caller (GH102 decision 7). Pure and seeded, no wall

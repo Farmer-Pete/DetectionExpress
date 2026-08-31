@@ -1,7 +1,7 @@
 # Architecture
 
 This file sets the rules for how the code is shaped. Read it before you write game code.
-`CONTEXT.md` holds the domain vocabulary. `PLAN.md` holds the build plan. This file holds the boundaries.
+`CONTEXT.md` holds the domain vocabulary. This file holds the boundaries.
 
 ## The core split
 
@@ -79,7 +79,7 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 ## Folders for content
 
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and the actor cast emits it; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.
-- `src/sim/actors/` holds the shared generation machinery (the FSM engine, the scheduler, the composer, the wave admission controller) and the benign actors every Scenario reuses (the rider, the account rider, staff, trains). Pure logic, no React. **Graduation rule:** a deviant or specialized actor is born in its Scenario's own folder (e.g. `pin-attacker.ts` under `kiosk-pin-attack/`), and graduates into `src/sim/actors/` only when a second Scenario casts it — until then it stays local, so `src/sim/actors/` holds only what is genuinely shared.
+- `src/sim/actors/` holds the shared generation machinery (the FSM engine, the scheduler, the composer, the wave admission controller) and the benign actors every Scenario reuses (the rider, the account rider, staff, trains). Pure logic, no React. **Graduation rule:** a deviant or specialized actor is born in its Scenario's own folder (e.g. `pin-attacker.ts` under `pin-brute-force/`), and graduates into `src/sim/actors/` only when a second Scenario casts it — until then it stays local, so `src/sim/actors/` holds only what is genuinely shared.
 - `src/sim/scenarios/` holds one folder per Scenario. A Scenario builds its actor cast, drives the intent timeline, injects Attacks as deviant actors, and records the Ground truth. Pure logic, no React.
 - The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
 - One engine detects every hunt, authored as many files: a core plus one rule per scenario, composed by `createEngine`. Two ways to read or change it. The in-game editor shows one assembled JS module, built from those files and served as a Vite virtual module. Or a player edits one real TypeScript override at `src/algorithms/engine.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine is composed from the scenario rules. See `docs/adr/0010-one-engine-composable-scenarios.md` and `docs/adr/0008-native-algorithm-hot-reload.md`.

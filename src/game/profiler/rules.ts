@@ -16,7 +16,7 @@
 
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { Finding } from "../../sim/finding";
-import { PIN_BRUTE_FORCE_REASON } from "../../sim/scenarios/kiosk-pin-attack/attacks";
+import { PIN_BRUTE_FORCE_REASON } from "../../sim/scenarios/pin-brute-force/attacks";
 import { GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "../tuning";
 
 /** The reason the kiosk PIN brute-force Alert names. Shared with the scorer. */
