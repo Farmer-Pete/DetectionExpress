@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { LiveFinding } from "../sim/correctness";
+import type { Decision, LiveFinding } from "../sim/correctness";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { getGraph, useGameStore } from "./store";
@@ -15,6 +15,7 @@ beforeEach(() => {
     sourceLocked: false,
     runPending: false,
     selection: null,
+    decisionSelection: null,
     transport: { frozen: false, speed: 1 },
   });
 });
@@ -33,9 +34,26 @@ function finding(seq: number): LiveFinding {
   };
 }
 
+/** A false Decision fixture: the reconciliation logic reads only its `seq`. */
+function decision(seq: number): Decision {
+  return {
+    outcome: "false",
+    seq,
+    at: 0,
+    resolvedAt: 0,
+    finding: { alert: { eventIds: [seq], reason: "pin_brute_force", at: 0 }, eventId: seq },
+    citedEvents: [],
+  };
+}
+
 /** A snapshot carrying the given findings, otherwise empty. */
 function snapshotWith(findings: LiveFinding[]): SimSnapshot {
   return { ...emptySnapshot(), findings };
+}
+
+/** A snapshot carrying the given decisions, otherwise empty. */
+function snapshotWithDecisions(decisions: Decision[]): SimSnapshot {
+  return { ...emptySnapshot(), decisions };
 }
 
 describe("store", () => {
@@ -195,5 +213,77 @@ describe("store selection", () => {
   it("setSnapshot leaves a null selection null", () => {
     useGameStore.getState().setSnapshot(snapshotWith([finding(1)]));
     expect(useGameStore.getState().selection).toBeNull();
+  });
+});
+
+describe("store decision selection (T10)", () => {
+  it("starts with no decision selection", () => {
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("selects a decision by seq through selectDecision", () => {
+    useGameStore.getState().selectDecision(7);
+    expect(useGameStore.getState().decisionSelection).toEqual({ seq: 7 });
+  });
+
+  it("toggles: re-selecting the same seq clears the decision selection", () => {
+    useGameStore.getState().selectDecision(7);
+    useGameStore.getState().selectDecision(7);
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("switches decision selection when a different seq is selected", () => {
+    useGameStore.getState().selectDecision(7);
+    useGameStore.getState().selectDecision(9);
+    expect(useGameStore.getState().decisionSelection).toEqual({ seq: 9 });
+  });
+
+  it("clears the decision selection through clearSelection", () => {
+    useGameStore.getState().selectDecision(7);
+    useGameStore.getState().clearSelection();
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("selecting a finding clears any decision selection (the dialog is single)", () => {
+    useGameStore.getState().selectDecision(7);
+    useGameStore.getState().selectFinding(3);
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().selection).toEqual({ seq: 3 });
+  });
+
+  it("selecting a decision clears any finding selection (the dialog is single)", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().selectDecision(7);
+    expect(useGameStore.getState().selection).toBeNull();
+    expect(useGameStore.getState().decisionSelection).toEqual({ seq: 7 });
+  });
+
+  it("setSnapshot keeps a decision selection whose seq is still present", () => {
+    useGameStore.getState().selectDecision(3);
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1), decision(3)]));
+    expect(useGameStore.getState().decisionSelection).toEqual({ seq: 3 });
+  });
+
+  it("setSnapshot clears a decision selection whose seq left the capped decisions log", () => {
+    useGameStore.getState().selectDecision(3);
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1), decision(2)]));
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("setSnapshot leaves a null decision selection null", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1)]));
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("reconciles the finding selection and the decision selection independently", () => {
+    useGameStore.getState().selectFinding(3);
+    useGameStore.getState().setSnapshot({
+      ...emptySnapshot(),
+      findings: [finding(3)],
+      decisions: [],
+    });
+    // The finding selection survives; there was never a decision selection to touch.
+    expect(useGameStore.getState().selection).toEqual({ seq: 3 });
+    expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 });
