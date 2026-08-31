@@ -32,7 +32,7 @@ interface TransportState {
  * a higher gen, so `LogRow` remounts the flash instead of extending the old one, and
  * a stale timer (armed for an older gen) can tell it no longer owns the row.
  */
-interface FlashEntry {
+export interface FlashEntry {
   colorVar: string;
   gen: number;
 }
