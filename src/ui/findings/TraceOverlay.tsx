@@ -44,7 +44,7 @@ import {
   type TraceCard,
   type TraceViewModel,
 } from "./trace-view-model";
-import { prettifyReason } from "./view-model";
+import { prettifyReason, stateLabel } from "./view-model";
 import { WidgetList } from "./widgets";
 
 interface TraceOverlayProps {
@@ -220,7 +220,7 @@ function LiveTraceContent({ model, onClose }: { model: TraceViewModel; onClose: 
           <span className="trace-entity-chip">{model.entity}</span>
         ) : null}
         <span className="trace-reason">{prettifyReason(model.reason)}</span>
-        <span className={`trace-state trace-state--${model.state}`}>{model.state}</span>
+        <span className={`trace-state trace-state--${model.state}`}>{stateLabel(model.state)}</span>
         <span className="trace-time">{formatClock(model.at)}</span>
         <CloseButton onClose={onClose} />
       </header>

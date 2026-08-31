@@ -217,6 +217,20 @@ describe("TraceOverlay", () => {
     expect(screen.getByText("watching, no finding yet")).toBeDefined();
   });
 
+  it("labels the state badge with player-facing vocabulary, not the raw 'hit'/'watch' token", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "hit" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Alert")).toBeDefined();
+    expect(dialog.queryByText("hit")).toBeNull();
+  });
+
+  it("labels a watch's state badge as Watching", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    expect(screen.getByText("Watching")).toBeDefined();
+  });
+
   it("renders one card per cited event, raw over normalized, with its endpoint and time", () => {
     publish(
       [live({ seq: 1, eventIds: [3], entity: "acct-1" })],
@@ -567,6 +581,6 @@ describe("TraceOverlay decision mode (T10)", () => {
       });
     });
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.getByText("hit")).toBeDefined(); // the live trace's state chip, not "caught"
+    expect(dialog.getByText("Alert")).toBeDefined(); // the live trace's state chip, not "caught"
   });
 });
