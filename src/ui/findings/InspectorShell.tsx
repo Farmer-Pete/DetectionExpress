@@ -1,45 +1,44 @@
 /**
  * The inspector shell (S3): a two-column layout with the raw stream on the left and
- * the findings on the right, plus the trace dialog (T9). The App renders it where the
- * node canvas used to sit. Growing it to the full three-column layout later is a
- * container change, not a panel rewrite.
+ * the findings on the right. The App renders it where the node canvas used to sit.
+ * Growing it to the full three-column layout later is a container change, not a
+ * panel rewrite.
  *
  * The shell owns the Esc-to-deselect listener. It sits on the shell container, so it
  * fires only for keydowns from within the shell (focus inside), and it yields when the
  * event was already handled (`defaultPrevented`). So it never steals Esc from the
- * editor or the intro overlay, both of which live outside the shell. `TraceOverlay`
- * preempts it in practice: it calls `preventDefault` on its own Esc handler, so once
- * that runs this guarded listener does not fire at all — its own `clearSelection` call
- * is dead code while a trace dialog is open, not a redundant one.
+ * editor or the intro overlay, both of which live outside the shell. This handles Esc
+ * from ordinary focused shell content; the trace dialog (`TraceOverlay`, GH105-PLAN.md)
+ * is no longer a descendant of the shell — `App.tsx` mounts it as a shell sibling
+ * through `ModalHost`, so it handles its own Esc independently, never bubbling here.
  *
- * The shell owns the findings-panel ref and hands it to both children: `FindingsPanel`
- * renders it, and `TraceOverlay` reads it as the finding-mode focus fallback
- * (GH34-35-PLAN.md decision 14) for when reconciliation evicts a trace's trigger row.
+ * The shell renders `FindingsPanel` and passes it the findings-panel ref. In `App.tsx`
+ * that ref is owned by `App` (lifted there, GH105-PLAN.md, so `TraceOverlay` can read it
+ * as the finding-mode focus fallback, GH34-35-PLAN.md decision 14) and handed in here;
+ * the prop is optional and defaults to a locally-owned ref, so a bare `<InspectorShell />`
+ * (an isolated test) still works.
  *
- * `DecisionsPanel` (T10) is a sibling of the shell in `App.tsx`, not a child of it, so
- * its ref cannot be owned here the same way: `App.tsx` owns it and passes it down as
- * `decisionsPanelRef`, which this shell forwards to `TraceOverlay` as the decision-mode
- * focus fallback. Optional, defaulting to a locally-owned ref, so a bare
- * `<InspectorShell />` (an isolated test, with no `DecisionsPanel` mounted) still works.
+ * `DecisionsPanel` (T10) and `TraceOverlay` are both siblings of the shell in `App.tsx`,
+ * not children of it. `App.tsx` owns the decision-mode focus-fallback ref and hands it to
+ * `DecisionsPanel` and `TraceOverlay` directly (GH105-PLAN.md), so this shell no longer
+ * takes or forwards it.
  */
 import { type RefObject, useRef } from "react";
 import { useGameStore } from "../../game/store";
 import { FxLayer } from "../fx/FxLayer";
 import { LogPanel } from "../log/LogPanel";
 import { FindingsPanel } from "./FindingsPanel";
-import { TraceOverlay } from "./TraceOverlay";
 
 interface InspectorShellProps {
-  decisionsPanelRef?: RefObject<HTMLElement | null>;
+  findingsPanelRef?: RefObject<HTMLElement | null>;
 }
 
 export function InspectorShell({
-  decisionsPanelRef: externalDecisionsRef,
+  findingsPanelRef: externalFindingsRef,
 }: InspectorShellProps = {}) {
   const clearSelection = useGameStore((state) => state.clearSelection);
-  const findingsPanelRef = useRef<HTMLElement>(null);
-  const ownDecisionsRef = useRef<HTMLElement>(null);
-  const decisionsPanelRef = externalDecisionsRef ?? ownDecisionsRef;
+  const ownFindingsRef = useRef<HTMLElement>(null);
+  const findingsPanelRef = externalFindingsRef ?? ownFindingsRef;
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     if (event.key === "Escape" && !event.defaultPrevented) {
@@ -53,10 +52,6 @@ export function InspectorShell({
         <LogPanel />
       </div>
       <FindingsPanel panelRef={findingsPanelRef} />
-      <TraceOverlay
-        fallbackFocusRef={findingsPanelRef}
-        decisionsFallbackFocusRef={decisionsPanelRef}
-      />
       <FxLayer />
     </section>
   );

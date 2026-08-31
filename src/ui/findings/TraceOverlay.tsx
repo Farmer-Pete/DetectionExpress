@@ -18,6 +18,13 @@
  * no evidence pane (decision 12). Every decision-mode header's "recorded at" reads
  * `resolvedAt` (decision 16), never the player-influenced `at`.
  *
+ * It mounts as a sibling of `.app-shell`, in `App.tsx` through `ModalHost`
+ * (GH105-PLAN.md), next to `IntroOverlay`. The shell is `inert` while it is open
+ * (`ModalHost`'s `modalOpen`), so a screen reader's browse mode and the keyboard
+ * cannot reach the findings rows, decisions rows, transport controls, or the editor
+ * behind it — only the Tab trap below, which is not enough on its own (browse mode
+ * ignores the browser's keyboard focus entirely).
+ *
  * It is a real modal dialog, styled on `IntroOverlay`'s pattern: `role="dialog"`,
  * a backdrop that dismisses on click (a gesture STARTING inside the dialog never
  * does, even if it ends on the backdrop — `src/ui/focus.ts`'s
@@ -158,12 +165,17 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
 
   // Unmount-only release (F001): the freeze effect above has no cleanup of its own
   // (its dependencies already cover open/close while mounted), so unmounting while
-  // this dialog still holds an unforfeited claim — e.g. the Metro/Pipeline view
-  // toggle in App.tsx tearing down InspectorShell with a trace open — would
-  // otherwise leak the freeze into the store forever. `frozen` is read fresh
-  // through `getState()`, never the closed-over prop, so a store update between the
-  // last render and unmount can't go stale. Deps are just `[setFrozen]`, so this
-  // effect's cleanup runs only on unmount, never on an open/frozen change.
+  // this dialog still holds an unforfeited claim would otherwise leak the freeze
+  // into the store forever. Since GH105-PLAN.md moved this component to a shell
+  // sibling (mounted in both views), a Pipeline<->Metro view toggle no longer
+  // unmounts it: the pipeline effect's cleanup in App.tsx calls `clearSelection()`
+  // on a view switch, which closes the dialog through its normal close path above
+  // and releases the freeze there instead. This effect is now a safety net for a
+  // full `App` unmount specifically, a distinct invariant from the close path.
+  // `frozen` is read fresh through `getState()`, never the closed-over prop, so a
+  // store update between the last render and unmount can't go stale. Deps are just
+  // `[setFrozen]`, so this effect's cleanup runs only on unmount, never on an
+  // open/frozen change.
   //
   // Resetting `wasOpenRef` here also settles a StrictMode-only hazard: on a fresh
   // mount with the dialog already open, React's dev-mode phantom

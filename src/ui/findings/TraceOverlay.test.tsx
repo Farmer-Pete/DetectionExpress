@@ -9,6 +9,7 @@ import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { DecisionsPanel } from "../decisions/DecisionsPanel";
 import { caughtDecision, falseDecision, missedDecision } from "../decisions/decision-fixtures";
 import { InspectorShell } from "./InspectorShell";
+import { TraceOverlay } from "./TraceOverlay";
 
 // The zustand store is a singleton shared across test files, so reset every field this
 // file reads or writes before each test, or a leaked value would bleed across.
@@ -73,30 +74,39 @@ function publish(findings: LiveFinding[], events: RingEvent[] = []): void {
   useGameStore.setState({ snapshot });
 }
 
-/** Render the shell, click the named finding's row, and hand back the row element (the
+/**
+ * The shared harness: `InspectorShell` (sharing `findingsPanelRef`), `DecisionsPanel`
+ * (sharing `decisionsPanelRef`), and `TraceOverlay` as siblings, with `TraceOverlay`
+ * reading both refs as its focus fallbacks, mirroring how `App.tsx` composes them
+ * (GH105-PLAN.md — `TraceOverlay` no longer lives inside `InspectorShell`, so tests
+ * mount it alongside instead). Decision mode's focus fallback (decision 14) needs a
+ * real `DecisionsPanel` DOM node to fall back to, which `InspectorShell` alone never
+ * mounts; finding mode's fallback needs the shared `findingsPanelRef` `TraceOverlay`
+ * reads to reach `FindingsPanel`'s own container.
+ */
+function Harness() {
+  const findingsPanelRef = useRef<HTMLElement>(null);
+  const decisionsPanelRef = useRef<HTMLElement>(null);
+  return (
+    <>
+      <InspectorShell findingsPanelRef={findingsPanelRef} />
+      <DecisionsPanel panelRef={decisionsPanelRef} />
+      <TraceOverlay
+        fallbackFocusRef={findingsPanelRef}
+        decisionsFallbackFocusRef={decisionsPanelRef}
+      />
+    </>
+  );
+}
+
+/** Render the harness, click the named finding's row, and hand back the row element (the
  *  trigger a real click would focus, native-button default focus behavior). */
 function openTraceByClick(name: RegExp): HTMLElement {
-  render(<InspectorShell />);
+  render(<Harness />);
   const row = screen.getByRole("button", { name });
   row.focus();
   fireEvent.click(row);
   return row;
-}
-
-/**
- * The decision-mode harness: `InspectorShell` and `DecisionsPanel` as siblings
- * sharing one ref, mirroring how `App.tsx` composes them (2.4). Decision mode's
- * focus fallback (decision 14) needs a real `DecisionsPanel` DOM node to fall back
- * to, which a bare `<InspectorShell />` alone never mounts.
- */
-function Harness() {
-  const decisionsPanelRef = useRef<HTMLElement>(null);
-  return (
-    <>
-      <InspectorShell decisionsPanelRef={decisionsPanelRef} />
-      <DecisionsPanel panelRef={decisionsPanelRef} />
-    </>
-  );
 }
 
 /** Render the harness, click the named decision's row, and hand back the row element. */
@@ -117,7 +127,7 @@ function publishDecisions(decisions: Decision[], events: RingEvent[] = []): void
 describe("TraceOverlay", () => {
   it("renders nothing when no finding is selected", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
-    render(<InspectorShell />);
+    render(<Harness />);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -362,7 +372,7 @@ describe("TraceOverlay", () => {
 
   it("restores focus to a row the click itself never focused (Safari does not focus a clicked button)", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
-    render(<InspectorShell />);
+    render(<Harness />);
     const row = screen.getByRole("button", { name: /pin brute force/i });
     // Deliberately skip `row.focus()`: the click handler itself must force focus onto
     // the row (FindingsPanel's own fix), not rely on the browser's click-to-focus.
@@ -473,9 +483,9 @@ describe("TraceOverlay", () => {
     expect(useGameStore.getState().transport.frozen).toBe(true);
   });
 
-  it("releases a freeze it initiated when it unmounts while open, e.g. the Metro/Pipeline view toggle", () => {
+  it("releases a freeze it initiated when it unmounts while open, e.g. a full App unmount", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
-    const { unmount } = render(<InspectorShell />);
+    const { unmount } = render(<Harness />);
     const row = screen.getByRole("button", { name: /pin brute force/i });
     row.focus();
     fireEvent.click(row);
@@ -489,7 +499,7 @@ describe("TraceOverlay", () => {
   it("leaves a manual pre-freeze alone when it unmounts while open", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     useGameStore.getState().setFrozen(true);
-    const { unmount } = render(<InspectorShell />);
+    const { unmount } = render(<Harness />);
     const row = screen.getByRole("button", { name: /pin brute force/i });
     row.focus();
     fireEvent.click(row);
@@ -508,7 +518,7 @@ describe("TraceOverlay", () => {
 
     render(
       <StrictMode>
-        <InspectorShell />
+        <Harness />
       </StrictMode>,
     );
 

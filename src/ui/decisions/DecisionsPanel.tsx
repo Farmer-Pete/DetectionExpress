@@ -10,7 +10,7 @@
  * dialog's decision-mode focus fallback, GH34-35-PLAN.md decision 14): when a
  * decision's trigger row was evicted by reconciliation (the cap, or a run restart),
  * `TraceOverlay` focuses this container instead. `App.tsx` owns the shared ref and
- * hands it to both this panel and `InspectorShell`.
+ * hands it to both this panel and `TraceOverlay` directly.
  */
 import type { RefObject } from "react";
 import { useGameStore } from "../../game/store";

@@ -18,14 +18,26 @@
  * Tests inject controller factories through `createPipelineController` /
  * `createWorldController`, so the app never loads the real loader or engine under test.
  *
+ * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
+ * component that actually renders them and holds the shell-inert invariant. `App`
+ * derives `modalOpen` — `introOpen || traceOpen`, where `traceOpen` is `selection !==
+ * null || decisionSelection !== null` — and hands it in along with both overlays,
+ * `IntroOverlay` and `TraceOverlay`, as `ModalHost`'s `overlays` prop. Both render as
+ * siblings of the inert shell, so a screen reader's browse mode and the keyboard
+ * cannot reach shell content behind either one. `TraceOverlay` used to mount inside
+ * `InspectorShell`, a shell descendant, which meant inerting the shell would have
+ * inerted the dialog too; as a shell sibling it renders unconditionally now (it
+ * returns null itself when neither selection is set), across both the pipeline and
+ * metro views.
+ *
  * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
  * (`useWavePhaseEdge`) toggles `.shake` on `.app-shell` for `SHAKE_MS` on the
  * incoming -> active edge, independent of LogPanel's own `.waveflash`. It
  * lands on `.app-shell`, not the outer `.app` wrapper, because the `shake`
  * keyframe's `transform` makes its own element a containing block for any
- * `position: fixed` descendant (F006): `.app-shell` and `IntroOverlay` are
- * siblings inside `.app`, so shaking `.app-shell` never drags the overlay's
- * fixed backdrop along with it. The shake gates on run conclusion in two
+ * `position: fixed` descendant (F006): `.app-shell` and the overlays are
+ * siblings inside `.app` (via `ModalHost`), so shaking `.app-shell` never drags
+ * an overlay's fixed backdrop along with it. The shake gates on run conclusion in two
  * places (F004+F006, CodeRabbit review): `useWavePhaseEdge` reads `"calm"`
  * once `snapshot.status` is no longer `"running"`, so a shake never fires off
  * a frozen terminal frame; separately, the render site ANDs the one-shot flag
@@ -51,10 +63,12 @@ import { ChaosLadder } from "./ChaosLadder";
 import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
+import { TraceOverlay } from "./findings/TraceOverlay";
 import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
 import { IntroOverlay } from "./IntroOverlay";
 import { MetroView } from "./MetroView";
+import { ModalHost } from "./ModalHost";
 import { hasSeenIntro, markIntroSeen } from "./onboarding-storage";
 import { scenarioSlug } from "./scenarios";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
@@ -114,8 +128,13 @@ interface AppProps {
 export function App({ createPipelineController, createWorldController }: AppProps = {}) {
   const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
-  // Shared with InspectorShell (which forwards it to TraceOverlay as the decision-mode
-  // focus fallback, GH34-35-PLAN.md decision 14) and DecisionsPanel (which renders it).
+  // Shared with InspectorShell (which passes it to FindingsPanel) and TraceOverlay
+  // (which reads it as the finding-mode focus fallback, GH34-35-PLAN.md decision 14).
+  // Lifted here from InspectorShell (GH105-PLAN.md) since TraceOverlay no longer lives
+  // inside it.
+  const findingsPanelRef = useRef<HTMLElement>(null);
+  // Shared with DecisionsPanel (which renders it) and TraceOverlay (which reads it as
+  // the decision-mode focus fallback, GH34-35-PLAN.md decision 14).
   const decisionsPanelRef = useRef<HTMLElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
@@ -130,6 +149,16 @@ export function App({ createPipelineController, createWorldController }: AppProp
   const status = useGameStore((s) => s.snapshot.status);
   const edgeToken = useWavePhaseEdge(status === "running" ? wavePhase : "calm");
   const shaking = useOneShotFlag(edgeToken, SHAKE_MS);
+
+  // Whether the trace dialog is open (GH105-PLAN.md): `selection !== null` OR
+  // `decisionSelection !== null` IS "the dialog is open" (GH34-35-PLAN.md decision 2).
+  // Feeds ModalHost's modalOpen alongside introOpen, so the shell goes inert whenever
+  // either overlay is showing. This derivation is sound only because the store now
+  // validates a selection against the live snapshot before storing it (store.ts), so a
+  // set selection always implies TraceOverlay actually renders a dialog.
+  const selection = useGameStore((s) => s.selection);
+  const decisionSelection = useGameStore((s) => s.decisionSelection);
+  const traceOpen = selection !== null || decisionSelection !== null;
 
   // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
   // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
@@ -314,77 +343,86 @@ export function App({ createPipelineController, createWorldController }: AppProp
   };
 
   return (
-    <div className="app">
-      {/* The shell. While the intro overlay is open it is `inert`, so a screen
-          reader's virtual cursor and the keyboard cannot reach it and the overlay
-          is truly modal. The overlay is a sibling of this container, so it stays
-          interactive. The shake class also lands here, not on the outer wrapper
-          above, so its transform never turns into a containing block for the
-          overlay's `position: fixed` backdrop (F006). The class also ANDs
-          `shaking` with `status === "running"`, so an in-flight shake clears
-          immediately if the run concludes mid-animation, instead of running
-          out its own timer over a frozen frame (CodeRabbit review). */}
-      <div
-        className={shaking && status === "running" ? "app-shell shake" : "app-shell"}
-        inert={introOpen}
-      >
-        <header className="topbar">
-          <h1>Detection Express</h1>
-          <span className="slice-tag">Observe the Engine, then cause chaos</span>
-          <div className="topbar-actions">
-            <button
-              type="button"
-              className="view-toggle"
-              onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
-            >
-              {view === "pipeline" ? "Metro view" : "Pipeline view"}
-            </button>
-            <button
-              type="button"
-              ref={reopenRef}
-              className="topbar-reopen"
-              onClick={() => setIntroOpen(true)}
-            >
-              How this works
-            </button>
-            <HireMe copy={hireMe} />
-          </div>
-        </header>
-        {view === "pipeline" ? (
-          <>
-            <Hud />
-            <InspectorShell decisionsPanelRef={decisionsPanelRef} />
-            <DecisionsPanel panelRef={decisionsPanelRef} />
-            <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
-            <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
-            <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
-            {algoReady ? (
-              <div className="local-ide">
-                {localMode ? (
-                  <button type="button" onClick={onStopLocalMode}>
-                    Stop editing
-                  </button>
-                ) : (
-                  <button type="button" onClick={onEnterLocalMode}>
-                    Edit in IDE
-                  </button>
-                )}
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <MetroView />
-        )}
-      </div>
-      {introOpen ? (
-        <IntroOverlay
-          copy={introCopy}
-          repoUrl={REPO_URL}
-          onObserve={onObserve}
-          onCauseChaos={onCauseChaos}
-          onEditEngine={onEditEngine}
-        />
-      ) : null}
-    </div>
+    // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
+    // (GH105-PLAN.md). `modalOpen` covers both overlays, so the shell goes inert
+    // while EITHER the intro or the trace dialog is open, and a screen reader's
+    // browse mode and the keyboard cannot reach shell content behind either one. The
+    // shake class lands on the shell class it manages, not the outer `.app` wrapper,
+    // so its transform never turns into a containing block for an overlay's
+    // `position: fixed` backdrop (F006). `shellExtraClass` ANDs `shaking` with
+    // `status === "running"`, so an in-flight shake clears immediately if the run
+    // concludes mid-animation, instead of running out its own timer over a frozen
+    // frame (CodeRabbit review). Both overlays are ModalHost's `overlays` siblings:
+    // `IntroOverlay` when `introOpen`, and `TraceOverlay` unconditionally (it renders
+    // null itself when neither selection is set).
+    <ModalHost
+      modalOpen={introOpen || traceOpen}
+      shellExtraClass={shaking && status === "running" ? "shake" : undefined}
+      overlays={
+        <>
+          {introOpen ? (
+            <IntroOverlay
+              copy={introCopy}
+              repoUrl={REPO_URL}
+              onObserve={onObserve}
+              onCauseChaos={onCauseChaos}
+              onEditEngine={onEditEngine}
+            />
+          ) : null}
+          <TraceOverlay
+            fallbackFocusRef={findingsPanelRef}
+            decisionsFallbackFocusRef={decisionsPanelRef}
+          />
+        </>
+      }
+    >
+      <header className="topbar">
+        <h1>Detection Express</h1>
+        <span className="slice-tag">Observe the Engine, then cause chaos</span>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className="view-toggle"
+            onClick={() => setView(view === "pipeline" ? "metro" : "pipeline")}
+          >
+            {view === "pipeline" ? "Metro view" : "Pipeline view"}
+          </button>
+          <button
+            type="button"
+            ref={reopenRef}
+            className="topbar-reopen"
+            onClick={() => setIntroOpen(true)}
+          >
+            How this works
+          </button>
+          <HireMe copy={hireMe} />
+        </div>
+      </header>
+      {view === "pipeline" ? (
+        <>
+          <Hud />
+          <InspectorShell findingsPanelRef={findingsPanelRef} />
+          <DecisionsPanel panelRef={decisionsPanelRef} />
+          <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
+          <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+          <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+          {algoReady ? (
+            <div className="local-ide">
+              {localMode ? (
+                <button type="button" onClick={onStopLocalMode}>
+                  Stop editing
+                </button>
+              ) : (
+                <button type="button" onClick={onEnterLocalMode}>
+                  Edit in IDE
+                </button>
+              )}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <MetroView />
+      )}
+    </ModalHost>
   );
 }
