@@ -48,7 +48,13 @@ export function score(counts: Counts, wFn: number, wFp: number): number {
 
 /** The scorer's tuning: injected so `sim/` stays free of `game/` constants. */
 export interface ScorerConfig {
-  /** Distinct cited ids an Alert must share with an Attack to credit it. */
+  /**
+   * The default count of distinct cited ids an Alert must share with an Attack to
+   * credit it. A per-Attack `Attack.threshold` (GH42-PLAN.md "Scoring for mixed
+   * hunts") takes precedence when set; this value is the fallback for an Attack
+   * that carries none, which keeps every caller that never set `Attack.threshold`
+   * scoring exactly as before.
+   */
   threshold: number;
   /** Outcomes kept in the rolling gauge ring. */
   window: number;
@@ -508,7 +514,12 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       const predicate = useEntity
         ? attack.entity === scored.entity
         : attack.reason === alert.reason;
-      if (predicate && (hits.get(attack.id) ?? 0) >= config.threshold) {
+      // Per-attack threshold (GH42-PLAN.md "Scoring for mixed hunts"): an Attack that
+      // carries its own `threshold` is credited by that value; one that carries none
+      // falls back to the injected config default, so every pre-GH42 caller (whose
+      // Attacks never set this field) scores exactly as before.
+      const threshold = attack.threshold ?? config.threshold;
+      if (predicate && (hits.get(attack.id) ?? 0) >= threshold) {
         resolve(attack, "caught");
         append({
           outcome: "caught",

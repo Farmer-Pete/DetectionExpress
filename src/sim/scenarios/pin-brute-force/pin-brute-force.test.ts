@@ -19,7 +19,7 @@ import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kio
 import type { PipeEvent } from "../../event";
 import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm } from "./reference";
-import { pinBruteForce } from "./scenario";
+import { generate, pinBruteForce } from "./scenario";
 
 /** The total attackers across all waves; the globally distinct victim count. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);
@@ -284,6 +284,30 @@ describe("referenceSource", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
     expect(referenceSource).toContain("export function normalize");
     expect(referenceSource).toContain("export function detect");
+  });
+});
+
+describe("generate's partition parameter (GH42-PLAN.md's minimal merge seam)", () => {
+  it("with no partition, replays exactly the pre-GH42 behavior for a given seed", () => {
+    expect(generate(LEVEL_SEED)).toEqual(pinBruteForce.generate(LEVEL_SEED));
+  });
+
+  it("draws disjoint accounts for two different partitions, even across different seeds", () => {
+    const a = generate(LEVEL_SEED, 0);
+    const b = generate(2026, 1);
+    const accountsOf = (run: ReturnType<typeof generate>): Set<string> =>
+      new Set(run.attacks.map((attack) => attack.entity));
+    const aAccounts = accountsOf(a);
+    const bAccounts = accountsOf(b);
+    for (const account of aAccounts) {
+      expect(bAccounts.has(account)).toBe(false);
+    }
+  });
+
+  it("is deterministic for a given seed and partition", () => {
+    const a = generate(LEVEL_SEED, 1);
+    const b = generate(LEVEL_SEED, 1);
+    expect(a).toEqual(b);
   });
 });
 

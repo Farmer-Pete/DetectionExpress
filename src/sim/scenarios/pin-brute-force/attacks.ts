@@ -135,5 +135,9 @@ export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
     reason: PIN_BRUTE_FORCE_REASON,
     window: plan.window,
     eventIds,
+    // Per-attack scoring (GH42-PLAN.md): this hunt's own threshold, read by the
+    // scorer instead of a global config value, so a mixed run scores each hunt
+    // by its own evidence bar.
+    threshold: PIN_BRUTE_FORCE_THRESHOLD,
   };
 }

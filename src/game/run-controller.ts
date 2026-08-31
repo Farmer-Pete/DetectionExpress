@@ -152,6 +152,13 @@ export interface RunControllerDeps {
   onFinished?: () => void;
 }
 
+/**
+ * `threshold` here is only the fallback default for an Attack that carries none
+ * (GH42-PLAN.md "Scoring for mixed hunts"): pin-brute-force's own Attacks already
+ * set `Attack.threshold` in `attackFromPlan`, so the scorer credits them by that
+ * value. A future mixed run of scenarios with differing thresholds still scores
+ * correctly with this one shared fallback, because each Attack overrides it.
+ */
 const SCORER_CONFIG: ScorerConfig = {
   threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,

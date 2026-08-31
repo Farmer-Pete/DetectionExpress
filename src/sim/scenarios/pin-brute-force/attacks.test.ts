@@ -8,7 +8,7 @@ import {
   WAVE_RATES,
 } from "../../../game/tuning";
 import { buildSchedule } from "../../schedule";
-import { planAttacks, selectVictims } from "./attacks";
+import { attackFromPlan, planAttacks, selectVictims } from "./attacks";
 
 /** The total attackers across all waves. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);
@@ -88,5 +88,22 @@ describe("planAttacks", () => {
       }
     });
     expect(planIndex).toBe(VICTIM_COUNT);
+  });
+});
+
+// GH42-PLAN.md "Scoring for mixed hunts": the scorer now reads a per-Attack
+// threshold, so `attackFromPlan` must set it from this hunt's own tuning.
+describe("attackFromPlan", () => {
+  it("carries this hunt's threshold on the Attack ground truth", () => {
+    const { waves } = buildSchedule();
+    const victims = selectVictims(pool(40), randomLcg(7), VICTIM_COUNT);
+    const plans = planAttacks(waves, victims, randomLcg(7));
+    const plan = plans[0];
+    expect(plan).toBeDefined();
+    if (!plan) {
+      return;
+    }
+    const attack = attackFromPlan(plan, [1, 2, 3]);
+    expect(attack.threshold).toBe(PIN_BRUTE_FORCE_THRESHOLD);
   });
 });

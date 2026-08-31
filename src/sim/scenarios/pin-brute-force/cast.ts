@@ -14,6 +14,7 @@
  * are the attacker's. The clamp makes benign and attack traffic separable by
  * construction; the scenario's assertions are the double check.
  */
+import { randomLcg } from "d3-random";
 import { SCAN_WINDOW_TICKS } from "../../../game/tuning";
 import { type AccountRiderConfig, createAccountRider } from "../../actors/account-rider";
 import type { Actor } from "../../actors/actor";
@@ -69,6 +70,58 @@ export function buildIdentityPools(
   accountCount: number,
 ): IdentityPools {
   const accounts = buildAccounts(accountCount, rng).map((account) => account.name);
+  const stations = world.stations.map((station) => station.id);
+  return { accounts, stations, terminals: KIOSK_TERMINALS };
+}
+
+/**
+ * A fixed seed for the shared partition namespace, independent of any run's own
+ * seed. `buildPartitionedIdentityPools` mints its account slices from this one
+ * constant source, never from a run's `rng`, so two runs generated from
+ * unrelated seeds still draw guaranteed-disjoint accounts as long as they use
+ * different partitions (GH42-PLAN.md "Composable streams: the merge seam"). A
+ * run's own `rng` still decides which of its partition's accounts become
+ * victims or patrons; only the namespace each partition draws from is fixed.
+ */
+const PARTITION_NAMESPACE_SEED = 0x9a1e5;
+
+/**
+ * How many disjoint partitions the fixed namespace reserves. `buildAccounts`
+ * caps its own ceiling at `STEMS.length * 26` (520 today), so this must stay
+ * comfortably under `520 / accountCount` for the accountCount this scenario
+ * actually uses (40): 8 partitions of 40 is 320, well inside that ceiling.
+ * Bump it if a future merge ever needs more concurrent runs.
+ */
+const MAX_PARTITIONS = 8;
+
+/**
+ * The identity pools for one partition of a composed (merged) run. `accounts`
+ * comes from the fixed `PARTITION_NAMESPACE_SEED` namespace, sliced by
+ * `partition`, not from any run's own seed, so two runs given different
+ * partitions never share an account no matter what seed generated each run.
+ * Stations and terminals are already world-fixed, so they need no partitioning.
+ *
+ * Throws on a `partition` outside `[0, MAX_PARTITIONS)`: a caller asking for an
+ * unreserved partition would otherwise silently slice past the namespace and
+ * get an under-full (or empty) pool, corrupting the disjointness guarantee this
+ * function exists to provide.
+ */
+export function buildPartitionedIdentityPools(
+  world: World,
+  accountCount: number,
+  partition: number,
+): IdentityPools {
+  if (!Number.isInteger(partition) || partition < 0 || partition >= MAX_PARTITIONS) {
+    throw new Error(
+      `buildPartitionedIdentityPools: partition must be an integer in [0, ${MAX_PARTITIONS}), got ${partition}.`,
+    );
+  }
+  const namespace = buildAccounts(
+    accountCount * MAX_PARTITIONS,
+    randomLcg(PARTITION_NAMESPACE_SEED),
+  ).map((account) => account.name);
+  const start = partition * accountCount;
+  const accounts = namespace.slice(start, start + accountCount);
   const stations = world.stations.map((station) => station.id);
   return { accounts, stations, terminals: KIOSK_TERMINALS };
 }

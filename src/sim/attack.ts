@@ -15,4 +15,12 @@ export interface Attack {
   window: { startTs: number; endTs: number };
   /** The burst's failure Event ids: at least the threshold within the window. */
   eventIds: number[];
+  /**
+   * Distinct cited ids an Alert must share with this Attack to credit it. Mixed
+   * hunts carry different thresholds, so each Attack owns its own (GH42-PLAN.md
+   * "Scoring for mixed hunts"). Optional: when a scenario omits it, `createScorer`
+   * falls back to its injected `ScorerConfig.threshold`, so every existing caller
+   * that never set this field keeps scoring exactly as before.
+   */
+  threshold?: number;
 }

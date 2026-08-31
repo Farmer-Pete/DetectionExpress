@@ -28,8 +28,16 @@ function attack(
   startTs: number,
   endTs: number,
   eventIds: number[],
+  threshold?: number,
 ): Attack {
-  return { id, entity, reason: REASON, window: { startTs, endTs }, eventIds };
+  return {
+    id,
+    entity,
+    reason: REASON,
+    window: { startTs, endTs },
+    eventIds,
+    ...(threshold === undefined ? {} : { threshold }),
+  };
 }
 
 /** A bare Event carrying only the scheduled time the scorer folds on. */
@@ -234,6 +242,44 @@ describe("scorer (reason path, entityMatch off)", () => {
     expect(r.caught).toBe(1);
     expect(r.missed).toBe(2);
     expect(r.rolling).toBe(0); // ring holds [missed, missed]
+  });
+});
+
+// GH42-PLAN.md "Scoring for mixed hunts": a mixed run carries Attacks with different
+// thresholds, so the scorer must read each Attack's own `threshold`, not one global
+// config value.
+describe("scorer (per-attack threshold, GH42 mixed hunts)", () => {
+  it("credits each Attack by its own threshold, ignoring the other Attack's threshold", () => {
+    // Two pending Attacks, different entities and different thresholds. The global
+    // config threshold (2) would wrongly credit "b" too if it were used for both.
+    const s = createScorer(
+      [attack(1, "a", 0, 100, [10, 11], 2), attack(2, "b", 0, 100, [20, 21, 22, 23], 4)],
+      cfg({ threshold: 2 }),
+    );
+    // "a" needs only 2 distinct cited ids: its own threshold is satisfied.
+    s.record(one([10, 11], 50), at(50));
+    // "b" needs 4, but this Finding cites only 3 of its owned ids: below ITS OWN
+    // threshold even though it clears the global config's threshold of 2.
+    s.record(one([20, 21, 22], 60), at(60));
+    const r = s.reading();
+    expect(r.caught).toBe(1); // only "a"
+    expect(r.falseAlerts).toBe(1); // "b"'s under-threshold finding credits nothing
+    expect(r.missed).toBe(0);
+  });
+
+  it("catches an Attack once its own (higher-than-config) threshold is met", () => {
+    const s = createScorer([attack(1, "b", 0, 100, [20, 21, 22, 23], 4)], cfg({ threshold: 2 }));
+    s.record(one([20, 21, 22, 23], 60), at(60)); // all 4 of its owned ids
+    expect(s.reading().caught).toBe(1);
+    expect(s.reading().falseAlerts).toBe(0);
+  });
+
+  it("falls back to the config threshold when an Attack sets none", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12])], cfg({ threshold: 3 }));
+    s.record(one([10, 11], 50), at(50)); // two of three: below the config fallback
+    expect(s.reading().falseAlerts).toBe(1);
+    s.record(one([10, 11, 12], 60), at(60)); // now meets the config fallback
+    expect(s.reading().caught).toBe(1);
   });
 });
 

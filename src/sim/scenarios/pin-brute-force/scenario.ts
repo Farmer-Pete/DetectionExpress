@@ -37,6 +37,7 @@ import {
   type BenignVisit,
   budgetFumbles,
   buildIdentityPools,
+  buildPartitionedIdentityPools,
   pickSeeded,
 } from "./cast";
 
@@ -58,11 +59,29 @@ interface FairRecord {
   attackId: number | null;
 }
 
-function generate(seed: number): GeneratedRun {
+/**
+ * Plan the whole run from a seed. Deterministic: the same seed always returns the
+ * same run.
+ *
+ * `partition` is the minimal composable-streams seam (GH42-PLAN.md "Composable
+ * streams: the merge seam"): omitted (the `Scenario.generate` contract every
+ * other caller uses), the account pool is drawn from this run's own seeded
+ * `rng`, exactly as before. Given an explicit partition, the account pool comes
+ * instead from a fixed, seed-independent namespace slice
+ * (`buildPartitionedIdentityPools`), so two runs generated from different seeds
+ * but different partitions are guaranteed to draw disjoint accounts —
+ * `mergeRuns`'s entity-disjointness invariant depends on this. The full
+ * `composeScenario` partition threading is a later milestone; this only proves
+ * the seam.
+ */
+export function generate(seed: number, partition?: number): GeneratedRun {
   const rng = randomLcg(seed);
   const { waves, checkpoints } = buildSchedule();
 
-  const pools = buildIdentityPools(rng, world, ACCOUNT_COUNT);
+  const pools =
+    partition === undefined
+      ? buildIdentityPools(rng, world, ACCOUNT_COUNT)
+      : buildPartitionedIdentityPools(world, ACCOUNT_COUNT, partition);
   const victims = selectVictims(pools.accounts, rng, VICTIM_COUNT);
   const victimSet = new Set(victims);
   const plans = planAttacks(waves, victims, rng);
