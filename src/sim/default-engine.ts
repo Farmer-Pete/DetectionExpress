@@ -75,6 +75,16 @@ export function detect(e: KioskDetectView): Finding[] {
       alert: { reason: "pin_brute_force", at: e.ts, eventIds },
       eventId: anchor,
       subjectType: "account",
+      context: [
+        {
+          type: "kv",
+          entries: [
+            { label: "wrong PINs", value: kept.length },
+            { label: "threshold", value: THRESHOLD },
+            { label: "window", value: WINDOW },
+          ],
+        },
+      ],
     },
   ];
 }

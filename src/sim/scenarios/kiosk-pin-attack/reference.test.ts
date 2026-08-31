@@ -93,7 +93,16 @@ describe("referenceSource (executed, seam 4 parity)", () => {
     expect(hit?.isPartial).toBeUndefined();
     expect(hit?.eventId).toBe(0);
     expect(hit?.subjectType).toBe("account");
-    expect(hit?.context).toBeUndefined();
+    expect(hit?.context).toEqual([
+      {
+        type: "kv",
+        entries: [
+          { label: "wrong PINs", value: 5 },
+          { label: "threshold", value: 5 },
+          { label: "window", value: 300 },
+        ],
+      },
+    ]);
   });
 });
 
