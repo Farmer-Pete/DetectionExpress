@@ -11,12 +11,19 @@
  *
  * The scorer also keeps a durable, append-only decision log (`decisions()`): one
  * resolved `Decision` per judgement, each carrying a deep-cloned, frozen snapshot,
- * so a later slice's UI history survives log aging.
+ * so a later slice's UI history survives log aging. The log is optionally capped
+ * (`ScorerConfig.decisionsCap`): oldest entries drop, but `seq` is an independent
+ * monotonic counter (`nextDecisionSeq`), never `log.length`, so capping can never
+ * reuse a seq. A caught or false decision also carries `citedEvents`, resolved at
+ * append time through a late-bound resolver (`bindEventResolver`) the run controller
+ * wires to the inspector ring, so the T10 decisions history can reopen evidence a
+ * later reconciliation would otherwise have silently dropped.
  */
 
 import type { Attack } from "./attack";
 import type { PipeEvent } from "./event";
 import type { AlertReason, Finding } from "./finding";
+import type { RingEvent } from "./inspector";
 
 /** The global tallies behind the score of record. */
 export interface Counts {
@@ -55,6 +62,13 @@ export interface ScorerConfig {
    * `DEFAULT_LIVE_HORIZON` when omitted.
    */
   liveHorizon?: number;
+  /**
+   * Decisions kept in the durable log (`decisions()`). Past this count, `append()`
+   * drops the oldest. Optional; omitted means unbounded, preserving every existing
+   * test's behavior. `reading()`'s global `Counts` are unaffected by the cap: they
+   * fold every outcome that ever resolved, not just what the log still retains.
+   */
+  decisionsCap?: number;
 }
 
 /** The reading the sampler publishes: the gauge value plus the global counts. */
@@ -79,10 +93,21 @@ export type DecisionOutcome = "caught" | "missed" | "false";
 /** Fields shared by every resolved Decision. */
 interface DecisionBase {
   outcome: DecisionOutcome;
-  /** Append order: 0, 1, 2, ... Strictly monotonic. The UI's stable sort key and id. */
+  /**
+   * Append order, from an independent monotonic counter, not `log.length`: capping
+   * the log can drop entries, but never reuses or skips a seq. Strictly monotonic.
+   * The UI's stable sort key and id.
+   */
   seq: number;
   /** Game seconds when it resolved. Display metadata; NOT an ordering key. */
   at: number;
+  /**
+   * The TRUSTED game-seconds timestamp at resolution, never the player-influenced
+   * `at`. For caught and false, `env.ts` during `record()`. For a miss, on both the
+   * `closeExpired` and `finalize()` paths, `attack.window.endTs`: the moment the
+   * miss became true, ground truth. The UI's "recorded at" reads this, never `at`.
+   */
+  resolvedAt: number;
 }
 
 /** An Attack caught by a crediting finding. */
@@ -93,6 +118,12 @@ export interface CaughtDecision extends DecisionBase {
   entity: string;
   /** Deep clone of the crediting finding, frozen. */
   finding: Finding;
+  /**
+   * Cited events resolved at append time through the bound resolver, frozen with
+   * the decision. Empty when no resolver is bound. An id already evicted from the
+   * ring is simply absent, exactly as the live trace's aged-out placeholder.
+   */
+  citedEvents: readonly RingEvent[];
 }
 
 /** A finding that credited no pending Attack. */
@@ -102,6 +133,8 @@ export interface FalseDecision extends DecisionBase {
   entity?: string;
   /** Deep clone of the finding, frozen. */
   finding: Finding;
+  /** Cited events resolved at append time. See `CaughtDecision.citedEvents`. */
+  citedEvents: readonly RingEvent[];
 }
 
 /** An Attack whose window closed with no crediting finding. */
@@ -186,6 +219,17 @@ export interface Scorer {
    * on promotion. Ranking is a UI concern; this is a stable insertion order only.
    */
   liveFindings(): readonly LiveFinding[];
+  /**
+   * Bind the resolver a caught or false decision uses to capture `citedEvents` at
+   * append time. Late-bound because the run controller builds the scorer before the
+   * engine builds the inspector (`sim/inspector.ts`'s `resolveEvents`), so no single
+   * constructor call site can wire both. Every committed run gets a fresh scorer and
+   * a fresh inspector (Apply, hot reload, a failed dry run, disposal, and restart all
+   * build a new pair together, never rebind a survivor onto a new partner), so a
+   * rebind always pairs the current run's two halves. Unbound (the default) resolves
+   * every id to nothing, so `citedEvents` is simply empty.
+   */
+  bindEventResolver(resolve: (ids: readonly number[]) => RingEvent[]): void;
 }
 
 /** One resolved judgement, held in the rolling ring. */
@@ -241,6 +285,10 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   // the anchor. An entity-less finding falls back to (eventId, reason). See `upsertLive`.
   const live = new Map<string, LiveFinding>();
   let nextLiveSeq = 0;
+  // Independent of `log.length`, so capping the log never reuses or skips a seq.
+  let nextDecisionSeq = 0;
+  // The late-bound event resolver behind `citedEvents`. Unbound resolves nothing.
+  let resolveEvents: (ids: readonly number[]) => RingEvent[] = () => [];
 
   function push(outcome: Outcome): void {
     ring.push(outcome);
@@ -249,9 +297,16 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     }
   }
 
-  /** Append one frozen, deep-cloned decision. `seq` is its append index. */
+  /**
+   * Append one frozen, deep-cloned decision, then drop the oldest past
+   * `decisionsCap` when one is configured. Dropping never touches `seq`: it comes
+   * from `nextDecisionSeq`, not the log's length or contents.
+   */
   function append(decision: Decision): void {
     log.push(freezeDeep(decision));
+    if (config.decisionsCap !== undefined && log.length > config.decisionsCap) {
+      log.shift();
+    }
   }
 
   function resolve(attack: Attack, outcome: "caught" | "missed"): void {
@@ -264,12 +319,18 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     push(outcome);
   }
 
-  /** Emit a miss decision for an Attack, timestamped at its window close. */
+  /**
+   * Emit a miss decision for an Attack, timestamped at its window close. Called
+   * from both `closeExpired` and `finalize`, so both paths agree: `resolvedAt` is
+   * always `attack.window.endTs`, the moment the miss became true, ground truth
+   * with no signature change needed to thread it through.
+   */
   function missDecision(attack: Attack): MissedDecision {
     return {
       outcome: "missed",
-      seq: log.length,
+      seq: nextDecisionSeq++,
       at: attack.window.endTs,
+      resolvedAt: attack.window.endTs,
       attackId: attack.id,
       entity: attack.entity,
       reason: attack.reason,
@@ -401,8 +462,11 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    * reason. Evidence (>= threshold distinct cited ids owned by that Attack) is
    * required either way. "First pending" is the injected `attacks` array order, so
    * when two attacks tie the earlier element wins.
+   *
+   * `resolvedAt` is `record()`'s own `env.ts`, the trusted resolution time; `alert.at`
+   * stays untrusted display metadata, unread here except as the decision's `at`.
    */
-  function scoreFinding(scored: ScoredFinding): void {
+  function scoreFinding(scored: ScoredFinding, resolvedAt: number): void {
     const finding = scored.finding;
     if (finding.isPartial === true) {
       return;
@@ -421,11 +485,13 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
         resolve(attack, "caught");
         append({
           outcome: "caught",
-          seq: log.length,
+          seq: nextDecisionSeq++,
           at: alert.at,
+          resolvedAt,
           attackId: attack.id,
           entity: attack.entity,
           finding: deepClone(finding),
+          citedEvents: resolveEvents(alert.eventIds),
         });
         return;
       }
@@ -434,9 +500,11 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     push("false");
     const decision: FalseDecision = {
       outcome: "false",
-      seq: log.length,
+      seq: nextDecisionSeq++,
       at: alert.at,
+      resolvedAt,
       finding: deepClone(finding),
+      citedEvents: resolveEvents(alert.eventIds),
     };
     if (scored.entity !== undefined) {
       decision.entity = scored.entity;
@@ -456,7 +524,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
         upsertLive(scored, env.ts);
       }
       for (const scored of findings) {
-        scoreFinding(scored);
+        scoreFinding(scored, env.ts);
       }
     },
     advanceTo(gameTs) {
@@ -495,6 +563,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     },
     liveFindings() {
       return Object.freeze([...live.values()]);
+    },
+    bindEventResolver(resolve) {
+      resolveEvents = resolve;
     },
   };
 }
