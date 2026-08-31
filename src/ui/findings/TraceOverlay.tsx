@@ -153,6 +153,31 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
     }
   }, [open, frozen, setFrozen]);
 
+  // Unmount-only release (F001): the freeze effect above has no cleanup of its own
+  // (its dependencies already cover open/close while mounted), so unmounting while
+  // this dialog still holds an unforfeited claim — e.g. the Metro/Pipeline view
+  // toggle in App.tsx tearing down InspectorShell with a trace open — would
+  // otherwise leak the freeze into the store forever. `frozen` is read fresh
+  // through `getState()`, never the closed-over prop, so a store update between the
+  // last render and unmount can't go stale. Deps are just `[setFrozen]`, so this
+  // effect's cleanup runs only on unmount, never on an open/frozen change.
+  //
+  // Resetting `wasOpenRef` here also settles a StrictMode-only hazard: on a fresh
+  // mount with the dialog already open, React's dev-mode phantom
+  // cleanup+re-setup runs this cleanup once before the freeze effect ever runs
+  // again. Left at `true`, the freeze effect's re-setup would read a stale
+  // "already open" and land in the forfeit branch instead of re-claiming; zeroing
+  // it here makes that re-setup see a fresh not-yet-open state instead.
+  useEffect(() => {
+    return () => {
+      if (initiatedFreeze.current && useGameStore.getState().transport.frozen) {
+        setFrozen(false);
+      }
+      initiatedFreeze.current = false;
+      wasOpenRef.current = false;
+    };
+  }, [setFrozen]);
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {
       event.preventDefault();

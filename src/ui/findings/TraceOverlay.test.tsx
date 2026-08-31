@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { useRef } from "react";
+import { StrictMode, useRef } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
 import type {
@@ -455,6 +455,50 @@ describe("TraceOverlay", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeNull();
     expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("releases a freeze it initiated when it unmounts while open, e.g. the Metro/Pipeline view toggle", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    const { unmount } = render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    row.focus();
+    fireEvent.click(row);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    unmount();
+
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("leaves a manual pre-freeze alone when it unmounts while open", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    useGameStore.getState().setFrozen(true);
+    const { unmount } = render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    row.focus();
+    fireEvent.click(row);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    unmount();
+
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("settles frozen under StrictMode's phantom cleanup+re-setup when the dialog is already open on first mount, and closing still unfreezes", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    // Set the selection before the first render, so the dialog is open at mount,
+    // the exact case StrictMode's dev-only mount->cleanup->re-mount cycle exercises.
+    useGameStore.setState({ selection: { seq: 1 } });
+
+    render(
+      <StrictMode>
+        <InspectorShell />
+      </StrictMode>,
+    );
+
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
   });
 });
 
