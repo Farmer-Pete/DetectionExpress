@@ -8,8 +8,9 @@
  * fires only for keydowns from within the shell (focus inside), and it yields when the
  * event was already handled (`defaultPrevented`). So it never steals Esc from the
  * editor or the intro overlay, both of which live outside the shell. `TraceOverlay`
- * preempts it in practice: it calls `preventDefault` on its own Esc handler, so this
- * listener only ever fires a redundant, harmless `clearSelection` past that point.
+ * preempts it in practice: it calls `preventDefault` on its own Esc handler, so once
+ * that runs this guarded listener does not fire at all — its own `clearSelection` call
+ * is dead code while a trace dialog is open, not a redundant one.
  *
  * The shell owns the findings-panel ref and hands it to both children: `FindingsPanel`
  * renders it, and `TraceOverlay` reads it as the finding-mode focus fallback

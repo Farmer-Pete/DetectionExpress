@@ -69,8 +69,8 @@ export function formatRow(endpoint: string, raw: JsonValue): RowView {
 }
 
 /** `ts` is game seconds. Formats as an mm:ss clock; the formatter never reads real time.
- *  Shared by the log panel and the trace overlay, the two places a `RingEvent`'s time
- *  reaches the screen. */
+ *  Shared wherever a game-seconds time reaches the screen: the log panel, the trace
+ *  overlay, and the decisions panel. */
 export function formatClock(ts: number): string {
   const totalSeconds = Math.max(0, Math.floor(ts));
   const minutes = Math.floor(totalSeconds / 60);

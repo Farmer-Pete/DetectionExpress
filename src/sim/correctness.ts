@@ -16,9 +16,10 @@
  * the oldest entries drop, but `seq` is an independent monotonic counter
  * (`nextDecisionSeq`), never `log.length`, so capping can never reuse a seq. A
  * caught or false decision also carries `citedEvents`, resolved at
- * append time through a late-bound resolver (`bindEventResolver`) the run controller
- * wires to the inspector ring, so the T10 decisions history can reopen evidence a
- * later reconciliation would otherwise have silently dropped.
+ * append time through a late-bound resolver (`bindEventResolver`) the engine (its
+ * `start()`, after building the inspector) wires to the inspector ring, so the T10
+ * decisions history can reopen evidence a later reconciliation would otherwise have
+ * silently dropped.
  */
 
 import type { Attack } from "./attack";
