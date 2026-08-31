@@ -8,6 +8,7 @@
  * longer in `snapshot.findings`, which the store's reconciliation would have
  * already cleared the selection for.
  */
+import type { DecisionOutcome } from "../../sim/correctness";
 import type { Context, JsonValue } from "../../sim/finding";
 import type { SimSnapshot } from "../../sim/snapshot";
 
@@ -82,6 +83,92 @@ export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceVi
   }
   if (live.finding.context !== undefined) {
     model.context = live.finding.context;
+  }
+  return model;
+}
+
+/**
+ * A caught or false decision reopened: the frozen evidence exactly as it stood at
+ * decision time. `cards` resolves `alert.eventIds` against the decision's own
+ * `citedEvents` (T10, captured at append time), never the live `snapshot.events`
+ * ring, which may have moved on or been evicted entirely by the time a player
+ * reopens old history.
+ */
+export interface DecisionTraceEvidence {
+  kind: "evidence";
+  outcome: Extract<DecisionOutcome, "caught" | "false">;
+  /** The resolved subject, or null for an entity-less false decision. */
+  entity: string | null;
+  /** `alert.reason`: the hunt id. */
+  reason: string;
+  /** The trusted resolution time (GH34-35-PLAN.md decision 16), never `at`. */
+  resolvedAt: number;
+  /** One card per `alert.eventIds` entry, order preserved. */
+  cards: TraceCard[];
+  /** The frozen finding's display widgets, when it carries any. */
+  context?: Context;
+}
+
+/** A missed decision reopened: reason and the attack window only, no evidence pane
+ *  (GH34-35-PLAN.md decision 12: there was no finding to show). */
+export interface DecisionTraceMissed {
+  kind: "missed";
+  reason: string;
+  resolvedAt: number;
+  window: { startTs: number; endTs: number };
+}
+
+export type DecisionTraceViewModel = DecisionTraceEvidence | DecisionTraceMissed;
+
+/**
+ * Build the decision-mode trace view-model for the decision at `seq`, or `null`
+ * when no decision in `snapshot.decisions` carries that seq (the cap or a run
+ * restart dropped it; the store's reconciliation would have already cleared the
+ * selection for it too).
+ */
+export function buildDecisionTraceViewModel(
+  snapshot: SimSnapshot,
+  seq: number,
+): DecisionTraceViewModel | null {
+  const decision = snapshot.decisions.find((candidate) => candidate.seq === seq);
+  if (decision === undefined) {
+    return null;
+  }
+
+  if (decision.outcome === "missed") {
+    return {
+      kind: "missed",
+      reason: decision.reason,
+      resolvedAt: decision.resolvedAt,
+      window: { startTs: decision.window.startTs, endTs: decision.window.endTs },
+    };
+  }
+
+  const cards: TraceCard[] = decision.finding.alert.eventIds.map((id) => {
+    const cited = decision.citedEvents.find((event) => event.id === id);
+    if (cited === undefined) {
+      return { kind: "aged-out", id };
+    }
+    return {
+      kind: "event",
+      id,
+      ts: cited.ts,
+      endpoint: cited.endpoint,
+      raw: cited.raw,
+      normalized: cited.normalized,
+    };
+  });
+
+  const model: DecisionTraceEvidence = {
+    kind: "evidence",
+    outcome: decision.outcome,
+    entity: decision.entity ?? null,
+    reason: decision.finding.alert.reason,
+    resolvedAt: decision.resolvedAt,
+    cards,
+  };
+  if (decision.finding.context !== undefined) {
+    model.context = decision.finding.context;
   }
   return model;
 }
