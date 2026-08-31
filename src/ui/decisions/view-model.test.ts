@@ -5,7 +5,7 @@ import type {
   FalseDecision,
   MissedDecision,
 } from "../../sim/correctness";
-import { buildDecisionRows } from "./view-model";
+import { buildDecisionRows, outcomeLabel } from "./view-model";
 
 /** A caught decision. `at` is a fabricated decoy; the row must read `resolvedAt`. */
 function caught(over: { seq: number; resolvedAt: number; entity?: string }): CaughtDecision {
@@ -113,5 +113,13 @@ describe("buildDecisionRows", () => {
 
   it("returns an empty array for an empty log", () => {
     expect(buildDecisionRows([])).toEqual([]);
+  });
+});
+
+describe("outcomeLabel", () => {
+  it("labels each outcome with player-facing copy, not the raw token", () => {
+    expect(outcomeLabel("caught")).toBe("Caught");
+    expect(outcomeLabel("missed")).toBe("Missed");
+    expect(outcomeLabel("false")).toBe("False alert");
   });
 });

@@ -83,13 +83,13 @@ describe("DecisionsPanel", () => {
     const rows = screen.getAllByRole("button");
     expect(rows).toHaveLength(3);
     // Newest first: seq 2 (missed), then 1 (false), then 0 (caught).
-    expect(rows[0]?.textContent).toContain("missed");
+    expect(rows[0]?.textContent).toContain("Missed");
     expect(rows[0]?.textContent).toContain("acct-9");
     expect(rows[0]?.textContent).toContain("Pin brute force");
-    expect(rows[1]?.textContent).toContain("false");
+    expect(rows[1]?.textContent).toContain("False alert");
     expect(rows[1]?.textContent).toContain("ghost");
     expect(rows[1]?.textContent).toContain("Impossible travel");
-    expect(rows[2]?.textContent).toContain("caught");
+    expect(rows[2]?.textContent).toContain("Caught");
     expect(rows[2]?.textContent).toContain("acct-7");
     expect(rows[2]?.textContent).toContain("Pin brute force");
   });
@@ -106,7 +106,7 @@ describe("DecisionsPanel", () => {
     publish([falseDecision({ seq: 0, resolvedAt: 10 })]);
     render(<DecisionsPanel />);
     const row = screen.getByRole("button");
-    expect(row.textContent).toContain("false");
+    expect(row.textContent).toContain("False alert");
     expect(row.textContent).not.toContain("ghost");
   });
 

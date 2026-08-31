@@ -56,3 +56,19 @@ function toRow(decision: Decision): DecisionRow {
 export function buildDecisionRows(decisions: readonly Decision[]): DecisionRow[] {
   return [...decisions].reverse().map(toRow);
 }
+
+/**
+ * The player-facing label for a decision outcome, replacing the raw "caught" /
+ * "missed" / "false" token. Display text only: the CSS class a caller keys on
+ * stays on the raw token.
+ */
+export function outcomeLabel(outcome: DecisionOutcome): "Caught" | "Missed" | "False alert" {
+  switch (outcome) {
+    case "caught":
+      return "Caught";
+    case "missed":
+      return "Missed";
+    case "false":
+      return "False alert";
+  }
+}

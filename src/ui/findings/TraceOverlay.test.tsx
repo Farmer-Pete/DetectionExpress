@@ -217,6 +217,22 @@ describe("TraceOverlay", () => {
     expect(screen.getByText("watching, no finding yet")).toBeDefined();
   });
 
+  it("carries the watch modifier class on the verdict line, not the ok-green hit styling", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const verdict = screen.getByText("watching, no finding yet");
+    expect(verdict.className).toContain("trace-verdict--watch");
+    expect(verdict.className).not.toContain("trace-verdict--hit");
+  });
+
+  it("carries the hit modifier class on the verdict line for a hit finding", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "hit" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const verdict = screen.getByText("finding raised");
+    expect(verdict.className).toContain("trace-verdict--hit");
+    expect(verdict.className).not.toContain("trace-verdict--watch");
+  });
+
   it("labels the state badge with player-facing vocabulary, not the raw 'hit'/'watch' token", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "hit" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);
@@ -589,7 +605,7 @@ describe("TraceOverlay decision mode (T10)", () => {
     openDecisionTraceByClick(/pin brute force/i);
     const dialogEl = screen.getByRole("dialog");
     const dialog = within(dialogEl);
-    expect(dialog.getByText("caught")).toBeDefined();
+    expect(dialog.getByText("Caught")).toBeDefined();
     expect(dialog.getByText("acct-7")).toBeDefined();
     // The card resolves against the decision's frozen citedEvents, never the live ring
     // (which carries a decoy for the same id, proving the card is not reading it).
@@ -606,14 +622,14 @@ describe("TraceOverlay decision mode (T10)", () => {
     publishDecisions([falseDecision({ seq: 1, eventIds: [0] })]);
     openDecisionTraceByClick(/impossible travel/i);
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.getByText("false")).toBeDefined();
+    expect(dialog.getByText("False alert")).toBeDefined();
   });
 
   it("renders a missed decision as a solo panel: entity, reason (once), and the attack window, no evidence nodes", () => {
     publishDecisions([missedDecision({ seq: 1, window: { startTs: 10, endTs: 100 } })]);
     openDecisionTraceByClick(/pin brute force/i);
     const dialog = within(screen.getByRole("dialog"));
-    expect(dialog.getByText("missed")).toBeDefined();
+    expect(dialog.getByText("Missed")).toBeDefined();
     expect(dialog.getByText("acct-9")).toBeDefined();
     // The header already carries the reason; the solo panel must not repeat it.
     expect(dialog.getAllByText(/pin brute force/i)).toHaveLength(1);

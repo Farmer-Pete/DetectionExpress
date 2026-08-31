@@ -15,7 +15,7 @@
 import type { RefObject } from "react";
 import { useGameStore } from "../../game/store";
 import { formatClock } from "../log/formatters";
-import { buildDecisionRows, type DecisionRow } from "./view-model";
+import { buildDecisionRows, type DecisionRow, outcomeLabel } from "./view-model";
 
 interface DecisionsPanelProps {
   /** The focus-fallback ref TraceOverlay reads. Defaults to a locally-owned ref. */
@@ -74,7 +74,9 @@ function DecisionRowItem({ row, selected, onSelect }: RowProps) {
           onSelect(row.seq);
         }}
       >
-        <span className={`decisions-outcome decisions-outcome--${row.outcome}`}>{row.outcome}</span>
+        <span className={`decisions-outcome decisions-outcome--${row.outcome}`}>
+          {outcomeLabel(row.outcome)}
+        </span>
         {row.entity !== null ? <span className="decisions-entity">{row.entity}</span> : null}
         <span className="decisions-reason">{row.reason}</span>
         <span className="decisions-time">{formatClock(row.time)}</span>

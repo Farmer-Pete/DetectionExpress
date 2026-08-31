@@ -419,8 +419,11 @@ body {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  /* No longer uppercase (F009/F010): the label itself is now properly cased
+     ("Alert", "Watching", "False alert"), and shouting it in caps would fight
+     that. The extra weight keeps the badge's visual punch without the caps. */
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .trace-state--hit {
@@ -453,7 +456,8 @@ body {
 
 .trace-time,
 .trace-recorded-at {
-  color: var(--dim);
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-variant-numeric: tabular-nums;
   font-size: 0.8rem;
 }
@@ -506,7 +510,8 @@ body {
 
 .trace-node-empty {
   margin: 0;
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-size: 0.85rem;
 }
 
@@ -530,7 +535,8 @@ body {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  color: var(--dim);
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-style: italic;
 }
 
@@ -538,14 +544,16 @@ body {
   display: flex;
   justify-content: space-between;
   margin-bottom: 0.3rem;
-  color: var(--dim);
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-size: 0.72rem;
 }
 
 .trace-card-payload-label {
   display: block;
   margin: 0.3rem 0 0.15rem;
-  color: var(--dim);
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -569,9 +577,18 @@ body {
 
 .trace-verdict {
   margin: 0.7rem 0 0;
-  color: var(--ok);
   font-weight: 700;
   font-size: 0.85rem;
+}
+
+.trace-verdict--hit {
+  color: var(--ok);
+}
+
+.trace-verdict--watch {
+  /* The same dim treatment as .trace-state--watch's badge text, brightened from
+     plain --dim (2.40:1 on --panel2) to clear WCAG AA (5.16:1 on --panel2). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
 }
 
 .trace-node-missed {
@@ -583,7 +600,8 @@ body {
 
 .trace-missed-window {
   margin: 0;
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
 }
@@ -598,7 +616,8 @@ body {
 
 .widget-title {
   margin: 0 0 0.3rem;
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -625,7 +644,8 @@ body {
 }
 
 .widget-kv-entry dt {
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
 }
 
 .widget-kv-entry dd {
@@ -648,7 +668,8 @@ body {
 }
 
 .widget-table-grid th {
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -710,8 +731,11 @@ body {
   padding: 0.05rem 0.4rem;
   border-radius: 999px;
   font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  /* No longer uppercase (F009/F010): the label is now properly cased ("Caught",
+     "Missed", "False alert"), and shouting it in caps would fight that. The
+     extra weight keeps the badge's visual punch without the caps. */
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .decisions-outcome--caught {
@@ -734,12 +758,16 @@ body {
 }
 
 .decisions-entity {
-  color: var(--a3);
+  /* Text brightened from --a3 (1.77:1 on --panel2) to clear WCAG AA (4.77:1).
+     Mixed toward white, not --ink, so the entity chip keeps a recognizably
+     blue cast instead of washing out to near-ink. */
+  color: color-mix(in srgb, var(--a3) 40%, white);
   font-variant-numeric: tabular-nums;
 }
 
 .decisions-time {
-  color: var(--dim);
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-variant-numeric: tabular-nums;
 }
 
@@ -755,7 +783,8 @@ body {
 
 .decisions-empty-note {
   margin: 0;
-  color: var(--dim);
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-size: 0.8rem;
 }
 

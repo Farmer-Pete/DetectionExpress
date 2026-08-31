@@ -40,6 +40,7 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
+import { outcomeLabel } from "../decisions/view-model";
 import { focusableControls, installOutsidePointerDismiss } from "../focus";
 import { formatClock } from "../log/formatters";
 import {
@@ -295,7 +296,7 @@ function LiveTraceContent({ model, onClose }: { model: TraceViewModel; onClose: 
         <section className="trace-node trace-node-judge" aria-label="Judge">
           <h3 className="trace-node-title">Judge</h3>
           <WidgetList context={model.context} />
-          <p className="trace-verdict">
+          <p className={`trace-verdict trace-verdict--${model.state}`}>
             {model.state === "hit" ? "finding raised" : "watching, no finding yet"}
           </p>
         </section>
@@ -321,7 +322,7 @@ function DecisionTraceContent({
           <span className="trace-entity-chip">{decisionEntity(model)}</span>
         ) : null}
         <span className="trace-reason">{prettifyReason(model.reason)}</span>
-        <span className={`trace-state trace-state--${outcome}`}>{outcome}</span>
+        <span className={`trace-state trace-state--${outcome}`}>{outcomeLabel(outcome)}</span>
         <span className="trace-recorded-at">
           recorded at{" "}
           <span className="trace-recorded-at-time">{formatClock(model.resolvedAt)}</span> —
