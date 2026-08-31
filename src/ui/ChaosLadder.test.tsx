@@ -1,7 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { defaultEntry } from "../game/registry";
 import { ChaosLadder } from "./ChaosLadder";
-import { chaosLevels, liveScenario } from "./content/narrative";
+import { chaosLevels, liveScenarioFrom } from "./content/narrative";
+
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 function renderLadder() {
   const { container } = render(<ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />);

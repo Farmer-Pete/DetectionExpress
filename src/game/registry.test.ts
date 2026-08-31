@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createScorer } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { DetectView } from "../sim/finding";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import {
   buildEngine,
   type CatalogueEntry,
@@ -11,13 +12,7 @@ import {
   scenarioEntry,
   scenarioRegistry,
 } from "./registry";
-import {
-  CORRECTNESS_W_FN,
-  CORRECTNESS_W_FP,
-  CORRECTNESS_WINDOW,
-  LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
-} from "./tuning";
+import { CORRECTNESS_W_FN, CORRECTNESS_W_FP, CORRECTNESS_WINDOW, LEVEL_SEED } from "./tuning";
 
 describe("scenario registry contents", () => {
   it("registers pin-brute-force joined to its catalogue name and briefing", () => {

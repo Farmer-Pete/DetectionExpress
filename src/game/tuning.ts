@@ -34,12 +34,6 @@ export const THROUGHPUT_WINDOW_MS = 500;
 /** Ticks to game seconds. Sets the ~120x time compression (the Ingest schedule). */
 export const GAME_SECONDS_PER_TICK = 2;
 
-/** Wrong PINs within the window that flag a PIN brute-force Attack. */
-export const PIN_BRUTE_FORCE_THRESHOLD = 5;
-
-/** The PIN brute-force detection window, in game seconds (5 minutes). */
-export const PIN_BRUTE_FORCE_WINDOW_S = 300;
-
 /** The deterministic level seed for data generation. */
 export const LEVEL_SEED = 1337;
 
@@ -127,9 +121,6 @@ export const OMEGA = 20;
  */
 export const CORPUS_ACCOUNTS = 12;
 
-/** The detection window in ticks (300 game seconds). The naive scan evicts past it. */
-export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TICK;
-
 /**
  * Slice 2 "Keep up" — the squeeze (M2). The arrival rate rises in waves against a
  * fixed per-rule service rate. These constants set the wave ramp and the
@@ -148,14 +139,6 @@ export const WAVE_RATES: readonly number[] = [5, 15, 60];
 
 /** Number of waves. Derived from the rate schedule. */
 export const WAVE_COUNT = WAVE_RATES.length;
-
-/**
- * How many PIN-brute-force bursts each wave carries, indexed by wave (GH102). The
- * pressure climbs 2 -> 4 -> 8, so a wave holds more than one attack, on that many
- * globally distinct victims. Its length must equal `WAVE_RATES.length`; `planAttacks`
- * throws otherwise. The total (14) is the victim count `selectVictims` draws.
- */
-export const ATTACKS_PER_WAVE: readonly number[] = [2, 4, 8];
 
 /** The calm intro before Wave 1, in ticks (2 real seconds at CLOCK_HZ). */
 export const INTRO_TICKS = 120;

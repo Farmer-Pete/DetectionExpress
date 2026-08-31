@@ -7,14 +7,10 @@
  * counts per account. Each burst fits inside one detection window, so the rule can
  * always catch it. The scorer reads the resulting Attacks; the Rule never sees them.
  */
-import {
-  ATTACKS_PER_WAVE,
-  GAME_SECONDS_PER_TICK,
-  PIN_BRUTE_FORCE_THRESHOLD,
-  SCAN_WINDOW_TICKS,
-} from "../../../game/tuning";
+import { GAME_SECONDS_PER_TICK } from "../../../game/tuning";
 import type { Attack } from "../../attack";
 import type { Wave } from "../../scenario";
+import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "./tuning";
 
 /** The pattern this Scenario reveals. Both the ground truth and the reference use it. */
 export const PIN_BRUTE_FORCE_REASON = "pin_brute_force";

@@ -16,11 +16,15 @@
 
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { Finding } from "../../sim/finding";
-import { PIN_BRUTE_FORCE_REASON } from "../../sim/scenarios/pin-brute-force/attacks";
-import { GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "../tuning";
+import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force";
+import {
+  PIN_BRUTE_FORCE_THRESHOLD,
+  SCAN_WINDOW_TICKS,
+} from "../../sim/scenarios/pin-brute-force/tuning";
+import { GAME_SECONDS_PER_TICK } from "../tuning";
 
 /** The reason the kiosk PIN brute-force Alert names. Shared with the scorer. */
-const REASON = PIN_BRUTE_FORCE_REASON;
+const REASON = pinBruteForceCorpus.reason;
 
 /** The detection window in game seconds. The rules keep only fails newer than this. */
 export const SCAN_WINDOW_S = SCAN_WINDOW_TICKS * GAME_SECONDS_PER_TICK;

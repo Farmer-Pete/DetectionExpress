@@ -24,6 +24,7 @@ import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { Scenario } from "../sim/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import {
@@ -44,7 +45,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   DECISIONS_CAP,
-  PIN_BRUTE_FORCE_THRESHOLD,
   PROFILER_VERSION,
 } from "./tuning";
 

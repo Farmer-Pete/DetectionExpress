@@ -12,12 +12,18 @@
  * stream is in order, so the tally is correct; do not exploit the assumption here.
  *
  * `optimizationSource` is the module the editor loads and the browser run profiles;
- * it imports lodash by URL, the way a player would. `buildOptimizationAlgorithm` is
- * the in-process twin the deterministic tests run: the same logic with no import.
+ * it imports lodash by URL, the way a player would. `buildOptimizedRule` is the
+ * EngineRule factory shape every rule now takes (GH42-PLAN.md "optimization.ts
+ * (decision: port it)"), the same shape `rule.ts` exports for the naive default.
+ * `buildOptimizationAlgorithm` is the in-process `{ normalize, detect }` twin the
+ * deterministic tests run, built over `buildOptimizedRule` and the shared kiosk
+ * normalizer, the same way `reference.ts` wraps `rule.ts`'s factory.
  */
 
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
-import type { Finding } from "../../finding";
+import { type NormalizedKiosk, normalizeKiosk } from "../../endpoints/kiosk/normalize";
+import type { EngineRule } from "../../engine/engine";
+import type { DetectView, Finding } from "../../finding";
 import { PIN_BRUTE_FORCE_REASON } from "./attacks";
 
 /**
@@ -71,23 +77,16 @@ export function detect(e) {
 }
 `;
 
-/** The player's shape after Normalize. */
-interface NormalizedKiosk {
-  account: string;
-  terminal: string;
-  outcome: "success" | "fail";
-}
-
-/** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
-interface KioskDetectView extends NormalizedKiosk {
-  id: number;
-  ts: number;
-  endpoint: string;
-}
-
 export interface OptimizationAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
-  detect(e: KioskDetectView): Finding[];
+  detect(e: {
+    id: number;
+    ts: number;
+    endpoint: string;
+    account: string;
+    terminal: string;
+    outcome: "success" | "fail";
+  }): Finding[];
 }
 
 /** One queued fail in the global expiry queue: its account, time, and id. */
@@ -103,12 +102,20 @@ const COMPACT_THRESHOLD = 1024;
 const WINDOW = 300; // 5 minutes in game seconds
 const THRESHOLD = 5;
 
+/** A string primitive, by its tag rather than a `typeof` representation check. */
+function isString(value: unknown): value is string {
+  return !(value instanceof Object) && Object.prototype.toString.call(value) === "[object String]";
+}
+
 /**
- * The in-process twin. State lives per instance, so a fresh instance replays the
- * same run cleanly, the way reloading the source module would. Amortized O(1) per
- * Event, with state bounded to one window plus a per-account ring of THRESHOLD ids.
+ * Build one fresh Optimization rule: the `EngineRule` factory shape every rule
+ * now takes (GH42-PLAN.md "optimization.ts (decision: port it)"), the same shape
+ * `rule.ts` exports for the naive default. State lives per instance, so a fresh
+ * instance replays the same run cleanly, the way reloading the source module
+ * would. Amortized O(1) per Event, with state bounded to one window plus a
+ * per-account ring of THRESHOLD ids.
  */
-export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
+export function buildOptimizedRule(): EngineRule {
   let queue: QueuedFail[] = [];
   let head = 0;
   // Per-account state (counts, recent, firing) is not pruned when an account's
@@ -121,25 +128,23 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
   const firing = new Set<string>();
 
   return {
-    normalize(raw) {
-      return {
-        account: raw.acct,
-        terminal: raw.term,
-        outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
-      };
-    },
-    detect(e) {
-      if (e.outcome !== "fail") {
+    id: "pin-brute-force",
+    endpoints: ["kiosk-v1"],
+    detect(e: DetectView): Finding[] {
+      // `account`/`outcome` ride the DetectView index signature (the normalized
+      // payload), so they come off a destructure as `unknown` and get narrowed here.
+      const { account, outcome } = e;
+      if (!isString(account) || outcome !== "fail") {
         return [];
       }
-      queue.push({ account: e.account, ts: e.ts, id: e.id });
-      counts.set(e.account, (counts.get(e.account) ?? 0) + 1);
-      const ids = recent.get(e.account) ?? [];
+      queue.push({ account, ts: e.ts, id: e.id });
+      counts.set(account, (counts.get(account) ?? 0) + 1);
+      const ids = recent.get(account) ?? [];
       ids.push(e.id);
       if (ids.length > THRESHOLD) {
         ids.shift();
       }
-      recent.set(e.account, ids);
+      recent.set(account, ids);
 
       // Eviction assumes Events arrive in time order: it drains the queue front
       // only forward, so a later Event that arrived early would slip past its
@@ -160,14 +165,14 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         head = 0;
       }
 
-      if ((counts.get(e.account) ?? 0) < THRESHOLD) {
-        firing.delete(e.account);
+      if ((counts.get(account) ?? 0) < THRESHOLD) {
+        firing.delete(account);
         return [];
       }
-      if (firing.has(e.account)) {
+      if (firing.has(account)) {
         return []; // one hit per burst; no duplicates
       }
-      firing.add(e.account);
+      firing.add(account);
       const eventIds = [...ids];
       return [
         {
@@ -177,5 +182,20 @@ export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
         },
       ];
     },
+  };
+}
+
+/**
+ * The in-process `{ normalize, detect }` twin the deterministic tests run: the
+ * shared kiosk normalizer plus one fresh `buildOptimizedRule()` instance, the
+ * same way `reference.ts` wraps `rule.ts`'s factory. Spread the concrete kiosk
+ * view into a fresh literal so it satisfies the engine's `DetectView` (its index
+ * signature) at the seam, with no assertion.
+ */
+export function buildOptimizationAlgorithm(): OptimizationAlgorithm {
+  const rule = buildOptimizedRule();
+  return {
+    normalize: normalizeKiosk,
+    detect: (e) => rule.detect({ ...e }),
   };
 }

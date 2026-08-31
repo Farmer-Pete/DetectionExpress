@@ -49,7 +49,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
 import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
 import { localAlgorithmUrl } from "../game/algorithms-resolve";
-import { defaultScenario } from "../game/registry";
+import { defaultEntry, defaultScenario } from "../game/registry";
 import { createRunController, type RunController } from "../game/run-controller";
 import { getGraph, useGameStore } from "../game/store";
 import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
@@ -60,7 +60,7 @@ import { world } from "../sim/world/world";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
-import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { chaosLevels, hireMe, introCopy, liveScenarioFrom, REPO_URL } from "./content/narrative";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
@@ -82,6 +82,9 @@ type View = "pipeline" | "metro";
 
 /** The station distances are fixed data, built once for the world controller. */
 const worldDistances = distanceTable(world);
+
+/** The live scenario's display copy, joined from the registry's catalogue entry. */
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 function buildController(): RunController {
   return createRunController({

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createScorer, type ScorerConfig } from "../../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import { normalizeKiosk } from "../../sim/endpoints/kiosk/normalize";
 import type { PipeEvent } from "../../sim/event";
 import type { Finding } from "../../sim/finding";
 import type { GraphEdge, GraphNode } from "../../sim/graph";
-import { buildOptimizationAlgorithm } from "../../sim/scenarios/pin-brute-force/optimization";
+import { buildOptimizedRule } from "../../sim/scenarios/pin-brute-force/optimization";
 import { buildReferenceAlgorithm } from "../../sim/scenarios/pin-brute-force/reference";
 import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import { buildSchedule } from "../../sim/schedule";
 import { makeGovernor, type ServiceRate } from "../../sim/service-governor";
 import type { SimSnapshot } from "../../sim/snapshot";
@@ -22,7 +24,6 @@ import {
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
   OMEGA,
-  PIN_BRUTE_FORCE_THRESHOLD,
   WAVE_RATES,
 } from "../tuning";
 import { simulate as bandSimulate, type SimResult } from "./band";
@@ -199,6 +200,20 @@ function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
   };
 }
 
+/**
+ * The Optimization as a `KioskTwin`: the shared kiosk normalizer plus one fresh
+ * `buildOptimizedRule()` instance (the EngineRule factory port, GH42-PLAN.md
+ * "optimization.ts (decision: port it)"), the same way `buildReferenceAlgorithm`
+ * wraps `rule.ts`'s factory.
+ */
+function buildOptimizedTwin(): KioskTwin {
+  const rule = buildOptimizedRule();
+  return {
+    normalize: normalizeKiosk,
+    detect: (view) => rule.detect({ ...view }),
+  };
+}
+
 async function runRealEngine(algorithm: TaskAlgorithm, rate: ServiceRate) {
   const run = pinBruteForce.generate(LEVEL_SEED);
   const driver = new ManualDriver();
@@ -239,7 +254,7 @@ describe("winnability through the real engine (nominal)", () => {
   });
 
   it("carries the applied tally: the run wins", async () => {
-    const last = await runRealEngine(taskAlgorithmFor(buildOptimizationAlgorithm()), tallyRate);
+    const last = await runRealEngine(taskAlgorithmFor(buildOptimizedTwin()), tallyRate);
     expect(last?.status).toBe("won");
     expect(last?.failureReason).toBeNull();
   });

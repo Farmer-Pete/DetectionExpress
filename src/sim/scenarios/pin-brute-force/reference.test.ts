@@ -5,7 +5,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
 } from "../../../game/tuning";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
@@ -14,6 +13,7 @@ import type { Finding } from "../../finding";
 import { resolveEntity } from "../../tasks";
 import { buildReferenceAlgorithm, type ReferenceAlgorithm } from "./reference";
 import { pinBruteForce } from "./scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "./tuning";
 
 /**
  * The live game loads the `referenceSource` STRING, not the typed twin, so its watch,

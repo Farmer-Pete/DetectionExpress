@@ -4,14 +4,9 @@ import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { DetectView } from "../sim/finding";
 import { mergeRuns } from "../sim/merge-runs";
 import { generate } from "../sim/scenarios/pin-brute-force/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import { buildEngine } from "./registry";
-import {
-  CORRECTNESS_W_FN,
-  CORRECTNESS_W_FP,
-  CORRECTNESS_WINDOW,
-  LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
-} from "./tuning";
+import { CORRECTNESS_W_FN, CORRECTNESS_W_FP, CORRECTNESS_WINDOW, LEVEL_SEED } from "./tuning";
 
 // GH42-PLAN.md "Composable streams: the merge seam" + "Scoring for mixed hunts": two
 // pin-brute-force runs, differently seeded and drawn from disjoint identity

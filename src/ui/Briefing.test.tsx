@@ -1,8 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { defaultEntry } from "../game/registry";
 import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { Briefing } from "./Briefing";
-import { liveScenario } from "./content/narrative";
+import { liveScenarioFrom } from "./content/narrative";
+
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 function renderBriefing() {
   render(<Briefing tagline={liveScenario.tagline} text={pinBruteForce.briefing} />);

@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { referenceSource } from "../../../game/engine-source";
 import {
-  ATTACKS_PER_WAVE,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   GAME_SECONDS_PER_TICK,
   INTRO_TICKS,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
-  PIN_BRUTE_FORCE_WINDOW_S,
   WAVE_COUNT,
   WAVE_RATES,
 } from "../../../game/tuning";
@@ -20,6 +17,7 @@ import type { PipeEvent } from "../../event";
 import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm } from "./reference";
 import { generate, pinBruteForce } from "./scenario";
+import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, PIN_BRUTE_FORCE_WINDOW_S } from "./tuning";
 
 /** The total attackers across all waves; the globally distinct victim count. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);

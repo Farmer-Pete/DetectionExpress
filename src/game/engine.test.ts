@@ -13,6 +13,7 @@ import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
 import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
 import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -27,7 +28,6 @@ import {
   CORRECTNESS_WINDOW,
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
   WAVE_WARN_TICKS,
 } from "./tuning";
 

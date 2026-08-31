@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { defaultEntry } from "../../game/registry";
 import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
-import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./narrative";
+import { chaosLevels, hireMe, introCopy, liveScenarioFrom, REPO_URL } from "./narrative";
+
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 // Stale phrases from the old "you build the engine" voice. None may survive in the
 // shipped prose. The live briefing string lives on the sim scenario, so it is checked

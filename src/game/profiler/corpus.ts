@@ -24,18 +24,13 @@ import { randomLcg } from "d3-random";
 import { type Actor, runActors, type TimedReading } from "../../sim/actors/actor";
 import { composeRun } from "../../sim/actors/compose";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
-import {
-  assembleAttacker,
-  assemblePatron,
-  buildIdentityPools,
-  pickSeeded,
-} from "../../sim/scenarios/pin-brute-force/cast";
-import { ARRIVE_LEAD_TICKS } from "../../sim/scenarios/pin-brute-force/pin-attacker";
+import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import { distanceTable } from "../../sim/world/distance";
 import { buildTimetable } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
 import type { WorldEnv, WorldReading } from "../../sim/world-reading";
-import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD } from "../tuning";
+import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK } from "../tuning";
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {
@@ -78,21 +73,25 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
   // MAX_BURST_TICKS tail for the longest burst. Clamped to at least 1 so a tiny
   // corpus (whose nominal span cannot hold a burst) still lays every pair at the
   // lead tick.
-  const usableTicks = Math.max(1, nominalSpanTicks - ARRIVE_LEAD_TICKS - MAX_BURST_TICKS);
+  const usableTicks = Math.max(
+    1,
+    nominalSpanTicks - pinBruteForceCorpus.arriveLeadTicks - MAX_BURST_TICKS,
+  );
 
-  const pools = buildIdentityPools(rng, world, CORPUS_ACCOUNTS);
+  const pools = pinBruteForceCorpus.buildIdentityPools(rng, world, CORPUS_ACCOUNTS);
   const actors: Actor<WorldReading, WorldEnv>[] = [];
   for (let k = 0; k < pairCount; k++) {
-    const account = pickSeeded(pools.accounts, rng);
-    const station = pickSeeded(pools.stations, rng);
-    const terminal = pickSeeded(pools.terminals, rng);
+    const account = pinBruteForceCorpus.pickSeeded(pools.accounts, rng);
+    const station = pinBruteForceCorpus.pickSeeded(pools.stations, rng);
+    const terminal = pinBruteForceCorpus.pickSeeded(pools.terminals, rng);
     // Between threshold and threshold + 3 fails, the same distribution planAttacks
     // draws; laid one tick apart for deliberately deep detection windows.
     const failCount = PIN_BRUTE_FORCE_THRESHOLD + Math.floor(rng() * 4);
-    const slotTick = ARRIVE_LEAD_TICKS + Math.floor((k * usableTicks) / pairCount);
+    const slotTick =
+      pinBruteForceCorpus.arriveLeadTicks + Math.floor((k * usableTicks) / pairCount);
 
     actors.push(
-      assemblePatron({
+      pinBruteForceCorpus.assemblePatron({
         id: `patron-${k}`,
         account,
         station,
@@ -106,7 +105,7 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
       { length: failCount },
       (_v, i) => (slotTick + i) * GAME_SECONDS_PER_TICK,
     );
-    const { actor } = assembleAttacker({
+    const { actor } = pinBruteForceCorpus.assembleAttacker({
       id: `attack-${k}`,
       attackId: k + 1,
       account,
@@ -124,7 +123,7 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
   };
   // The longest burst fully covered under the half-open bound: the last slot sits at
   // most `usableTicks` past the lead, plus the longest burst's tail, plus one.
-  const horizon = nominalSpanTicks + ARRIVE_LEAD_TICKS + MAX_BURST_TICKS + 1;
+  const horizon = nominalSpanTicks + pinBruteForceCorpus.arriveLeadTicks + MAX_BURST_TICKS + 1;
   const timed = runActors({ actors, env, runSeed: seed, horizon });
 
   // No ground truth in the corpus: omit attackIdOf, so eventIdsByAttack is empty.

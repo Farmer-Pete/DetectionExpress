@@ -1,6 +1,5 @@
 import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import { SCAN_WINDOW_TICKS } from "../../../game/tuning";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
 import { world } from "../../world/world";
 import {
@@ -10,6 +9,7 @@ import {
   buildIdentityPools,
   buildPartitionedIdentityPools,
 } from "./cast";
+import { SCAN_WINDOW_TICKS } from "./tuning";
 
 describe("buildIdentityPools", () => {
   it("is deterministic for a seed", () => {

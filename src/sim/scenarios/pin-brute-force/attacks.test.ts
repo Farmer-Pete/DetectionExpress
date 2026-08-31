@@ -1,14 +1,9 @@
 import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import {
-  ATTACKS_PER_WAVE,
-  GAME_SECONDS_PER_TICK,
-  PIN_BRUTE_FORCE_THRESHOLD,
-  PIN_BRUTE_FORCE_WINDOW_S,
-  WAVE_RATES,
-} from "../../../game/tuning";
+import { GAME_SECONDS_PER_TICK, WAVE_RATES } from "../../../game/tuning";
 import { buildSchedule } from "../../schedule";
 import { attackFromPlan, planAttacks, selectVictims } from "./attacks";
+import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, PIN_BRUTE_FORCE_WINDOW_S } from "./tuning";
 
 /** The total attackers across all waves. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);

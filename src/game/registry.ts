@@ -175,3 +175,10 @@ if (firstEntry === undefined) {
 
 /** The first registered sim Scenario. The app and its run controller consume this. */
 export const defaultScenario: Scenario = firstEntry.scenario;
+
+/**
+ * The first registered entry, catalogue metadata and all. UI content that needs
+ * more than the bare Scenario (a display name, a tagline) reads this, rather than
+ * hardcoding its own copy of what the registry already joined.
+ */
+export const defaultEntry: ScenarioRegistryEntry = firstEntry;

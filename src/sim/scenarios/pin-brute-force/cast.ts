@@ -15,7 +15,6 @@
  * construction; the scenario's assertions are the double check.
  */
 import { randomLcg } from "d3-random";
-import { SCAN_WINDOW_TICKS } from "../../../game/tuning";
 import { type AccountRiderConfig, createAccountRider } from "../../actors/account-rider";
 import type { Actor } from "../../actors/actor";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
@@ -23,6 +22,7 @@ import { buildAccounts } from "../../entities/account";
 import type { World } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
 import { createPinAttacker, type PinAttackerConfig } from "./pin-attacker";
+import { SCAN_WINDOW_TICKS } from "./tuning";
 
 /**
  * The per-visit fumble probabilities (GH102 decision 2). P(0) = 0.90, P(1) = 0.07,

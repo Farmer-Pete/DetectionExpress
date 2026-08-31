@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createScorer, type Scorer, type ScorerConfig } from "../sim/correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
+import { normalizeKiosk } from "../sim/endpoints/kiosk/normalize";
 import type { PipeEvent } from "../sim/event";
 import type { Finding } from "../sim/finding";
 import type { GraphEdge, GraphNode } from "../sim/graph";
-import { buildOptimizationAlgorithm } from "../sim/scenarios/pin-brute-force/optimization";
+import { buildOptimizedRule } from "../sim/scenarios/pin-brute-force/optimization";
 import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
 import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -18,7 +20,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
 } from "./tuning";
 
 /**
@@ -80,6 +81,20 @@ function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
   return {
     normalize: (raw) => (isRawKioskV1(raw) ? twin.normalize(raw) : raw),
     detect: (view) => (isKioskView(view) ? twin.detect(view) : []),
+  };
+}
+
+/**
+ * The Optimization as a `KioskTwin`: the shared kiosk normalizer plus one fresh
+ * `buildOptimizedRule()` instance (the EngineRule factory port, GH42-PLAN.md
+ * "optimization.ts (decision: port it)"), the same way `buildReferenceAlgorithm`
+ * wraps `rule.ts`'s factory.
+ */
+function buildOptimizedTwin(): KioskTwin {
+  const rule = buildOptimizedRule();
+  return {
+    normalize: normalizeKiosk,
+    detect: (view) => rule.detect({ ...view }),
   };
 }
 
@@ -162,7 +177,7 @@ describe("the applied Optimization wins through the real engine (M3 integration)
     const run = pinBruteForce.generate(LEVEL_SEED);
     const result = await runToDeadline(
       {
-        algorithm: taskAlgorithmFor(buildOptimizationAlgorithm()),
+        algorithm: taskAlgorithmFor(buildOptimizedTwin()),
         scorer: createScorer(run.attacks, SCORER_CONFIG),
         generator: scheduleOf(run.events),
         serviceRate: OPTIMIZATION_RATE,
