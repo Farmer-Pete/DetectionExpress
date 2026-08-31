@@ -72,14 +72,17 @@ describe("buildCorpus (GH102 burst-shaped corpus)", () => {
     expect(accounts.size).toBe(CORPUS_ACCOUNTS);
   });
 
-  it("measures a fail share within 0.03 of the expected constant, for three seeds", () => {
+  it("measures a fail share within 0.01 of the expected constant, for three seeds", () => {
+    // The constant already subtracts the structural slice offset (the fail-heavy
+    // time-tail cut), so the drift here is residual noise, not a one-directional
+    // bias — hence the tight 0.01 band.
     for (const seed of [LEVEL_SEED, 1, 42]) {
       const corpus = buildCorpus(seed, CORPUS_SIZE, CORPUS_PEAK_EVENTS_PER_TICK);
       const fails = corpus.events.filter(
         (e) => isRawKioskV1(e.payload) && e.payload.res === "WRONG_PIN",
       ).length;
       const share = fails / corpus.events.length;
-      expect(Math.abs(share - EXPECTED_CORPUS_FAIL_SHARE)).toBeLessThan(0.03);
+      expect(Math.abs(share - EXPECTED_CORPUS_FAIL_SHARE)).toBeLessThan(0.01);
     }
   });
 

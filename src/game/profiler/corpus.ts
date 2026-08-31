@@ -8,8 +8,11 @@
  * benign patron (a single success, no fumbles) and one PIN attacker (a 5..8-fail
  * burst one tick apart, deep windows on purpose) on one account. The patron signs
  * in at the pair's slot tick and the attacker's first fail lands on that same tick,
- * so successes and fails interleave uniformly in time and slicing the sorted stream
- * to the first `size` events removes a representative mix, not a fail-heavy tail.
+ * but the burst's remaining fails trail behind the success, so the sorted stream's
+ * time-tail is mostly fails. Slicing to the first `size` events therefore cuts a
+ * fail-heavy tail and lands the kept fail share a little BELOW the per-pair mean;
+ * `EXPECTED_CORPUS_FAIL_SHARE` (kiosk-band-calibration.ts) subtracts that
+ * structural offset so the band model prices the corpus the profiler actually uses.
  *
  * Each wrap advances every Event's ts by the corpus span and hands out a fresh
  * monotonic id, so time and ids move forward exactly as they would in a real run,
@@ -47,6 +50,14 @@ export interface Corpus {
   spanSeconds: number;
 }
 
+/**
+ * The longest burst in ticks: the max of the `threshold + floor(rng()*4)` fail-count
+ * draw below (also `planAttacks`'s draw). Derived, not a literal, so a threshold
+ * retune moves the slot spread and the horizon together and bursts never spill past
+ * the nominal span (which would break the bounded-corpus divisibility invariant).
+ */
+const MAX_BURST_TICKS = PIN_BRUTE_FORCE_THRESHOLD + 3;
+
 /** Draw one item from a pool with the seeded rng. */
 function pick<T>(items: readonly T[], rng: () => number): T {
   const item = items[Math.floor(rng() * items.length)];
@@ -60,8 +71,8 @@ function pick<T>(items: readonly T[], rng: () => number): T {
  * Build a fixed `size`-Event corpus from `seed` at `eventsPerTick` density. It lays
  * `N = ceil(size / (1 + threshold))` co-located pairs across the nominal span. Each
  * pair emits at least `1 + threshold` (6) events, so the stream always reaches
- * `size`; the sorted stream is sliced to the first `size` (a time-tail cut over a
- * uniform success/fail mix). The span is the nominal span, grown only if the last
+ * `size`; the sorted stream is sliced to the first `size` (a time-tail cut that
+ * drops mostly trailing fails). The span is the nominal span, grown only if the last
  * kept Event would otherwise fall outside it, so a wrap never overlaps the previous.
  */
 export function buildCorpus(seed: number, size: number, eventsPerTick: number): Corpus {
@@ -71,10 +82,11 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
   const nominalSpan = Math.ceil(size / eventsPerSecond);
   const nominalSpanTicks = Math.ceil(nominalSpan / GAME_SECONDS_PER_TICK);
   const pairCount = Math.ceil(size / (1 + PIN_BRUTE_FORCE_THRESHOLD));
-  // The tick range slots spread over, leaving ARRIVE_LEAD_TICKS of pre-roll and an
-  // 8-tick tail for the longest burst. Clamped to at least 1 so a tiny corpus (whose
-  // nominal span cannot hold a burst) still lays every pair at the lead tick.
-  const usableTicks = Math.max(1, nominalSpanTicks - ARRIVE_LEAD_TICKS - 8);
+  // The tick range slots spread over, leaving ARRIVE_LEAD_TICKS of pre-roll and a
+  // MAX_BURST_TICKS tail for the longest burst. Clamped to at least 1 so a tiny
+  // corpus (whose nominal span cannot hold a burst) still lays every pair at the
+  // lead tick.
+  const usableTicks = Math.max(1, nominalSpanTicks - ARRIVE_LEAD_TICKS - MAX_BURST_TICKS);
 
   const pools = buildIdentityPools(rng, world, CORPUS_ACCOUNTS);
   const actors: Actor<WorldReading, WorldEnv>[] = [];
@@ -119,8 +131,8 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
     timetable: buildTimetable(world),
   };
   // The longest burst fully covered under the half-open bound: the last slot sits at
-  // most `usableTicks` past the lead, plus the 8-tick burst tail, plus one.
-  const horizon = nominalSpanTicks + ARRIVE_LEAD_TICKS + 8 + 1;
+  // most `usableTicks` past the lead, plus the longest burst's tail, plus one.
+  const horizon = nominalSpanTicks + ARRIVE_LEAD_TICKS + MAX_BURST_TICKS + 1;
   const timed = runActors({ actors, env, runSeed: seed, horizon });
 
   // No ground truth in the corpus: omit attackIdOf, so eventIdsByAttack is empty.

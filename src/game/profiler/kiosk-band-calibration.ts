@@ -11,7 +11,7 @@
  * naive rule's rate at the shipped OMEGA (about 20 events/tick) and the tally
  * rule's rate at the same OMEGA. Since GH102 the corpus is burst-shaped (co-located
  * patron/attacker pairs), so the fail share is emergent, not tuned; the tally rate
- * rises with it (about 825 events/tick) because the naive scan's window fill grows.
+ * rises with it (about 798 events/tick) because the naive scan's window fill grows.
  */
 
 import type { ServiceRate } from "../../sim/service-governor";
@@ -25,14 +25,21 @@ import {
 import { quantizeServiceRate } from "./quantize";
 
 /**
- * The expected wrong-PIN fail share of the burst-shaped corpus (GH102 D10), derived
- * from burst arithmetic rather than tuned. Each co-located pair emits one success
- * and a uniform 5..8-fail burst, so the mean fails per pair is
- * `PIN_BRUTE_FORCE_THRESHOLD + 1.5`, and the share is `meanFails / (meanFails + 1)`,
- * about 0.867. A 3-seed corpus test pins the measured share to within 0.03 of this.
+ * The expected wrong-PIN fail share of the SHIPPED (sliced) corpus (GH102 D10). Two
+ * derived parts. The pair mean: each co-located pair emits one success and a uniform
+ * 5..8-fail burst, so mean fails per pair is `PIN_BRUTE_FORCE_THRESHOLD + 1.5` and
+ * the full-stream share is `meanFails / (meanFails + 1)`, about 0.867. The slice
+ * offset: bursts trail their success, so `buildCorpus`'s cut of the sorted stream to
+ * the first `size` events removes a mostly-fail time-tail (measured ~94% fails
+ * across seeds), lowering the KEPT share by about 0.02. The constant subtracts that
+ * measured structural offset so it describes the corpus the profiler actually
+ * prices; a 3-seed corpus test pins the measured share to within 0.01 of this.
  */
 const MEAN_FAILS_PER_PAIR = PIN_BRUTE_FORCE_THRESHOLD + 1.5;
-export const EXPECTED_CORPUS_FAIL_SHARE = MEAN_FAILS_PER_PAIR / (MEAN_FAILS_PER_PAIR + 1);
+/** The measured drop from the pair-mean share caused by the fail-heavy tail cut. */
+const SLICE_TAIL_OFFSET = 0.02;
+export const EXPECTED_CORPUS_FAIL_SHARE =
+  MEAN_FAILS_PER_PAIR / (MEAN_FAILS_PER_PAIR + 1) - SLICE_TAIL_OFFSET;
 
 // The naive scan re-filters an account's in-window fails on every fail, so its
 // per-Event cost grows with the window fill. The tally is amortized O(1). The
@@ -74,5 +81,5 @@ export function rateFor(codePerAnchor: number, omega: number, skew: number): Ser
 /** The naive rule's rate at the shipped OMEGA, skew 1: about 20 events per tick. */
 export const REFERENCE_SLOW_RATE: ServiceRate = rateFor(NAIVE_CODE_PER_ANCHOR, OMEGA, 1);
 
-/** The tally rule's rate at the shipped OMEGA, skew 1: about 825 events per tick. */
+/** The tally rule's rate at the shipped OMEGA, skew 1: about 798 events per tick. */
 export const REFERENCE_FAST_RATE: ServiceRate = rateFor(TALLY_CODE_PER_ANCHOR, OMEGA, 1);

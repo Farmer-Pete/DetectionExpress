@@ -43,10 +43,11 @@ describe("the two locked reference rates", () => {
     expect(slow).toBeLessThan(25);
   });
 
-  it("sits the fast rate near 825 events per tick, well above the slow rate", () => {
-    // GH102: the burst-shaped corpus raised the emergent fail share to ~0.867, so
-    // the naive scan's window fill grew and the separation ratio (and thus the fast
-    // rate) rose from ~368 to ~825. The naive rate is unchanged (anchor over itself).
+  it("sits the fast rate near 798 events per tick, well above the slow rate", () => {
+    // GH102: the burst-shaped corpus raised the emergent fail share to ~0.847 (the
+    // ~0.867 pair mean minus the ~0.02 fail-heavy slice offset), so the naive scan's
+    // window fill grew and the separation ratio (and thus the fast rate) rose from
+    // ~368 to ~798. The naive rate is unchanged (anchor over itself).
     const fast = REFERENCE_FAST_RATE.num / REFERENCE_FAST_RATE.den;
     expect(fast).toBeGreaterThan(750);
     expect(fast).toBeLessThan(900);

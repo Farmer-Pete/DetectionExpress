@@ -91,8 +91,8 @@ function assertNoOverlap(waves: readonly Wave[]): void {
  * its own fractional accumulator, reset at the wave's start: every tick adds
  * `eventsPerTick`, and each whole unit it crosses admits one arrival at that
  * tick. So a whole rate admits exactly `eventsPerTick` arrivals per tick, and a
- * fractional rate spreads its cumulative count the same way the kiosk benign
- * generator does.
+ * fractional rate spreads its cumulative count evenly instead of rounding per tick
+ * (the behavior the legacy kiosk draft loop had before GH102 moved it here).
  */
 export function admitArrivals(waves: readonly Wave[]): number[] {
   waves.forEach((wave, index) => {

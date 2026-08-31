@@ -68,6 +68,14 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
        performance.now lives here                 no wall-clock; ticks only
    ```
 
+9. **Validate at seams; trust types inside.** Runtime guards belong where a bad value
+   could loop forever, corrupt determinism, or arrive as a caller-supplied number at a
+   module seam: `admitArrivals` rejects rates that would stall its accumulator, the
+   scheduler rejects bad horizons and non-advancing reschedules, the PIN attacker
+   rejects malformed timestamps. Internal call sites covered by the strict type system
+   carry no redundant runtime checks. A new guard must name the failure mode it
+   prevents; a missing guard must have a type that already prevents it.
+
 ## Folders for content
 
 - `src/sim/endpoints/` holds reusable Endpoints. Each family keeps one internal record type and the actor cast emits it; each Endpoint is a thin formatter over it. Pure logic, no React. Endpoints are shared across Scenarios.

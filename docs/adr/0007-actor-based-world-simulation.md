@@ -491,9 +491,10 @@ What this revision records:
   globally distinct victims, so bursts on distinct accounts may overlap in time. The per-account
   detector makes that fair.
 - The corpus is now burst-shaped (co-located patron/attacker pairs), so its fail share is emergent
-  (~0.867), derived from burst arithmetic rather than a tuned `CORPUS_FAIL_SHARE`. `CORPUS_VERSION`
-  bumps to 2; the naive reference rate is unchanged and the tally rate rises with the share, so the
-  winnability band still holds.
+  (~0.847 shipped: the ~0.867 pair mean minus the measured fail-heavy slice offset), derived from
+  burst arithmetic rather than a tuned `CORPUS_FAIL_SHARE`. `CORPUS_VERSION` bumps to 2; the naive
+  reference rate is unchanged and the tally rate rises with the share, so the winnability band
+  still holds.
 
 ## Research sources
 
