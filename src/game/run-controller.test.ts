@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Checkpoint, GeneratedRun, Scenario } from "../sim/scenario";
+import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { AlgorithmSource, LoadedAlgorithm, LoadTarget } from "./algorithm";
@@ -14,7 +14,7 @@ import {
 
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
-const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [] };
+const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [], waves: [] };
 const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };
 
 const graph = { nodes: [], edges: [] };
@@ -243,7 +243,7 @@ describe("run controller", () => {
       { atTick: 300, clearsThroughWave: 0 },
       { atTick: 700, clearsThroughWave: 1 },
     ];
-    const run: GeneratedRun = { events: [], attacks: [], checkpoints };
+    const run: GeneratedRun = { events: [], attacks: [], checkpoints, waves: [] };
     const seen: StartOptions[] = [];
     const controller = createRunController(
       baseDeps({
@@ -258,6 +258,25 @@ describe("run controller", () => {
     await flush();
     expect(seen).toHaveLength(1);
     expect(seen[0]?.checkpoints).toBe(checkpoints); // the same array, untouched
+  });
+
+  it("passes the generated waves into start unchanged", async () => {
+    const waves: Wave[] = [{ startTick: 120, durationTicks: 240, eventsPerTick: 5 }];
+    const run: GeneratedRun = { events: [], attacks: [], checkpoints: [], waves };
+    const seen: StartOptions[] = [];
+    const controller = createRunController(
+      baseDeps({
+        scenario: { id: "waved", briefing: "b", generate: () => run },
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.waves).toBe(waves); // the same array, untouched
   });
 
   it("injects the profiled service rate into start (M2)", async () => {

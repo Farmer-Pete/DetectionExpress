@@ -55,6 +55,68 @@ body {
   color: var(--ink);
 }
 
+/* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
+   applied only inside the `prefers-reduced-motion: no-preference` block near
+   the end of this file. The state-bearing animations (`heart`, driving
+   `.wave-readout-incoming`, `.findings-panel.urgent-pulse`, and the
+   `severityFill`-driven fill colors) also carry a static, unanimated form
+   outside that guard, so color and count changes still read with motion off.
+   The one-shot transients (`waveflash`, `shake`) are the opposite: they ARE
+   the effect, so they intentionally have no static form to fall back to (see
+   the "Wave juice animations" comment below, near the guard itself). Colors
+   are existing palette tokens only, per `docs/design/hud-palette.md`;
+   translucent stops mix those tokens with `color-mix` for a soft glow. */
+@keyframes waveflash {
+  0% {
+    box-shadow:
+      0 0 0 2px var(--ink) inset,
+      0 0 26px color-mix(in srgb, var(--ink) 25%, transparent);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-3px, 1px);
+  }
+  75% {
+    transform: translate(3px, -1px);
+  }
+}
+
+@keyframes heart {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 9px currentcolor;
+  }
+}
+
+@keyframes urgentborder {
+  0%,
+  100% {
+    /* WCAG 3:1 against --panel (~3.62:1), held constant across all three
+       stops so the pulse's peak never dips below its trough's contrast (GH38
+       review round 4, F001 — the 50% stop previously used raw --threat, only
+       ~2.94:1). The box-shadow glow below still modulates the pulse, since it
+       is decoration, not the boundary itself. */
+    border-color: color-mix(in srgb, var(--threat) 80%, white);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--threat) 80%, white);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--threat) 13%, transparent);
+  }
+}
+
 .app {
   display: flex;
   flex-direction: column;
@@ -148,6 +210,15 @@ body {
     background 0.2s linear;
 }
 
+/* Gauge pulse (#38 juice item 2). `Gauge`'s `pulse` prop adds this class; the
+   caller only sets it at danger severity (Hud's Queue gauge), so `currentcolor`
+   below is safely the threat hue. The pulse animation itself lives in the
+   reduced-motion guard near the end of this file; the fill's background,
+   already `severityFill`'s danger color, is the static form. */
+.gauge-fill-pulse {
+  color: var(--threat);
+}
+
 .gauge-counts {
   display: flex;
   gap: 0.6rem;
@@ -218,6 +289,27 @@ body {
   border-radius: 12px;
   background: var(--panel);
   overflow-y: auto;
+}
+
+/* Panel throb (#38 juice item 4): static outside the reduced-motion guard, so
+   the threat border reads even with motion off (GH38+40-PLAN.md decision 4).
+   WCAG 3:1 against --panel (~3.62:1). The `.urgent-pulse` modifier (added only
+   while the run is live, F004+F006) is what the guard near the end of this
+   file layers the urgentborder animation onto; `.urgent` alone never animates. */
+.findings-panel.urgent {
+  border-color: color-mix(in srgb, var(--threat) 80%, white);
+}
+
+/* Active count header (#38 juice item 3). */
+.findings-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.findings-active {
+  color: var(--alert);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .findings-list,
@@ -1520,6 +1612,24 @@ body {
   background: color-mix(in srgb, var(--ok) 22%, transparent);
 }
 
+/* Wave readout (#38 juice item 1): "next wave in N" while calm, swapping to a
+   pulsing "WAVE INCOMING" while incoming. Neither state carries inherent
+   threat/alert/ok semantics, so both use `--ink` per hud-palette.md's Emphasis
+   rule; incoming stays bold outside the reduced-motion guard, so the state
+   reads even with motion off (GH38+40-PLAN.md decision 4) — the guard near the
+   end of this file only adds the heart pulse on top. */
+.wave-readout {
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.wave-readout-incoming {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .engine-bar {
   display: flex;
   align-items: center;
@@ -1541,6 +1651,15 @@ body {
   transition:
     width 0.12s linear,
     background 0.2s linear;
+}
+
+/* Queue-bar danger pulse (#38 juice item 2). LogPanel adds this at danger
+   severity; the fill's background is already `severityFill`'s danger color
+   (the static form), so `currentcolor` below is safely the threat hue. The
+   pulse animation itself lives in the reduced-motion guard near the end of
+   this file. */
+.queue-bar-danger {
+  color: var(--threat);
 }
 
 .queue-count {
@@ -1650,6 +1769,36 @@ body {
   font-size: 0.9rem;
   font-weight: 700;
   line-height: 1.4;
+}
+
+/* Wave juice animations (#38, GH38+40-PLAN.md Part 2). Every `animation:` rule
+   the app ships lives inside this guard; every state it enhances also has a
+   static, unanimated form declared above (the `.waveflash`/`.shake` classes
+   themselves carry no static styling, since the box-shadow flash and the
+   translate shake ARE the effect and have nothing to show when motion is off).
+   Colors and counts still change with motion off; only the extra movement and
+   glow are gated. */
+@media (prefers-reduced-motion: no-preference) {
+  .waveflash {
+    animation: waveflash 0.6s ease-out;
+  }
+
+  .shake {
+    animation: shake 0.3s ease-in-out;
+  }
+
+  .wave-readout-incoming {
+    animation: heart 0.45s infinite;
+  }
+
+  .queue-bar-danger,
+  .gauge-fill-pulse {
+    animation: heart 0.45s infinite;
+  }
+
+  .findings-panel.urgent-pulse {
+    animation: urgentborder 1s infinite;
+  }
 }
 
 /* T12 FX overlay (GH37-PLAN.md): a fixed, full-viewport layer FxLayer owns outright.

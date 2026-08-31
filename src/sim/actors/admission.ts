@@ -10,79 +10,25 @@
  * Deterministic and pure. No rng: the accumulator alone fixes the ticks.
  */
 import type { Wave } from "../scenario";
+import { assertWaveScheduleOrdered } from "../wave-schedule";
 
 /**
  * Far above any real wave rate (the shipped peak is 60). It caps `eventsPerTick`
  * so a pathological rate cannot stall the accumulator or materialize an unbounded
  * arrival array. Past `Number.MAX_SAFE_INTEGER` the `acc -= 1` step stops making
  * progress, so an unbounded rate would loop forever; this bound forbids that.
+ * The shared `assertWaveScheduleOrdered` (`../wave-schedule.ts`) already rejects
+ * a non-finite or negative rate; this cap is the one accumulator-specific check
+ * left local to admission.
  */
 const MAX_EVENTS_PER_TICK = 10_000;
 
-/** Reject a wave whose bounds are not non-negative integers, so every emitted tick stays whole. */
-function assertTickBounds(wave: Wave, index: number): void {
-  if (!Number.isInteger(wave.startTick) || wave.startTick < 0) {
-    throw new Error(`admitArrivals: wave ${index} startTick must be a non-negative integer.`);
-  }
-  if (!Number.isInteger(wave.durationTicks) || wave.durationTicks < 0) {
-    throw new Error(`admitArrivals: wave ${index} durationTicks must be a non-negative integer.`);
-  }
-}
-
-/**
- * Reject a rate that is not finite and non-negative. A non-finite rate would
- * loop forever in the accumulator below, so this throws before that can happen.
- */
-function assertRate(wave: Wave, index: number): void {
-  if (!Number.isFinite(wave.eventsPerTick) || wave.eventsPerTick < 0) {
-    throw new Error(
-      `admitArrivals: wave ${index} eventsPerTick must be a finite, non-negative number.`,
-    );
-  }
+/** Reject a rate above the accumulator's cap. Finiteness and sign are the shared helper's job. */
+function assertRateCap(wave: Wave, index: number): void {
   if (wave.eventsPerTick > MAX_EVENTS_PER_TICK) {
     throw new Error(
       `admitArrivals: wave ${index} eventsPerTick ${wave.eventsPerTick} exceeds the ${MAX_EVENTS_PER_TICK} cap.`,
     );
-  }
-}
-
-/**
- * Reject waves that are not in non-decreasing `startTick` order. Together with the
- * no-overlap check this makes the emitted ticks come out sorted, since each wave's
- * ticks then all precede the next wave's. Callers build waves left to right.
- */
-function assertChronological(waves: readonly Wave[]): void {
-  for (let i = 1; i < waves.length; i++) {
-    const prev = waves[i - 1];
-    const cur = waves[i];
-    if (prev === undefined || cur === undefined) {
-      continue;
-    }
-    if (cur.startTick < prev.startTick) {
-      throw new Error(`admitArrivals: wave ${i} starts before wave ${i - 1}.`);
-    }
-  }
-}
-
-/** Reject any pair of waves whose half-open tick ranges overlap, regardless of input order. */
-function assertNoOverlap(waves: readonly Wave[]): void {
-  for (let i = 0; i < waves.length; i++) {
-    const a = waves[i];
-    if (a === undefined) {
-      continue;
-    }
-    const aEnd = a.startTick + a.durationTicks;
-    for (let j = i + 1; j < waves.length; j++) {
-      const b = waves[j];
-      if (b === undefined) {
-        continue;
-      }
-      const bEnd = b.startTick + b.durationTicks;
-      const disjoint = aEnd <= b.startTick || bEnd <= a.startTick;
-      if (!disjoint) {
-        throw new Error(`admitArrivals: wave ${i} and wave ${j} overlap.`);
-      }
-    }
   }
 }
 
@@ -95,12 +41,13 @@ function assertNoOverlap(waves: readonly Wave[]): void {
  * (the behavior the legacy kiosk draft loop had before GH102 moved it here).
  */
 export function admitArrivals(waves: readonly Wave[]): number[] {
+  // Field validity, chronological order, and no-overlap all live in the shared
+  // helper now (F002); thrown messages come from there, which is fine since this
+  // module's own tests use bare `.toThrow()`.
+  assertWaveScheduleOrdered(waves);
   waves.forEach((wave, index) => {
-    assertTickBounds(wave, index);
-    assertRate(wave, index);
+    assertRateCap(wave, index);
   });
-  assertChronological(waves);
-  assertNoOverlap(waves);
 
   const arrivals: number[] = [];
   for (const wave of waves) {

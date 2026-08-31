@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
-import { buildFindingGroups, prettifyReason, stateLabel } from "./view-model";
+import {
+  buildFindingGroups,
+  countActiveHits,
+  prettifyReason,
+  stateLabel,
+  urgentAnnouncement,
+} from "./view-model";
 
 /**
  * Build a LiveFinding fixture. `subjectType` lands on the emitted Finding (an
@@ -278,5 +285,66 @@ describe("buildFindingGroups row shape", () => {
     );
     expect(hit.groups[0]?.rows[0]?.seq).toBe(4);
     expect(hit.groups[0]?.rows[0]?.state).toBe("hit");
+  });
+});
+
+describe("countActiveHits (#38 juice item 3+4)", () => {
+  it("counts zero and reads not urgent with no findings", () => {
+    expect(countActiveHits([])).toEqual({ count: 0, urgent: false });
+  });
+
+  it("counts only hit-state findings, ignoring watches", () => {
+    const findings = [
+      live({ seq: 1, state: "hit" }),
+      live({ seq: 2, state: "watch" }),
+      live({ seq: 3, state: "hit" }),
+    ];
+    expect(countActiveHits(findings)).toEqual({ count: 2, urgent: false });
+  });
+
+  it("is not urgent one hit below URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS - 1, urgent: false });
+  });
+
+  it("flips urgent exactly at URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS, urgent: true });
+  });
+
+  it("stays urgent past URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS + 2 }, (_, i) =>
+      live({ seq: i + 1, state: "hit" }),
+    );
+    expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS + 2, urgent: true });
+  });
+});
+
+describe("urgentAnnouncement (GH38 review round 4, F002)", () => {
+  it("is empty when not urgent", () => {
+    expect(urgentAnnouncement(false)).toBe("");
+  });
+
+  it("is a complete phrase, with no leading comma, when urgent", () => {
+    const text = urgentAnnouncement(true);
+    expect(text).toBe("findings urgent");
+    expect(text.startsWith(",")).toBe(false);
+  });
+
+  it("carries no live count, so it does not re-announce on every hit increment", () => {
+    // A fixed phrase regardless of how many hits are urgent — the count lives
+    // only in the visible "N active" text, never in the announcement. Asserting
+    // the phrase carries no digit enforces that contract against any future
+    // implementation, where comparing the pure call to itself never would.
+    expect(urgentAnnouncement(true)).not.toMatch(/\d/);
+  });
+
+  it("names no CONTEXT.md Alert-avoid word (hit, detection, notification, flag)", () => {
+    const text = urgentAnnouncement(true);
+    expect(text.toLowerCase()).not.toMatch(/\bhits?\b|\bdetection\b|\bnotification\b|\bflag\b/);
   });
 });

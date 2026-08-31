@@ -1,12 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
 import type { CaughtDecision, LiveFinding } from "../sim/correctness";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
-import { emptySnapshot } from "../sim/snapshot";
+import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenario } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
@@ -418,5 +418,197 @@ describe("App view toggle", () => {
     expect(pipes[0]?.disposes).toBe(1);
     expect(pipes[1]?.runs).toBe(1);
     expect(pipes[1]?.disposes).toBe(0);
+  });
+});
+
+describe("App wave shake (#38 juice item 1)", () => {
+  function setWave(wave: SimSnapshot["wave"]): void {
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), wave } });
+  }
+
+  it("adds .shake to .app-shell on the incoming -> active edge, then clears it", () => {
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+      expect(shell?.className).not.toMatch(/shake/);
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      expect(shell?.className).toMatch(/shake/);
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not shake on a rerender that is not an incoming -> active edge", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 10, eventsPerTick: null });
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    const shell = container.querySelector(".app-shell");
+    act(() => {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    });
+    expect(shell?.className).not.toMatch(/shake/);
+  });
+
+  it("shakes .app-shell, not the intro overlay's ancestor, so the overlay escapes it (F006)", () => {
+    localStorage.clear(); // show the overlay so it is on screen while .app-shell shakes
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+      const overlay = container.querySelector(".intro-overlay-backdrop");
+      expect(overlay).not.toBeNull();
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      expect(shell?.className).toMatch(/shake/);
+      // The overlay is a sibling of the shaken .app-shell, not a descendant of it, so
+      // its `position: fixed` backdrop never inherits the shake transform's containing
+      // block.
+      expect(shell?.contains(overlay)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status"]): void {
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });
+  }
+
+  it("never shakes when the incoming -> active edge lands in the same update the run concludes", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+      expect(shell?.className).not.toMatch(/shake/);
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still shakes across the incoming -> active edge while the run keeps running", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-arms after a suppressed terminal edge: a new run's calm -> incoming -> active(running) still shakes", () => {
+    vi.useFakeTimers();
+    try {
+      // The first run's edge lands as it concludes, so it is suppressed (per the
+      // case above).
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+
+      // A fresh run starts: calm, then incoming, then active, all while running.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "calm", index: 0, ticksUntilNext: 40, eventsPerTick: null },
+          "running",
+        );
+      });
+      act(() => {
+        setWaveAndStatus(
+          { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+          "running",
+        );
+      });
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears an in-flight shake immediately when the run concludes mid-animation, without waiting for the timer (GH38 review)", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+
+      // The run concludes mid-shake, well before the shake's own timer would clear it.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

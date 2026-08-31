@@ -143,7 +143,7 @@ function generate(seed: number): GeneratedRun {
   const records = toFairRecords(timed, labels);
   assertFair(records, victimSet, attacks);
 
-  return { events, attacks, checkpoints };
+  return { events, attacks, checkpoints, waves };
 }
 
 /**

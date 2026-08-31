@@ -499,6 +499,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
           generator,
           serviceRate,
           checkpoints: generated.checkpoints,
+          waves: generated.waves,
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;

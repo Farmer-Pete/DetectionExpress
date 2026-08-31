@@ -23,9 +23,11 @@ import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
 import {
   buildFindingGroups,
+  countActiveHits,
   type FindingGroup,
   type FindingRow,
   stateLabel,
+  urgentAnnouncement,
   VISIBLE_CAP,
 } from "./view-model";
 
@@ -36,6 +38,7 @@ interface FindingsPanelProps {
 
 export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}) {
   const findings = useGameStore((state) => state.snapshot.findings);
+  const status = useGameStore((state) => state.snapshot.status);
   const selection = useGameStore((state) => state.selection);
   const selectFinding = useGameStore((state) => state.selectFinding);
   const clearSelection = useGameStore((state) => state.clearSelection);
@@ -60,13 +63,44 @@ export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}
   const selectedSeq = selection?.seq ?? null;
   const { groups, hiddenCount } = buildFindingGroups(findings, selectedSeq);
   const visible = expanded ? groups : groups.slice(0, VISIBLE_CAP);
+  const { count: activeCount, urgent } = countActiveHits(findings);
+  // Severity COLOR persists on a frozen terminal frame; the ANIMATED pulse gates
+  // on run conclusion, the same family rule LogPanel and Hud follow (F004+F006).
+  // `running` splits the two: `urgent` carries the static border-color outside
+  // any reduced-motion guard (GH38+40-PLAN.md decision 4), and `urgent-pulse`
+  // carries the `urgentborder` keyframe animation, gated behind both
+  // `prefers-reduced-motion: no-preference` and a live run.
+  const running = status === "running";
+  const panelClass = [
+    "findings-panel",
+    urgent ? "urgent" : null,
+    urgent && running ? "urgent-pulse" : null,
+  ]
+    .filter((name): name is string => name !== null)
+    .join(" ");
 
   return (
-    <section ref={panelRef} className="findings-panel" aria-label="Findings" tabIndex={-1}>
+    <section ref={panelRef} className={panelClass} aria-label="Findings" tabIndex={-1}>
+      {/* A persistent role="status" live region: this node is a direct child of the
+          section, so it always exists — even with zero findings — and the browser
+          is already watching it before any text change. That change is what
+          triggers the announcement (an element that mounts already carrying its
+          final text announces nothing), the same live-region mechanics as
+          LogPanel's waveAnnouncement. The border pulse is a visual-only cue; this
+          spells the crossing out for a screen reader, since motion carries no
+          signal past a border color. */}
+      <span className="visually-hidden" role="status">
+        {urgentAnnouncement(urgent)}
+      </span>
       {findings.length === 0 ? (
         <EmptyState />
       ) : (
         <>
+          <div className="findings-header">
+            <span className="findings-active">
+              {activeCount > 0 ? `⚠ ${activeCount} active` : `${activeCount} active`}
+            </span>
+          </div>
           <ul className="findings-list">
             {visible.map((group) => (
               <FindingGroupCard

@@ -40,6 +40,12 @@ export interface GeneratedRun {
   attacks: Attack[];
   /** The wave boundaries plus the final deadline, in tick order. */
   checkpoints: Checkpoint[];
+  /**
+   * The wave boundaries `checkpoints` derives from. The sim publishes this in the
+   * snapshot (`waveStateAt`, `wave-state.ts`) so the UI reads the same waves the
+   * generator emitted — the UI never derives sim truth (GH38+40-PLAN.md decision 2).
+   */
+  waves: Wave[];
 }
 
 export interface Scenario {

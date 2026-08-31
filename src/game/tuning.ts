@@ -171,6 +171,12 @@ export const WAVE_DURATION_TICKS = 240;
  * The gap after each wave before its checkpoint, in ticks. Short on purpose: a
  * fast rule drains the whole wave inside it, but the naive scan cannot, so the two
  * separate at the checkpoint. Locked with the wave rates by the band test.
+ *
+ * #40 knob, constrained: `min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)` must stay `>=
+ * CLOCK_HZ / PUBLISH_HZ` (the publish stride), or a successor wave's brief
+ * 'incoming' phase can fall between publish samples, or vanish entirely, and
+ * silently drop the flash/shake/announcement. Locked by `schedule.test.ts`'s
+ * F012 case; see `wave-state.ts`'s precedence note.
  */
 export const DRAIN_GAP_TICKS = 45;
 
@@ -179,6 +185,38 @@ export const DRAIN_GAP_TICKS = 45;
  * below this fails the run with reason "correctness".
  */
 export const CORRECTNESS_FLOOR = 50;
+
+/**
+ * Wave juice (#38). First-draft numbers; #40's tuning pass revisits them once it
+ * starts (see GH38+40-PLAN.md Part 3, gated on GH102 merging).
+ */
+
+/**
+ * How many ticks before a wave's `startTick` the reading flips from "calm" to
+ * "incoming" (`waveStateAt` in `wave-state.ts`). Roughly the prototype's warn
+ * fraction of its cycle.
+ *
+ * #40 knob, constrained: for a successor wave's 'incoming' phase to be
+ * observable at all, `min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)` must stay `>=
+ * CLOCK_HZ / PUBLISH_HZ` (see `DRAIN_GAP_TICKS`'s note and `wave-state.ts`'s
+ * precedence note). This constant is one half of that min() bound, so it must
+ * clear the stride too, not just the gap.
+ */
+export const WAVE_WARN_TICKS = 30;
+
+/**
+ * The shared severity ramp's thresholds (`src/ui/hud/severity.ts`), promoted to
+ * tuning constants so #40 can tune them. Generic names, not "queue"-specific:
+ * the ramp also colors the Compute gauge.
+ */
+export const SEVERITY_WARN_FRAC = 0.5;
+export const SEVERITY_DANGER_FRAC = 0.8;
+
+/**
+ * The live-hit count at which the findings panel throbs (`FindingsPanel.tsx`
+ * gains the `urgent` border-pulse class at or above this count).
+ */
+export const URGENT_HITS = 3;
 
 /**
  * M0 (living metro, #87). The world loop steps the actor schedule ONE tick at a

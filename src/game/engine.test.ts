@@ -10,7 +10,7 @@ import {
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
-import type { Checkpoint } from "../sim/scenario";
+import type { Checkpoint, Wave } from "../sim/scenario";
 import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import type { ServiceRate } from "../sim/service-governor";
@@ -28,6 +28,7 @@ import {
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
   PIN_BRUTE_FORCE_THRESHOLD,
+  WAVE_WARN_TICKS,
 } from "./tuning";
 
 const SCORER_CONFIG: ScorerConfig = {
@@ -101,6 +102,7 @@ interface LaunchOpts {
   onError?: (error: unknown) => void;
   serviceRate?: ServiceRate;
   checkpoints?: Checkpoint[];
+  waves?: Wave[];
 }
 
 interface Harness {
@@ -121,6 +123,7 @@ function launch(opts: LaunchOpts): Harness {
     generator: opts.generator ?? scheduleOf([]),
     serviceRate: opts.serviceRate ?? FAST_RATE,
     checkpoints: opts.checkpoints ?? [],
+    waves: opts.waves ?? [],
     driver,
     ...(opts.onError ? { onError: opts.onError } : {}),
   };
@@ -153,9 +156,51 @@ describe("engine start guards", () => {
         generator: scheduleOf([]),
         serviceRate: FAST_RATE,
         checkpoints: [],
+        waves: [],
         driver,
       }),
     ).toThrow(/unknown/i);
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
+  it("throws on an unsorted wave schedule and allocates nothing (F003 hardening)", () => {
+    const driver = new SpyDriver();
+    const waves: Wave[] = [
+      { startTick: 20, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+    ];
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves,
+        driver,
+      }),
+    ).toThrow();
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
+  it("throws on a NaN-startTick wave and allocates nothing (F002)", () => {
+    const driver = new SpyDriver();
+    const waves: Wave[] = [{ startTick: Number.NaN, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves,
+        driver,
+      }),
+    ).toThrow();
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
@@ -177,6 +222,7 @@ describe("engine start guards", () => {
         generator: scheduleOf([]),
         serviceRate: FAST_RATE,
         checkpoints: [],
+        waves: [],
         driver,
       }),
     ).toThrow(boom);
@@ -389,6 +435,7 @@ describe("engine failure and stop paths", () => {
       generator: () => ev(nextId++, 10_000),
       serviceRate: FAST_RATE,
       checkpoints: [],
+      waves: [],
       driver,
     });
     await step(driver, 20);
@@ -571,6 +618,7 @@ describe("engine speed changes only wall pacing (M4 seam 5)", () => {
       generator: scheduleOf(events),
       serviceRate: FAST_RATE,
       checkpoints: deadlineAt(20),
+      waves: [],
       driver,
     });
     handle.setSpeed(speed);
@@ -641,6 +689,81 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.decisions).toEqual([]);
     expect(snap.events).toEqual([]);
     expect(snap.processed).toBe(0);
+  });
+});
+
+describe("engine publishes the wave reading (GH38+40-PLAN.md Part 1)", () => {
+  // The wave's ticks are chosen as multiples of the sampler's publish cadence
+  // (CLOCK_HZ / PUBLISH_HZ = 3 ticks/sample), so a regular, non-forced publish
+  // lands exactly on each phase boundary this test checks.
+  const START_TICK = 60;
+  const DURATION_TICKS = 6;
+  const WAVES: Wave[] = [
+    { startTick: START_TICK, durationTicks: DURATION_TICKS, eventsPerTick: 4 },
+  ];
+
+  it("carries snapshot.wave through calm, incoming, active, and after the last wave", async () => {
+    const h = launch({
+      generator: scheduleOf([]),
+      checkpoints: deadlineAt(START_TICK + DURATION_TICKS + 24),
+      waves: WAVES,
+    });
+
+    await step(h.driver, 3); // well before the warn window
+    expect(h.last()?.wave).toEqual({
+      phase: "calm",
+      index: 0,
+      ticksUntilNext: START_TICK - 3,
+      eventsPerTick: null,
+    });
+
+    await step(h.driver, START_TICK - WAVE_WARN_TICKS - 3); // now at startTick - WAVE_WARN_TICKS
+    expect(h.last()?.wave).toEqual({
+      phase: "incoming",
+      index: 0,
+      ticksUntilNext: WAVE_WARN_TICKS,
+      eventsPerTick: null,
+    });
+
+    await step(h.driver, WAVE_WARN_TICKS); // now at startTick: the wave's first tick
+    expect(h.last()?.wave).toEqual({
+      phase: "active",
+      index: 0,
+      ticksUntilNext: null,
+      eventsPerTick: 4,
+    });
+
+    await step(h.driver, DURATION_TICKS); // now at startTick + durationTicks: past the wave
+    expect(h.last()?.wave).toEqual({
+      phase: "calm",
+      index: null,
+      ticksUntilNext: null,
+      eventsPerTick: null,
+    });
+
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+
+  it("keeps a sane wave reading in the terminal frame", async () => {
+    const events = [0, 1, 2, 3, 4].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
+    const h = launch({
+      generator: scheduleOf(events),
+      serviceRate: { num: 1, den: 20 }, // slow enough to still be queued at the deadline
+      checkpoints: deadlineAt(40),
+      waves: WAVES,
+    });
+    await step(h.driver, 41);
+    await h.handle.whenStopped;
+    // The run fails on Queue at tick 40, inside the wave's warn window (it starts
+    // at 60): incoming, with the still-ahead wave's index, not a stale reading.
+    expect(h.last()?.status).toBe("failed");
+    expect(h.last()?.wave).toEqual({
+      phase: "incoming",
+      index: 0,
+      ticksUntilNext: START_TICK - 40,
+      eventsPerTick: null,
+    });
   });
 });
 

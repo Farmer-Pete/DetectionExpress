@@ -14,6 +14,40 @@
  * State 3 is decided purely from `events`/`processed`/`admitted`, never from
  * DOM measurement.
  *
+ * The transport row also carries the wave readout (#38 juice item 1): "next
+ * wave in Ns" (N quantized to a 30-game-second bucket, see `waveReadout`)
+ * while calm, a pulsing "◈ WAVE INCOMING" while incoming, and nothing while a
+ * wave is active or after the last one (no countdown to show). Both the
+ * readout and the status announcement gate on
+ * `snapshot.status === "running"` (F003): once a run has concluded (won or
+ * failed) neither renders, since a wave reading from a stopped clock is stale,
+ * not a live cue. That gate is about conclusion, not the transport freeze —
+ * pausing (`transport.frozen`) leaves the readout showing the frozen reading,
+ * since the run can still resume. That visible text is `aria-hidden` because
+ * it ticks too fast to announce; a separate `role="status"` region carries
+ * only the low-frequency phase change ("wave incoming", then "wave arrived"
+ * once the wave starts), which fires at most a few times per run. On the
+ * incoming -> active edge the panel's own column flashes once
+ * (`useWavePhaseEdge` feeding its own `useOneShotFlag` call, one-shot
+ * ownership: this component holds its own hook instance and clears
+ * `.waveflash` itself, independent of App's `.shake`, which calls the same
+ * shared hook from its own instance). The queue bar also gains a
+ * `queue-bar-danger` pulse class at danger severity (juice item 2).
+ *
+ * The conclusion gate (F004+F006): severity COLORS persist on the frozen
+ * terminal frame (`severityFill` stays ungated), but ANIMATED cues — the
+ * flash edge and the danger pulse — gate on `snapshot.status === "running"`.
+ * `running` is derived once, early, and feeds `useWavePhaseEdge` a `"calm"`
+ * input while not running, so a status flip alone can never manufacture an
+ * edge; `running` is deliberately left out of `useOneShotFlag`'s own token
+ * input (only `edgeToken` drives it), since folding it in there would re-fire
+ * the last edge on a status flip instead of gating admission at the source.
+ * This is about conclusion, never the transport freeze: pausing
+ * (`transport.frozen`) leaves every cue live, since the run can still resume.
+ * The flash render site itself also ANDs `flashing` with `running`, so an
+ * ALREADY in-flight flash clears the instant a run concludes, instead of
+ * running out its own timer over a frozen frame (CodeRabbit review).
+ *
  * A row also reads its entry in the store's `flashes` map (T12, GH37-PLAN.md
  * "Comets"): FxLayer spawns one when the row is cited evidence for a just-landed
  * finding. The row's React `key` folds in the flash's `gen`, so a re-spawn on the
@@ -23,10 +57,77 @@
 import { type CSSProperties, memo, useEffect } from "react";
 import type { Speed } from "../../game/run-controller";
 import { type FlashEntry, useGameStore } from "../../game/store";
-import { LOG_QUEUE_MAX } from "../../game/tuning";
+import { GAME_SECONDS_PER_TICK, LOG_QUEUE_MAX } from "../../game/tuning";
 import type { RingEvent } from "../../sim/inspector";
-import { severityFill } from "../hud/severity";
+import type { SimSnapshot } from "../../sim/snapshot";
+import { severityFill, severityLevel } from "../hud/severity";
+import { useOneShotFlag } from "../wave/use-one-shot-flag";
+import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
 import { formatClock, formatRow } from "./formatters";
+
+/** Matches the CSS `waveflash` keyframes' 0.6s duration (`src/index.css`). */
+const WAVEFLASH_MS = 600;
+
+/**
+ * The countdown's display bucket, in game-seconds (GH38 review round 4,
+ * F014). `ticksUntilNext` is always a whole tick count, so ceiling it to a
+ * whole second is a no-op: the text would still change on every ~50ms publish
+ * sample, six game-seconds at a time. Per-second display stepping would not
+ * fix that either — at 1x, game time runs `CLOCK_HZ * GAME_SECONDS_PER_TICK`
+ * = 120 game-seconds per wall-second, so a once-per-second step still races
+ * the sampler. Bucketing to 30 game-seconds instead steps the readout only a
+ * handful of times per calm window. This value is a first-draft #40 tuning
+ * knob, not load-bearing.
+ */
+const WAVE_COUNTDOWN_BUCKET_S = 30;
+
+/**
+ * The wave readout's text and urgency, or null when there is nothing to show
+ * (active, or calm with no wave left). `incoming` drives the pulsing style.
+ * The countdown quantizes to `WAVE_COUNTDOWN_BUCKET_S`-second buckets (see
+ * that constant's comment for why a plain per-second ceil does not work).
+ * Honest caveat, at the shipped tuning: the intro calm (`INTRO_TICKS`, 120)
+ * genuinely counts down through the buckets (240s -> 90s), but a SUCCESSOR
+ * wave's whole calm gap is `DRAIN_GAP_TICKS` (45), and every calm tick that
+ * gap can produce buckets to the same constant "next wave in 90s" until the
+ * phase flips to INCOMING. That is a consequence of `WAVE_COUNTDOWN_BUCKET_S`
+ * (a #40 felt-pace knob) sized close to the gap, not a bug; this comment
+ * records it, not fixes it.
+ */
+function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
+  if (wave.phase === "incoming") {
+    return { text: "◈ WAVE INCOMING", incoming: true };
+  }
+  if (wave.ticksUntilNext !== null) {
+    const rawSeconds = wave.ticksUntilNext * GAME_SECONDS_PER_TICK;
+    const seconds = Math.ceil(rawSeconds / WAVE_COUNTDOWN_BUCKET_S) * WAVE_COUNTDOWN_BUCKET_S;
+    return { text: `next wave in ${seconds}s`, incoming: false };
+  }
+  return null;
+}
+
+/**
+ * The role="status" announcement: phase-mapped, never the ticking count, so a
+ * screen reader hears one whole phrase per phase change instead of every
+ * sample. "wave incoming" warns during the countdown; "wave arrived" fires
+ * once the wave actually starts (GH38 review round 4, F007) — without it, a
+ * screen reader user is warned but never learns the wave they were warned
+ * about began. The text holds constant through the whole active phase, so it
+ * announces exactly once at wave start, not on every publish sample. Calm
+ * renders "", so the region falls silent between waves.
+ */
+function waveAnnouncement(
+  phase: SimSnapshot["wave"]["phase"],
+): "wave incoming" | "wave arrived" | "" {
+  switch (phase) {
+    case "incoming":
+      return "wave incoming";
+    case "active":
+      return "wave arrived";
+    case "calm":
+      return "";
+  }
+}
 
 /** The speed choices the transport offers, in ascending order, with their labels. */
 const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
@@ -84,11 +185,30 @@ export function LogPanel() {
   const events = useGameStore((s) => s.snapshot.events);
   const processed = useGameStore((s) => s.snapshot.processed);
   const admitted = useGameStore((s) => s.snapshot.admitted);
+  const wave = useGameStore((s) => s.snapshot.wave);
+  const status = useGameStore((s) => s.snapshot.status);
   const frozen = useGameStore((s) => s.transport.frozen);
   const speed = useGameStore((s) => s.transport.speed);
   const flashes = useGameStore((s) => s.flashes);
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
+
+  // Derived early, before the edge hook: gate on conclusion (won/failed), never
+  // on the transport freeze (F003, F004+F006). A paused run can still resume,
+  // so its frozen reading stays live; a concluded run cannot, so its cues must
+  // stop.
+  const running = status === "running";
+
+  // One-shot ownership (GH38+40-PLAN.md, "Wave indicator + flash + shake"): this
+  // panel owns its own `.waveflash` class and clears it itself, independent of
+  // App's `.shake`. `edgeToken` changes exactly once per incoming -> active
+  // edge; skip its initial `0` so mount never flashes. The hook's INPUT is
+  // gated on `running`, not its output: feeding it `"calm"` while concluded
+  // means a status flip alone can never manufacture an edge. `running` stays
+  // out of the effect's own deps below (only `edgeToken` drives it) — adding it
+  // there would re-fire the last edge on a status flip instead.
+  const edgeToken = useWavePhaseEdge(running ? wave.phase : "calm");
+  const flashing = useOneShotFlag(edgeToken, WAVEFLASH_MS);
 
   // The panel owns a Space-to-freeze listener: added on mount, removed on unmount. It
   // ignores key repeats and editable targets, and it reads the freeze state fresh from
@@ -129,9 +249,15 @@ export function LogPanel() {
   const showSticky = !caughtUp && !cursorVisible;
 
   const newestFirst = events.slice().reverse();
+  // `running` (F003) also gates the readout text: a concluded run's stale
+  // reading must not keep showing.
+  const readout = running ? waveReadout(wave) : null;
+  // severityFill (the bar's color) stays ungated — that's the persistent color
+  // cue (F004+F006) — but the pulse is animated, so it gates on `running` too.
+  const dangerPulse = running && severityLevel(frac) === "danger";
 
   return (
-    <div className="log-panel">
+    <div className={flashing && running ? "log-panel waveflash" : "log-panel"}>
       <div className="log-header">
         <div className="transport">
           <button
@@ -159,12 +285,23 @@ export function LogPanel() {
               );
             })}
           </div>
+          {readout ? (
+            <span
+              className={`wave-readout${readout.incoming ? " wave-readout-incoming" : ""}`}
+              aria-hidden="true"
+            >
+              {readout.text}
+            </span>
+          ) : null}
+          <span className="visually-hidden" role="status">
+            {running ? waveAnnouncement(wave.phase) : ""}
+          </span>
         </div>
       </div>
       <div className="engine-bar">
         <div className="queue-bar">
           <div
-            className="queue-bar-fill"
+            className={dangerPulse ? "queue-bar-fill queue-bar-danger" : "queue-bar-fill"}
             data-testid="queue-bar-fill"
             style={{ width: `${frac * 100}%`, background: severityFill(frac) }}
           />

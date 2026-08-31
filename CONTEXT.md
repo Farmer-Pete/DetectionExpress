@@ -46,7 +46,7 @@ _Avoid_: signal, bad event.
 
 **Attack**:
 A real intrusion hidden in the stream, such as someone guessing a PIN at the account kiosk. It is one or more Threats on an account inside a time span. A Hunt defines the pattern that reveals it. The Engine should raise one Alert per Attack. Catching it raises Correctness. Missing it lowers it.
-_Avoid_: breach, incident, wave.
+_Avoid_: breach, incident.
 
 **Ground truth**:
 The hidden knowledge of which Events form the real Attacks in a run. The game holds it in the scorer, apart from the Events the Algorithm sees. The player does not see it. The code is open, so we do not obfuscate it.
@@ -100,6 +100,10 @@ _Avoid_: Adaptability, extensibility, agility.
 The performance ramp. Event volume and burst size climb. New Endpoints add new data formats to handle.
 _Avoid_: Load, traffic.
 
+**Wave**:
+A scripted rise in benign Event volume for a bounded stretch per the run's schedule. The rise itself is neither an Attack nor a Stress event, though Attacks may strike while it runs.
+_Avoid_: surge, burst, spike, rush.
+
 **Feature request**:
 The architecture disruptor. A new Hunt or Vulnerability the player must detect. It can invalidate the current Engine design.
 _Avoid_: Task, requirement, ticket, feature.
@@ -120,4 +124,4 @@ _Avoid_: Bug, drawback, penalty.
 
 **Stress event**:
 A surge in the stream that exposes an unhandled Side effect. Examples: a burst of kiosk readings, a late reading, a duplicate tap, two gate readers racing to report the same card. It turns a hidden flaw into a visible Correctness drop.
-_Avoid_: Attack, wave, test, spike.
+_Avoid_: Attack, test, spike.

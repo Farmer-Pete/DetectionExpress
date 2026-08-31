@@ -162,5 +162,5 @@ export function buildFareGateRun(seed: number): GeneratedRun {
 
   // Benign traffic only: no Attack. The composer no longer returns this field, so
   // the run supplies its own empty ground truth.
-  return { events, attacks: [], checkpoints: withFinalDeadline(checkpoints, finalDeadline) };
+  return { events, attacks: [], checkpoints: withFinalDeadline(checkpoints, finalDeadline), waves };
 }

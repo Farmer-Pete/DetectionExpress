@@ -1,9 +1,19 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../../game/store";
 import type { RingEvent } from "../../sim/inspector";
-import { emptySnapshot } from "../../sim/snapshot";
+import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { LogPanel } from "./LogPanel";
+
+/** Publish a snapshot carrying only the given wave reading; everything else stays empty. */
+function setWave(wave: SimSnapshot["wave"]): void {
+  useGameStore.setState({ snapshot: { ...emptySnapshot(), wave } });
+}
+
+/** Publish a snapshot carrying the given wave reading and run status. */
+function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status"]): void {
+  useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });
+}
 
 function kioskEvent(id: number, overrides: Partial<RingEvent> = {}): RingEvent {
   return {
@@ -213,5 +223,302 @@ describe("LogPanel speed control", () => {
     expect(screen.getByRole("button", { name: "0.5x" }).className).not.toMatch(
       /transport-speed-on/,
     );
+  });
+});
+
+describe("LogPanel wave readout (#38 juice item 1)", () => {
+  it("shows the countdown to the next wave, quantized to a 30-game-second bucket, while calm", () => {
+    // ticksUntilNext 42 * GAME_SECONDS_PER_TICK (2) = 84 raw game-seconds,
+    // which rounds up to the 90 bucket (ceil(84 / 30) * 30).
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
+  });
+
+  it("swaps to the WAVE INCOMING readout while incoming", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByText("◈ WAVE INCOMING")).toBeDefined();
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+  });
+
+  it("shows no readout while a wave is active (no countdown to show)", () => {
+    setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+
+  it("shows no readout after the last wave (calm with a null index)", () => {
+    setWave({ phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+});
+
+describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)", () => {
+  it("shows no WAVE INCOMING readout and an empty status region once the run has failed", () => {
+    setWaveAndStatus(
+      { phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null },
+      "failed",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("shows no 'next wave in' countdown once the run has failed, even while calm with a wave still scheduled", () => {
+    setWaveAndStatus(
+      { phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null },
+      "failed",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+  });
+
+  it("shows no readout and an empty status region once the run has won", () => {
+    setWaveAndStatus(
+      { phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null },
+      "won",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+});
+
+describe("LogPanel wave countdown bucketing (GH38 review round 4, F014)", () => {
+  it("renders known tick values at their 30-game-second bucket", () => {
+    // waveStateAt only reports "calm" once ticksUntilNext > WAVE_WARN_TICKS
+    // (30); at or below that it is "incoming" instead. Both fixtures below
+    // use the smallest producible-calm tick counts, not arbitrary round
+    // numbers, so this test only encodes states the engine can actually emit.
+    //
+    // 60 ticks * GAME_SECONDS_PER_TICK (2) = 120 raw game-seconds, already a
+    // bucket multiple, so it renders unchanged.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 60, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    expect(screen.getByText("next wave in 120s")).toBeDefined();
+
+    // 31 ticks (the smallest tick count waveStateAt ever reports as "calm") *
+    // 2 = 62 raw game-seconds, rounding up into the 90 bucket.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
+    rerender(<LogPanel />);
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
+  });
+
+  it("renders adjacent tick values inside one 30s bucket identically", () => {
+    // 31 ticks -> 62 raw seconds and 45 ticks -> 90 raw seconds both land in
+    // the (60, 90] bucket, so both must render "90s" instead of drifting
+    // downward sample to sample.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    const first = screen.getByText(/next wave in \d+s/).textContent;
+
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 45, eventsPerTick: null });
+    rerender(<LogPanel />);
+    const second = screen.getByText(/next wave in \d+s/).textContent;
+
+    expect(first).toBe("next wave in 90s");
+    expect(second).toBe(first);
+  });
+
+  it("renders bucket-boundary values differently", () => {
+    // 45 ticks -> 90 raw seconds (bucket 90) vs 46 ticks -> 92 raw seconds
+    // (bucket 120): one tick apart, but crossing the boundary must change
+    // the displayed text.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 45, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
+
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 46, eventsPerTick: null });
+    rerender(<LogPanel />);
+    expect(screen.getByText("next wave in 120s")).toBeDefined();
+  });
+});
+
+describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () => {
+  it("hides the fast-updating visible countdown from assistive tech", () => {
+    // 31 is the smallest tick count `waveStateAt` can ever report as calm
+    // (calm requires ticksUntilNext > WAVE_WARN_TICKS); 31 * 2s buckets to 90s.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
+    render(<LogPanel />);
+    const visible = screen.getByText("next wave in 90s");
+    expect(visible.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("hides the visible WAVE INCOMING text from assistive tech too", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    const visible = screen.getByText("◈ WAVE INCOMING");
+    expect(visible.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("carries a role=status region that stays silent while calm", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("announces the incoming phase in the role=status region", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toMatch(/wave incoming/i);
+  });
+
+  it("announces wave arrived once the wave goes active (GH38 review round 4, F007)", () => {
+    setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toMatch(/wave arrived/i);
+  });
+});
+
+describe("LogPanel queue-bar danger pulse (#38 juice item 2)", () => {
+  it("adds the pulse class at danger severity", () => {
+    setSnapshot([], 0, 45); // 45 / LOG_QUEUE_MAX(50) = 0.9, past SEVERITY_DANGER_FRAC (0.8)
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
+  });
+
+  it("omits the pulse class below danger severity", () => {
+    setSnapshot([], 0, 10); // 10 / 50 = 0.2
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
+  });
+});
+
+describe("LogPanel wave flash (one-shot on incoming -> active)", () => {
+  it("adds .waveflash to the log column on the edge, then clears it after the animation", () => {
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flash on a rerender that is not an incoming -> active edge", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 10, eventsPerTick: null });
+    const { container } = render(<LogPanel />);
+    const panel = container.querySelector(".log-panel");
+    act(() => {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    });
+    expect(panel?.className).not.toMatch(/waveflash/);
+  });
+});
+
+describe("LogPanel animated cues gate on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("never flashes when the incoming -> active edge lands in the same update the run concludes", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still flashes across the incoming -> active edge while the run keeps running", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears an in-flight flash immediately when the run concludes mid-animation, without waiting for the timer (GH38 review)", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+
+      // The run concludes mid-flash, well before the flash's own timer would clear it.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("LogPanel queue-bar danger pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("omits the pulse class at danger severity once the run has failed", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "failed" },
+    });
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
+  });
+
+  it("keeps the pulse class at danger severity while the run is running", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "running" },
+    });
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
   });
 });

@@ -89,3 +89,63 @@ describe("Hud", () => {
     expect(screen.getByText("Failed: Correctness too low")).toBeDefined();
   });
 });
+
+/** Find one gauge's fill element by its label text (Hud renders several `.gauge-fill`s). */
+function gaugeFill(label: string): Element {
+  const gauge = screen.getByText(label).closest(".gauge");
+  if (!gauge) {
+    throw new Error(`expected a .gauge ancestor for label "${label}"`);
+  }
+  const fill = gauge.querySelector(".gauge-fill");
+  if (!fill) {
+    throw new Error(`expected a .gauge-fill inside the "${label}" gauge`);
+  }
+  return fill;
+}
+
+describe("Hud gauge pulse routing (#38 juice item 2)", () => {
+  it("pulses the Queue gauge at danger severity", () => {
+    // QUEUE_MAX is 2 * CHANNEL_CAP (200); 160/200 = 0.8 = SEVERITY_DANGER_FRAC.
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 200, completed: 40 },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).toMatch(/gauge-fill-pulse/);
+  });
+
+  it("does not pulse the Queue gauge below danger severity", () => {
+    // 50/200 = 0.25: well under SEVERITY_DANGER_FRAC.
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 50, completed: 0 },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).not.toMatch(/gauge-fill-pulse/);
+  });
+
+  it("never pulses the Compute gauge, even at danger severity", () => {
+    // COMPUTE_MAX is 2 / OMEGA (0.1); 0.09/0.1 = 0.9, well past SEVERITY_DANGER_FRAC.
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), compute: 0.09 },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Compute").className).not.toMatch(/gauge-fill-pulse/);
+  });
+});
+
+describe("Hud gauge pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("omits the Queue pulse at danger severity once the run has failed", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 200, completed: 40, status: "failed" },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).not.toMatch(/gauge-fill-pulse/);
+  });
+
+  it("keeps the Queue pulse at danger severity while the run is running", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 200, completed: 40, status: "running" },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).toMatch(/gauge-fill-pulse/);
+  });
+});

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLOCK_HZ,
   DRAIN_GAP_TICKS,
   INTRO_TICKS,
+  PUBLISH_HZ,
   WAVE_COUNT,
   WAVE_DURATION_TICKS,
   WAVE_RATES,
+  WAVE_WARN_TICKS,
 } from "../game/tuning";
 import { buildSchedule } from "./schedule";
 
@@ -52,5 +55,22 @@ describe("buildSchedule", () => {
 
   it("is deterministic: repeated calls return the same schedule", () => {
     expect(buildSchedule()).toEqual(buildSchedule());
+  });
+
+  it("keeps the observable successor-incoming window at or above the publish stride (F012, F023)", () => {
+    // The publish stride, CLOCK_HZ / PUBLISH_HZ, is the coarsest sample spacing the
+    // sampler ever takes (currently 3 ticks). A successor wave's checkpoint lands
+    // exactly DRAIN_GAP_TICKS after the prior wave ends (see the test above), so the
+    // gap is an upper bound on the successor's 'incoming' window — but `active`
+    // outranks `incoming` (wave-state.ts's precedence note), so the prior wave still
+    // reads 'active' until WAVE_WARN_TICKS opens the successor's warn window, which
+    // can land later than the gap's own start. The window `waveStateAt` can actually
+    // read is therefore min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS) ticks wide, not
+    // DRAIN_GAP_TICKS alone. A window smaller than the publish stride can let every
+    // publish sample land on either side of it, or shrink it to zero ticks, so the
+    // flash/shake/announcement silently never fires for that wave.
+    expect(Math.min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)).toBeGreaterThanOrEqual(
+      CLOCK_HZ / PUBLISH_HZ,
+    );
   });
 });
