@@ -17,29 +17,14 @@ import { assertWaveScheduleOrdered } from "../wave-schedule";
  * so a pathological rate cannot stall the accumulator or materialize an unbounded
  * arrival array. Past `Number.MAX_SAFE_INTEGER` the `acc -= 1` step stops making
  * progress, so an unbounded rate would loop forever; this bound forbids that.
+ * The shared `assertWaveScheduleOrdered` (`../wave-schedule.ts`) already rejects
+ * a non-finite or negative rate; this cap is the one accumulator-specific check
+ * left local to admission.
  */
 const MAX_EVENTS_PER_TICK = 10_000;
 
-/** Reject a wave whose bounds are not non-negative integers, so every emitted tick stays whole. */
-function assertTickBounds(wave: Wave, index: number): void {
-  if (!Number.isInteger(wave.startTick) || wave.startTick < 0) {
-    throw new Error(`admitArrivals: wave ${index} startTick must be a non-negative integer.`);
-  }
-  if (!Number.isInteger(wave.durationTicks) || wave.durationTicks < 0) {
-    throw new Error(`admitArrivals: wave ${index} durationTicks must be a non-negative integer.`);
-  }
-}
-
-/**
- * Reject a rate that is not finite and non-negative. A non-finite rate would
- * loop forever in the accumulator below, so this throws before that can happen.
- */
-function assertRate(wave: Wave, index: number): void {
-  if (!Number.isFinite(wave.eventsPerTick) || wave.eventsPerTick < 0) {
-    throw new Error(
-      `admitArrivals: wave ${index} eventsPerTick must be a finite, non-negative number.`,
-    );
-  }
+/** Reject a rate above the accumulator's cap. Finiteness and sign are the shared helper's job. */
+function assertRateCap(wave: Wave, index: number): void {
   if (wave.eventsPerTick > MAX_EVENTS_PER_TICK) {
     throw new Error(
       `admitArrivals: wave ${index} eventsPerTick ${wave.eventsPerTick} exceeds the ${MAX_EVENTS_PER_TICK} cap.`,
@@ -56,11 +41,13 @@ function assertRate(wave: Wave, index: number): void {
  * generator does.
  */
 export function admitArrivals(waves: readonly Wave[]): number[] {
-  waves.forEach((wave, index) => {
-    assertTickBounds(wave, index);
-    assertRate(wave, index);
-  });
+  // Field validity, chronological order, and no-overlap all live in the shared
+  // helper now (F002); thrown messages come from there, which is fine since this
+  // module's own tests use bare `.toThrow()`.
   assertWaveScheduleOrdered(waves);
+  waves.forEach((wave, index) => {
+    assertRateCap(wave, index);
+  });
 
   const arrivals: number[] = [];
   for (const wave of waves) {

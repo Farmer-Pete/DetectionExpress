@@ -179,6 +179,25 @@ describe("engine start guards", () => {
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
+  it("throws on a NaN-startTick wave and allocates nothing (F002)", () => {
+    const driver = new SpyDriver();
+    const waves: Wave[] = [{ startTick: Number.NaN, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves,
+        driver,
+      }),
+    ).toThrow();
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
   it("tears down the clock and publishes nothing when setup throws after the clock is built", () => {
     // The Clock is constructed and starts the driver, then reading the scorer during
     // runtime wiring throws. This exercises start()'s post-construction catch, which must

@@ -101,7 +101,7 @@ The performance ramp. Event volume and burst size climb. New Endpoints add new d
 _Avoid_: Load, traffic.
 
 **Wave**:
-A scripted benign arrival surge: Event volume rises for a bounded stretch per the run's schedule (`src/sim/scenario.ts` `Wave`, `src/game/tuning.ts` `WAVE_RATES`). It is not an Attack, a hidden intrusion, and not a Stress event, a surge that exposes a Side effect.
+A scripted benign rise in Event volume for a bounded stretch per the run's schedule (`src/sim/scenario.ts` `Wave`, `src/game/tuning.ts` `WAVE_RATES`). It is not an Attack, a hidden intrusion, and not a Stress event, a rise that exposes a Side effect.
 _Avoid_: surge, burst, spike, rush.
 
 **Feature request**:

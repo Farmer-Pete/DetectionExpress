@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
 import { URGENT_HITS } from "../../game/tuning";
@@ -122,7 +122,7 @@ describe("FindingsPanel", () => {
     publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
     const { container } = render(<InspectorShell />);
     useGameStore.getState().selectFinding(5);
-    const panel = container.querySelector(".findings-panel");
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
     if (!panel) {
       throw new Error("expected the findings panel");
     }
@@ -165,25 +165,36 @@ describe("FindingsPanel", () => {
     expect(container.querySelector(".findings-panel")?.className).toMatch(/urgent/);
   });
 
-  it("carries no visually-hidden urgent announcement below URGENT_HITS", () => {
+  it("carries the status region always, with no 'urgent' text below URGENT_HITS", () => {
     const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
       live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
     );
     publish(findings);
-    render(<InspectorShell />);
-    expect(screen.queryByText(/urgent/i)).toBeNull();
+    const { container } = render(<InspectorShell />);
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    const status = within(panel).getByRole("status");
+    expect(status.className).toMatch(/visually-hidden/);
+    expect(status.textContent).not.toMatch(/urgent/i);
   });
 
-  it("adds a visually-hidden urgent announcement at URGENT_HITS, so the state is perceivable without the border pulse", () => {
+  it("carries 'urgent' in the status region's text at URGENT_HITS, so the state is perceivable without the border pulse", () => {
     const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
       live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
     );
     publish(findings);
-    render(<InspectorShell />);
-    const announcement = screen.getByText(/urgent/i);
-    expect(announcement.className).toMatch(/visually-hidden/);
-    // The visible counter's own text stays exactly as before; the announcement is a
-    // separate node, so it never leaks into the visible string.
+    const { container } = render(<InspectorShell />);
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    const status = within(panel).getByRole("status");
+    expect(status.className).toMatch(/visually-hidden/);
+    expect(status.textContent).toMatch(/urgent/i);
+    // The visible counter's own text stays exactly as before; the status region is a
+    // separate node, so its text never leaks into the visible string.
     expect(screen.getByText(`⚠ ${URGENT_HITS} active`)).toBeDefined();
   });
 

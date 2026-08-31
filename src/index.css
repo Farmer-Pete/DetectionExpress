@@ -46,12 +46,16 @@ body {
 
 /* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
    applied only inside the `prefers-reduced-motion: no-preference` block near
-   the end of this file; every state it animates also carries a static,
-   unanimated form outside that guard (see `.wave-readout-incoming`,
-   `.findings-panel.urgent`, and the `severityFill`-driven fill colors), so
-   color and count changes still read with motion off. Colors are existing
-   palette tokens only, per `docs/design/hud-palette.md`; translucent stops mix
-   against the tokens with `color-mix`, per that doc's mix rule. */
+   the end of this file. The state-bearing animations (`heart`, driving
+   `.wave-readout-incoming`, `.findings-panel.urgent`, and the
+   `severityFill`-driven fill colors) also carry a static, unanimated form
+   outside that guard, so color and count changes still read with motion off.
+   The one-shot transients (`waveflash`, `shake`) are the opposite: they ARE
+   the effect, so they intentionally have no static form to fall back to (see
+   the "Wave juice animations" comment below, near the guard itself). Colors
+   are existing palette tokens only, per
+   `docs/design/hud-palette.md`; translucent stops mix against the tokens with
+   `color-mix`, per that doc's mix rule. */
 @keyframes waveflash {
   0% {
     box-shadow:
@@ -1176,19 +1180,20 @@ body {
 }
 
 /* Wave readout (#38 juice item 1): "next wave in N" while calm, swapping to a
-   pulsing "WAVE INCOMING" while incoming. The incoming color is static outside
-   the reduced-motion guard, so the state reads even with motion off
-   (GH38+40-PLAN.md decision 4); the guard near the end of this file only adds the
-   heart pulse on top. */
+   pulsing "WAVE INCOMING" while incoming. Neither state carries inherent
+   threat/alert/ok semantics, so both use `--ink` per hud-palette.md's Emphasis
+   rule; incoming stays bold outside the reduced-motion guard, so the state
+   reads even with motion off (GH38+40-PLAN.md decision 4) — the guard near the
+   end of this file only adds the heart pulse on top. */
 .wave-readout {
   margin-left: auto;
-  color: var(--dim);
+  color: var(--ink);
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
 .wave-readout-incoming {
-  color: var(--threat);
+  color: var(--ink);
   font-weight: 700;
 }
 

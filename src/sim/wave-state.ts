@@ -27,7 +27,13 @@ export interface WaveReading {
  * Precedence is `active > incoming > calm`: a tick inside one wave, while the
  * next wave's warn window has already opened, reads `active`. Both
  * `WAVE_WARN_TICKS` and the drain pacing are tuning knobs, so that overlap is
- * reachable and must resolve predictably.
+ * reachable and must resolve predictably. A consequence of that precedence: a
+ * successor wave's `incoming` phase is only ever observable at a tick that sits
+ * strictly after the prior wave's end, so it needs a positive drain gap between
+ * the two waves to have any ticks to occupy at all — and, for the sampler to
+ * actually catch one of those ticks, that gap must be at least the publish
+ * stride (`CLOCK_HZ / PUBLISH_HZ`), the invariant `DRAIN_GAP_TICKS` documents
+ * and `schedule.test.ts` locks (F012).
  *
  * `incoming` covers the half-open warn window immediately before a wave's
  * start: `ticksUntilNext` in `(0, warnTicks]`. `eventsPerTick` on an `active`

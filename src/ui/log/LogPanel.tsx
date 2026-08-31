@@ -17,10 +17,15 @@
  * The transport row also carries the wave readout (#38 juice item 1): "next
  * wave in Ns" (whole game-seconds) while calm, a pulsing "◈ WAVE INCOMING"
  * while incoming, and nothing while a wave is active or after the last one (no
- * countdown to show). That visible text is `aria-hidden` because it ticks too
- * fast to announce; a separate `role="status"` region carries only the
- * low-frequency phase change ("wave incoming"), which fires at most a few
- * times per run. On the incoming -> active edge the panel's own column
+ * countdown to show). Both the readout and the status announcement gate on
+ * `snapshot.status === "running"` (F003): once a run has concluded (won or
+ * failed) neither renders, since a wave reading from a stopped clock is stale,
+ * not a live cue. That gate is about conclusion, not the transport freeze —
+ * pausing (`transport.frozen`) leaves the readout showing the frozen reading,
+ * since the run can still resume. That visible text is `aria-hidden` because
+ * it ticks too fast to announce; a separate `role="status"` region carries
+ * only the low-frequency phase change ("wave incoming"), which fires at most a
+ * few times per run. On the incoming -> active edge the panel's own column
  * flashes once (`useWavePhaseEdge`, one-shot ownership: this component owns
  * its `.waveflash` class and clears it itself, independent of App's
  * `.shake`). The queue bar also gains a `queue-bar-danger` pulse class at
@@ -119,6 +124,7 @@ export function LogPanel() {
   const processed = useGameStore((s) => s.snapshot.processed);
   const admitted = useGameStore((s) => s.snapshot.admitted);
   const wave = useGameStore((s) => s.snapshot.wave);
+  const status = useGameStore((s) => s.snapshot.status);
   const frozen = useGameStore((s) => s.transport.frozen);
   const speed = useGameStore((s) => s.transport.speed);
   const setFrozen = useGameStore((s) => s.setFrozen);
@@ -178,7 +184,11 @@ export function LogPanel() {
   const showSticky = !caughtUp && !cursorVisible;
 
   const newestFirst = events.slice().reverse();
-  const readout = waveReadout(wave);
+  // Gate on conclusion (won/failed), never on the transport freeze: a paused run
+  // can still resume, so its frozen reading stays live; a concluded run cannot,
+  // so its stale reading must not keep showing (F003).
+  const running = status === "running";
+  const readout = running ? waveReadout(wave) : null;
   const dangerPulse = severityLevel(frac) === "danger";
 
   return (
@@ -219,7 +229,7 @@ export function LogPanel() {
             </span>
           ) : null}
           <span className="visually-hidden" role="status">
-            {waveAnnouncement(wave.phase)}
+            {running ? waveAnnouncement(wave.phase) : ""}
           </span>
         </div>
       </div>

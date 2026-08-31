@@ -62,9 +62,17 @@ export function FindingsPanel() {
         <>
           <div className="findings-header">
             <span className="findings-active">⚠ {activeCount} active</span>
-            {/* The border pulse is a visual-only cue; this spells the crossing out for a
-                screen reader, since motion carries no signal past a border color. */}
-            {urgent ? <span className="visually-hidden">, urgent</span> : null}
+            {/* A persistent role="status" live region: the node always exists, so the
+                browser is already watching it, and only its text changes between
+                renders. That text change is what triggers the announcement (an
+                element that mounts already carrying its final text announces
+                nothing), the same live-region mechanics as LogPanel's
+                waveAnnouncement. The border pulse is a visual-only cue; this spells
+                the crossing out for a screen reader, since motion carries no signal
+                past a border color. */}
+            <span className="visually-hidden" role="status">
+              {urgent ? ", urgent" : ""}
+            </span>
           </div>
           <ul className="findings-list">
             {visible.map((group) => (

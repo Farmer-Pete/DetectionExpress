@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLOCK_HZ,
   DRAIN_GAP_TICKS,
   INTRO_TICKS,
+  PUBLISH_HZ,
   WAVE_COUNT,
   WAVE_DURATION_TICKS,
   WAVE_RATES,
@@ -52,5 +54,17 @@ describe("buildSchedule", () => {
 
   it("is deterministic: repeated calls return the same schedule", () => {
     expect(buildSchedule()).toEqual(buildSchedule());
+  });
+
+  it("keeps DRAIN_GAP_TICKS at or above the publish stride (F012)", () => {
+    // The publish stride, CLOCK_HZ / PUBLISH_HZ, is the coarsest sample spacing the
+    // sampler ever takes (currently 3 ticks). A successor wave's checkpoint lands
+    // exactly DRAIN_GAP_TICKS after the prior wave ends (see the test above), and
+    // that gap is the only window in which `waveStateAt` can read the successor's
+    // 'incoming' phase (wave-state.ts's precedence note). A gap smaller than the
+    // publish stride can let every publish sample land on either side of that
+    // window and skip it, or shrink it to zero ticks, so the flash/shake/
+    // announcement silently never fires for that wave.
+    expect(DRAIN_GAP_TICKS).toBeGreaterThanOrEqual(CLOCK_HZ / PUBLISH_HZ);
   });
 });

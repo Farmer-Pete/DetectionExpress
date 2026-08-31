@@ -151,6 +151,11 @@ export const WAVE_DURATION_TICKS = 240;
  * The gap after each wave before its checkpoint, in ticks. Short on purpose: a
  * fast rule drains the whole wave inside it, but the naive scan cannot, so the two
  * separate at the checkpoint. Locked with the wave rates by the band test.
+ *
+ * #40 knob, constrained: must stay `>= CLOCK_HZ / PUBLISH_HZ` (the publish
+ * stride), or a successor wave's brief 'incoming' phase can fall between publish
+ * samples, or vanish entirely, and silently drop the flash/shake/announcement.
+ * Locked by `schedule.test.ts`'s F012 case; see `wave-state.ts`'s precedence note.
  */
 export const DRAIN_GAP_TICKS = 45;
 
@@ -169,6 +174,11 @@ export const CORRECTNESS_FLOOR = 50;
  * How many ticks before a wave's `startTick` the reading flips from "calm" to
  * "incoming" (`waveStateAt` in `wave-state.ts`). Roughly the prototype's warn
  * fraction of its cycle.
+ *
+ * #40 knob, constrained: for a successor wave's 'incoming' phase to be
+ * observable at all, `DRAIN_GAP_TICKS` must stay `>= CLOCK_HZ / PUBLISH_HZ`
+ * (see that constant's note and `wave-state.ts`'s precedence note). This
+ * constant does not itself need to clear that bound.
  */
 export const WAVE_WARN_TICKS = 30;
 

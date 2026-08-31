@@ -1,6 +1,61 @@
 import { describe, expect, it } from "vitest";
 import type { Wave } from "./scenario";
-import { assertWaveScheduleOrdered } from "./wave-schedule";
+import { assertWaveFields, assertWaveScheduleOrdered } from "./wave-schedule";
+
+describe("assertWaveFields (F002)", () => {
+  it("accepts a well-formed wave", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 10, eventsPerTick: 1.5 }, 0),
+    ).not.toThrow();
+  });
+
+  it("rejects a NaN startTick", () => {
+    expect(() =>
+      assertWaveFields({ startTick: Number.NaN, durationTicks: 5, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects a negative startTick", () => {
+    expect(() =>
+      assertWaveFields({ startTick: -1, durationTicks: 5, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects a negative durationTicks", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: -5, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer durationTicks", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 5.5, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects an infinite eventsPerTick", () => {
+    expect(() =>
+      assertWaveFields(
+        { startTick: 0, durationTicks: 5, eventsPerTick: Number.POSITIVE_INFINITY },
+        0,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects a negative eventsPerTick", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 5, eventsPerTick: -1 }, 0),
+    ).toThrow();
+  });
+
+  it("carries no MAX_EVENTS_PER_TICK cap: a very large finite rate is fine here", () => {
+    // The accumulator-specific cap is admission.ts's own concern (F002), not this
+    // shared field check's.
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 5, eventsPerTick: 1_000_000 }, 0),
+    ).not.toThrow();
+  });
+});
 
 describe("assertWaveScheduleOrdered", () => {
   it("accepts an empty schedule", () => {
@@ -46,5 +101,45 @@ describe("assertWaveScheduleOrdered", () => {
       { startTick: 0, durationTicks: 10, eventsPerTick: 1 },
     ];
     expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects a NaN startTick (F002)", () => {
+    const waves: Wave[] = [{ startTick: Number.NaN, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects a negative startTick (F002)", () => {
+    const waves: Wave[] = [{ startTick: -1, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects a negative durationTicks (F002)", () => {
+    const waves: Wave[] = [{ startTick: 0, durationTicks: -5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects a non-integer durationTicks (F002)", () => {
+    const waves: Wave[] = [{ startTick: 0, durationTicks: 5.5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects an infinite eventsPerTick (F002)", () => {
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: Number.POSITIVE_INFINITY },
+    ];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("rejects a negative eventsPerTick (F002)", () => {
+    const waves: Wave[] = [{ startTick: 0, durationTicks: 5, eventsPerTick: -1 }];
+    expect(() => assertWaveScheduleOrdered(waves)).toThrow();
+  });
+
+  it("accepts a well-formed wave, fields, order, and overlap all clean (F002)", () => {
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 10, eventsPerTick: 1.5 },
+      { startTick: 10, durationTicks: 5, eventsPerTick: 2 },
+    ];
+    expect(() => assertWaveScheduleOrdered(waves)).not.toThrow();
   });
 });

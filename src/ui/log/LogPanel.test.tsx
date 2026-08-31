@@ -10,6 +10,11 @@ function setWave(wave: SimSnapshot["wave"]): void {
   useGameStore.setState({ snapshot: { ...emptySnapshot(), wave } });
 }
 
+/** Publish a snapshot carrying the given wave reading and run status. */
+function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status"]): void {
+  useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });
+}
+
 function kioskEvent(id: number, overrides: Partial<RingEvent> = {}): RingEvent {
   return {
     id,
@@ -223,6 +228,37 @@ describe("LogPanel wave readout (#38 juice item 1)", () => {
     render(<LogPanel />);
     expect(screen.queryByText(/next wave in/)).toBeNull();
     expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+});
+
+describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)", () => {
+  it("shows no WAVE INCOMING readout and an empty status region once the run has failed", () => {
+    setWaveAndStatus(
+      { phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null },
+      "failed",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("shows no 'next wave in' countdown once the run has failed, even while calm with a wave still scheduled", () => {
+    setWaveAndStatus(
+      { phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null },
+      "failed",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+  });
+
+  it("shows no readout and an empty status region once the run has won", () => {
+    setWaveAndStatus(
+      { phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null },
+      "won",
+    );
+    render(<LogPanel />);
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 });
 
