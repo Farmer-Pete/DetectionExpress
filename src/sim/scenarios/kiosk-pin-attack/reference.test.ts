@@ -125,7 +125,12 @@ describe("reference entity resolution through the real path (seam 5)", () => {
 });
 
 describe("reference anchor stability over the real run (seam 9)", () => {
-  it("never holds a watch and a hit for one account+reason at the same time", () => {
+  // A whole-run replay: every event through normalize/detect/record with a per-event
+  // invariant sweep. The GH102 stream (14 attacks plus fumbles) pushed it past the
+  // 5s default on slow CI runners, so it carries its own timeout.
+  it("never holds a watch and a hit for one account+reason at the same time", {
+    timeout: 30_000,
+  }, () => {
     const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
       threshold: PIN_BRUTE_FORCE_THRESHOLD,

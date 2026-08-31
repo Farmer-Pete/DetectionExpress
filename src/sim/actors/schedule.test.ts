@@ -85,9 +85,11 @@ describe("schedule golden regression", () => {
   ];
 
   it("reproduces GH30's exact readings for a fixed seed", () => {
-    expect(runActors({ actors: goldenCast(), env: null, runSeed: 4242, horizon: 100 })).toEqual(
-      golden,
-    );
+    expect(
+      runActors({ actors: goldenCast(), env: null, runSeed: 4242, horizon: 100 }).map(
+        (t) => t.reading,
+      ),
+    ).toEqual(golden);
   });
 
   it("still matches under a permutation of the input actors", () => {
@@ -96,7 +98,7 @@ describe("schedule golden regression", () => {
       env: null,
       runSeed: 4242,
       horizon: 100,
-    });
+    }).map((t) => t.reading);
     expect(reversed).toEqual(golden);
   });
 
@@ -115,7 +117,7 @@ describe("schedule golden regression", () => {
       env: null,
       runSeed: 1,
       horizon: 100,
-    });
+    }).map((t) => t.reading);
     expect(out).toEqual(goldenCollision);
   });
 
@@ -131,7 +133,7 @@ describe("schedule golden regression", () => {
       env: null,
       runSeed: 4242,
       horizon: 2000,
-    });
+    }).map((t) => t.reading);
     expect(out).toEqual(goldenStartOrder);
   });
 });

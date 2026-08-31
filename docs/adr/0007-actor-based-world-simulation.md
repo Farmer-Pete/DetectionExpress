@@ -463,6 +463,39 @@ Two properties are kept on purpose:
 The camera and door remain engine reducers over finished readings, not scheduler actors, as this
 ADR requires.
 
+## Revision: one generation method, repo-wide (ticket #102, 2026-08-31)
+
+The last field-roll generator is gone. This ADR set the actor model as the way every scenario
+generates data; #30, #87, and #89 built it out for the rider and staff paths, but the
+kiosk-pin-attack scenario and the calibration corpus still rolled flat kiosk records through a
+`generateKiosk` draft loop. #102 moves both onto the actor cast, so one generation method now holds
+across the whole repo: actors -> scheduler (`runActors`) -> composer (`composeRun`) ->
+`GeneratedRun`.
+
+What this revision records:
+
+- The kiosk scenario and the corpus are both built from one shared cast
+  (`src/sim/scenarios/kiosk-pin-attack/cast.ts`): seeded identity pools, one benign account rider
+  per admitted slot, and PIN attackers as world actors (`pin-attacker.ts`). The legacy
+  `KioskReading`, its fishery factory, `generateKiosk`, `GenContext`, and the `fishery` dependency
+  are deleted; the kiosk family now owns one record (`AccountKioskReading`) the way the fare-gate
+  family owns `FareGateReading`.
+- The composer carries ground truth as opaque labels only. `composeRun` takes an optional
+  `attackIdOf(reading)` and returns event ids bucketed per attack; it never knows what an Attack is.
+  The attacker's identity, not a field value, is the label.
+- Benign fumbles (scope addition). A benign account rider may fail its PIN, budgeted at cast
+  assembly to at most two fails per account per fixed 150-tick bucket, so a rolling detection window
+  sees at most four — below the threshold of five. Victims fumble zero. Separability holds by
+  construction; the scenario's assertions are the double check.
+- Multi-attacker waves (scope addition). Each wave carries `ATTACKS_PER_WAVE` bursts (2, 4, 8) on
+  globally distinct victims, so bursts on distinct accounts may overlap in time. The per-account
+  detector makes that fair.
+- The corpus is now burst-shaped (co-located patron/attacker pairs), so its fail share is emergent
+  (~0.847 shipped: the ~0.867 pair mean minus the measured fail-heavy slice offset), derived from
+  burst arithmetic rather than a tuned `CORPUS_FAIL_SHARE`. `CORPUS_VERSION` bumps to 2; the naive
+  reference rate is unchanged and the tally rate rises with the share, so the winnability band
+  still holds.
+
 ## Research sources
 
 - Agent-based model overview: https://en.wikipedia.org/wiki/Agent-based_model

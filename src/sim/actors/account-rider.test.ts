@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
+import type { AccountKioskReading } from "../endpoints/kiosk/internal";
 import { distanceTable } from "../world/distance";
 import type { Presence } from "../world/presence";
 import { buildTimetable } from "../world/timetable";
 import { world } from "../world/world";
-import type { AccountKioskReading, WorldEnv, WorldReading } from "../world-reading";
+import type { WorldEnv, WorldReading } from "../world-reading";
 import {
   type AccountRiderConfig,
   createAccountRider,
@@ -68,7 +69,7 @@ describe("createAccountRider", () => {
     expect(signin?.ts).toBe(BASE.startTick * GAME_SECONDS_PER_TICK);
   });
 
-  it("never fails a PIN: every reading over the whole visit is a success", () => {
+  it("with no fumble config, never fails a PIN: every reading is a success", () => {
     const { readings } = runAccountRider(BASE);
     expect(readings.length).toBeGreaterThan(0);
     for (const reading of readings) {
@@ -98,6 +99,33 @@ describe("createAccountRider", () => {
     const { readings } = runAccountRider({ ...BASE, station: "cen", terminal: "K2" });
     expect(readings[0]?.station).toBe("cen");
     expect(readings[0]?.terminal).toBe("K2");
+  });
+});
+
+describe("createAccountRider fumbles", () => {
+  it("emits fail, fail, then success at the sign-in tick, in that order", () => {
+    const { readings } = runAccountRider({ ...BASE, fumbleFails: 2 });
+    expect(readings.map((r) => r.outcome)).toEqual(["fail", "fail", "success"]);
+    // All three fire at the one sign-in tick.
+    const signinTs = BASE.startTick * GAME_SECONDS_PER_TICK;
+    for (const reading of readings) {
+      expect(reading.ts).toBe(signinTs);
+      expect(reading.account).toBe("river.k");
+      expect(reading.terminal).toBe("K1");
+    }
+  });
+
+  it("emits one fail then a success for fumbleFails: 1", () => {
+    const { readings } = runAccountRider({ ...BASE, fumbleFails: 1 });
+    expect(readings.map((r) => r.outcome)).toEqual(["fail", "success"]);
+  });
+
+  it("reproduces the omitted stream exactly when fumbleFails is 0", () => {
+    const omitted = runAccountRider(BASE).readings;
+    const zero = runAccountRider({ ...BASE, fumbleFails: 0 }).readings;
+    expect(zero).toEqual(omitted);
+    expect(omitted).toHaveLength(1);
+    expect(omitted[0]?.outcome).toBe("success");
   });
 });
 
