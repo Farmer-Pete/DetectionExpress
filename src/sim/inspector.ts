@@ -45,6 +45,13 @@ export interface TaskInspector {
 export interface Inspector extends TaskInspector {
   /** A fresh frozen events array and the watermark count. Never aliases the ring. */
   snapshot(): { events: readonly RingEvent[]; processed: number };
+  /**
+   * The ring entries whose id is in `ids`, id-ordered (not input-ordered). A cited
+   * id the ring has already evicted is simply absent from the result; the caller
+   * (the trace view-model) renders a placeholder for it. Entries are already
+   * deep-frozen at push, so returning references is safe.
+   */
+  resolveEvents(ids: readonly number[]): RingEvent[];
 }
 
 /** JSON-round-trip a value; a circular reference or BigInt falls back to `null`. */
@@ -95,6 +102,12 @@ export function createInspector(config: { ringSize: number }): Inspector {
     },
     snapshot() {
       return { events: Object.freeze([...ring]), processed };
+    },
+    resolveEvents(ids) {
+      // `ring` is already id-ordered (each push carries a strictly increasing id), so
+      // filtering it preserves id order regardless of the order `ids` names them in.
+      const wanted = new Set(ids);
+      return ring.filter((event) => wanted.has(event.id));
     },
   };
 }
