@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { referenceSource } from "../../../game/engine-source";
 import {
   ATTACKS_PER_WAVE,
   CORRECTNESS_W_FN,
@@ -17,7 +18,7 @@ import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
 import { buildSchedule } from "../../schedule";
-import { buildReferenceAlgorithm, referenceSource } from "./reference";
+import { buildReferenceAlgorithm } from "./reference";
 import { pinBruteForce } from "./scenario";
 
 /** The total attackers across all waves; the globally distinct victim count. */

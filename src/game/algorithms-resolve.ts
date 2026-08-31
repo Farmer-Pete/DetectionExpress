@@ -1,87 +1,64 @@
 /**
  * Pure resolution and framing helpers shared by the dev-only `algorithms-hmr` Vite
- * plugin (Node side, it stats the filesystem) and the dev client (browser side, it
- * subscribes by slug). No `fs`, no DOM: plain string logic, so both sides import it
- * and the same rules are unit-tested off the browser.
+ * plugin (Node side, it stats the filesystem) and the dev client (browser side). No
+ * `fs`, no DOM: plain string logic, so both sides import it and the same rules are
+ * unit-tested off the browser.
  *
- * The active file for a slug is the player override `src/algorithms/<slug>.ts` when it
- * exists on disk, else the committed default engine at `src/sim/default-engine.ts`
- * (86-PLAN.md "Loading path"). Paths are ROOT-RELATIVE URLs (`/src/...`) so Vite serves
- * them directly and the client can `import(path + "?v=" + version)`.
+ * One engine, not one algorithm per slug. The player's local override is a single
+ * fixed file, `src/algorithms/engine.ts`. When it exists on disk the run loads it;
+ * otherwise the run falls back to the committed default engine at
+ * `src/sim/default-engine.ts` (which is itself the composed single engine). The
+ * handshake carries no slug: `algo:hello` asks for the one engine, and the plugin
+ * replies `algo:changed { path, version }`.
  *
- * The slug is validated against `^[a-z0-9-]{1,64}$` before anything touches the
- * filesystem, and the pattern admits no `/` or `.`, so a resolved override path can only
- * name a file directly under `src/algorithms/`. There is no arbitrary slug-to-path step,
- * so no traversal surface.
+ * The override path is a compile-time constant, so there is no slug-to-path step and no
+ * traversal surface at all: the resolver can only ever name `src/algorithms/engine.ts`
+ * or the default.
  */
 
-/** The one legal slug shape. No `/`, no `.`, so it cannot escape `src/algorithms/`. */
-const ALGORITHM_SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
-
-/** The player-override directory, as a root-relative URL prefix. The dev plugin derives its
- * filesystem subdirectory from this, so the URL path and the watched path cannot drift. */
+/** The player-override directory, as a root-relative URL prefix. The dev plugin derives
+ * its filesystem subdirectory from this, so the URL path and the watched path cannot drift. */
 export const ALGORITHMS_DIR = "/src/algorithms";
 
-/** The committed fallback engine, loaded when a slug has no override on disk. */
+/** The one fixed player-override file. No slug: one engine detects every hunt. */
+export const ENGINE_OVERRIDE_PATH = `${ALGORITHMS_DIR}/engine.ts`;
+
+/** The committed fallback engine, loaded when the override file is absent. */
 export const DEFAULT_ENGINE_PATH = "/src/sim/default-engine.ts";
 
-/** True when `slug` matches the one legal shape. An invalid slug never touches the fs. */
-export function isValidAlgorithmSlug(slug: string): boolean {
-  return ALGORITHM_SLUG_PATTERN.test(slug);
-}
-
-/** The root-relative URL of a slug's override file. Caller must validate the slug first. */
-export function overridePath(slug: string): string {
-  return `${ALGORITHMS_DIR}/${slug}.ts`;
-}
-
 /**
- * Resolve the active file for a slug, given an `exists` predicate the caller supplies
- * (the plugin's `fs.existsSync`, or a fake in tests). Returns null for an invalid slug
- * WITHOUT calling `exists`, so an invalid slug never triggers a filesystem read. A valid
- * slug resolves to its override when `exists(slug)` is true, else the default engine.
+ * Resolve the active engine file: the override when it exists on disk, else the default
+ * engine. `overrideExists` is supplied by the caller (the plugin's `fs.existsSync`, or a
+ * fake in tests), so this stays pure and testable off the filesystem.
  */
-export function resolveActiveFile(slug: string, exists: (slug: string) => boolean): string | null {
-  if (!isValidAlgorithmSlug(slug)) {
-    return null; // never calls exists: no fs touch for an invalid slug
-  }
-  return exists(slug) ? overridePath(slug) : DEFAULT_ENGINE_PATH;
+export function resolveActiveFile(overrideExists: boolean): string {
+  return overrideExists ? ENGINE_OVERRIDE_PATH : DEFAULT_ENGINE_PATH;
 }
 
-/**
- * The boolean-input form of `resolveActiveFile`: resolve given whether the override
- * already exists (86-PLAN.md M2 test seam `selectActiveFile(slug, files)`). Returns null
- * for an invalid slug.
- */
-export function selectActiveFile(slug: string, overrideExists: boolean): string | null {
-  return resolveActiveFile(slug, () => overrideExists);
-}
-
-/** The `algo:changed` frame the plugin pings and the client parses. */
+/** The slugless `algo:changed` frame the plugin pings and the client parses. */
 export interface ChangedFrame {
-  slug: string;
   path: string;
   version: number;
 }
 
 /** Build the `algo:changed` frame for a resolved active file. */
-export function buildChangedFrame(slug: string, path: string, version: number): ChangedFrame {
-  return { slug, path, version };
+export function buildChangedFrame(path: string, version: number): ChangedFrame {
+  return { path, version };
 }
 
 /**
  * The cache-busting module URL the client imports and the profiler measures. `version`
  * is the plugin's monotonic counter, so an unchanged file reuses the URL (and the cached
- * rate) and a save bumps it to a fresh URL (86-PLAN.md "cache identity").
+ * rate) and a save bumps it to a fresh URL.
  */
 export function localAlgorithmUrl(path: string, version: number): string {
   return `${path}?v=${version}`;
 }
 
 /**
- * The plugin's single monotonic version counter — "the only source of versioning"
- * (86-PLAN.md). `current` answers a bootstrap `algo:hello` with the latest value;
- * `bump` advances it on each filesystem change under `src/algorithms/`.
+ * The plugin's single monotonic version counter — the only source of versioning.
+ * `current` answers a bootstrap `algo:hello` with the latest value; `bump` advances it
+ * on each filesystem change under `src/algorithms/`.
  */
 export interface VersionCounter {
   current(): number;

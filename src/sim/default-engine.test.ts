@@ -3,7 +3,7 @@ import { LEVEL_SEED } from "../game/tuning";
 import { detect as defaultDetect, normalize as defaultNormalize } from "./default-engine";
 import { isRawKioskV1, type RawKioskV1 } from "./endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "./event";
-import type { Finding } from "./finding";
+import type { DetectView, Finding } from "./finding";
 import {
   buildReferenceAlgorithm,
   type ReferenceAlgorithm,
@@ -19,16 +19,27 @@ function raw(ev: PipeEvent): RawKioskV1 {
 }
 
 /**
- * Drive an Algorithm over the whole stream and collect its Findings, mirroring how the
- * engine runs Normalize then Detect: Normalize shapes the raw payload, then Detect reads
- * that shape plus the engine's `id`/`ts`/`endpoint` fields and returns a `Finding[]`.
+ * Drive the composed default engine over the whole stream. It parses each payload
+ * through the endpoint-dispatching `normalize(raw, endpoint)`, then reads the flat
+ * `DetectView` the engine builds and returns a `Finding[]`.
  */
-function collectFindings(algo: ReferenceAlgorithm, events: PipeEvent[]): Finding[] {
+function collectDefault(events: PipeEvent[]): Finding[] {
   const findings: Finding[] = [];
   for (const ev of events) {
-    const norm = algo.normalize(raw(ev));
+    const norm = defaultNormalize(raw(ev), ev.endpoint);
+    const view: DetectView = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
+    findings.push(...defaultDetect(view));
+  }
+  return findings;
+}
+
+/** Drive the single-endpoint twin over the stream; its `normalize` takes just the raw. */
+function collectTwin(twin: ReferenceAlgorithm, events: PipeEvent[]): Finding[] {
+  const findings: Finding[] = [];
+  for (const ev of events) {
+    const norm = twin.normalize(raw(ev));
     const view = { ...norm, id: ev.id, ts: ev.ts, endpoint: ev.endpoint };
-    findings.push(...algo.detect(view));
+    findings.push(...twin.detect(view));
   }
   return findings;
 }
@@ -37,14 +48,11 @@ describe("default engine parity with the reference Algorithm", () => {
   it("raises the same Findings as the reference twin on the kiosk stream", () => {
     const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
 
-    // The default engine holds module-level state, so this single pass is one clean run,
-    // the way a fresh module import would replay it. The reference twin is a fresh
-    // per-instance build, the independent source of truth.
-    const defaultFindings = collectFindings(
-      { normalize: defaultNormalize, detect: defaultDetect },
-      events,
-    );
-    const referenceFindings = collectFindings(buildReferenceAlgorithm(), events);
+    // The default engine composes one rule instance at module load, so this single pass
+    // is one clean run, the way a fresh module import would replay it. The reference twin
+    // is a fresh per-instance build, the independent source of truth.
+    const defaultFindings = collectDefault(events);
+    const referenceFindings = collectTwin(buildReferenceAlgorithm(), events);
 
     expect(defaultFindings).toEqual(referenceFindings);
     // Guard against a vacuous pass: both engines catch every Attack, one hit each.
@@ -54,23 +62,25 @@ describe("default engine parity with the reference Algorithm", () => {
   });
 });
 
-/**
- * Drive one account's fails through a fresh Algorithm and collect its Findings per
- * step, so the watch-to-hit shape is observable event by event.
- */
-function fail(id: number, ts: number) {
-  return {
-    account: "amy",
-    terminal: "KIOSK-01",
-    outcome: "fail" as const,
-    id,
-    ts,
-    endpoint: "kiosk-v1",
-  };
+/** The concrete flat view both detect shapes read, event by event. */
+interface KioskView {
+  account: string;
+  terminal: string;
+  outcome: "success" | "fail";
+  id: number;
+  ts: number;
+  endpoint: string;
+}
+
+/** One fail Event on account "amy" in the flat view detect() reads. */
+function fail(id: number, ts: number): KioskView {
+  return { account: "amy", terminal: "KIOSK-01", outcome: "fail", id, ts, endpoint: "kiosk-v1" };
 }
 
 describe.each([
-  ["default engine", () => ({ normalize: defaultNormalize, detect: defaultDetect })],
+  // The composed engine's detect reads the engine's `DetectView`; the concrete view
+  // widens to it through a fresh spread at this boundary.
+  ["default engine", () => ({ detect: (v: KioskView) => defaultDetect({ ...v }) })],
   ["reference twin", () => buildReferenceAlgorithm()],
 ])("%s watch-to-hit promotion", (_name, build) => {
   it("emits four anchored watches, then one hit on the same anchor and reason", () => {

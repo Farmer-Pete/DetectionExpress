@@ -1,77 +1,23 @@
 /**
- * The reference Algorithm, in two forms with the same logic.
+ * The in-process reference twin the deterministic tests drive. It is a thin
+ * single-endpoint view over the shared source of truth: `normalizeKiosk` for the
+ * kiosk wire format and `buildRule()` for the detect logic. So the twin, the composed
+ * default engine, and the assembled editor source all derive from the same two files
+ * and stay in parity by construction.
  *
- * `referenceSource` is the editor's default text and what the browser run loads.
- * It imports lodash by absolute URL, the way a player would. `referenceAlgorithm`
- * is the in-process twin the deterministic tests run: the same logic with no
- * import, so it needs no network and no loader. Both emit anchored watches on the
- * way up ("N of 5 wrong PINs"), then one hit per burst, grouped by account.
+ * The twin is single-endpoint on purpose: its `normalize(raw)` takes only the raw
+ * payload (no endpoint dispatch), because the tests feed it kiosk-v1 readings and read
+ * the normalized record straight back. State lives per instance, so a fresh
+ * `buildReferenceAlgorithm()` replays a run cleanly.
+ *
+ * The editor's default source string is no longer a hand-maintained constant here; it
+ * is assembled from these files by the Vite virtual module (`virtual:engine-source`,
+ * re-exported from `src/game/engine-source.ts`).
  */
-
 import type { RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
+import { type NormalizedKiosk, normalizeKiosk } from "../../endpoints/kiosk/normalize";
 import type { Finding } from "../../finding";
-import { PIN_BRUTE_FORCE_REASON } from "./attacks";
-
-/** The editor default and the browser run. Imports lodash by URL, like a player. */
-export const referenceSource = `import _ from "https://esm.sh/lodash@4.17.21";
-export function normalize(raw) {
-  return {
-    account: raw.acct,
-    terminal: raw.term,
-    outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
-  };
-}
-const fails = {};
-const firing = {};
-function formatWindowClock(seconds) {
-  var m = Math.floor(seconds / 60);
-  var s = seconds % 60;
-  return m + ":" + (s < 10 ? "0" + s : s);
-}
-export function detect(e) {
-  const WINDOW = 300; // 5 minutes in game seconds
-  const THRESHOLD = 5;
-  if (e.outcome !== "fail") return [];
-  const f = (fails[e.account] ??= []);
-  f.push({ id: e.id, ts: e.ts });
-  const kept = f.filter((x) => x.ts > e.ts - WINDOW);
-  fails[e.account] = kept;
-  const anchor = kept[0].id; // first retained fail; stable across a dense burst
-  const eventIds = kept.map((x) => x.id);
-  if (kept.length < THRESHOLD) {
-    firing[e.account] = false;
-    return [{
-      alert: { reason: "pin_brute_force", at: e.ts, eventIds },
-      eventId: anchor,
-      subjectType: "account",
-      isPartial: true,
-      context: [{ type: "text", text: kept.length + " of " + THRESHOLD + " wrong PINs" }],
-    }];
-  }
-  if (firing[e.account]) return []; // one hit per burst; no duplicates
-  firing[e.account] = true;
-  return [{
-    alert: { reason: "pin_brute_force", at: e.ts, eventIds },
-    eventId: anchor,
-    subjectType: "account",
-    context: [{
-      type: "kv",
-      entries: [
-        { label: "wrong PINs", value: kept.length },
-        { label: "threshold", value: THRESHOLD },
-        { label: "window", value: formatWindowClock(WINDOW) },
-      ],
-    }],
-  }];
-}
-`;
-
-/** The player's shape after Normalize. */
-interface NormalizedKiosk {
-  account: string;
-  terminal: string;
-  outcome: "success" | "fail";
-}
+import { buildRule } from "./rule";
 
 /** The flat view Detect hands the Rule: the normalized payload plus engine fields. */
 interface KioskDetectView extends NormalizedKiosk {
@@ -85,81 +31,19 @@ export interface ReferenceAlgorithm {
   detect(e: KioskDetectView): Finding[];
 }
 
-/** `WINDOW` as "m:ss" for the kv widget (`sim/` stays UI-free: no import from
- *  `src/ui/log/formatters`). Mirrors `referenceSource`'s identical helper and
- *  `default-engine.ts`'s, so the parity trio emits byte-identical context. */
-function formatWindowClock(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}:${String(secs).padStart(2, "0")}`;
-}
-
 /**
- * The in-process twin. State lives per instance, so a fresh instance replays the
- * same run cleanly, the way reloading the source module would. The engine test
- * builds a fresh one per run to keep run-twice determinism honest.
+ * The in-process twin. `normalize` is the kiosk normalizer; `detect` is one fresh
+ * pin-brute-force rule instance, so its `fails`/`firing` state starts clean. The
+ * concrete kiosk view is projected onto the engine's `DetectView` (its normalized
+ * payload rides the index signature) at the single-endpoint boundary here.
  */
 export function buildReferenceAlgorithm(): ReferenceAlgorithm {
-  const fails = new Map<string, Array<{ id: number; ts: number }>>();
-  const firing = new Set<string>();
-  const WINDOW = 300; // 5 minutes in game seconds
-  const THRESHOLD = 5;
-
+  const rule = buildRule();
   return {
-    normalize(raw) {
-      return {
-        account: raw.acct,
-        terminal: raw.term,
-        outcome: raw.res === "WRONG_PIN" ? "fail" : "success",
-      };
-    },
-    detect(e) {
-      if (e.outcome !== "fail") {
-        return [];
-      }
-      const f = fails.get(e.account) ?? [];
-      f.push({ id: e.id, ts: e.ts });
-      const kept = f.filter((x) => x.ts > e.ts - WINDOW);
-      fails.set(e.account, kept);
-      // The anchor: the first retained fail. Stable while a burst sits inside one
-      // window, so the watch and the hit share `eventId` + `reason` and the scorer
-      // promotes one row in place. kept always holds the just-pushed fail.
-      const anchor = kept[0]?.id ?? e.id;
-      const eventIds = kept.map((x) => x.id);
-      if (kept.length < THRESHOLD) {
-        firing.delete(e.account);
-        return [
-          {
-            alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds },
-            eventId: anchor,
-            subjectType: "account",
-            isPartial: true,
-            context: [{ type: "text", text: `${kept.length} of ${THRESHOLD} wrong PINs` }],
-          },
-        ];
-      }
-      if (firing.has(e.account)) {
-        return []; // one hit per burst; no duplicates
-      }
-      firing.add(e.account);
-      return [
-        {
-          alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds },
-          eventId: anchor,
-          subjectType: "account",
-          context: [
-            {
-              type: "kv",
-              entries: [
-                { label: "wrong PINs", value: kept.length },
-                { label: "threshold", value: THRESHOLD },
-                { label: "window", value: formatWindowClock(WINDOW) },
-              ],
-            },
-          ],
-        },
-      ];
-    },
+    normalize: normalizeKiosk,
+    // Spread the concrete kiosk view into a fresh literal so it satisfies the engine's
+    // `DetectView` (its index signature) at the seam, with no assertion.
+    detect: (e) => rule.detect({ ...e }),
   };
 }
 

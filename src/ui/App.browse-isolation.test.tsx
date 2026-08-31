@@ -8,11 +8,11 @@
  */
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import { referenceSource } from "../game/engine-source";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
 import type { LiveFinding } from "../sim/correctness";
-import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { caughtDecision } from "./decisions/decision-fixtures";

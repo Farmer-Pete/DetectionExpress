@@ -16,8 +16,8 @@
  * current source to a file, so a player can carry their engine into their own editor as a
  * starting point for `src/algorithms/<slug>.ts`.
  */
+import { referenceSource } from "../game/engine-source";
 import { useGameStore } from "../game/store";
-import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { scenarioFileName } from "./scenarios";
 
 interface AlgorithmEditorProps {

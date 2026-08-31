@@ -49,11 +49,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
 import { devHotChannel, loadAlgorithmsDevClient } from "../game/algorithms-dev-flag";
 import { localAlgorithmUrl } from "../game/algorithms-resolve";
+import { defaultScenario } from "../game/registry";
 import { createRunController, type RunController } from "../game/run-controller";
 import { getGraph, useGameStore } from "../game/store";
 import { createWorldRunController, type WorldRunController } from "../game/world-run-controller";
 import { useWorldStore, worldSpeed } from "../game/world-store";
-import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { emptySnapshot } from "../sim/snapshot";
 import { distanceTable } from "../sim/world/distance";
 import { world } from "../sim/world/world";
@@ -85,7 +85,7 @@ const worldDistances = distanceTable(world);
 
 function buildController(): RunController {
   return createRunController({
-    scenario: pinBruteForce,
+    scenario: defaultScenario,
     getGraph,
     // The one discriminated input. A local override (set by the dev-only algorithms
     // client) drives url mode; otherwise the in-game editor drives source mode.
@@ -219,7 +219,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
     }
   }, [introOpen]);
 
-  const slug = scenarioSlug(pinBruteForce.id);
+  const slug = scenarioSlug(defaultScenario.id);
 
   // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
   // controller per visible epoch; the cleanup disposes it (permanently) on hide or
@@ -306,7 +306,6 @@ export function App({ createPipelineController, createWorldController }: AppProp
           return;
         }
         const client = mod.createAlgorithmsDevClient({
-          slug,
           channel,
           store: {
             getSource: () => useGameStore.getState().source,
@@ -329,7 +328,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
       algoClientRef.current?.dispose();
       algoClientRef.current = null;
     };
-  }, [slug]);
+  }, []);
 
   const onEnterLocalMode = (): void => {
     algoClientRef.current?.enter();
@@ -403,7 +402,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
           <Hud />
           <InspectorShell findingsPanelRef={findingsPanelRef} />
           <DecisionsPanel panelRef={decisionsPanelRef} />
-          <Briefing tagline={liveScenario.tagline} text={pinBruteForce.briefing} />
+          <Briefing tagline={liveScenario.tagline} text={defaultScenario.briefing} />
           <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
           <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
           {algoReady ? (

@@ -30,7 +30,7 @@ import { normalizeKiosk } from "./rules";
  * detect returns the parsed findings.
  */
 export interface ProfilerRule<N extends object = object> {
-  normalize(raw: RawKioskV1): N;
+  normalize(raw: RawKioskV1, endpoint: string): N;
   detect(view: N & EngineFields): Finding[];
 }
 
@@ -63,7 +63,7 @@ export function calibrate<N extends object>(
   const playerNext = loopingCorpus(corpus);
   const runPlayer = (): void => {
     const event = playerNext();
-    const normalized = rule.normalize(event.payload);
+    const normalized = rule.normalize(event.payload, event.endpoint);
     const view = withEngineFields(normalized, event.id, event.ts, event.endpoint);
     // The profiler needs a work sink, not the findings themselves; a rule's work
     // is the number of findings it returns ([] counts as none).

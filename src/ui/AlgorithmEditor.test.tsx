@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { referenceSource } from "../game/engine-source";
 import { useGameStore } from "../game/store";
-import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 
 const SLUG = "pin-brute-force";

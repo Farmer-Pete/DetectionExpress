@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { referenceSource } from "../../../game/engine-source";
 import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
@@ -11,7 +12,7 @@ import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kio
 import type { PipeEvent } from "../../event";
 import type { Finding } from "../../finding";
 import { resolveEntity } from "../../tasks";
-import { buildReferenceAlgorithm, type ReferenceAlgorithm, referenceSource } from "./reference";
+import { buildReferenceAlgorithm, type ReferenceAlgorithm } from "./reference";
 import { pinBruteForce } from "./scenario";
 
 /**

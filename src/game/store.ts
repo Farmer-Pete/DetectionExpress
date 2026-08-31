@@ -10,8 +10,8 @@
  */
 import { create } from "zustand";
 import type { GraphEdge, GraphNode } from "../sim/graph";
-import { referenceSource } from "../sim/scenarios/pin-brute-force/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import { referenceSource } from "./engine-source";
 import type { RuleErrorInfo, Speed } from "./run-controller";
 import { PIPELINE_EDGES, PIPELINE_NODES } from "./topology";
 import { LEVEL_SEED } from "./tuning";

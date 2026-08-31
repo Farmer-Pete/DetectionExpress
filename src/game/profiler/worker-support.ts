@@ -60,7 +60,7 @@ export function parseRequest(data: unknown): ProfileRequest {
  */
 export function adaptLoaded(algorithm: LoadedAlgorithm): ProfilerRule {
   return {
-    normalize: (raw) => normalizedPayload(algorithm.normalize(raw)),
+    normalize: (raw, endpoint) => normalizedPayload(algorithm.normalize(raw, endpoint)),
     detect: (view) => parseFindings(algorithm.detect(view)),
   };
 }

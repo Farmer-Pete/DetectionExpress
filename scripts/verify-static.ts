@@ -17,6 +17,10 @@
  * 3. Non-vacuous: the app entry module (`main.tsx`) must be a rendered module of some
  *    chunk. Without this, a build that emitted zero chunks — or nothing at all — would
  *    pass checks (1) and (2) trivially, proving nothing.
+ * 4. Assembled engine present (POSITIVE): the readable single engine the editor loads,
+ *    served as the `virtual:engine-source` string, must ship in the production JS. Its
+ *    marker comment survives minification inside the string literal, so its presence
+ *    proves the assembler ran and its output is in the build.
  *
  * The build is reduced to a plain `ChunkView[]` (fileName, module ids, code) so the
  * pass/fail logic (`inspectStatic`) is pure and unit-tested with synthetic chunks, and
@@ -35,6 +39,15 @@ const DEV_MODULE_INPUTS = ["algorithms-dev-client", "algorithms-dev-flag"];
 
 /** Custom HMR event identifiers that only the dev client carries. */
 const DEV_EVENT_MARKERS = ["algo:changed", "algo:hello"];
+
+/**
+ * A distinctive marker the assembled engine source carries. The `assemble-engine`
+ * plugin serves the editor default as the `virtual:engine-source` module, a string
+ * literal whose contents survive minification, so this comment lands in the production
+ * JS iff the assembled engine shipped. Its presence is a POSITIVE assertion: the one
+ * readable engine the editor loads must be in the build, not tree-shaken away.
+ */
+const ASSEMBLED_ENGINE_MARKER = "teaching prop, unused by the logic";
 
 /**
  * The app entry module. Its presence proves the build is non-vacuous — that it actually
@@ -107,6 +120,12 @@ export function inspectStatic(chunks: ChunkView[]): VerifyResult {
   if (!moduleIds.some((id) => id.includes(APP_ENTRY_INPUT))) {
     failures.push(
       `production build is vacuous: no chunk carries the app entry (expected a module matching "${APP_ENTRY_INPUT}")`,
+    );
+  }
+
+  if (!js.includes(ASSEMBLED_ENGINE_MARKER)) {
+    failures.push(
+      `assembled engine is missing from the production build (expected the marker "${ASSEMBLED_ENGINE_MARKER}")`,
     );
   }
 
