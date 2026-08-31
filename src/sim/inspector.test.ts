@@ -67,6 +67,46 @@ describe("createInspector watermark", () => {
   });
 });
 
+describe("createInspector resolveEvents", () => {
+  it("resolves present ids in id order, regardless of the ids array's own order", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    for (let id = 0; id < 5; id++) {
+      inspector.captureNormalized(id, id, "kiosk-v1", { id }, { id });
+    }
+    const resolved = inspector.resolveEvents([3, 1, 4]);
+    expect(resolved.map((e) => e.id)).toEqual([1, 3, 4]);
+  });
+
+  it("omits ids evicted from the ring, keeping the rest", () => {
+    const inspector = createInspector({ ringSize: 3 });
+    for (let id = 0; id < 5; id++) {
+      inspector.captureNormalized(id, id, "kiosk-v1", { id }, { id });
+    }
+    // ids 0 and 1 evicted past ringSize 3; only 2, 3, 4 remain.
+    const resolved = inspector.resolveEvents([0, 1, 2, 3, 4]);
+    expect(resolved.map((e) => e.id)).toEqual([2, 3, 4]);
+  });
+
+  it("returns an empty array when every cited id is missing or evicted", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", {}, {});
+    expect(inspector.resolveEvents([99])).toEqual([]);
+  });
+
+  it("returns an empty array for an empty ids list", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", {}, {});
+    expect(inspector.resolveEvents([])).toEqual([]);
+  });
+
+  it("returns entries already frozen, the same ring records the snapshot shares", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    inspector.captureNormalized(0, 0, "kiosk-v1", { u: "bob" }, { user: "bob" });
+    const resolved = inspector.resolveEvents([0]);
+    expect(resolved[0] !== undefined && Object.isFrozen(resolved[0])).toBe(true);
+  });
+});
+
 describe("createInspector snapshot", () => {
   it("returns a fresh frozen events array on every call", () => {
     const inspector = createInspector({ ringSize: 10 });

@@ -63,7 +63,7 @@ import type { SimSnapshot } from "../../sim/snapshot";
 import { severityFill, severityLevel } from "../hud/severity";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
-import { formatRow } from "./formatters";
+import { formatClock, formatRow } from "./formatters";
 
 /** Matches the CSS `waveflash` keyframes' 0.6s duration (`src/index.css`). */
 const WAVEFLASH_MS = 600;
@@ -135,14 +135,6 @@ const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
   { value: 1, label: "1x" },
   { value: 2, label: "2x" },
 ];
-
-/** `ts` is game seconds. Formats as an mm:ss clock; the formatter never reads time. */
-function formatClock(ts: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ts));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
 
 /** True when a key event targets an editable element, so Space should not toggle. */
 function isEditableTarget(target: EventTarget | null): boolean {

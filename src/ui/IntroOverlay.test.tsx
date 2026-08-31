@@ -81,6 +81,21 @@ describe("IntroOverlay", () => {
     expect(onObserve).toHaveBeenCalledTimes(1);
   });
 
+  it("does not dismiss when a gesture starts inside the dialog and ends on the backdrop", () => {
+    const { onObserve } = renderOverlay();
+    const dialog = screen.getByRole("dialog");
+    const paragraph = screen.getByText(introCopy.paragraphs[0] ?? "");
+    // A drag that starts inside the dialog (e.g. selecting the premise text) and
+    // releases over the backdrop must not dismiss, even though the click lands outside.
+    fireEvent.pointerDown(paragraph);
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    fireEvent.click(backdrop);
+    expect(onObserve).not.toHaveBeenCalled();
+  });
+
   it("moves focus into the dialog on open", () => {
     renderOverlay();
     const dialog = screen.getByRole("dialog");

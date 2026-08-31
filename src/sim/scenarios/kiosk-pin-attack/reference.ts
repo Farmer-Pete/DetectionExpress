@@ -23,6 +23,11 @@ export function normalize(raw) {
 }
 const fails = {};
 const firing = {};
+function formatWindowClock(seconds) {
+  var m = Math.floor(seconds / 60);
+  var s = seconds % 60;
+  return m + ":" + (s < 10 ? "0" + s : s);
+}
 export function detect(e) {
   const WINDOW = 300; // 5 minutes in game seconds
   const THRESHOLD = 5;
@@ -49,6 +54,14 @@ export function detect(e) {
     alert: { reason: "pin_brute_force", at: e.ts, eventIds },
     eventId: anchor,
     subjectType: "account",
+    context: [{
+      type: "kv",
+      entries: [
+        { label: "wrong PINs", value: kept.length },
+        { label: "threshold", value: THRESHOLD },
+        { label: "window", value: formatWindowClock(WINDOW) },
+      ],
+    }],
   }];
 }
 `;
@@ -70,6 +83,15 @@ interface KioskDetectView extends NormalizedKiosk {
 export interface ReferenceAlgorithm {
   normalize(raw: RawKioskV1): NormalizedKiosk;
   detect(e: KioskDetectView): Finding[];
+}
+
+/** `WINDOW` as "m:ss" for the kv widget (`sim/` stays UI-free: no import from
+ *  `src/ui/log/formatters`). Mirrors `referenceSource`'s identical helper and
+ *  `default-engine.ts`'s, so the parity trio emits byte-identical context. */
+function formatWindowClock(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
 }
 
 /**
@@ -125,6 +147,16 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
           alert: { reason: PIN_BRUTE_FORCE_REASON, at: e.ts, eventIds },
           eventId: anchor,
           subjectType: "account",
+          context: [
+            {
+              type: "kv",
+              entries: [
+                { label: "wrong PINs", value: kept.length },
+                { label: "threshold", value: THRESHOLD },
+                { label: "window", value: formatWindowClock(WINDOW) },
+              ],
+            },
+          ],
         },
       ];
     },

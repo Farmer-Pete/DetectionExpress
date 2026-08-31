@@ -33,8 +33,9 @@ export interface SimSnapshot {
   /** Open findings, seq-ordered. The UI ranks them; T3 publishes a stable order only. */
   findings: readonly LiveFinding[];
   /**
-   * The FULL decision log, seq-ordered, not a tail: `correctness.ts` documents it as
-   * durable history for a later slice's UI (T10), and T10 consumes this same field.
+   * The resolved decision log, seq-ordered, capped at `DECISIONS_CAP` (T10). Already
+   * frozen top to bottom by the scorer; `emptySnapshot()` carries a frozen empty
+   * array too, so the contract is runtime-enforced, not just a TS `readonly`.
    */
   decisions: readonly Decision[];
   /** Recent Events, id-ordered, bounded to `RING_SIZE`. */
@@ -66,7 +67,7 @@ export function emptySnapshot(): SimSnapshot {
     admitted: 0,
     completed: 0,
     findings: [],
-    decisions: [],
+    decisions: Object.freeze([]),
     events: [],
     processed: 0,
     wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },

@@ -67,6 +67,18 @@ describe("FindingsPanel", () => {
     expect(row.getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("labels a row's state badge with player-facing vocabulary, not the raw 'hit'/'watch' token", () => {
+    publish([
+      live({ seq: 1, subjectType: "account", entity: "a", state: "hit" }),
+      live({ seq: 2, subjectType: "account", entity: "b", state: "watch" }),
+    ]);
+    render(<InspectorShell />);
+    expect(screen.getByText("Alert")).toBeDefined();
+    expect(screen.getByText("Watching")).toBeDefined();
+    expect(screen.queryByText("hit")).toBeNull();
+    expect(screen.queryByText("watch")).toBeNull();
+  });
+
   it("exposes rows as native buttons the browser activates on Enter or Space", () => {
     publish([live({ seq: 5, subjectType: "account", entity: "a" })]);
     render(<InspectorShell />);

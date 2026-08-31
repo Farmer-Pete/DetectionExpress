@@ -77,6 +77,12 @@ interface GameState {
    * read it; this slice writes it.
    */
   selection: { seq: number } | null;
+  /**
+   * The selected decision (T10), keyed on its stable `seq`, or null. Mutually
+   * exclusive with `selection`: the trace dialog is single, so selecting either
+   * kind clears the other. UI state, not sim state, so it survives snapshot churn.
+   */
+  decisionSelection: { seq: number } | null;
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
@@ -96,9 +102,17 @@ interface GameState {
   setError: (error: RuleErrorInfo | null) => void;
   setSourceLocked: (locked: boolean) => void;
   setRunPending: (pending: boolean) => void;
-  /** Select a finding by seq. Re-selecting the same seq clears the selection. */
+  /**
+   * Select a finding by seq. Re-selecting the same seq clears the selection.
+   * Clears any decision selection: the two are mutually exclusive.
+   */
   selectFinding: (seq: number) => void;
-  /** Clear the selection. Esc and a click on the empty panel call it. */
+  /**
+   * Select a decision by seq. Re-selecting the same seq clears the selection.
+   * Clears any finding selection: the two are mutually exclusive.
+   */
+  selectDecision: (seq: number) => void;
+  /** Clear both selections. Esc and a click on the empty panel call it. */
   clearSelection: () => void;
   /** Sets the transport freeze mirror. The App reflects it into the run controller. */
   setFrozen: (frozen: boolean) => void;
@@ -128,32 +142,52 @@ export const useGameStore = create<GameState>((set) => ({
   sourceLocked: false,
   runPending: false,
   selection: null,
+  decisionSelection: null,
   transport: { frozen: false, speed: 1 },
   flashes: new Map(),
   runToken: 0,
-  // Reconcile the selection on every snapshot. `seq` is stable within one run, but a
-  // run restart (Apply or reload) builds a fresh scorer, so `seq` resets from zero. So
-  // keep the selection only while its seq still appears in the new snapshot's findings;
-  // otherwise clear it. This also clears a selection whose finding aged out by horizon.
+  // Reconcile both selections on every snapshot, independently. `seq` is stable
+  // within one run, but a run restart (Apply or reload) builds a fresh scorer, so
+  // `seq` resets from zero. So keep a selection only while its seq still appears in
+  // the new snapshot's findings (or decisions); otherwise clear it. This also clears
+  // a finding selection that aged out by horizon, or a decision selection the cap
+  // dropped.
   setSnapshot: (snapshot) =>
     set((state) => {
+      const next: Partial<GameState> = { snapshot };
       if (state.selection !== null) {
         const seq = state.selection.seq;
         const present = snapshot.findings.some((live) => live.seq === seq);
         if (!present) {
-          return { snapshot, selection: null };
+          next.selection = null;
         }
       }
-      return { snapshot };
+      if (state.decisionSelection !== null) {
+        const seq = state.decisionSelection.seq;
+        const present = snapshot.decisions.some((decision) => decision.seq === seq);
+        if (!present) {
+          next.decisionSelection = null;
+        }
+      }
+      return next;
     }),
   setAlgorithmSource: (source) => set({ source }),
   setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
   setRunPending: (pending) => set({ runPending: pending }),
+  // The dialog is single, so selecting either kind always clears the other.
   selectFinding: (seq) =>
-    set((state) => ({ selection: state.selection?.seq === seq ? null : { seq } })),
-  clearSelection: () => set({ selection: null }),
+    set((state) => ({
+      selection: state.selection?.seq === seq ? null : { seq },
+      decisionSelection: null,
+    })),
+  selectDecision: (seq) =>
+    set((state) => ({
+      decisionSelection: state.decisionSelection?.seq === seq ? null : { seq },
+      selection: null,
+    })),
+  clearSelection: () => set({ selection: null, decisionSelection: null }),
   // Each setter keeps the sibling field, so toggling freeze never resets speed and
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),

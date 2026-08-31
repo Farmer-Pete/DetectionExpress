@@ -103,6 +103,15 @@ export function prettifyReason(reason: string): string {
   return [head.charAt(0).toUpperCase() + head.slice(1), ...rest].join(" ");
 }
 
+/**
+ * The player-facing label for a live state, replacing the raw "hit"/"watch" token
+ * (CONTEXT.md lists "hit" as a term to avoid for Alert language). Display text
+ * only: the CSS class a caller keys on stays on the raw token.
+ */
+export function stateLabel(state: "hit" | "watch"): "Alert" | "Watching" {
+  return state === "hit" ? "Alert" : "Watching";
+}
+
 /** A group under construction, before its rows settle into hit-first order. */
 interface Draft {
   key: string;

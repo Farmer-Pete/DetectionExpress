@@ -30,6 +30,15 @@ interface KioskDetectView extends NormalizedKiosk {
 const WINDOW = 300;
 const THRESHOLD = 5;
 
+/** `WINDOW` as "m:ss" for the kv widget (`sim/` stays UI-free: no import from
+ *  `src/ui/log/formatters`). Mirrors `referenceSource` and `buildReferenceAlgorithm`'s
+ *  identical helper, so the parity trio emits byte-identical context. */
+function formatWindowClock(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
 const fails = new Map<string, Array<{ id: number; ts: number }>>();
 const firing = new Set<string>();
 
@@ -75,6 +84,16 @@ export function detect(e: KioskDetectView): Finding[] {
       alert: { reason: "pin_brute_force", at: e.ts, eventIds },
       eventId: anchor,
       subjectType: "account",
+      context: [
+        {
+          type: "kv",
+          entries: [
+            { label: "wrong PINs", value: kept.length },
+            { label: "threshold", value: THRESHOLD },
+            { label: "window", value: formatWindowClock(WINDOW) },
+          ],
+        },
+      ],
     },
   ];
 }

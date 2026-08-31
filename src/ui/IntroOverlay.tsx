@@ -5,12 +5,15 @@
  *
  * It is a real modal dialog. It carries `role="dialog"` and `aria-modal="true"`,
  * takes its accessible name from its title, and moves focus inside on open. It wraps
- * Tab and Shift+Tab at the edges to keep focus within the dialog. Escape and a click
- * on the backdrop both dismiss it the way Observe does. The App restores focus to the
- * reopen control after the overlay unmounts.
+ * Tab and Shift+Tab at the edges to keep focus within the dialog. Escape dismisses
+ * it, and so does a gesture that both starts and ends outside the dialog (a gesture
+ * STARTING inside never does, even if it ends outside — `src/ui/focus.ts`'s
+ * `installOutsidePointerDismiss`), the way Observe does. The App restores focus to
+ * the reopen control after the overlay unmounts.
  */
 import { useEffect, useRef } from "react";
 import type { IntroCopy } from "./content/narrative";
+import { focusableControls, installOutsidePointerDismiss, trapTab } from "./focus";
 
 interface IntroOverlayProps {
   copy: IntroCopy;
@@ -21,15 +24,6 @@ interface IntroOverlayProps {
   onCauseChaos: () => void;
   /** Dismiss, then scroll to the engine editor. */
   onEditEngine: () => void;
-}
-
-/** The standard focusable set, so the trap survives controls added later. */
-const FOCUSABLE_SELECTOR =
-  'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
-/** The dialog's focusable controls, in DOM order. */
-function focusableControls(dialog: HTMLElement): HTMLElement[] {
-  return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
 }
 
 export function IntroOverlay({
@@ -51,19 +45,12 @@ export function IntroOverlay({
     focusableControls(dialog)[0]?.focus();
   }, []);
 
-  // A click outside the dialog, on the backdrop scrim, dismisses the way Observe
-  // does. A click inside the dialog is contained, so it never dismisses. The listener
-  // lives on the document, not on the scrim element, so the scrim stays a plain
-  // presentational div.
+  // A gesture outside the dialog, on the backdrop scrim, dismisses the way Observe
+  // does — but only a gesture that STARTS outside; one that starts inside never does.
+  // The listeners live on the document, not on the scrim element, so the scrim stays
+  // a plain presentational div. See `installOutsidePointerDismiss`.
   useEffect(() => {
-    const onDocumentClick = (event: MouseEvent): void => {
-      const dialog = dialogRef.current;
-      if (dialog !== null && event.target instanceof Node && !dialog.contains(event.target)) {
-        onObserve();
-      }
-    };
-    document.addEventListener("click", onDocumentClick);
-    return () => document.removeEventListener("click", onDocumentClick);
+    return installOutsidePointerDismiss(dialogRef, onObserve);
   }, [onObserve]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -72,27 +59,14 @@ export function IntroOverlay({
       onObserve();
       return;
     }
-    if (event.key !== "Tab") {
-      return;
-    }
     const dialog = dialogRef.current;
     if (dialog === null) {
       return;
     }
-    const controls = focusableControls(dialog);
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (first === undefined || last === undefined) {
-      return;
-    }
-    // Wrap the two edges so focus stays inside the dialog.
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    // Wrap Tab/Shift+Tab at the dialog's edges (shared with TraceOverlay's own
+    // trap, `src/ui/focus.ts`). `!inControls`, one of trapTab's wrap conditions,
+    // is a no-op here in practice: open-focus always lands on `controls[0]`.
+    trapTab(dialog, event);
   };
 
   return (

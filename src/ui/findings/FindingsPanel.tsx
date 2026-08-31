@@ -13,30 +13,43 @@
  * `buildFindingGroups` runs each render. The live set is small and bounded, and the
  * sim publishes a fresh frozen array every tick, so a `useMemo` on that reference
  * would recompute every tick anyway. So there is no memo. (See GH33-PLAN.md.)
+ *
+ * The panel carries `tabIndex={-1}` and accepts an optional external ref (T9's focus
+ * fallback, GH34-35-PLAN.md decision 14): when a trace dialog's trigger row was evicted
+ * by reconciliation, `TraceOverlay` focuses this container instead. A plain `<section>`
+ * cannot take programmatic focus without the tabIndex.
  */
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
 import {
   buildFindingGroups,
   countActiveHits,
   type FindingGroup,
   type FindingRow,
+  stateLabel,
   urgentAnnouncement,
   VISIBLE_CAP,
 } from "./view-model";
 
-export function FindingsPanel() {
+interface FindingsPanelProps {
+  /** The focus-fallback ref TraceOverlay reads. Defaults to a locally-owned ref. */
+  panelRef?: RefObject<HTMLElement | null>;
+}
+
+export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}) {
   const findings = useGameStore((state) => state.snapshot.findings);
   const status = useGameStore((state) => state.snapshot.status);
   const selection = useGameStore((state) => state.selection);
   const selectFinding = useGameStore((state) => state.selectFinding);
   const clearSelection = useGameStore((state) => state.clearSelection);
   const [expanded, setExpanded] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
+  const ownRef = useRef<HTMLElement>(null);
+  const panelRef = externalRef ?? ownRef;
 
   // A click that lands on the bare panel background, not on a card or a row, clears the
   // selection. The listener sits on the document and checks the exact target, so the
   // panel element stays presentational with no click handler of its own.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: panelRef is a stable ref object (either the local useRef or the caller's own), so its identity never changes across renders.
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent): void => {
       if (event.target === panelRef.current) {
@@ -67,7 +80,7 @@ export function FindingsPanel() {
     .join(" ");
 
   return (
-    <section ref={panelRef} className={panelClass} aria-label="Findings">
+    <section ref={panelRef} className={panelClass} aria-label="Findings" tabIndex={-1}>
       {/* A persistent role="status" live region: this node is a direct child of the
           section, so it always exists — even with zero findings — and the browser
           is already watching it before any text change. That change is what
@@ -176,7 +189,15 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
         // T12's FxLayer measures this row's rect to anchor a caught/false pop and
         // comet; see GH37-PLAN.md "Comets and pops".
         data-finding-seq={row.seq}
-        onClick={() => onSelect(row.seq)}
+        onClick={(event) => {
+          // Safari does not focus a clicked <button> by default, unlike Chrome and
+          // Firefox. TraceOverlay's open-effect captures `document.activeElement` as
+          // the trigger to refocus on close (GH34-35-PLAN.md decision 14), so an
+          // unfocused row there would break that restore. Force the focus explicitly,
+          // independent of the browser's own click-to-focus behavior.
+          event.currentTarget.focus();
+          onSelect(row.seq);
+        }}
       >
         <span
           className={
@@ -185,7 +206,7 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
               : "findings-state findings-state--watch"
           }
         >
-          {row.state}
+          {stateLabel(row.state)}
         </span>
         <span className="findings-label">{row.label}</span>
         <span className="findings-cited">

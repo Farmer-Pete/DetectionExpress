@@ -32,6 +32,8 @@ function caughtDecision(liveSeq: number): CaughtDecision {
     attackId: 1,
     entity: "acct-1",
     finding: { alert: { reason: "brute", at: 0, eventIds: [1] }, eventId: 1 },
+    citedEvents: [],
+    resolvedAt: 0,
     liveSeq,
   };
 }
@@ -160,6 +162,16 @@ describe("App shell", () => {
     // The React Flow canvas is gone: its root wrapper class must be absent.
     expect(container.querySelector(".react-flow")).toBeNull();
     expect(container.querySelector(".pipeline")).toBeNull();
+  });
+
+  it("mounts the decisions panel directly under the inspector shell (T10)", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    const inspector = screen.getByRole("region", { name: "Inspector" });
+    const decisions = screen.getByRole("region", { name: "Decisions" });
+    expect(decisions).toBeDefined();
+    // "Directly under": the decisions panel is the inspector shell's next sibling.
+    expect(inspector.nextElementSibling).toBe(decisions);
+    expect(container.contains(decisions)).toBe(true);
   });
 
   it("renders the chaos ladder in the shell", () => {

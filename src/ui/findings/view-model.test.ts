@@ -6,6 +6,7 @@ import {
   buildFindingGroups,
   countActiveHits,
   prettifyReason,
+  stateLabel,
   urgentAnnouncement,
 } from "./view-model";
 
@@ -53,6 +54,16 @@ describe("prettifyReason", () => {
 
   it("leaves an already-clean single word sentence-cased", () => {
     expect(prettifyReason("tailgating")).toBe("Tailgating");
+  });
+});
+
+describe("stateLabel", () => {
+  it("labels a hit as Alert, avoiding the raw 'hit' term (CONTEXT.md)", () => {
+    expect(stateLabel("hit")).toBe("Alert");
+  });
+
+  it("labels a watch as Watching", () => {
+    expect(stateLabel("watch")).toBe("Watching");
   });
 });
 
