@@ -372,6 +372,252 @@ body {
   font-size: 0.8rem;
 }
 
+/* Trace overlay (T9) */
+.trace-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 22, 29, 0.72);
+}
+
+.trace-overlay {
+  width: min(760px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.2rem 1.4rem;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.trace-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.trace-entity-chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--a3) 30%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.trace-reason {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.trace-state {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trace-state--hit {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.trace-state--watch {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  color: var(--dim);
+}
+
+.trace-time {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.trace-close {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.trace-close:hover {
+  border-color: var(--a1);
+}
+
+.trace-nodes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .trace-nodes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.trace-node {
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.trace-node-title {
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.trace-node-empty {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+.trace-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trace-card {
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.trace-card--aged-out {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--dim);
+  font-style: italic;
+}
+
+.trace-card-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+  color: var(--dim);
+  font-size: 0.72rem;
+}
+
+.trace-card-raw,
+.trace-card-normalized {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.trace-card-normalized {
+  margin-top: 0.3rem;
+  color: var(--a4);
+}
+
+.trace-verdict {
+  margin: 0.7rem 0 0;
+  color: var(--ok);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+/* Context widgets (text / kv / table / json), shared by the Judge node and the
+   decisions view. */
+.widget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.widget-title {
+  margin: 0 0 0.3rem;
+  color: var(--dim);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.widget-text-body {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.widget-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+.widget-kv-entry {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.widget-kv-entry dt {
+  color: var(--dim);
+}
+
+.widget-kv-entry dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-table-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.widget-table-grid th,
+.widget-table-grid td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.widget-table-grid th {
+  color: var(--dim);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.widget-json-body {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+
 /* Briefing */
 .briefing {
   margin: 0 1.5rem 0.75rem;

@@ -89,7 +89,7 @@ function JsonWidget({ widget }: { widget: Extract<Widget, { type: "json" }> }) {
 }
 
 /** Renders every widget in `context`, in order. Renders nothing for an absent or empty context. */
-export function WidgetList({ context }: { context?: Context }) {
+export function WidgetList({ context }: { context?: Context | undefined }) {
   if (context === undefined || context.length === 0) {
     return null;
   }

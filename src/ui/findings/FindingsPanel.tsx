@@ -13,22 +13,34 @@
  * `buildFindingGroups` runs each render. The live set is small and bounded, and the
  * sim publishes a fresh frozen array every tick, so a `useMemo` on that reference
  * would recompute every tick anyway. So there is no memo. (See GH33-PLAN.md.)
+ *
+ * The panel carries `tabIndex={-1}` and accepts an optional external ref (T9's focus
+ * fallback, GH34-35-PLAN.md decision 14): when a trace dialog's trigger row was evicted
+ * by reconciliation, `TraceOverlay` focuses this container instead. A plain `<section>`
+ * cannot take programmatic focus without the tabIndex.
  */
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
 import { buildFindingGroups, type FindingGroup, type FindingRow, VISIBLE_CAP } from "./view-model";
 
-export function FindingsPanel() {
+interface FindingsPanelProps {
+  /** The focus-fallback ref TraceOverlay reads. Defaults to a locally-owned ref. */
+  panelRef?: RefObject<HTMLElement | null>;
+}
+
+export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}) {
   const findings = useGameStore((state) => state.snapshot.findings);
   const selection = useGameStore((state) => state.selection);
   const selectFinding = useGameStore((state) => state.selectFinding);
   const clearSelection = useGameStore((state) => state.clearSelection);
   const [expanded, setExpanded] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
+  const ownRef = useRef<HTMLElement>(null);
+  const panelRef = externalRef ?? ownRef;
 
   // A click that lands on the bare panel background, not on a card or a row, clears the
   // selection. The listener sits on the document and checks the exact target, so the
   // panel element stays presentational with no click handler of its own.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: panelRef is a stable ref object (either the local useRef or the caller's own), so its identity never changes across renders.
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent): void => {
       if (event.target === panelRef.current) {
@@ -44,7 +56,7 @@ export function FindingsPanel() {
   const visible = expanded ? groups : groups.slice(0, VISIBLE_CAP);
 
   return (
-    <section ref={panelRef} className="findings-panel" aria-label="Findings">
+    <section ref={panelRef} className="findings-panel" aria-label="Findings" tabIndex={-1}>
       {findings.length === 0 ? (
         <EmptyState />
       ) : (

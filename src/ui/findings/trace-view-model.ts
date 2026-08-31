@@ -11,8 +11,9 @@
 import type { Context, JsonValue } from "../../sim/finding";
 import type { SimSnapshot } from "../../sim/snapshot";
 
-/** One cited event, resolved: its raw and normalized payload, ready to render. */
-export interface TraceEventCard {
+/** One cited event, resolved: its raw and normalized payload, ready to render. Not
+ *  exported on its own; consumers narrow on `TraceCard.kind` instead. */
+interface TraceEventCard {
   kind: "event";
   id: number;
   ts: number;
@@ -22,7 +23,7 @@ export interface TraceEventCard {
 }
 
 /** A cited id the ring has already evicted. Rendered as a placeholder, not omitted. */
-export interface TraceAgedOutCard {
+interface TraceAgedOutCard {
   kind: "aged-out";
   id: number;
 }
