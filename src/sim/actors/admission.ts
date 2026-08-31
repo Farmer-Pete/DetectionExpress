@@ -1,11 +1,11 @@
 /**
- * The wave admission controller (issue #89). It reads the wave
- * schedule and returns the tick of every admitted arrival. It reproduces the
- * kiosk benign accumulator exactly, including the per-wave reset: for a whole
- * rate the per-tick count equals `eventsPerTick`; for a fractional rate it
- * matches the kiosk generator's cumulative count, spread the same way. Arrivals
- * land only inside each wave's half-open `[startTick, startTick + durationTicks)`,
- * so the intro and every drain gap carry no new arrivals.
+ * The wave admission controller (issue #89). It reads the wave schedule and returns
+ * the tick of every admitted arrival. Since GH102 it is the ONE benign accumulator:
+ * the kiosk scenario builds its benign patron slots from this, so no second copy of
+ * the accumulator math exists. Per-wave reset holds: for a whole rate the per-tick
+ * count equals `eventsPerTick`; for a fractional rate the cumulative count spreads
+ * evenly. Arrivals land only inside each wave's half-open `[startTick, startTick +
+ * durationTicks)`, so the intro and every drain gap carry no new arrivals.
  *
  * Deterministic and pure. No rng: the accumulator alone fixes the ticks.
  */
@@ -37,8 +37,8 @@ function assertRateCap(wave: Wave, index: number): void {
  * its own fractional accumulator, reset at the wave's start: every tick adds
  * `eventsPerTick`, and each whole unit it crosses admits one arrival at that
  * tick. So a whole rate admits exactly `eventsPerTick` arrivals per tick, and a
- * fractional rate spreads its cumulative count the same way the kiosk benign
- * generator does.
+ * fractional rate spreads its cumulative count evenly instead of rounding per tick
+ * (the behavior the legacy kiosk draft loop had before GH102 moved it here).
  */
 export function admitArrivals(waves: readonly Wave[]): number[] {
   // Field validity, chronological order, and no-overlap all live in the shared

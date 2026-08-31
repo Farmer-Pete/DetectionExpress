@@ -1,10 +1,10 @@
 /**
  * kiosk-v1: one wire format for the kiosk family. A thin `format` over
- * KioskReading. A later format is another thin `format` over the same record,
- * not a change here.
+ * `AccountKioskReading`. A later format is another thin `format` over the same
+ * record, not a change here. `station` is not on this wire.
  */
 import type { Endpoint } from "../../endpoint";
-import type { KioskReading } from "../internal";
+import type { AccountKioskReading } from "../internal";
 
 /** The kiosk-v1 wire shape: terse keys, a PIN-check result code. */
 export interface RawKioskV1 {
@@ -14,7 +14,7 @@ export interface RawKioskV1 {
   res: "WRONG_PIN" | "OK";
 }
 
-export const kioskV1: Endpoint<KioskReading, RawKioskV1> = {
+export const kioskV1: Endpoint<AccountKioskReading, RawKioskV1> = {
   id: "kiosk-v1",
   format: (r) => ({
     t: r.ts,

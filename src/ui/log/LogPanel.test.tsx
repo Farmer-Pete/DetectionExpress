@@ -36,6 +36,7 @@ beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
     transport: { frozen: false, speed: 1 },
+    flashes: new Map(),
   });
 });
 
@@ -110,6 +111,30 @@ describe("LogPanel", () => {
     setSnapshot([], 10, 35);
     render(<LogPanel />);
     expect(screen.getByText("25 queued")).toBeDefined();
+  });
+});
+
+describe("LogPanel cited-row flash", () => {
+  it("carries log-row-cited and the inline hunt color for a row with a flash entry", () => {
+    setSnapshot([kioskEvent(0), kioskEvent(1)], 0, 2);
+    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-2)", gen: 1 }]);
+    render(<LogPanel />);
+    const flashed = screen.getByTestId("log-row-1");
+    expect(flashed.className).toMatch(/log-row-cited/);
+    expect(flashed.style.getPropertyValue("--hunt-color")).toBe("var(--hunt-2)");
+    expect(screen.getByTestId("log-row-0").className).not.toMatch(/log-row-cited/);
+  });
+
+  it("remounts the flash when a re-spawn carries a higher gen", () => {
+    setSnapshot([kioskEvent(1)], 0, 1);
+    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-1)", gen: 1 }]);
+    const { rerender } = render(<LogPanel />);
+    const first = screen.getByTestId("log-row-1");
+    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-3)", gen: 2 }]);
+    rerender(<LogPanel />);
+    const second = screen.getByTestId("log-row-1");
+    expect(second).not.toBe(first); // a higher gen remounted the node
+    expect(second.style.getPropertyValue("--hunt-color")).toBe("var(--hunt-3)");
   });
 });
 

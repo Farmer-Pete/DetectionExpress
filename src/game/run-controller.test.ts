@@ -76,6 +76,7 @@ function baseDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
     setSnapshot: () => undefined,
     setError: () => undefined,
     setRunPending: () => undefined,
+    bumpRunToken: () => undefined,
     loadAlgorithm: async () => algo,
     resolveServiceRate: () => fixedServiceRate(),
     start: () => fakeHandle(),
@@ -762,6 +763,56 @@ describe("run controller", () => {
     await flush();
     expect(stops).toBe(1); // the freshly built handle was stopped, not left running
   });
+
+  it("bumps the run token exactly once when the engine installs", async () => {
+    const bumps: number[] = [];
+    const controller = createRunController(
+      baseDeps({
+        bumpRunToken: () => bumps.push(1),
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(bumps).toHaveLength(1);
+  });
+
+  it("never bumps the run token when a run fails to load", async () => {
+    const bumps: number[] = [];
+    const controller = createRunController(
+      baseDeps({
+        bumpRunToken: () => bumps.push(1),
+        loadAlgorithm: async () => {
+          throw new Error("bad syntax");
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(bumps).toHaveLength(0);
+  });
+
+  it("never bumps the run token when a run fails setup, before the engine installs", async () => {
+    const bumps: number[] = [];
+    let generateCalls = 0;
+    const throwingScenario: Scenario = {
+      id: "test",
+      briefing: "b",
+      generate: () => {
+        generateCalls++;
+        throw new Error("bad scenario build");
+      },
+    };
+    const controller = createRunController(
+      baseDeps({
+        scenario: throwingScenario,
+        bumpRunToken: () => bumps.push(1),
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(generateCalls).toBe(1); // the setup phase was reached and failed
+    expect(bumps).toHaveLength(0);
+  });
 });
 
 describe("run controller loader and profiler seam derive from one AlgorithmSource (M2a)", () => {
@@ -993,6 +1044,7 @@ function workerDeps(over: Partial<RunControllerDeps>): RunControllerDeps {
     setSnapshot: () => undefined,
     setError: () => undefined,
     setRunPending: () => undefined,
+    bumpRunToken: () => undefined,
     loadAlgorithm: async () => algo,
     start: () => fakeHandle(),
     ...over,

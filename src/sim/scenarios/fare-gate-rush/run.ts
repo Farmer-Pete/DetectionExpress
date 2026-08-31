@@ -145,14 +145,14 @@ export function buildFareGateRun(seed: number): GeneratedRun {
     env: { world, distances },
     runSeed: seed,
     horizon,
-  });
+  }).map((timed) => timed.reading);
   assertEveryTripCloses(readings, riders.length);
 
-  const { events, attacks } = composeRun({
+  const { events } = composeRun({
     readings,
     tsOf: (reading) => reading.ts,
     format: (reading) => gatekeepGate.format(reading),
-    endpointId: gatekeepGate.id,
+    endpointIdOf: () => gatekeepGate.id,
   });
 
   // composeRun returns events sorted ascending by ts, so the last one is the latest.
@@ -160,5 +160,7 @@ export function buildFareGateRun(seed: number): GeneratedRun {
   const lastEventTick = lastEventTs / GAME_SECONDS_PER_TICK;
   const finalDeadline = lastEventTick + 1 + DRAIN_GAP_TICKS;
 
-  return { events, attacks, checkpoints: withFinalDeadline(checkpoints, finalDeadline), waves };
+  // Benign traffic only: no Attack. The composer no longer returns this field, so
+  // the run supplies its own empty ground truth.
+  return { events, attacks: [], checkpoints: withFinalDeadline(checkpoints, finalDeadline), waves };
 }

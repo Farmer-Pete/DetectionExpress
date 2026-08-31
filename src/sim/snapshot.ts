@@ -3,7 +3,7 @@
  * publish tick. React reads it through primitive selectors; it never sees the
  * pipeline half-updated.
  */
-import type { CorrectnessReading, LiveFinding } from "./correctness";
+import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 import type { WaveReading } from "./wave-state";
 
@@ -32,6 +32,11 @@ export interface SimSnapshot {
   completed: number;
   /** Open findings, seq-ordered. The UI ranks them; T3 publishes a stable order only. */
   findings: readonly LiveFinding[];
+  /**
+   * The FULL decision log, seq-ordered, not a tail: `correctness.ts` documents it as
+   * durable history for a later slice's UI (T10), and T10 consumes this same field.
+   */
+  decisions: readonly Decision[];
   /** Recent Events, id-ordered, bounded to `RING_SIZE`. */
   events: readonly RingEvent[];
   /**
@@ -61,6 +66,7 @@ export function emptySnapshot(): SimSnapshot {
     admitted: 0,
     completed: 0,
     findings: [],
+    decisions: [],
     events: [],
     processed: 0,
     wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },

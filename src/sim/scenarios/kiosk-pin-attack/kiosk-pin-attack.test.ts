@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ATTACKS_PER_WAVE,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
@@ -11,12 +12,16 @@ import {
   WAVE_COUNT,
   WAVE_RATES,
 } from "../../../game/tuning";
+import { admitArrivals } from "../../actors/admission";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
 import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm, referenceSource } from "./reference";
 import { kioskPinAttack } from "./scenario";
+
+/** The total attackers across all waves; the globally distinct victim count. */
+const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);
 
 /** The run ends at the final deadline: the last checkpoint's tick, in game seconds. */
 function deadlineSeconds(): number {
@@ -110,16 +115,18 @@ describe("kioskPinAttack.generate", () => {
     }
   });
 
-  it("gives each Attack a distinct account and a non-overlapping window", () => {
+  it("carries the multi-attacker count on globally distinct victims", () => {
     const { attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    // 2 + 4 + 8 bursts, each on its own distinct victim account.
+    expect(attacks.length).toBe(VICTIM_COUNT);
     const accounts = new Set(attacks.map((a) => a.entity));
     expect(accounts.size).toBe(attacks.length);
-    const windows = [...attacks].sort((x, y) => x.window.startTs - y.window.startTs);
-    let end = -1;
-    for (const attack of windows) {
-      expect(attack.window.startTs).toBeGreaterThan(end);
-      end = attack.window.endTs;
-    }
+    // Attack ids run 1..14 in plan order.
+    expect(attacks.map((a) => a.id)).toEqual(
+      Array.from({ length: VICTIM_COUNT }, (_v, i) => i + 1),
+    );
+    // Bursts on distinct accounts may overlap in time; the detector counts per
+    // account, so overlap is fair and is NOT asserted against here.
   });
 
   it("is fair: only victims cross the threshold, and only via their burst", () => {
@@ -176,6 +183,31 @@ describe("kioskPinAttack.generate", () => {
     expect(r.missed).toBe(0);
     expect(r.falseAlerts).toBe(0);
     expect(r.rolling).toBe(100);
+  });
+});
+
+describe("kioskPinAttack.generate benign fumbles and sign-ins (GH102)", () => {
+  const run = kioskPinAttack.generate(LEVEL_SEED);
+  const successes = run.events.filter((ev) => raw(ev).res === "OK");
+  const fails = run.events.filter((ev) => raw(ev).res === "WRONG_PIN");
+  const attackFailIds = new Set(run.attacks.flatMap((a) => a.eventIds));
+
+  it("emits one successful sign-in per admitted arrival slot", () => {
+    const slots = admitArrivals(buildSchedule().waves).length;
+    expect(successes.length).toBe(slots);
+  });
+
+  it("carries benign fumbles: some fails belong to no Attack", () => {
+    const fumbleFails = fails.filter((ev) => !attackFailIds.has(ev.id));
+    expect(fumbleFails.length).toBeGreaterThan(0);
+  });
+
+  it("splits every fail into an attack fail or a benign fumble, and nothing else", () => {
+    const attackFails = fails.filter((ev) => attackFailIds.has(ev.id));
+    const fumbleFails = fails.filter((ev) => !attackFailIds.has(ev.id));
+    expect(attackFails.length + fumbleFails.length).toBe(fails.length);
+    // Total events = benign successes + benign fumbles + attack fails.
+    expect(run.events.length).toBe(successes.length + fumbleFails.length + attackFails.length);
   });
 });
 
@@ -261,7 +293,7 @@ describe("fairness invariants stay under the M2 wave data (M3 seam 15)", () => {
     // with the wave schedule in place. See GH3-PLAN.md section 9 (M3 seam 15).
     for (const seed of [LEVEL_SEED, 1, 42, 2026, 9999]) {
       const run = kioskPinAttack.generate(seed);
-      expect(run.attacks.length).toBe(WAVE_RATES.length);
+      expect(run.attacks.length).toBe(VICTIM_COUNT);
       for (const attack of run.attacks) {
         expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
       }

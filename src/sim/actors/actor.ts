@@ -55,7 +55,7 @@ export interface Actor<Reading, Env> {
 }
 
 /** One reading, tagged with the actor that emitted it and the tick it fired on. */
-interface TimedReading<Reading> {
+export interface TimedReading<Reading> {
   reading: Reading;
   actorId: string;
   /** The tick this reading was emitted on. */
@@ -473,12 +473,16 @@ export function createSchedule<Reading, Env>(
 
 /**
  * Run the actors to the horizon and return every reading they emit, in emission
- * order. A thin wrapper over `createSchedule().advanceTo(horizon)`: it builds one
- * schedule and steps it straight to the horizon, so the batch readings stay
- * byte-identical to the pre-step scheduler. Deterministic under any permutation of
- * the input array.
+ * order, each tagged with its actor id and the tick it fired on. A thin wrapper
+ * over `createSchedule().advanceTo(horizon)`: it builds one schedule and steps it
+ * straight to the horizon, so the batch readings stay byte-identical to the
+ * pre-step scheduler (unwrap `.reading` for the bare stream). The actor tag lets
+ * the composer attach ground truth from actor identity. Deterministic under any
+ * permutation of the input array.
  */
-export function runActors<Reading, Env>(input: RunActorsInput<Reading, Env>): Reading[] {
+export function runActors<Reading, Env>(
+  input: RunActorsInput<Reading, Env>,
+): TimedReading<Reading>[] {
   const { actors, env, runSeed, horizon } = input;
   // Reject a bad horizon up front, before seeding or any actor's start(), so the
   // batch path's observable behavior on invalid input matches the pre-step scheduler.
@@ -487,5 +491,5 @@ export function runActors<Reading, Env>(input: RunActorsInput<Reading, Env>): Re
   }
   const schedule = createSchedule({ actors, env, runSeed });
   const step = schedule.advanceTo(horizon);
-  return step.readings.map((timed) => timed.reading);
+  return step.readings;
 }

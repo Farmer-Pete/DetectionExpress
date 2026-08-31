@@ -17,6 +17,7 @@ import {
   ACCOUNT_DWELL_TICKS,
   ACCOUNT_POOL,
 } from "../../game/tuning";
+import { KIOSK_TERMINALS } from "../endpoints/kiosk/internal";
 import { type Account, buildAccounts } from "../entities/account";
 import type { World } from "../world/world";
 import type { WorldEnv, WorldReading } from "../world-reading";
@@ -46,9 +47,6 @@ export interface AccountRiderSpawner {
   tick(nowTick: number, liveAccountRiders: number): readonly Admission<WorldReading, WorldEnv>[];
 }
 
-/** The kiosk terminals an account rider may sign in at; drawn per birth. */
-const TERMINALS: readonly string[] = ["K1", "K2"];
-
 export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): AccountRiderSpawner {
   // A distinct seeded stream, keyed off the run seed but separate from every actor's,
   // so the spawn cadence never shares a stream with an account rider's own draws.
@@ -64,7 +62,7 @@ export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): Ac
     const id = `A${String(births++).padStart(6, "0")}`;
     const account: Account = pick(accounts) ?? { name: "rider.x" };
     const station = pick(stations)?.id ?? stations[0]?.id ?? "cen";
-    const terminal = pick(TERMINALS) ?? "K1";
+    const terminal = pick(KIOSK_TERMINALS) ?? "K1";
     const riderConfig: AccountRiderConfig = {
       id,
       account: account.name,

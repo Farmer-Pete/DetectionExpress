@@ -14,9 +14,6 @@ importers:
       d3-random:
         specifier: ^3.0.1
         version: 3.0.1
-      fishery:
-        specifier: ^2.4.0
-        version: 2.4.0
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -827,9 +824,6 @@ packages:
       picomatch:
         optional: true
 
-  fishery@2.4.0:
-    resolution: {integrity: sha512-QgeTlvgNhVGuMztrfAhlSIBs3rD3l9RMjl9I15yb/lnrx3njrOhvegr2L3LWdqvXwYfQjdQGpglyAfHH2J8DRA==}
-
   formatly@0.3.0:
     resolution: {integrity: sha512-9XNj/o4wrRFyhSMJOvsuyMwy8aUfBaZ1VrqHVfohyXf0Sw0e+yfKG+xZaY3arGCOMdwFsqObtzVOc1gU9KiT9w==}
     engines: {node: '>=18.3.0'}
@@ -986,9 +980,6 @@ packages:
   lightningcss@1.33.0:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
-
-  lodash.mergewith@4.6.2:
-    resolution: {integrity: sha512-GK3g5RPZWTRSeLSpgP8Xhra+pnjBC56q9FZYe1d5RN3TJ35dbkGy3YqBSMbyCrlbi+CM9Z3Jk5yTL7RCsqboyQ==}
 
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
@@ -1751,10 +1742,6 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
-  fishery@2.4.0:
-    dependencies:
-      lodash.mergewith: 4.6.2
-
   formatly@0.3.0:
     dependencies:
       fd-package-json: 2.0.0
@@ -1890,8 +1877,6 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
-
-  lodash.mergewith@4.6.2: {}
 
   lz-string@1.5.0: {}
 
