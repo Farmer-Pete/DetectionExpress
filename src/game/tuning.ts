@@ -98,7 +98,7 @@ export const PROFILE_WARMUP_MS = 50;
  * these versions are folded into the key. Bump one when its shape changes, so a
  * stale reading is not reused.
  */
-export const CORPUS_VERSION = 1;
+export const CORPUS_VERSION = 2;
 export const PROFILER_VERSION = 1;
 
 /**
@@ -118,9 +118,6 @@ export const OMEGA = 20;
  */
 export const CORPUS_ACCOUNTS = 12;
 
-/** Share of corpus Events that are wrong-PIN failures, the ones the detectors scan. */
-export const CORPUS_FAIL_SHARE = 0.5;
-
 /** The detection window in ticks (300 game seconds). The naive scan evicts past it. */
 export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TICK;
 
@@ -131,11 +128,25 @@ export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TIC
  * checkpoint with margin and the Optimization clears every one with margin.
  */
 
-/** Events per tick for each wave, low to high. Its length is the wave count. */
+/**
+ * The BENIGN baseline arrival rate per tick for each wave, low to high (its length
+ * is the wave count). It bounds benign sign-ins started per tick, not the tick's
+ * true event total: attack fails and benign fumbles ride ON TOP, so a tick's real
+ * count can exceed the rate. The legacy stream already worked this way (attack
+ * fails rode above the rate); GH102 only grows the magnitude. See ATTACKS_PER_WAVE.
+ */
 export const WAVE_RATES: readonly number[] = [5, 15, 60];
 
 /** Number of waves. Derived from the rate schedule. */
 export const WAVE_COUNT = WAVE_RATES.length;
+
+/**
+ * How many PIN-brute-force bursts each wave carries, indexed by wave (GH102). The
+ * pressure climbs 2 -> 4 -> 8, so a wave holds more than one attack, on that many
+ * globally distinct victims. Its length must equal `WAVE_RATES.length`; `planAttacks`
+ * throws otherwise. The total (14) is the victim count `selectVictims` draws.
+ */
+export const ATTACKS_PER_WAVE: readonly number[] = [2, 4, 8];
 
 /** The calm intro before Wave 1, in ticks (2 real seconds at CLOCK_HZ). */
 export const INTRO_TICKS = 120;

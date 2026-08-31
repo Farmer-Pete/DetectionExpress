@@ -11,6 +11,7 @@
  */
 
 import type { FareGateReading } from "./endpoints/fare-gate/gatekeep";
+import type { AccountKioskReading } from "./endpoints/kiosk/internal";
 import type { ControlReference } from "./entities/control";
 import type { DistanceTable } from "./world/distance";
 import type { Timetable } from "./world/timetable";
@@ -60,23 +61,6 @@ export interface DoorContactReading {
   site: string;
   door: string;
   event: "open" | "close";
-}
-
-/**
- * The account-kiosk family's internal record, matching the `normalizedExample` in
- * `sensors.json`: an account signing in at a station's kiosk terminal. Benign traffic
- * is always a `success` (the `wrong_pin` value is for a later attack ticket, out of
- * scope here). This is a NEW type, distinct from the legacy `KioskReading` in
- * `endpoints/kiosk/internal.ts`, which the kiosk-pin-attack scenario keeps untouched.
- * `ts` is in game seconds; `terminal` is a deterministic per-kiosk id (e.g. `"K1"`).
- */
-export interface AccountKioskReading {
-  /** Game seconds. */
-  ts: number;
-  account: string;
-  station: string;
-  terminal: string;
-  outcome: "success";
 }
 
 /**

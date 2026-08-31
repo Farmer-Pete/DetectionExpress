@@ -26,6 +26,18 @@ function tiedCast(): Actor<Tap, null>[] {
   return [pulse("r1", 0, 3, 3), pulse("r2", 0, 3, 3), pulse("r3", 0, 3, 3)];
 }
 
+describe("runActors timed readings", () => {
+  it("tags each reading with the actor that emitted it and the tick it fired on", () => {
+    // r1 fires at ticks 0, 3, 6; each tag's tick must match the emitting tick.
+    const out = runActors({ actors: [pulse("r1", 0, 3, 3)], env: null, runSeed: 42, horizon: 100 });
+    expect(out.map((t) => t.actorId)).toEqual(["r1", "r1", "r1"]);
+    expect(out.map((t) => t.tick)).toEqual([0, 3, 6]);
+    // The bare reading is still reachable under `.reading`.
+    expect(out.map((t) => t.reading.id)).toEqual(["r1", "r1", "r1"]);
+    expect(out.map((t) => t.reading.tick)).toEqual([0, 3, 6]);
+  });
+});
+
 describe("runActors determinism", () => {
   it("is identical across two runs on one seed", () => {
     const first = runActors({ actors: tiedCast(), env: null, runSeed: 42, horizon: 100 });
@@ -138,7 +150,7 @@ describe("runActors tie-break order", () => {
     // which is at the half-open horizon and does not run.
     const out = runActors({ actors: tiedCast(), env: null, runSeed, horizon: 3 });
     expect(out.map((tap) => tap.tick)).toEqual([0, 0, 0]);
-    expect(out.map((tap) => tap.id)).toEqual(expected);
+    expect(out.map((tap) => tap.actorId)).toEqual(expected);
   });
 });
 
@@ -217,8 +229,8 @@ describe("runActors forced seed collision", () => {
       runSeed: RUN,
       horizon: 5,
     });
-    const drawA = out.find((r) => r.id === A)?.draw;
-    const drawB = out.find((r) => r.id === B)?.draw;
+    const drawA = out.find((r) => r.reading.id === A)?.reading.draw;
+    const drawB = out.find((r) => r.reading.id === B)?.reading.draw;
     expect(drawA).toBeDefined();
     expect(drawB).toBeDefined();
     expect(drawA).not.toBe(drawB);
@@ -361,7 +373,7 @@ describe("runActors heap parity", () => {
 
       const expected = referenceRunActors({ actors: cast, env: null, runSeed, horizon });
       const actual = runActors({ actors: cast, env: null, runSeed, horizon });
-      expect(actual).toEqual(expected);
+      expect(actual.map((timed) => timed.reading)).toEqual(expected);
     }
   });
 });
