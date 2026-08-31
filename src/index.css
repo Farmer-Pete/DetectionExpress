@@ -430,12 +430,14 @@ body {
 
 .trace-state--watch {
   background: color-mix(in srgb, var(--dim) 30%, transparent);
-  color: var(--dim);
+  /* Text brightened from --dim (about 2.2:1 on this tint) to clear WCAG AA (4.77:1). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
 }
 
 .trace-state--caught {
   background: color-mix(in srgb, var(--ok) 30%, transparent);
-  color: var(--ok);
+  /* Text brightened from --ok (about 2.4:1 on this tint) to clear WCAG AA (4.73:1). */
+  color: color-mix(in srgb, var(--ok) 5%, var(--ink));
 }
 
 .trace-state--missed {
@@ -445,7 +447,8 @@ body {
 
 .trace-state--false {
   background: color-mix(in srgb, var(--dim) 30%, transparent);
-  color: var(--dim);
+  /* Text brightened from --dim (about 2.2:1 on this tint) to clear WCAG AA (4.77:1). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
 }
 
 .trace-time,
@@ -713,7 +716,10 @@ body {
 
 .decisions-outcome--caught {
   background: color-mix(in srgb, var(--ok) 30%, transparent);
-  color: var(--ok);
+  /* Text brightened from --ok (about 2.0:1 on this tint) to clear WCAG AA (4.75:1).
+     Pure --ink alone tops out at 4.14:1 on this darker --panel2 tint, so this mixes
+     past it toward white rather than staying within an ok/ink blend. */
+  color: color-mix(in srgb, var(--ink) 60%, white);
 }
 
 .decisions-outcome--missed {
@@ -723,7 +729,8 @@ body {
 
 .decisions-outcome--false {
   background: color-mix(in srgb, var(--dim) 30%, transparent);
-  color: var(--dim);
+  /* Text brightened from --dim (about 1.9:1 on this tint) to clear WCAG AA (4.76:1). */
+  color: color-mix(in srgb, var(--ink) 85%, white);
 }
 
 .decisions-entity {
