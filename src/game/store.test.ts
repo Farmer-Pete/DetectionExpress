@@ -166,42 +166,70 @@ describe("store selection", () => {
     expect(useGameStore.getState().selection).toBeNull();
   });
 
-  it("selects a finding by seq through selectFinding", () => {
+  it("selects a finding by seq through selectFinding, when the seq is present in the snapshot", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(7)]));
     useGameStore.getState().selectFinding(7);
     expect(useGameStore.getState().selection).toEqual({ seq: 7 });
   });
 
   it("toggles: re-selecting the same seq clears the selection", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(7)]));
     useGameStore.getState().selectFinding(7);
     useGameStore.getState().selectFinding(7);
     expect(useGameStore.getState().selection).toBeNull();
   });
 
   it("switches selection when a different seq is selected", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(7), finding(9)]));
     useGameStore.getState().selectFinding(7);
     useGameStore.getState().selectFinding(9);
     expect(useGameStore.getState().selection).toEqual({ seq: 9 });
   });
 
   it("clears the selection through clearSelection", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(7)]));
     useGameStore.getState().selectFinding(7);
     useGameStore.getState().clearSelection();
     expect(useGameStore.getState().selection).toBeNull();
   });
 
+  it("leaves the selection null when the seq is absent from the current snapshot's findings", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(1)]));
+    useGameStore.getState().selectFinding(99);
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("leaves an open decision selection untouched, and publishes no new state, on a stale selectFinding", () => {
+    useGameStore.getState().setSnapshot({
+      ...emptySnapshot(),
+      findings: [finding(1)],
+      decisions: [decision(2)],
+    });
+    useGameStore.getState().selectDecision(2);
+    const before = useGameStore.getState();
+    useGameStore.getState().selectFinding(99); // 99 is absent from findings: stale
+    const after = useGameStore.getState();
+    expect(Object.is(before, after)).toBe(true);
+    expect(useGameStore.getState().decisionSelection).toEqual({ seq: 2 });
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
   it("setSnapshot keeps a selection whose seq is still present", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(3)])); // seed: seq 3 exists
     useGameStore.getState().selectFinding(3);
     useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(3)]));
     expect(useGameStore.getState().selection).toEqual({ seq: 3 });
   });
 
   it("setSnapshot clears a selection whose seq aged out of the findings", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(3)])); // seed: seq 3 exists
     useGameStore.getState().selectFinding(3);
     useGameStore.getState().setSnapshot(snapshotWith([finding(1), finding(2)]));
     expect(useGameStore.getState().selection).toBeNull();
   });
 
   it("clears a stale selection across a run restart so a reused seq cannot alias", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(0)])); // seed: seq 0 exists
     useGameStore.getState().selectFinding(0);
     // A restart publishes an empty snapshot first (run-controller), which clears the
     // selection because seq 0 is no longer present.
@@ -224,30 +252,45 @@ describe("store decision selection (T10)", () => {
     expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 
-  it("selects a decision by seq through selectDecision", () => {
+  it("selects a decision by seq through selectDecision, when the seq is present in the snapshot", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
     useGameStore.getState().selectDecision(7);
     expect(useGameStore.getState().decisionSelection).toEqual({ seq: 7 });
   });
 
   it("toggles: re-selecting the same seq clears the decision selection", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
     useGameStore.getState().selectDecision(7);
     useGameStore.getState().selectDecision(7);
     expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 
   it("switches decision selection when a different seq is selected", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7), decision(9)]));
     useGameStore.getState().selectDecision(7);
     useGameStore.getState().selectDecision(9);
     expect(useGameStore.getState().decisionSelection).toEqual({ seq: 9 });
   });
 
   it("clears the decision selection through clearSelection", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
     useGameStore.getState().selectDecision(7);
     useGameStore.getState().clearSelection();
     expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 
+  it("leaves the decision selection null when the seq is absent from the current snapshot's decisions", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1)]));
+    useGameStore.getState().selectDecision(99);
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
   it("selecting a finding clears any decision selection (the dialog is single)", () => {
+    useGameStore.getState().setSnapshot({
+      ...emptySnapshot(),
+      findings: [finding(3)],
+      decisions: [decision(7)],
+    });
     useGameStore.getState().selectDecision(7);
     useGameStore.getState().selectFinding(3);
     expect(useGameStore.getState().decisionSelection).toBeNull();
@@ -255,6 +298,11 @@ describe("store decision selection (T10)", () => {
   });
 
   it("selecting a decision clears any finding selection (the dialog is single)", () => {
+    useGameStore.getState().setSnapshot({
+      ...emptySnapshot(),
+      findings: [finding(3)],
+      decisions: [decision(7)],
+    });
     useGameStore.getState().selectFinding(3);
     useGameStore.getState().selectDecision(7);
     expect(useGameStore.getState().selection).toBeNull();
@@ -262,12 +310,14 @@ describe("store decision selection (T10)", () => {
   });
 
   it("setSnapshot keeps a decision selection whose seq is still present", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(3)])); // seed: seq 3 exists
     useGameStore.getState().selectDecision(3);
     useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1), decision(3)]));
     expect(useGameStore.getState().decisionSelection).toEqual({ seq: 3 });
   });
 
   it("setSnapshot clears a decision selection whose seq left the capped decisions log", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(3)])); // seed: seq 3 exists
     useGameStore.getState().selectDecision(3);
     useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(1), decision(2)]));
     expect(useGameStore.getState().decisionSelection).toBeNull();
@@ -279,6 +329,7 @@ describe("store decision selection (T10)", () => {
   });
 
   it("reconciles the finding selection and the decision selection independently", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(3)])); // seed: seq 3 exists
     useGameStore.getState().selectFinding(3);
     useGameStore.getState().setSnapshot({
       ...emptySnapshot(),

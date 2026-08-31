@@ -104,12 +104,17 @@ interface GameState {
   setRunPending: (pending: boolean) => void;
   /**
    * Select a finding by seq. Re-selecting the same seq clears the selection.
-   * Clears any decision selection: the two are mutually exclusive.
+   * Clears any decision selection: the two are mutually exclusive. A selection is
+   * stored only for a seq present in the current snapshot; a stale seq (a click that
+   * raced a reconciliation, or a seq from a stale render) is ignored without
+   * disturbing any open selection (GH105-PLAN.md).
    */
   selectFinding: (seq: number) => void;
   /**
    * Select a decision by seq. Re-selecting the same seq clears the selection.
-   * Clears any finding selection: the two are mutually exclusive.
+   * Clears any finding selection: the two are mutually exclusive. A selection is
+   * stored only for a seq present in the current snapshot; a stale seq is ignored
+   * without disturbing any open selection (GH105-PLAN.md).
    */
   selectDecision: (seq: number) => void;
   /** Clear both selections. Esc and a click on the empty panel call it. */
@@ -176,17 +181,33 @@ export const useGameStore = create<GameState>((set) => ({
   setError: (error) => set({ error }),
   setSourceLocked: (locked) => set({ sourceLocked: locked }),
   setRunPending: (pending) => set({ runPending: pending }),
-  // The dialog is single, so selecting either kind always clears the other.
+  // The dialog is single, so selecting either kind always clears the other. A
+  // selection is stored only for a seq present in the current snapshot, so
+  // `selection !== null` always implies a live finding to render (GH105-PLAN.md):
+  // (1) re-select of the same seq toggles off first; (2) validate the seq against
+  // the snapshot; (3) only for a valid seq, set the selection and clear the
+  // opposite one. A stale seq returns `state` itself, not `{}` — a genuine Zustand
+  // no-op that leaves any open dialog untouched and publishes no new root state.
   selectFinding: (seq) =>
-    set((state) => ({
-      selection: state.selection?.seq === seq ? null : { seq },
-      decisionSelection: null,
-    })),
+    set((state) => {
+      if (state.selection?.seq === seq) {
+        return { selection: null, decisionSelection: null }; // re-select toggles off
+      }
+      if (!state.snapshot.findings.some((live) => live.seq === seq)) {
+        return state; // stale seq: genuine no-op, leaves any open dialog untouched
+      }
+      return { selection: { seq }, decisionSelection: null };
+    }),
   selectDecision: (seq) =>
-    set((state) => ({
-      decisionSelection: state.decisionSelection?.seq === seq ? null : { seq },
-      selection: null,
-    })),
+    set((state) => {
+      if (state.decisionSelection?.seq === seq) {
+        return { selection: null, decisionSelection: null };
+      }
+      if (!state.snapshot.decisions.some((decision) => decision.seq === seq)) {
+        return state;
+      }
+      return { decisionSelection: { seq }, selection: null };
+    }),
   clearSelection: () => set({ selection: null, decisionSelection: null }),
   // Each setter keeps the sibling field, so toggling freeze never resets speed and
   // vice versa.
