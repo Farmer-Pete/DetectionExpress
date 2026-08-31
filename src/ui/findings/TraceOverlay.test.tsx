@@ -584,11 +584,14 @@ describe("TraceOverlay decision mode (T10)", () => {
     expect(dialog.getByText("false")).toBeDefined();
   });
 
-  it("renders a missed decision as a solo panel: reason and the attack window, no evidence nodes", () => {
+  it("renders a missed decision as a solo panel: entity, reason (once), and the attack window, no evidence nodes", () => {
     publishDecisions([missedDecision({ seq: 1, window: { startTs: 10, endTs: 100 } })]);
     openDecisionTraceByClick(/pin brute force/i);
     const dialog = within(screen.getByRole("dialog"));
     expect(dialog.getByText("missed")).toBeDefined();
+    expect(dialog.getByText("acct-9")).toBeDefined();
+    // The header already carries the reason; the solo panel must not repeat it.
+    expect(dialog.getAllByText(/pin brute force/i)).toHaveLength(1);
     expect(dialog.queryByText(/ingest \+ normalize/i)).toBeNull();
     expect(dialog.queryByText(/judge/i)).toBeNull();
     expect(dialog.queryByRole("region", { name: "Ingest and Normalize" })).toBeNull();

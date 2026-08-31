@@ -267,6 +267,13 @@ function decisionReason(model: DecisionTraceViewModel | null): string {
   return model?.reason ?? "";
 }
 
+/** The header's entity chip, or null for an entity-less false decision. A caught
+ *  decision always names one; a miss always names one too (an Attack always has an
+ *  entity, unlike a finding). */
+function decisionEntity(model: DecisionTraceViewModel): string | null {
+  return model.entity;
+}
+
 /** T9's body: the header, then the Ingest+Normalize and Judge nodes. */
 function LiveTraceContent({ model, onClose }: { model: TraceViewModel; onClose: () => void }) {
   return (
@@ -310,8 +317,8 @@ function DecisionTraceContent({
   return (
     <>
       <header className="trace-overlay-header">
-        {model.kind === "evidence" && model.entity !== null ? (
-          <span className="trace-entity-chip">{model.entity}</span>
+        {decisionEntity(model) !== null ? (
+          <span className="trace-entity-chip">{decisionEntity(model)}</span>
         ) : null}
         <span className="trace-reason">{prettifyReason(model.reason)}</span>
         <span className={`trace-state trace-state--${outcome}`}>{outcome}</span>
@@ -334,8 +341,9 @@ function DecisionTraceContent({
           </section>
         </div>
       ) : (
+        // The header above already carries the reason; this panel adds only what it
+        // does not: the attack window (decision 12 — no evidence pane for a miss).
         <div className="trace-node trace-node-missed">
-          <p className="trace-missed-reason">{prettifyReason(model.reason)}</p>
           <p className="trace-missed-window">
             Attack window: {formatClock(model.window.startTs)}–{formatClock(model.window.endTs)}
           </p>

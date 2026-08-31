@@ -361,13 +361,14 @@ describe("buildDecisionTraceViewModel", () => {
     expect(model.entity).toBe("ghost");
   });
 
-  it("builds a missed view: reason, resolvedAt, and the attack window, no cards", () => {
+  it("builds a missed view: entity, reason, resolvedAt, and the attack window, no cards", () => {
     const snap = snapshotWithDecisions([
       missedDecision({ seq: 1, window: { startTs: 5, endTs: 100 } }),
     ]);
     const model = buildDecisionTraceViewModel(snap, 1);
     expect(model).toEqual({
       kind: "missed",
+      entity: "acct-9",
       reason: "pin_brute_force",
       resolvedAt: 100,
       window: { startTs: 5, endTs: 100 },

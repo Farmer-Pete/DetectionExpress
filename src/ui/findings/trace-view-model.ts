@@ -120,6 +120,8 @@ interface DecisionTraceEvidence {
  *  (GH34-35-PLAN.md decision 12: there was no finding to show). */
 interface DecisionTraceMissed {
   kind: "missed";
+  /** The attack's entity: a miss always names one, unlike a false decision's optional one. */
+  entity: string;
   reason: string;
   resolvedAt: number;
   window: { startTs: number; endTs: number };
@@ -145,6 +147,7 @@ export function buildDecisionTraceViewModel(
   if (decision.outcome === "missed") {
     return {
       kind: "missed",
+      entity: decision.entity,
       reason: decision.reason,
       resolvedAt: decision.resolvedAt,
       window: { startTs: decision.window.startTs, endTs: decision.window.endTs },
