@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
+import type { AccountKioskReading } from "../endpoints/kiosk/internal";
 import { distanceTable } from "../world/distance";
 import type { Presence } from "../world/presence";
 import { buildTimetable } from "../world/timetable";
 import { world } from "../world/world";
-import type { AccountKioskReading, WorldEnv, WorldReading } from "../world-reading";
+import type { WorldEnv, WorldReading } from "../world-reading";
 import {
   type AccountRiderConfig,
   createAccountRider,
