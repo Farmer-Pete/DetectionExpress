@@ -28,6 +28,7 @@ import {
   assembleAttacker,
   assemblePatron,
   buildIdentityPools,
+  pickSeeded,
 } from "../../sim/scenarios/kiosk-pin-attack/cast";
 import { ARRIVE_LEAD_TICKS } from "../../sim/scenarios/kiosk-pin-attack/pin-attacker";
 import { distanceTable } from "../../sim/world/distance";
@@ -58,15 +59,6 @@ export interface Corpus {
  */
 const MAX_BURST_TICKS = PIN_BRUTE_FORCE_THRESHOLD + 3;
 
-/** Draw one item from a pool with the seeded rng. */
-function pick<T>(items: readonly T[], rng: () => number): T {
-  const item = items[Math.floor(rng() * items.length)];
-  if (item === undefined) {
-    throw new Error("buildCorpus: drew from an empty identity pool.");
-  }
-  return item;
-}
-
 /**
  * Build a fixed `size`-Event corpus from `seed` at `eventsPerTick` density. It lays
  * `N = ceil(size / (1 + threshold))` co-located pairs across the nominal span. Each
@@ -91,9 +83,9 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
   const pools = buildIdentityPools(rng, world, CORPUS_ACCOUNTS);
   const actors: Actor<WorldReading, WorldEnv>[] = [];
   for (let k = 0; k < pairCount; k++) {
-    const account = pick(pools.accounts, rng);
-    const station = pick(pools.stations, rng);
-    const terminal = pick(pools.terminals, rng);
+    const account = pickSeeded(pools.accounts, rng);
+    const station = pickSeeded(pools.stations, rng);
+    const terminal = pickSeeded(pools.terminals, rng);
     // Between threshold and threshold + 3 fails, the same distribution planAttacks
     // draws; laid one tick apart for deliberately deep detection windows.
     const failCount = PIN_BRUTE_FORCE_THRESHOLD + Math.floor(rng() * 4);

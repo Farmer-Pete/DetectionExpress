@@ -45,6 +45,20 @@ export interface IdentityPools {
 }
 
 /**
+ * Draw one item from `items` with the seeded `rng`, one rng call per draw. Shared
+ * by the scenario and the calibration corpus, both of which draw accounts,
+ * stations, and terminals from these same identity pools. Throws if `items` is
+ * empty, since an empty pool means the caller built its identities wrong.
+ */
+export function pickSeeded<T>(items: readonly T[], rng: () => number): T {
+  const item = items[Math.floor(rng() * items.length)];
+  if (item === undefined) {
+    throw new Error("pickSeeded: drew from an empty pool.");
+  }
+  return item;
+}
+
+/**
  * Build the identity pools from the seeded rng: `accountCount` distinct accounts via
  * `buildAccounts` (killing the faker copies), the world's stations, and the kiosk
  * terminal pool. Deterministic and order-fixed for a seed.

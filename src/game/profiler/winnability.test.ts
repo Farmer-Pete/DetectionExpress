@@ -56,6 +56,14 @@ import {
 // generic band `simulate` runs the real channel and governor math against them.
 
 /**
+ * The canonical run's Events, generated once at module load. `arrivalsByTick` is
+ * called once per service rate in the OMEGA/skew band sweep below, and generation
+ * is pure and deterministic under LEVEL_SEED, so every caller can share this one
+ * run instead of re-running the whole scenario per call.
+ */
+const canonicalEvents = kioskPinAttack.generate(LEVEL_SEED).events;
+
+/**
  * Events arriving at each tick, binned from the assembled canonical run. It consumes
  * the same LEVEL_SEED stream the engine does, so the bins carry the benign
  * successes, the benign fumble fails, AND the attack fails at their exact ticks
@@ -64,8 +72,7 @@ import {
  */
 function arrivalsByTick(deadline: number): number[] {
   const arrivals = new Array<number>(deadline + 1).fill(0);
-  const { events } = kioskPinAttack.generate(LEVEL_SEED);
-  for (const ev of events) {
+  for (const ev of canonicalEvents) {
     const tick = ev.ts / GAME_SECONDS_PER_TICK;
     if (tick <= deadline) {
       arrivals[tick] = (arrivals[tick] ?? 0) + 1;

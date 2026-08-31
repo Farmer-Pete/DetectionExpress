@@ -37,6 +37,7 @@ import {
   type BenignVisit,
   budgetFumbles,
   buildIdentityPools,
+  pickSeeded,
 } from "./cast";
 
 /** Accounts in the pool. The victims are a distinct subset; the rest stay benign. */
@@ -47,15 +48,6 @@ const BENIGN_DWELL_TICKS = 1;
 
 /** The total attackers across all waves; the victim count `selectVictims` draws. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);
-
-/** Draw one item from a pool with the seeded rng. */
-function pick<T>(items: readonly T[], rng: () => number): T {
-  const item = items[Math.floor(rng() * items.length)];
-  if (item === undefined) {
-    throw new Error("kiosk-pin-attack: drew from an empty identity pool.");
-  }
-  return item;
-}
 
 /** A typed view of one kiosk reading, used by the separability assertions. */
 interface FairRecord {
@@ -80,9 +72,9 @@ function generate(seed: number): GeneratedRun {
   const slotTicks = admitArrivals(waves);
   const visits = slotTicks.map((tick) => ({
     tick,
-    account: pick(pools.accounts, rng),
-    station: pick(pools.stations, rng),
-    terminal: pick(pools.terminals, rng),
+    account: pickSeeded(pools.accounts, rng),
+    station: pickSeeded(pools.stations, rng),
+    terminal: pickSeeded(pools.terminals, rng),
   }));
   const budgetInput: BenignVisit[] = visits.map((v) => ({ account: v.account, tick: v.tick }));
   const fumbleCounts = budgetFumbles(budgetInput, victimSet, rng);
@@ -106,8 +98,8 @@ function generate(seed: number): GeneratedRun {
       id: `attack-${plan.id}`,
       attackId: plan.id,
       account: plan.account,
-      station: pick(pools.stations, rng),
-      terminal: pick(pools.terminals, rng),
+      station: pickSeeded(pools.stations, rng),
+      terminal: pickSeeded(pools.terminals, rng),
       failTimestamps: plan.failTimestamps,
     });
     labels.set(label[0], label[1]);
