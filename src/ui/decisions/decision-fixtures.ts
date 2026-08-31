@@ -58,6 +58,7 @@ export function falseDecision(over: EvidenceDecisionOverrides): FalseDecision {
     finding: {
       alert: { reason: "impossible_travel", at: 999, eventIds },
       eventId: eventIds[0] ?? 0,
+      ...(over.context !== undefined ? { context: over.context } : {}),
     },
     citedEvents: over.citedEvents ?? [],
   };
