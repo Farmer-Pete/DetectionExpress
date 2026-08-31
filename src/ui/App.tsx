@@ -33,6 +33,7 @@ import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
 import { chaosLevels, hireMe, introCopy, liveScenario, REPO_URL } from "./content/narrative";
+import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { HireMe } from "./HireMe";
 import { Hud } from "./hud/Hud";
@@ -289,6 +290,7 @@ export function App({ createPipelineController, createWorldController }: AppProp
           <>
             <Hud />
             <InspectorShell />
+            <DecisionsPanel />
             <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
             <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
             <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />

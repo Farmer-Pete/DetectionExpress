@@ -618,6 +618,97 @@ body {
   overflow-x: auto;
 }
 
+/* Decisions panel (T10) */
+.decisions-panel {
+  margin: 0 1rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.decisions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decisions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.decisions-row:hover {
+  border-color: var(--line);
+}
+
+.decisions-row.is-selected {
+  border-color: var(--a1);
+  background: color-mix(in srgb, var(--a1) 18%, var(--panel2));
+}
+
+.decisions-outcome {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decisions-outcome--caught {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+  color: var(--ok);
+}
+
+.decisions-outcome--missed {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.decisions-outcome--false {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  color: var(--dim);
+}
+
+.decisions-entity {
+  color: var(--a3);
+  font-variant-numeric: tabular-nums;
+}
+
+.decisions-time {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.decisions-empty {
+  text-align: center;
+}
+
+.decisions-empty-title {
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.decisions-empty-note {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.8rem;
+}
+
 /* Briefing */
 .briefing {
   margin: 0 1.5rem 0.75rem;
