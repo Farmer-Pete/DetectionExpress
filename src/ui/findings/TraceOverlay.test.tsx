@@ -299,6 +299,41 @@ describe("TraceOverlay", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("wraps Tab at the edges to keep focus within the dialog", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    // The shipped dialog exposes only the close button today; append a second
+    // control here (FOCUSABLE_SELECTOR is generic so the trap survives controls
+    // added later, per src/ui/focus.ts) to exercise the wrap between two distinct
+    // elements rather than a single control wrapping to itself.
+    const extra = document.createElement("button");
+    extra.type = "button";
+    extra.textContent = "extra";
+    dialog.appendChild(extra);
+    const focusable = [...dialog.querySelectorAll<HTMLElement>("button, a[href]")];
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (first === undefined || last === undefined || first === last) {
+      throw new Error("expected two distinct focusable controls");
+    }
+
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("does not throw on Tab in the missed-decision solo panel, which carries fewer focusable controls", () => {
+    publishDecisions([missedDecision({ seq: 1 })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    expect(() => fireEvent.keyDown(dialog, { key: "Tab" })).not.toThrow();
+  });
+
   it("has a close button that clears the selection", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);

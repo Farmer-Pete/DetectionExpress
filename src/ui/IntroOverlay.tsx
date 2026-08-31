@@ -11,6 +11,7 @@
  */
 import { useEffect, useRef } from "react";
 import type { IntroCopy } from "./content/narrative";
+import { focusableControls } from "./focus";
 
 interface IntroOverlayProps {
   copy: IntroCopy;
@@ -21,15 +22,6 @@ interface IntroOverlayProps {
   onCauseChaos: () => void;
   /** Dismiss, then scroll to the engine editor. */
   onEditEngine: () => void;
-}
-
-/** The standard focusable set, so the trap survives controls added later. */
-const FOCUSABLE_SELECTOR =
-  'button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-
-/** The dialog's focusable controls, in DOM order. */
-function focusableControls(dialog: HTMLElement): HTMLElement[] {
-  return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)];
 }
 
 export function IntroOverlay({

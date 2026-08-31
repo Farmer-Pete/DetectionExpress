@@ -20,7 +20,9 @@
  *
  * It is a real modal dialog, styled on `IntroOverlay`'s pattern: `role="dialog"`,
  * a backdrop that dismisses on click (a click inside the dialog never does), Esc
- * dismisses too, and focus moves in on open. On close it restores focus to the row
+ * dismisses too, focus moves in on open, and Tab/Shift+Tab wrap at the dialog's
+ * edges (shared with `IntroOverlay` through `src/ui/focus.ts`). On close it
+ * restores focus to the row
  * that opened it, but only if that row `isConnected` — reconciliation may have
  * evicted it (aging, a cap, or a run restart publishing `emptySnapshot()`) — and
  * falls back to the active mode's own container otherwise (decision 14):
@@ -36,6 +38,7 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
+import { focusableControls } from "../focus";
 import { formatClock } from "../log/formatters";
 import {
   buildDecisionTraceViewModel,
@@ -154,6 +157,31 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
     if (event.key === "Escape") {
       event.preventDefault();
       clearSelection();
+      return;
+    }
+    if (event.key !== "Tab") {
+      return;
+    }
+    // Wrap Tab/Shift+Tab at the dialog's edges, mirroring IntroOverlay's trap
+    // (src/ui/focus.ts). A missed decision's solo panel carries fewer focusable
+    // controls than the evidence layouts; the undefined guard covers it the same
+    // way IntroOverlay guards the zero-focusable case.
+    const dialog = dialogRef.current;
+    if (dialog === null) {
+      return;
+    }
+    const controls = focusableControls(dialog);
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (first === undefined || last === undefined) {
+      return;
+    }
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
   };
 
