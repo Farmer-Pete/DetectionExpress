@@ -108,6 +108,18 @@ describe("buildTraceViewModel", () => {
     ]);
   });
 
+  it("dedups a repeated cited id to one card, keeping first-occurrence order", () => {
+    const snap = snapshot([live({ seq: 1, eventIds: [7, 3, 7] })], [ringEvent(3), ringEvent(7)]);
+    const model = buildTraceViewModel(snap, 1);
+    expect(model?.cards.map((card) => card.id)).toEqual([7, 3]);
+  });
+
+  it("dedups a repeated missing id to one aged-out placeholder", () => {
+    const snap = snapshot([live({ seq: 1, eventIds: [9, 9] })], []);
+    const model = buildTraceViewModel(snap, 1);
+    expect(model?.cards).toEqual([{ kind: "aged-out", id: 9 }]);
+  });
+
   it("carries reason, state, entity, and the trusted `at`, never the finding's alert.at", () => {
     const snap = snapshot(
       [
@@ -318,6 +330,19 @@ describe("buildDecisionTraceViewModel", () => {
     const bareModel = buildDecisionTraceViewModel(bare, 2);
     if (bareModel?.kind !== "evidence") throw new Error("expected an evidence view");
     expect(bareModel.context).toBeUndefined();
+  });
+
+  it("dedups a decision's repeated cited id to one card, keeping first-occurrence order", () => {
+    const snap = snapshotWithDecisions([
+      caughtDecision({
+        seq: 1,
+        eventIds: [7, 3, 7],
+        citedEvents: [ringEvent(3), ringEvent(7)],
+      }),
+    ]);
+    const model = buildDecisionTraceViewModel(snap, 1);
+    if (model?.kind !== "evidence") throw new Error("expected an evidence view");
+    expect(model.cards.map((card) => card.id)).toEqual([7, 3]);
   });
 
   it("builds a false decision's evidence view, entity null when the finding named no subject", () => {

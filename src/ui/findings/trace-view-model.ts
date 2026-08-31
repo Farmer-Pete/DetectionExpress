@@ -40,10 +40,16 @@ export interface TraceViewModel {
   state: "hit" | "watch";
   /** `LiveFinding.at`: the trusted emission time, never `alert.at`. */
   at: number;
-  /** One card per `alert.eventIds` entry, order preserved. */
+  /** One card per distinct cited id, first-occurrence order preserved. */
   cards: TraceCard[];
   /** The finding's display widgets, when it carries any. */
   context?: Context;
+}
+
+/** `alert.eventIds` deduped, first-occurrence order preserved, matching the
+ *  set-semantics `resolveEvents` and the scorer's `hitsFor` already apply. */
+function dedupIds(ids: readonly number[]): number[] {
+  return [...new Set(ids)];
 }
 
 /**
@@ -56,7 +62,7 @@ export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceVi
     return null;
   }
 
-  const cards: TraceCard[] = live.finding.alert.eventIds.map((id) => {
+  const cards: TraceCard[] = dedupIds(live.finding.alert.eventIds).map((id) => {
     const event = snapshot.events.find((candidate) => candidate.id === id);
     if (event === undefined) {
       return { kind: "aged-out", id };
@@ -104,7 +110,7 @@ interface DecisionTraceEvidence {
   reason: string;
   /** The trusted resolution time (GH34-35-PLAN.md decision 16), never `at`. */
   resolvedAt: number;
-  /** One card per `alert.eventIds` entry, order preserved. */
+  /** One card per distinct cited id, first-occurrence order preserved. */
   cards: TraceCard[];
   /** The frozen finding's display widgets, when it carries any. */
   context?: Context;
@@ -145,7 +151,7 @@ export function buildDecisionTraceViewModel(
     };
   }
 
-  const cards: TraceCard[] = decision.finding.alert.eventIds.map((id) => {
+  const cards: TraceCard[] = dedupIds(decision.finding.alert.eventIds).map((id) => {
     const cited = decision.citedEvents.find((event) => event.id === id);
     if (cited === undefined) {
       return { kind: "aged-out", id };
