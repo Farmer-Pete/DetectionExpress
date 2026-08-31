@@ -93,6 +93,9 @@ export interface CaughtDecision extends DecisionBase {
   entity: string;
   /** Deep clone of the crediting finding, frozen. */
   finding: Finding;
+  /** The `seq` of the live row this finding upserted. Exact, so the UI needs no
+   *  (entity, reason) reconstruction to find the row a decision came from. */
+  liveSeq: number;
 }
 
 /** A finding that credited no pending Attack. */
@@ -102,6 +105,8 @@ export interface FalseDecision extends DecisionBase {
   entity?: string;
   /** Deep clone of the finding, frozen. */
   finding: Finding;
+  /** The `seq` of the live row this finding upserted. */
+  liveSeq: number;
 }
 
 /** An Attack whose window closed with no crediting finding. */
@@ -172,6 +177,9 @@ export interface Scorer {
   finalize(): void;
   /** The current gauge and global counts. Never mutates scoring state. */
   reading(): CorrectnessReading;
+  /** The decision log's length, O(1) and allocation-free. Grows only on `append`, so
+   *  a sampler can detect new decisions without reading (and copying) `decisions()`. */
+  decisionCount(): number;
   /**
    * The decision log in append (resolution) order. Returns a frozen fresh array
    * (`Object.freeze([...log])`) of already-frozen, deep-cloned decisions, so neither
@@ -332,8 +340,12 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    * canonicalizes it (`tasks.ts`, JSON round-trip) before `record`, and nothing
    * mutates it afterward. So this freezes that object in place rather than making a
    * second copy. The scorer never mutates a stored entry afterward.
+   *
+   * Returns the row's `seq`, or `null` on the resolved-partial early return, where no
+   * row is upserted. `scoreFinding` skips every partial before it would use this
+   * value, so a null seq never reaches a decision.
    */
-  function upsertLive(scored: ScoredFinding, ts: number): void {
+  function upsertLive(scored: ScoredFinding, ts: number): number | null {
     const finding = scored.finding;
     // Drop a partial "watch" whose owning attack has already resolved. `record`
     // closes expired attacks (dropping their linked watches) BEFORE this upsert, so a
@@ -343,7 +355,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     if (finding.isPartial === true) {
       const attackId = owner.get(finding.eventId);
       if (attackId !== undefined && state.get(attackId) !== "pending") {
-        return;
+        return null;
       }
     }
     const liveState: "hit" | "watch" = finding.isPartial === true ? "watch" : "hit";
@@ -373,6 +385,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       entry.entity = scored.entity;
     }
     live.set(key, freezeDeep(entry));
+    return seq;
   }
 
   /**
@@ -401,11 +414,21 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    * reason. Evidence (>= threshold distinct cited ids owned by that Attack) is
    * required either way. "First pending" is the injected `attacks` array order, so
    * when two attacks tie the earlier element wins.
+   *
+   * `liveSeq` is the row `upsertLive` just upserted this same finding into. It is
+   * `null` only when that upsert hit its resolved-partial early return, and a partial
+   * always returns above before this value is used, so a real caught or false
+   * decision always carries a real seq. The guard below documents that invariant
+   * rather than asserting past it, so a future upsertLive change fails loudly instead
+   * of writing a decision with no live row.
    */
-  function scoreFinding(scored: ScoredFinding): void {
+  function scoreFinding(scored: ScoredFinding, liveSeq: number | null): void {
     const finding = scored.finding;
     if (finding.isPartial === true) {
       return;
+    }
+    if (liveSeq === null) {
+      throw new Error("scoreFinding: a non-partial finding must have upserted a live row");
     }
     const alert = finding.alert;
     const hits = hitsFor(alert.eventIds);
@@ -426,6 +449,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
           attackId: attack.id,
           entity: attack.entity,
           finding: deepClone(finding),
+          liveSeq,
         });
         return;
       }
@@ -437,6 +461,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       seq: log.length,
       at: alert.at,
       finding: deepClone(finding),
+      liveSeq,
     };
     if (scored.entity !== undefined) {
       decision.entity = scored.entity;
@@ -449,15 +474,14 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       // Pinned order: horizon sweep, close expired (+ its early watch-drop),
       // upsert every finding into the live set, then score every finding. Upsert
       // runs as its own pass, before scoring, so it never depends on which Attack
-      // a finding ends up crediting.
+      // a finding ends up crediting. Each finding's liveSeq is collected here, in the
+      // same pass, so scoring needs no second (entity, reason) lookup to find it.
       sweepHorizon(env.ts);
       closeExpired(env.ts);
-      for (const scored of findings) {
-        upsertLive(scored, env.ts);
-      }
-      for (const scored of findings) {
-        scoreFinding(scored);
-      }
+      const liveSeqs = findings.map((scored) => upsertLive(scored, env.ts));
+      findings.forEach((scored, index) => {
+        scoreFinding(scored, liveSeqs[index] ?? null);
+      });
     },
     advanceTo(gameTs) {
       sweepHorizon(gameTs);
@@ -489,6 +513,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
         missed: counts.missed,
         falseAlerts: counts.falseAlerts,
       };
+    },
+    decisionCount() {
+      return log.length;
     },
     decisions() {
       return Object.freeze([...log]);
