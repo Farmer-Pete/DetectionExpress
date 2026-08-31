@@ -1201,11 +1201,11 @@ body {
 
 @keyframes fx-cite {
   0% {
-    background: var(--hunt-color);
+    background: color-mix(in srgb, var(--hunt-color) 35%, transparent);
     box-shadow: 0 0 16px var(--hunt-color);
   }
   55% {
-    background: var(--hunt-color);
+    background: color-mix(in srgb, var(--hunt-color) 35%, transparent);
   }
   100% {
     background: transparent;

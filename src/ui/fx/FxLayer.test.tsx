@@ -337,6 +337,48 @@ describe("FxLayer fallback anchors", () => {
   });
 });
 
+describe("FxLayer viewport clamping (F018)", () => {
+  function stubViewport(width: number, height: number): void {
+    vi.stubGlobal("innerWidth", width);
+    vi.stubGlobal("innerHeight", height);
+  }
+
+  it("clamps a fallback point to the viewport when the panel is only partly scrolled off", () => {
+    stubViewport(1024, 800);
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    // The log panel's raw rect runs from y=500 to y=1500 — its bottom half is below
+    // the 800px viewport. The mounted row sits at y=520..530, inside the part of the
+    // panel that IS on screen, so it anchors on its own center, not the edge.
+    stubRect(requireEl(".log-stream"), rect(0, 500, 100, 1500));
+    stubRect(requireEl(".findings-panel"), rect(300, 300, 400, 400));
+    stubRect(screen.getByTestId("log-row-10"), rect(10, 520, 20, 530));
+
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    const comet = screen.getByTestId("fx-comet");
+    expect(cometFrom(comet)).toEqual({ x: 15, y: 525 }); // the row's own center: it is visible
+    expect(cometFrom(comet).y).toBeLessThanOrEqual(800);
+  });
+
+  it("treats a panel rect entirely below the viewport as not visible, clamping to the nearest edge", () => {
+    stubViewport(1024, 800);
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    // The whole log panel sits below the viewport (900..1500 with innerHeight 800): no
+    // part of it is visible, so even a "mounted" row inside it falls back to the
+    // viewport's nearest edge rather than its own (off-screen) coordinates.
+    stubRect(requireEl(".log-stream"), rect(0, 900, 100, 1500));
+    stubRect(requireEl(".findings-panel"), rect(300, 300, 400, 400));
+    stubRect(screen.getByTestId("log-row-10"), rect(10, 920, 20, 930));
+
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    const comet = screen.getByTestId("fx-comet");
+    // x stays the row's own center (15, already inside the panel's horizontal span);
+    // y clamps to the viewport's bottom edge, same as any other off-screen anchor.
+    expect(cometFrom(comet)).toEqual({ x: 15, y: 800 });
+  });
+});
+
 describe("FxLayer reduced motion", () => {
   it("spawns no comets, but still fades in a verdict pop and flashes cited rows", () => {
     stubReducedMotion(true);
@@ -401,6 +443,21 @@ describe("FxLayer run reset", () => {
     publish([liveFinding({ seq: 1, eventIds: [10] })]);
     expect(useGameStore.getState().flashes.size).toBe(1);
     expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+  });
+
+  it("clears announcements on a runToken change (F005), so no prior-run verdict lingers", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], [1]);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(requireEl("[data-finding-seq='1']"), rect(40, 50, 60, 70));
+    publish([], [caughtDecision(1, "acct-7")]);
+    expect(screen.getByTestId("fx-announcements").textContent).toContain("Caught: acct-7");
+
+    act(() => {
+      useGameStore.getState().bumpRunToken();
+      useGameStore.setState({ snapshot: emptySnapshot() });
+    });
+    expect(screen.getByTestId("fx-announcements").childElementCount).toBe(0);
   });
 });
 
@@ -485,6 +542,48 @@ describe("FxLayer verdict announcements (F007)", () => {
     const live = screen.getByTestId("fx-announcements");
     expect(live.textContent).toContain("False alert");
     expect(live.textContent).toContain("Missed: acct-9");
+  });
+
+  it("appends and trims a sub-cap burst to the cap (F007)", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], []);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    // Three decisions, then three more new ones: six seen total, five kept (the cap),
+    // the oldest (acct-1) aged out.
+    publish([], [missedDecision("acct-1"), missedDecision("acct-2"), missedDecision("acct-3")]);
+    publish(
+      [],
+      [
+        missedDecision("acct-1"),
+        missedDecision("acct-2"),
+        missedDecision("acct-3"),
+        missedDecision("acct-4"),
+        missedDecision("acct-5"),
+        missedDecision("acct-6"),
+      ],
+    );
+    const live = screen.getByTestId("fx-announcements");
+    expect(live.childElementCount).toBe(5);
+    expect(live.textContent).not.toContain("acct-1");
+    expect(live.textContent).toContain("acct-6");
+  });
+
+  it("renders exactly the cap's worth of announcements from a single burst over the cap, keeping the latest", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], []);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    // One publish carrying 7 missed decisions at once: more than ANNOUNCEMENT_CAP (5).
+    const decisions = [1, 2, 3, 4, 5, 6, 7].map((n) => missedDecision(`acct-${n}`));
+    publish([], decisions);
+
+    const live = screen.getByTestId("fx-announcements");
+    expect(live.childElementCount).toBe(5);
+    // The latest 5 of the batch survive, not the earliest.
+    for (const n of [3, 4, 5, 6, 7]) {
+      expect(live.textContent).toContain(`acct-${n}`);
+    }
+    expect(live.textContent).not.toContain("acct-1");
+    expect(live.textContent).not.toContain("acct-2");
   });
 });
 

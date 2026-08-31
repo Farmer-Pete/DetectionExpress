@@ -87,9 +87,47 @@ function edgeCenter(rect: FxRect, edge: "top" | "bottom"): FxPoint {
 
 const ORIGIN: FxPoint = { x: 0, y: 0 };
 
+function viewportRect(): FxRect {
+  return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+}
+
+function intersectRect(a: FxRect, b: FxRect): FxRect | null {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.right, b.right);
+  const bottom = Math.min(a.bottom, b.bottom);
+  return left < right && top < bottom ? { left, top, right, bottom } : null;
+}
+
+/**
+ * A rect outside the viewport, collapsed to a zero-height line at the nearest
+ * viewport edge, holding the rect's horizontal span (itself clamped into the
+ * viewport). There is no visible interior left for an anchor to land inside — only
+ * an edge to land on.
+ */
+function nearestViewportEdge(rect: FxRect, viewport: FxRect): FxRect {
+  const left = clamp(rect.left, viewport.left, viewport.right);
+  const right = clamp(rect.right, viewport.left, viewport.right);
+  const y = rect.bottom <= viewport.top ? viewport.top : viewport.bottom;
+  return { left, top: y, right, bottom: y };
+}
+
+/**
+ * F018: the page scrolls (the shell grows with content), so a panel's raw rect can
+ * sit entirely outside the viewport, and the fixed FX overlay clips anything
+ * positioned there invisible. Intersect the panel with the viewport before it is used
+ * for visibility checks or fallback-edge points; a panel with no overlap at all
+ * collapses to the nearest viewport edge within its horizontal span, so every
+ * fallback point still lands on screen.
+ */
 function panelRect(selector: string): FxRect | null {
   const el = document.querySelector(selector);
-  return el === null ? null : toFxRect(el.getBoundingClientRect());
+  if (el === null) {
+    return null;
+  }
+  const raw = toFxRect(el.getBoundingClientRect());
+  const viewport = viewportRect();
+  return intersectRect(raw, viewport) ?? nearestViewportEdge(raw, viewport);
 }
 
 /**
@@ -282,6 +320,7 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       pendingFlashesRef.current = [];
       itemsRef.current = [];
       setItems([]);
+      setAnnouncements([]);
       useGameStore.setState({ flashes: new Map() });
     }
 
@@ -357,7 +396,14 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
           text: announcementFor(decision),
         }),
       );
-      setAnnouncements((current) => [...current, ...newAnnouncements].slice(-ANNOUNCEMENT_CAP));
+      // A same-tick batch at or over the cap fills the region on its own: spreading
+      // `current` first would only be discarded by the slice below, so skip it to keep
+      // the result exactly the newest ANNOUNCEMENT_CAP entries of THIS batch.
+      setAnnouncements((current) =>
+        newAnnouncements.length >= ANNOUNCEMENT_CAP
+          ? newAnnouncements.slice(-ANNOUNCEMENT_CAP)
+          : [...current, ...newAnnouncements].slice(-ANNOUNCEMENT_CAP),
+      );
     }
     if (flashSpawns.length > 0 || newItems.length > 0) {
       wakeLoopRef.current(); // F011: a spawn wakes a parked loop
