@@ -337,8 +337,10 @@ describe("urgentAnnouncement (GH38 review round 4, F002)", () => {
 
   it("carries no live count, so it does not re-announce on every hit increment", () => {
     // A fixed phrase regardless of how many hits are urgent — the count lives
-    // only in the visible "N active" text, never in the announcement.
-    expect(urgentAnnouncement(true)).toBe(urgentAnnouncement(true));
+    // only in the visible "N active" text, never in the announcement. Asserting
+    // the phrase carries no digit enforces that contract against any future
+    // implementation, where comparing the pure call to itself never would.
+    expect(urgentAnnouncement(true)).not.toMatch(/\d/);
   });
 
   it("names no CONTEXT.md Alert-avoid word (hit, detection, notification, flag)", () => {
