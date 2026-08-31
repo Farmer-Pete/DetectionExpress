@@ -4,12 +4,14 @@ import { type ChunkView, inspectStatic, verifyStatic } from "./verify-static";
 /**
  * A clean main chunk: carries the app entry and the assembled-engine marker, with no
  * dev module or event marker. The marker stands in for the `virtual:engine-source`
- * string literal the real build ships.
+ * string literal the real build ships: `pin_brute_force`, the pin-brute-force rule's
+ * `REASON` value, a runtime string literal that survives both minification and the
+ * assembler's own comment-stripping (unlike a comment, which would not).
  */
 const cleanChunk: ChunkView = {
   fileName: "assets/index-abc.js",
   moduleIds: ["src/main.tsx", "src/ui/App.tsx"],
-  code: "console.log('detection express');/* teaching prop, unused by the logic */",
+  code: "console.log('detection express');'pin_brute_force'",
 };
 
 describe("inspectStatic", () => {

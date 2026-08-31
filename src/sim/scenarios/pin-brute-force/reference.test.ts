@@ -65,8 +65,12 @@ function raw(ev: PipeEvent): RawKioskV1 {
 describe("referenceSource (executed, seam 4 parity)", () => {
   it("imports lodash by absolute URL and exports the Rule, like a player would", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
-    expect(referenceSource).toContain("export function normalize");
-    expect(referenceSource).toContain("export function detect");
+    // Rolldown's ESM output hoists every export to one footer statement rather than
+    // keeping an inline `export function`, so the declaration and the export show up
+    // as two separate, deterministic substrings rather than one.
+    expect(referenceSource).toContain("function normalize(raw, endpoint)");
+    expect(referenceSource).toContain("function detect(e)");
+    expect(referenceSource).toContain("export { detect, normalize };");
   });
 
   it("runs the same watch-to-hit promotion as the typed twin when executed", () => {

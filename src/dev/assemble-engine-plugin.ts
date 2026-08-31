@@ -43,11 +43,11 @@ export function assembleEngine(): Plugin {
       return id === VIRTUAL_ID ? RESOLVED_ID : undefined;
     },
 
-    load(id): string | undefined {
+    async load(id): Promise<string | undefined> {
       if (id !== RESOLVED_ID) {
         return undefined;
       }
-      const source = assembleEngineSource(projectRoot);
+      const source = await assembleEngineSource(projectRoot);
       return `export const engineSource = ${JSON.stringify(source)};`;
     },
 

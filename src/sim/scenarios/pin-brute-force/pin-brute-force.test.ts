@@ -280,8 +280,12 @@ describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () =>
 describe("referenceSource", () => {
   it("imports lodash by absolute URL and exports the Rule", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
-    expect(referenceSource).toContain("export function normalize");
-    expect(referenceSource).toContain("export function detect");
+    // Rolldown's ESM output hoists every export to one footer statement rather than
+    // keeping an inline `export function`, so the declaration and the export show up
+    // as two separate, deterministic substrings rather than one.
+    expect(referenceSource).toContain("function normalize(raw, endpoint)");
+    expect(referenceSource).toContain("function detect(e)");
+    expect(referenceSource).toContain("export { detect, normalize };");
   });
 });
 

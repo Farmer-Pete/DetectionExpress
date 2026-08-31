@@ -43,11 +43,17 @@ const DEV_EVENT_MARKERS = ["algo:changed", "algo:hello"];
 /**
  * A distinctive marker the assembled engine source carries. The `assemble-engine`
  * plugin serves the editor default as the `virtual:engine-source` module, a string
- * literal whose contents survive minification, so this comment lands in the production
+ * literal whose contents survive minification, so this marker lands in the production
  * JS iff the assembled engine shipped. Its presence is a POSITIVE assertion: the one
  * readable engine the editor loads must be in the build, not tree-shaken away.
+ *
+ * A string literal, not a comment: the assembler now strips every comment from the
+ * assembled source (its Rolldown `load` hook runs `ts.transpileModule` with
+ * `removeComments: true`), so a comment-based marker would no longer survive.
+ * `pin_brute_force` is the pin-brute-force rule's `REASON` value, a real runtime string
+ * the rule's own logic reads, not decoration.
  */
-const ASSEMBLED_ENGINE_MARKER = "teaching prop, unused by the logic";
+const ASSEMBLED_ENGINE_MARKER = "pin_brute_force";
 
 /**
  * The app entry module. Its presence proves the build is non-vacuous — that it actually
