@@ -19,9 +19,11 @@
  * `resolvedAt` (decision 16), never the player-influenced `at`.
  *
  * It is a real modal dialog, styled on `IntroOverlay`'s pattern: `role="dialog"`,
- * a backdrop that dismisses on click (a click inside the dialog never does), Esc
- * dismisses too, focus moves in on open, and Tab/Shift+Tab wrap at the dialog's
- * edges (shared with `IntroOverlay` through `src/ui/focus.ts`). On close it
+ * a backdrop that dismisses on click (a gesture STARTING inside the dialog never
+ * does, even if it ends on the backdrop — `src/ui/focus.ts`'s
+ * `installOutsidePointerDismiss`), Esc dismisses too, focus moves in on open, and
+ * Tab/Shift+Tab wrap at the dialog's edges (shared with `IntroOverlay` through
+ * `src/ui/focus.ts`). On close it
  * restores focus to the row
  * that opened it, but only if that row `isConnected` — reconciliation may have
  * evicted it (aging, a cap, or a run restart publishing `emptySnapshot()`) — and
@@ -38,7 +40,7 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
-import { focusableControls } from "../focus";
+import { focusableControls, installOutsidePointerDismiss } from "../focus";
 import { formatClock } from "../log/formatters";
 import {
   buildDecisionTraceViewModel,
@@ -210,21 +212,16 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
     }
   };
 
-  // A click outside the dialog, on the backdrop scrim, dismisses it. A click inside
-  // the dialog is contained, so it never dismisses. Mirrors IntroOverlay's technique:
-  // the listener lives on the document, not the scrim, so the scrim stays presentational.
+  // A gesture outside the dialog, on the backdrop scrim, dismisses it — but only a
+  // gesture that STARTS outside; one that starts inside (e.g. selecting text in a
+  // .trace-card-raw <pre> and releasing over the backdrop) never does. Mirrors
+  // IntroOverlay's technique: the listeners live on the document, not the scrim, so
+  // the scrim stays presentational. See `installOutsidePointerDismiss`.
   useEffect(() => {
     if (!open) {
       return;
     }
-    const onDocumentClick = (event: MouseEvent): void => {
-      const dialog = dialogRef.current;
-      if (dialog !== null && event.target instanceof Node && !dialog.contains(event.target)) {
-        clearSelection();
-      }
-    };
-    document.addEventListener("click", onDocumentClick);
-    return () => document.removeEventListener("click", onDocumentClick);
+    return installOutsidePointerDismiss(dialogRef, clearSelection);
   }, [open, clearSelection]);
 
   if (mode === null) {

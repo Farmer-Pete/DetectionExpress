@@ -299,6 +299,26 @@ describe("TraceOverlay", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("does not dismiss when a gesture starts inside the dialog and ends on the backdrop", () => {
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    const pre = dialog.querySelector(".trace-card-raw");
+    if (pre === null) {
+      throw new Error("expected a raw payload <pre>");
+    }
+    // A drag that selects text in the raw payload and releases over the backdrop: the
+    // pointerdown starts inside, so the paired click must not dismiss even though the
+    // click itself lands outside.
+    fireEvent.pointerDown(pre);
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+
   it("wraps Tab at the edges to keep focus within the dialog", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);
