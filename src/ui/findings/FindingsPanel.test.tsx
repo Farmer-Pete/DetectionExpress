@@ -165,6 +165,28 @@ describe("FindingsPanel", () => {
     expect(container.querySelector(".findings-panel")?.className).toMatch(/urgent/);
   });
 
+  it("carries no visually-hidden urgent announcement below URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    render(<InspectorShell />);
+    expect(screen.queryByText(/urgent/i)).toBeNull();
+  });
+
+  it("adds a visually-hidden urgent announcement at URGENT_HITS, so the state is perceivable without the border pulse", () => {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    render(<InspectorShell />);
+    const announcement = screen.getByText(/urgent/i);
+    expect(announcement.className).toMatch(/visually-hidden/);
+    // The visible counter's own text stays exactly as before; the announcement is a
+    // separate node, so it never leaks into the visible string.
+    expect(screen.getByText(`⚠ ${URGENT_HITS} active`)).toBeDefined();
+  });
+
   it("shows a +N more line past the cap and expands it", () => {
     const many = Array.from({ length: 15 }, (_, i) =>
       live({ seq: i + 1, subjectType: "account", entity: `e${i}`, at: 15 - i }),

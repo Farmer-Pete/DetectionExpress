@@ -1,7 +1,7 @@
 /**
  * The wave reading: derives where a tick sits relative to the schedule's waves,
  * so the sampler can publish it in the snapshot and the UI can show it without
- * ever deriving sim truth itself (GH38-PLAN.md Part 1, decision 2). Pure and
+ * ever deriving sim truth itself (GH38+40-PLAN.md Part 1, decision 2). Pure and
  * total: no wall-clock, no DOM.
  */
 import type { Wave } from "./scenario";

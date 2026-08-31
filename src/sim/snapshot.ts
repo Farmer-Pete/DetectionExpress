@@ -44,7 +44,7 @@ export interface SimSnapshot {
   /**
    * The wave reading at this publish tick (`waveStateAt`, `wave-state.ts`). The UI
    * never derives sim truth: this is the same reading the sampler computed off the
-   * run's waves, not a value the UI infers on its own (GH38-PLAN.md decision 2).
+   * run's waves, not a value the UI infers on its own (GH38+40-PLAN.md decision 2).
    */
   wave: WaveReading;
 }

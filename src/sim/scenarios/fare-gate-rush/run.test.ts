@@ -131,7 +131,7 @@ describe("buildFareGateRun: final deadline", () => {
   });
 });
 
-describe("buildFareGateRun: waves (GH38-PLAN.md Part 1)", () => {
+describe("buildFareGateRun: waves (GH38+40-PLAN.md Part 1)", () => {
   it("carries the schedule's waves through into the generated run unchanged", () => {
     const run = buildFareGateRun(LEVEL_SEED);
     expect(run.waves).toEqual(buildSchedule().waves);

@@ -157,6 +157,28 @@ describe("engine start guards", () => {
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
+  it("throws on an unsorted wave schedule and allocates nothing (F003 hardening)", () => {
+    const driver = new SpyDriver();
+    const waves: Wave[] = [
+      { startTick: 20, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+    ];
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves,
+        driver,
+      }),
+    ).toThrow();
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
   it("tears down the clock and publishes nothing when setup throws after the clock is built", () => {
     // The Clock is constructed and starts the driver, then reading the scorer during
     // runtime wiring throws. This exercises start()'s post-construction catch, which must
@@ -644,7 +666,7 @@ describe("engine publishes findings, events, and the processed watermark", () =>
   });
 });
 
-describe("engine publishes the wave reading (GH38-PLAN.md Part 1)", () => {
+describe("engine publishes the wave reading (GH38+40-PLAN.md Part 1)", () => {
   // The wave's ticks are chosen as multiples of the sampler's publish cadence
   // (CLOCK_HZ / PUBLISH_HZ = 3 ticks/sample), so a regular, non-forced publish
   // lands exactly on each phase boundary this test checks.

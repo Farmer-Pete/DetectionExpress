@@ -43,7 +43,7 @@ export interface GeneratedRun {
   /**
    * The wave boundaries `checkpoints` derives from. The sim publishes this in the
    * snapshot (`waveStateAt`, `wave-state.ts`) so the UI reads the same waves the
-   * generator emitted — the UI never derives sim truth (GH38-PLAN.md decision 2).
+   * generator emitted — the UI never derives sim truth (GH38+40-PLAN.md decision 2).
    */
   waves: Wave[];
 }

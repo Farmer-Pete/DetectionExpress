@@ -222,7 +222,7 @@ describe("buildSchedule (M2 schedule invariant)", () => {
     expect(run.checkpoints[run.checkpoints.length - 1]?.clearsThroughWave).toBe(WAVE_COUNT - 1);
   });
 
-  it("carries the waves through into the generated run unchanged (GH38-PLAN.md Part 1)", () => {
+  it("carries the waves through into the generated run unchanged (GH38+40-PLAN.md Part 1)", () => {
     const run = kioskPinAttack.generate(LEVEL_SEED);
     expect(run.waves).toEqual(buildSchedule().waves);
   });

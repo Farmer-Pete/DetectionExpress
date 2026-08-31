@@ -10,6 +10,7 @@
  * Deterministic and pure. No rng: the accumulator alone fixes the ticks.
  */
 import type { Wave } from "../scenario";
+import { assertWaveScheduleOrdered } from "../wave-schedule";
 
 /**
  * Far above any real wave rate (the shipped peak is 60). It caps `eventsPerTick`
@@ -47,46 +48,6 @@ function assertRate(wave: Wave, index: number): void {
 }
 
 /**
- * Reject waves that are not in non-decreasing `startTick` order. Together with the
- * no-overlap check this makes the emitted ticks come out sorted, since each wave's
- * ticks then all precede the next wave's. Callers build waves left to right.
- */
-function assertChronological(waves: readonly Wave[]): void {
-  for (let i = 1; i < waves.length; i++) {
-    const prev = waves[i - 1];
-    const cur = waves[i];
-    if (prev === undefined || cur === undefined) {
-      continue;
-    }
-    if (cur.startTick < prev.startTick) {
-      throw new Error(`admitArrivals: wave ${i} starts before wave ${i - 1}.`);
-    }
-  }
-}
-
-/** Reject any pair of waves whose half-open tick ranges overlap, regardless of input order. */
-function assertNoOverlap(waves: readonly Wave[]): void {
-  for (let i = 0; i < waves.length; i++) {
-    const a = waves[i];
-    if (a === undefined) {
-      continue;
-    }
-    const aEnd = a.startTick + a.durationTicks;
-    for (let j = i + 1; j < waves.length; j++) {
-      const b = waves[j];
-      if (b === undefined) {
-        continue;
-      }
-      const bEnd = b.startTick + b.durationTicks;
-      const disjoint = aEnd <= b.startTick || bEnd <= a.startTick;
-      if (!disjoint) {
-        throw new Error(`admitArrivals: wave ${i} and wave ${j} overlap.`);
-      }
-    }
-  }
-}
-
-/**
  * The tick of every admitted arrival, in non-decreasing order. Each wave carries
  * its own fractional accumulator, reset at the wave's start: every tick adds
  * `eventsPerTick`, and each whole unit it crosses admits one arrival at that
@@ -99,8 +60,7 @@ export function admitArrivals(waves: readonly Wave[]): number[] {
     assertTickBounds(wave, index);
     assertRate(wave, index);
   });
-  assertChronological(waves);
-  assertNoOverlap(waves);
+  assertWaveScheduleOrdered(waves);
 
   const arrivals: number[] = [];
   for (const wave of waves) {

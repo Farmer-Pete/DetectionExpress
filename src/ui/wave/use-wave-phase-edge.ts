@@ -1,5 +1,5 @@
 /**
- * One-shot ownership for the wave's incoming -> active edge (GH38-PLAN.md,
+ * One-shot ownership for the wave's incoming -> active edge (GH38+40-PLAN.md,
  * "Wave indicator + flash + shake"). This is render state, not sim state, so it
  * stays out of the store: two independent call sites (App's shake, LogPanel's
  * flash) each hold their own instance, and a fired edge on one never triggers

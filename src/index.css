@@ -44,7 +44,7 @@ body {
   color: var(--ink);
 }
 
-/* Wave juice keyframes (#38, GH38-PLAN.md Part 2). Every keyframe below is
+/* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
    applied only inside the `prefers-reduced-motion: no-preference` block near
    the end of this file; every state it animates also carries a static,
    unanimated form outside that guard (see `.wave-readout-incoming`,
@@ -273,7 +273,7 @@ body {
 }
 
 /* Panel throb (#38 juice item 4): static outside the reduced-motion guard, so
-   the threat border reads even with motion off (GH38-PLAN.md decision 4). The
+   the threat border reads even with motion off (GH38+40-PLAN.md decision 4). The
    guard near the end of this file layers the urgentborder pulse on top. */
 .findings-panel.urgent {
   border-color: color-mix(in srgb, var(--threat) 55%, transparent);
@@ -1178,7 +1178,7 @@ body {
 /* Wave readout (#38 juice item 1): "next wave in N" while calm, swapping to a
    pulsing "WAVE INCOMING" while incoming. The incoming color is static outside
    the reduced-motion guard, so the state reads even with motion off
-   (GH38-PLAN.md decision 4); the guard near the end of this file only adds the
+   (GH38+40-PLAN.md decision 4); the guard near the end of this file only adds the
    heart pulse on top. */
 .wave-readout {
   margin-left: auto;
@@ -1313,7 +1313,7 @@ body {
   line-height: 1.4;
 }
 
-/* Wave juice animations (#38, GH38-PLAN.md Part 2). Every `animation:` rule
+/* Wave juice animations (#38, GH38+40-PLAN.md Part 2). Every `animation:` rule
    the app ships lives inside this guard; every state it enhances also has a
    static, unanimated form declared above (the `.waveflash`/`.shake` classes
    themselves carry no static styling, since the box-shadow flash and the

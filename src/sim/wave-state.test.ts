@@ -109,7 +109,7 @@ describe("waveStateAt: precedence when the next wave's warn window opens during 
     });
   });
 
-  it("moves to incoming for wave 1 once wave 0 ends", () => {
+  it("reads active for wave 1 at its exact start tick, the active-overlaps-next-warn-window precedence case", () => {
     expect(waveStateAt(10, OVERLAPPING, 5)).toEqual({
       phase: "active",
       index: 1,

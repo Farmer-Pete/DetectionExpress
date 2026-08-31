@@ -26,6 +26,7 @@ import type { Checkpoint, Wave } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
+import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
 import { waveStateAt } from "../sim/wave-state";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
@@ -187,6 +188,7 @@ export function start(options: StartOptions): EngineHandle {
 
   const graph = options.getGraph();
   validateLinearChain(graph.nodes, graph.edges); // throws before allocation
+  assertWaveScheduleOrdered(options.waves); // throws before allocation
 
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;

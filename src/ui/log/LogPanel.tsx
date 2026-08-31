@@ -15,17 +15,21 @@
  * DOM measurement.
  *
  * The transport row also carries the wave readout (#38 juice item 1): "next
- * wave in N" while calm, a pulsing "◈ WAVE INCOMING" while incoming, and
- * nothing while a wave is active or after the last one (no countdown to show).
- * On the incoming -> active edge the panel's own column flashes once
- * (`useWavePhaseEdge`, one-shot ownership: this component owns its `.waveflash`
- * class and clears it itself, independent of App's `.shake`). The queue bar
- * also gains a `queue-bar-danger` pulse class at danger severity (juice item 2).
+ * wave in Ns" (whole game-seconds) while calm, a pulsing "◈ WAVE INCOMING"
+ * while incoming, and nothing while a wave is active or after the last one (no
+ * countdown to show). That visible text is `aria-hidden` because it ticks too
+ * fast to announce; a separate `role="status"` region carries only the
+ * low-frequency phase change ("wave incoming"), which fires at most a few
+ * times per run. On the incoming -> active edge the panel's own column
+ * flashes once (`useWavePhaseEdge`, one-shot ownership: this component owns
+ * its `.waveflash` class and clears it itself, independent of App's
+ * `.shake`). The queue bar also gains a `queue-bar-danger` pulse class at
+ * danger severity (juice item 2).
  */
 import { memo, useEffect, useState } from "react";
 import type { Speed } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
-import { LOG_QUEUE_MAX } from "../../game/tuning";
+import { GAME_SECONDS_PER_TICK, LOG_QUEUE_MAX } from "../../game/tuning";
 import type { RingEvent } from "../../sim/inspector";
 import type { SimSnapshot } from "../../sim/snapshot";
 import { severityFill, severityLevel } from "../hud/severity";
@@ -38,15 +42,27 @@ const WAVEFLASH_MS = 600;
 /**
  * The wave readout's text and urgency, or null when there is nothing to show
  * (active, or calm with no wave left). `incoming` drives the pulsing style.
+ * The countdown is whole game-seconds, ceiled so it steps once per second
+ * instead of racing with every sample (`ticksUntilNext` ticks down far faster
+ * than a human can read).
  */
 function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
   if (wave.phase === "incoming") {
     return { text: "◈ WAVE INCOMING", incoming: true };
   }
   if (wave.ticksUntilNext !== null) {
-    return { text: `next wave in ${wave.ticksUntilNext}`, incoming: false };
+    const seconds = Math.ceil(wave.ticksUntilNext * GAME_SECONDS_PER_TICK);
+    return { text: `next wave in ${seconds}s`, incoming: false };
   }
   return null;
+}
+
+/**
+ * The role="status" announcement: only the phase, never the ticking count, so
+ * a screen reader hears "wave incoming" once per wave instead of every sample.
+ */
+function waveAnnouncement(phase: SimSnapshot["wave"]["phase"]): "wave incoming" | "" {
+  return phase === "incoming" ? "wave incoming" : "";
 }
 
 /** The speed choices the transport offers, in ascending order, with their labels. */
@@ -108,7 +124,7 @@ export function LogPanel() {
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
 
-  // One-shot ownership (GH38-PLAN.md, "Wave indicator + flash + shake"): this
+  // One-shot ownership (GH38+40-PLAN.md, "Wave indicator + flash + shake"): this
   // panel owns its own `.waveflash` class and clears it itself, independent of
   // App's `.shake`. `edgeToken` changes exactly once per incoming -> active
   // edge; skip its initial `0` so mount never flashes.
@@ -195,10 +211,16 @@ export function LogPanel() {
             })}
           </div>
           {readout ? (
-            <span className={`wave-readout${readout.incoming ? " wave-readout-incoming" : ""}`}>
+            <span
+              className={`wave-readout${readout.incoming ? " wave-readout-incoming" : ""}`}
+              aria-hidden="true"
+            >
               {readout.text}
             </span>
           ) : null}
+          <span className="visually-hidden" role="status">
+            {waveAnnouncement(wave.phase)}
+          </span>
         </div>
       </div>
       <div className="engine-bar">

@@ -197,10 +197,11 @@ describe("LogPanel speed control", () => {
 });
 
 describe("LogPanel wave readout (#38 juice item 1)", () => {
-  it("shows the countdown to the next wave while calm", () => {
+  it("shows the countdown to the next wave, in whole game-seconds, while calm", () => {
+    // ticksUntilNext 42 * GAME_SECONDS_PER_TICK (2) = 84.
     setWave({ phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null });
     render(<LogPanel />);
-    expect(screen.getByText("next wave in 42")).toBeDefined();
+    expect(screen.getByText("next wave in 84s")).toBeDefined();
   });
 
   it("swaps to the WAVE INCOMING readout while incoming", () => {
@@ -222,6 +223,71 @@ describe("LogPanel wave readout (#38 juice item 1)", () => {
     render(<LogPanel />);
     expect(screen.queryByText(/next wave in/)).toBeNull();
     expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
+});
+
+describe("LogPanel wave countdown seconds (GH38 review round 1, fix 3)", () => {
+  it("renders known tick values as whole game-seconds", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    expect(screen.getByText("next wave in 60s")).toBeDefined();
+
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+    rerender(<LogPanel />);
+    expect(screen.getByText("next wave in 2s")).toBeDefined();
+  });
+
+  it("ceils a fractional tick countdown so it steps once per whole second, not once per sample", () => {
+    // Real ticksUntilNext values are always whole ticks, so at the shipped
+    // GAME_SECONDS_PER_TICK (2, a whole number) no two distinct real tick counts
+    // ever land in the same second. This directly exercises the ceil quantization
+    // that guards against that changing: two samples a fraction of a tick apart,
+    // 29.1 and 29.5, both multiply into the (58, 59] bucket and must render
+    // identically instead of flickering between adjacent samples.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 29.1, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    const first = screen.getByText(/next wave in \d+s/).textContent;
+
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 29.5, eventsPerTick: null });
+    rerender(<LogPanel />);
+    const second = screen.getByText(/next wave in \d+s/).textContent;
+
+    expect(first).toBe("next wave in 59s");
+    expect(second).toBe(first);
+  });
+});
+
+describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () => {
+  it("hides the fast-updating visible countdown from assistive tech", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    render(<LogPanel />);
+    const visible = screen.getByText("next wave in 60s");
+    expect(visible.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("hides the visible WAVE INCOMING text from assistive tech too", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    const visible = screen.getByText("◈ WAVE INCOMING");
+    expect(visible.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("carries a role=status region that stays silent while calm", () => {
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("announces the incoming phase in the role=status region", () => {
+    setWave({ phase: "incoming", index: 0, ticksUntilNext: 5, eventsPerTick: null });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toMatch(/wave incoming/i);
+  });
+
+  it("falls silent again in the role=status region once the wave goes active", () => {
+    setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+    render(<LogPanel />);
+    expect(screen.getByRole("status").textContent).toBe("");
   });
 });
 

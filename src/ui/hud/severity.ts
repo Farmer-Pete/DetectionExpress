@@ -3,7 +3,7 @@
  * below `SEVERITY_WARN_FRAC`, warning from there, danger from `SEVERITY_DANGER_FRAC`.
  * The HUD gauges and the log panel's queue bar both read from here, so one
  * threshold set drives every fill. Generic names, not "queue"-specific: the ramp
- * also colors the Compute gauge (#38 GH38-PLAN.md decision 3).
+ * also colors the Compute gauge (#38 GH38+40-PLAN.md decision 3).
  */
 import { SEVERITY_DANGER_FRAC, SEVERITY_WARN_FRAC } from "../../game/tuning";
 

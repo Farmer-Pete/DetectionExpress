@@ -50,7 +50,7 @@ export function FindingsPanel() {
   const visible = expanded ? groups : groups.slice(0, VISIBLE_CAP);
   const { count: activeCount, urgent } = countActiveHits(findings);
   // Static outside any reduced-motion guard: the threat border reads even with
-  // motion off (GH38-PLAN.md decision 4). The CSS layers the `urgentborder`
+  // motion off (GH38+40-PLAN.md decision 4). The CSS layers the `urgentborder`
   // pulse on top of it, gated behind `prefers-reduced-motion: no-preference`.
   const panelClass = urgent ? "findings-panel urgent" : "findings-panel";
 
@@ -62,6 +62,9 @@ export function FindingsPanel() {
         <>
           <div className="findings-header">
             <span className="findings-active">⚠ {activeCount} active</span>
+            {/* The border pulse is a visual-only cue; this spells the crossing out for a
+                screen reader, since motion carries no signal past a border color. */}
+            {urgent ? <span className="visually-hidden">, urgent</span> : null}
           </div>
           <ul className="findings-list">
             {visible.map((group) => (
