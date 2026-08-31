@@ -92,6 +92,9 @@ interface AppProps {
 export function App({ createPipelineController, createWorldController }: AppProps = {}) {
   const [view, setView] = useState<View>("pipeline");
   const controllerRef = useRef<RunController | null>(null);
+  // Shared with InspectorShell (which forwards it to TraceOverlay as the decision-mode
+  // focus fallback, GH34-35-PLAN.md decision 14) and DecisionsPanel (which renders it).
+  const decisionsPanelRef = useRef<HTMLElement>(null);
 
   // The dev-only local-IDE (algorithms hot-reload) client. Its whole path is gated on
   // `import.meta.env.DEV` and a live HMR channel, so it never mounts in the production
@@ -289,8 +292,8 @@ export function App({ createPipelineController, createWorldController }: AppProp
         {view === "pipeline" ? (
           <>
             <Hud />
-            <InspectorShell />
-            <DecisionsPanel />
+            <InspectorShell decisionsPanelRef={decisionsPanelRef} />
+            <DecisionsPanel panelRef={decisionsPanelRef} />
             <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
             <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
             <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />

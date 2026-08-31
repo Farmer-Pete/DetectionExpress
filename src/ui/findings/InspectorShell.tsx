@@ -12,18 +12,32 @@
  * listener only ever fires a redundant, harmless `clearSelection` past that point.
  *
  * The shell owns the findings-panel ref and hands it to both children: `FindingsPanel`
- * renders it, and `TraceOverlay` reads it as the focus fallback (GH34-35-PLAN.md
- * decision 14) for when reconciliation evicts a trace's trigger row.
+ * renders it, and `TraceOverlay` reads it as the finding-mode focus fallback
+ * (GH34-35-PLAN.md decision 14) for when reconciliation evicts a trace's trigger row.
+ *
+ * `DecisionsPanel` (T10) is a sibling of the shell in `App.tsx`, not a child of it, so
+ * its ref cannot be owned here the same way: `App.tsx` owns it and passes it down as
+ * `decisionsPanelRef`, which this shell forwards to `TraceOverlay` as the decision-mode
+ * focus fallback. Optional, defaulting to a locally-owned ref, so a bare
+ * `<InspectorShell />` (an isolated test, with no `DecisionsPanel` mounted) still works.
  */
-import { useRef } from "react";
+import { type RefObject, useRef } from "react";
 import { useGameStore } from "../../game/store";
 import { LogPanel } from "../log/LogPanel";
 import { FindingsPanel } from "./FindingsPanel";
 import { TraceOverlay } from "./TraceOverlay";
 
-export function InspectorShell() {
+interface InspectorShellProps {
+  decisionsPanelRef?: RefObject<HTMLElement | null>;
+}
+
+export function InspectorShell({
+  decisionsPanelRef: externalDecisionsRef,
+}: InspectorShellProps = {}) {
   const clearSelection = useGameStore((state) => state.clearSelection);
   const findingsPanelRef = useRef<HTMLElement>(null);
+  const ownDecisionsRef = useRef<HTMLElement>(null);
+  const decisionsPanelRef = externalDecisionsRef ?? ownDecisionsRef;
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     if (event.key === "Escape" && !event.defaultPrevented) {
@@ -37,7 +51,10 @@ export function InspectorShell() {
         <LogPanel />
       </div>
       <FindingsPanel panelRef={findingsPanelRef} />
-      <TraceOverlay fallbackFocusRef={findingsPanelRef} />
+      <TraceOverlay
+        fallbackFocusRef={findingsPanelRef}
+        decisionsFallbackFocusRef={decisionsPanelRef}
+      />
     </section>
   );
 }

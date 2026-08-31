@@ -433,9 +433,30 @@ body {
   color: var(--dim);
 }
 
-.trace-time {
+.trace-state--caught {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+  color: var(--ok);
+}
+
+.trace-state--missed {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.trace-state--false {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  color: var(--dim);
+}
+
+.trace-time,
+.trace-recorded-at {
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+.trace-recorded-at-time {
+  color: var(--ink);
 }
 
 .trace-close {
@@ -540,6 +561,27 @@ body {
   color: var(--ok);
   font-weight: 700;
   font-size: 0.85rem;
+}
+
+.trace-node-missed {
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.trace-missed-reason {
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.trace-missed-window {
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Context widgets (text / kv / table / json), shared by the Judge node and the

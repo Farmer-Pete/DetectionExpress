@@ -92,9 +92,10 @@ export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceVi
  * decision time. `cards` resolves `alert.eventIds` against the decision's own
  * `citedEvents` (T10, captured at append time), never the live `snapshot.events`
  * ring, which may have moved on or been evicted entirely by the time a player
- * reopens old history.
+ * reopens old history. Not exported on its own; consumers narrow on
+ * `DecisionTraceViewModel.kind` instead.
  */
-export interface DecisionTraceEvidence {
+interface DecisionTraceEvidence {
   kind: "evidence";
   outcome: Extract<DecisionOutcome, "caught" | "false">;
   /** The resolved subject, or null for an entity-less false decision. */
@@ -111,7 +112,7 @@ export interface DecisionTraceEvidence {
 
 /** A missed decision reopened: reason and the attack window only, no evidence pane
  *  (GH34-35-PLAN.md decision 12: there was no finding to show). */
-export interface DecisionTraceMissed {
+interface DecisionTraceMissed {
   kind: "missed";
   reason: string;
   resolvedAt: number;
