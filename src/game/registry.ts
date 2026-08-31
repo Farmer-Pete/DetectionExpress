@@ -20,6 +20,7 @@ import {
   type Normalizer,
 } from "../sim/engine/engine";
 import type { Scenario } from "../sim/scenario";
+import { isScenarioCorpus, type ScenarioCorpus } from "./profiler/scenario-corpus";
 
 /** One catalogue entry, as the display join reads it. Loose: `docs/world` owns the schema. */
 export interface CatalogueEntry {
@@ -40,6 +41,8 @@ export interface ScenarioRegistryEntry {
   scenario: Scenario;
   /** The rule factory the engine gathers. */
   buildRule: BuildRule;
+  /** The profiler's stable corpus contract for this scenario. */
+  corpus: ScenarioCorpus;
   /** The catalogue metadata joined by id: display name, difficulty, briefing. */
   catalogue: CatalogueEntry;
 }
@@ -146,8 +149,12 @@ export function composeRegistry(
     if (!isBuildRule(mod.buildRule)) {
       throw new Error(`Scenario module "${path}" does not export a \`buildRule\` factory.`);
     }
-    if (mod.corpus === undefined) {
-      throw new Error(`Scenario module "${path}" does not export a \`corpus\`.`);
+    if (!isScenarioCorpus(mod.corpus)) {
+      throw new Error(
+        `Scenario module "${path}" does not export a valid \`corpus\` (needs ` +
+          "assembleAttacker, assemblePatron, buildIdentityPools, pickSeeded, " +
+          "arriveLeadTicks, and reason).",
+      );
     }
     // A probe build: cheap (a fresh rule instance with empty state) and thrown
     // away, since the engine builds its own instance later. It only proves the
@@ -171,6 +178,7 @@ export function composeRegistry(
       id,
       scenario: mod.scenario,
       buildRule: mod.buildRule,
+      corpus: mod.corpus,
       catalogue: catalogueEntry,
     });
   }

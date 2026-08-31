@@ -16,12 +16,15 @@
 
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { Finding } from "../../sim/finding";
-import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force";
 import {
   PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
 } from "../../sim/scenarios/pin-brute-force/tuning";
+import { defaultEntry } from "../registry";
 import { GAME_SECONDS_PER_TICK } from "../tuning";
+
+/** The cast contract, read through the registry, never a scenario folder directly. */
+const pinBruteForceCorpus = defaultEntry.corpus;
 
 /** The reason the kiosk PIN brute-force Alert names. Shared with the scorer. */
 const REASON = pinBruteForceCorpus.reason;

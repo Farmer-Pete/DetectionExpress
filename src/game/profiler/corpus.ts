@@ -24,13 +24,17 @@ import { randomLcg } from "d3-random";
 import { type Actor, runActors, type TimedReading } from "../../sim/actors/actor";
 import { composeRun } from "../../sim/actors/compose";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
-import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import { distanceTable } from "../../sim/world/distance";
 import { buildTimetable } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
 import type { WorldEnv, WorldReading } from "../../sim/world-reading";
+import { defaultEntry } from "../registry";
 import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK } from "../tuning";
+
+/** The cast primitives, read through the registry's corpus contract, never a
+ *  scenario folder directly (GH42 code review). */
+const pinBruteForceCorpus = defaultEntry.corpus;
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {

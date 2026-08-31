@@ -78,10 +78,20 @@ function goodBuildRule() {
   return { id: "x", endpoints: ["e"], detect: () => [] };
 }
 
+/** A corpus stub that satisfies `isScenarioCorpus`, so a test reaches later checks. */
+const goodCorpus = {
+  assembleAttacker: () => ({}),
+  assemblePatron: () => ({}),
+  buildIdentityPools: () => ({}),
+  pickSeeded: () => "",
+  arriveLeadTicks: 1,
+  reason: "r",
+};
+
 const goodModule = {
   scenario: { id: "x", generate: () => ({}) },
   buildRule: goodBuildRule,
-  corpus: {},
+  corpus: goodCorpus,
 };
 
 describe("composeRegistry validation", () => {
@@ -112,6 +122,22 @@ describe("composeRegistry validation", () => {
     ).toThrow(/corpus/);
   });
 
+  it("rejects a corpus that is present but missing a required member", () => {
+    const { reason: _dropped, ...missingReason } = goodCorpus;
+    expect(() =>
+      composeRegistry(
+        {
+          "./a": {
+            scenario: { id: "x", generate: () => ({}) },
+            buildRule: goodBuildRule,
+            corpus: missingReason,
+          },
+        },
+        indexCatalogue([catalogueEntry("x")]),
+      ),
+    ).toThrow(/corpus/);
+  });
+
   it("rejects a Scenario missing generate", () => {
     expect(() =>
       composeRegistry(
@@ -125,7 +151,7 @@ describe("composeRegistry validation", () => {
     const badModule = {
       scenario: { id: "x", generate: () => ({}) },
       buildRule: () => ({ endpoints: ["e"], detect: () => [] }),
-      corpus: {},
+      corpus: goodCorpus,
     };
     expect(() =>
       composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
@@ -136,7 +162,7 @@ describe("composeRegistry validation", () => {
     const badModule = {
       scenario: { id: "x", generate: () => ({}) },
       buildRule: () => ({ id: "x", endpoints: [], detect: () => [] }),
-      corpus: {},
+      corpus: goodCorpus,
     };
     expect(() =>
       composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
@@ -147,7 +173,7 @@ describe("composeRegistry validation", () => {
     const badModule = {
       scenario: { id: "x", generate: () => ({}) },
       buildRule: () => ({ id: "x", endpoints: ["e"], detect: "nope" }),
-      corpus: {},
+      corpus: goodCorpus,
     };
     expect(() =>
       composeRegistry({ "./a": badModule }, indexCatalogue([catalogueEntry("x")])),
