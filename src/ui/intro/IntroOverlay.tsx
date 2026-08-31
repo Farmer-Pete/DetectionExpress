@@ -12,8 +12,8 @@
  * the reopen control after the overlay unmounts.
  */
 import { useEffect, useRef } from "react";
-import type { IntroCopy } from "./content/narrative";
-import { focusableControls, installOutsidePointerDismiss, trapTab } from "./focus";
+import type { IntroCopy } from "../content/narrative";
+import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
 
 interface IntroOverlayProps {
   copy: IntroCopy;

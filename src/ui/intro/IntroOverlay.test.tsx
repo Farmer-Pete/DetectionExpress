@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { introCopy, REPO_URL } from "./content/narrative";
+import { introCopy, REPO_URL } from "../content/narrative";
 import { IntroOverlay } from "./IntroOverlay";
 
 function renderOverlay(overrides: Partial<Parameters<typeof IntroOverlay>[0]> = {}) {
