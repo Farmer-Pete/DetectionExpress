@@ -1,19 +1,37 @@
 /**
  * The calibration corpus: the fixed Event stream the profiler times the player's
- * code over. It is built once from the level seed at a representative peak
- * density, so the naive scan is priced at its worst case, then looped forever.
+ * code over. It is built once from the level seed at a representative peak density,
+ * so the naive scan is priced at its worst case, then looped forever.
+ *
+ * Since GH102 it is built from the SAME actor cast the kiosk scenario uses
+ * (`cast.ts`), with no ground truth. The cast is co-located pairs: each pair is one
+ * benign patron (a single success, no fumbles) and one PIN attacker (a 5..8-fail
+ * burst one tick apart, deep windows on purpose) on one account. The patron signs
+ * in at the pair's slot tick and the attacker's first fail lands on that same tick,
+ * so successes and fails interleave uniformly in time and slicing the sorted stream
+ * to the first `size` events removes a representative mix, not a fail-heavy tail.
  *
  * Each wrap advances every Event's ts by the corpus span and hands out a fresh
- * monotonic id. So time and ids move forward exactly as they would in a real run,
+ * monotonic id, so time and ids move forward exactly as they would in a real run,
  * the bounded rules (see rules.ts) settle into a steady state, and no per-batch
  * module reload is needed. Pure and deterministic: the same seed rebuilds the
  * identical stream. Game-time only, no wall-clock.
  */
-import { en, Faker } from "@faker-js/faker";
 import { randomLcg } from "d3-random";
-import { kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
-import { generateKiosk } from "../../sim/endpoints/kiosk/internal";
-import { CORPUS_ACCOUNTS, CORPUS_FAIL_SHARE, GAME_SECONDS_PER_TICK } from "../tuning";
+import { type Actor, runActors, type TimedReading } from "../../sim/actors/actor";
+import { composeRun } from "../../sim/actors/compose";
+import { isRawKioskV1, kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import {
+  assembleAttacker,
+  assemblePatron,
+  buildIdentityPools,
+} from "../../sim/scenarios/kiosk-pin-attack/cast";
+import { ARRIVE_LEAD_TICKS } from "../../sim/scenarios/kiosk-pin-attack/pin-attacker";
+import { distanceTable } from "../../sim/world/distance";
+import { buildTimetable } from "../../sim/world/timetable";
+import { world } from "../../sim/world/world";
+import type { WorldEnv, WorldReading } from "../../sim/world-reading";
+import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK, PIN_BRUTE_FORCE_THRESHOLD } from "../tuning";
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {
@@ -29,37 +47,108 @@ export interface Corpus {
   spanSeconds: number;
 }
 
-/** Build a stable pool of distinct account names from the seeded faker. */
-function buildAccounts(faker: Faker, count: number): string[] {
-  const accounts = new Set<string>();
-  while (accounts.size < count) {
-    accounts.add(faker.internet.username());
+/** Draw one item from a pool with the seeded rng. */
+function pick<T>(items: readonly T[], rng: () => number): T {
+  const item = items[Math.floor(rng() * items.length)];
+  if (item === undefined) {
+    throw new Error("buildCorpus: drew from an empty identity pool.");
   }
-  return [...accounts];
+  return item;
 }
 
 /**
- * Build a fixed `size`-Event corpus from `seed` at `eventsPerTick` density. Events
- * are laid out in ascending game-second time; the span is one tick past the last
- * Event, so a wrap continues forward without overlapping the previous one.
+ * Build a fixed `size`-Event corpus from `seed` at `eventsPerTick` density. It lays
+ * `N = ceil(size / (1 + threshold))` co-located pairs across the nominal span. Each
+ * pair emits at least `1 + threshold` (6) events, so the stream always reaches
+ * `size`; the sorted stream is sliced to the first `size` (a time-tail cut over a
+ * uniform success/fail mix). The span is the nominal span, grown only if the last
+ * kept Event would otherwise fall outside it, so a wrap never overlaps the previous.
  */
 export function buildCorpus(seed: number, size: number, eventsPerTick: number): Corpus {
-  const faker = new Faker({ locale: en });
-  faker.seed(seed);
   const rng = randomLcg(seed);
-  const accounts = buildAccounts(faker, CORPUS_ACCOUNTS);
 
   const eventsPerSecond = eventsPerTick / GAME_SECONDS_PER_TICK;
-  const spanSeconds = Math.ceil(size / eventsPerSecond);
+  const nominalSpan = Math.ceil(size / eventsPerSecond);
+  const nominalSpanTicks = Math.ceil(nominalSpan / GAME_SECONDS_PER_TICK);
+  const pairCount = Math.ceil(size / (1 + PIN_BRUTE_FORCE_THRESHOLD));
+  // The tick range slots spread over, leaving ARRIVE_LEAD_TICKS of pre-roll and an
+  // 8-tick tail for the longest burst. Clamped to at least 1 so a tiny corpus (whose
+  // nominal span cannot hold a burst) still lays every pair at the lead tick.
+  const usableTicks = Math.max(1, nominalSpanTicks - ARRIVE_LEAD_TICKS - 8);
 
-  const events: CorpusEvent[] = [];
-  for (let i = 0; i < size; i++) {
-    const ts = Math.floor(i / eventsPerSecond);
-    const account = accounts[Math.floor(rng() * accounts.length)] ?? accounts[0] ?? "unknown";
-    const outcome = rng() < CORPUS_FAIL_SHARE ? "fail" : "success";
-    const payload = kioskV1.format(generateKiosk({ rng, faker, ts, account, outcome }));
-    events.push({ id: i, ts, endpoint: kioskV1.id, payload });
+  const pools = buildIdentityPools(rng, world, CORPUS_ACCOUNTS);
+  const actors: Actor<WorldReading, WorldEnv>[] = [];
+  for (let k = 0; k < pairCount; k++) {
+    const account = pick(pools.accounts, rng);
+    const station = pick(pools.stations, rng);
+    const terminal = pick(pools.terminals, rng);
+    // Between threshold and threshold + 3 fails, the same distribution planAttacks
+    // draws; laid one tick apart for deliberately deep detection windows.
+    const failCount = PIN_BRUTE_FORCE_THRESHOLD + Math.floor(rng() * 4);
+    const slotTick = ARRIVE_LEAD_TICKS + Math.floor((k * usableTicks) / pairCount);
+
+    actors.push(
+      assemblePatron({
+        id: `patron-${k}`,
+        account,
+        station,
+        terminal,
+        startTick: slotTick,
+        dwellTicks: 1,
+        fumbleFails: 0,
+      }),
+    );
+    const failTimestamps = Array.from(
+      { length: failCount },
+      (_v, i) => (slotTick + i) * GAME_SECONDS_PER_TICK,
+    );
+    const { actor } = assembleAttacker({
+      id: `attack-${k}`,
+      attackId: k + 1,
+      account,
+      station,
+      terminal,
+      failTimestamps,
+    });
+    actors.push(actor);
   }
+
+  const env: WorldEnv = {
+    world,
+    distances: distanceTable(world),
+    timetable: buildTimetable(world),
+  };
+  // The longest burst fully covered under the half-open bound: the last slot sits at
+  // most `usableTicks` past the lead, plus the 8-tick burst tail, plus one.
+  const horizon = nominalSpanTicks + ARRIVE_LEAD_TICKS + 8 + 1;
+  const timed = runActors({ actors, env, runSeed: seed, horizon });
+
+  // No ground truth in the corpus: omit attackIdOf, so eventIdsByAttack is empty.
+  const composed = composeRun<TimedReading<WorldReading>>({
+    readings: timed,
+    tsOf: (t) => t.reading.reading.ts,
+    format: (t) => {
+      if (t.reading.sensor !== "kiosk") {
+        throw new Error(`corpus composed a ${t.reading.sensor} reading.`);
+      }
+      return kioskV1.format(t.reading.reading);
+    },
+    endpointIdOf: () => kioskV1.id,
+  });
+
+  // Slice the time-sorted stream to the first `size`; ids stay 0..size-1.
+  const events: CorpusEvent[] = composed.events.slice(0, size).map((event) => {
+    if (!isRawKioskV1(event.payload)) {
+      throw new Error("buildCorpus: composed a non-kiosk-v1 payload.");
+    }
+    return { id: event.id, ts: event.ts, endpoint: event.endpoint, payload: event.payload };
+  });
+
+  // Span rule: the nominal span, grown only so the last kept Event ends strictly
+  // inside it. At the shipped tuning the co-located layout ends every kept Event
+  // inside the nominal span, so the span stays exactly the nominal one.
+  const lastKeptTs = events[events.length - 1]?.ts ?? 0;
+  const spanSeconds = Math.max(nominalSpan, lastKeptTs + GAME_SECONDS_PER_TICK);
   return { events, spanSeconds };
 }
 

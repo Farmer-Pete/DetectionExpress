@@ -98,7 +98,7 @@ export const PROFILE_WARMUP_MS = 50;
  * these versions are folded into the key. Bump one when its shape changes, so a
  * stale reading is not reused.
  */
-export const CORPUS_VERSION = 1;
+export const CORPUS_VERSION = 2;
 export const PROFILER_VERSION = 1;
 
 /**
@@ -117,9 +117,6 @@ export const OMEGA = 20;
  * on the window-fill the naive scan pays at peak density.
  */
 export const CORPUS_ACCOUNTS = 12;
-
-/** Share of corpus Events that are wrong-PIN failures, the ones the detectors scan. */
-export const CORPUS_FAIL_SHARE = 0.5;
 
 /** The detection window in ticks (300 game seconds). The naive scan evicts past it. */
 export const SCAN_WINDOW_TICKS = PIN_BRUTE_FORCE_WINDOW_S / GAME_SECONDS_PER_TICK;

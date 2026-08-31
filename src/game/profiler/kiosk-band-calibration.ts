@@ -9,18 +9,30 @@
  * `REFERENCE_SLOW_RATE` and `REFERENCE_FAST_RATE` are the two yardsticks both the
  * kiosk winnability test and the fare-gate throughput test squeeze against: the
  * naive rule's rate at the shipped OMEGA (about 20 events/tick) and the tally
- * rule's rate at the same OMEGA (about 368 events/tick).
+ * rule's rate at the same OMEGA. Since GH102 the corpus is burst-shaped (co-located
+ * patron/attacker pairs), so the fail share is emergent, not tuned; the tally rate
+ * rises with it (about 825 events/tick) because the naive scan's window fill grows.
  */
 
 import type { ServiceRate } from "../../sim/service-governor";
 import {
   CORPUS_ACCOUNTS,
-  CORPUS_FAIL_SHARE,
   CORPUS_PEAK_EVENTS_PER_TICK,
   OMEGA,
+  PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
 } from "../tuning";
 import { quantizeServiceRate } from "./quantize";
+
+/**
+ * The expected wrong-PIN fail share of the burst-shaped corpus (GH102 D10), derived
+ * from burst arithmetic rather than tuned. Each co-located pair emits one success
+ * and a uniform 5..8-fail burst, so the mean fails per pair is
+ * `PIN_BRUTE_FORCE_THRESHOLD + 1.5`, and the share is `meanFails / (meanFails + 1)`,
+ * about 0.867. A 3-seed corpus test pins the measured share to within 0.03 of this.
+ */
+const MEAN_FAILS_PER_PAIR = PIN_BRUTE_FORCE_THRESHOLD + 1.5;
+export const EXPECTED_CORPUS_FAIL_SHARE = MEAN_FAILS_PER_PAIR / (MEAN_FAILS_PER_PAIR + 1);
 
 // The naive scan re-filters an account's in-window fails on every fail, so its
 // per-Event cost grows with the window fill. The tally is amortized O(1). The
@@ -32,17 +44,17 @@ const TALLY_OP = 3; // enqueue, expiry drain, and count update, amortized
 
 /** Fails an account holds in the detection window at `density` Events per tick. */
 function windowFill(density: number): number {
-  return (density * CORPUS_FAIL_SHARE * SCAN_WINDOW_TICKS) / CORPUS_ACCOUNTS;
+  return (density * EXPECTED_CORPUS_FAIL_SHARE * SCAN_WINDOW_TICKS) / CORPUS_ACCOUNTS;
 }
 
 /** The naive scan's counted cost per Event at `density`: overhead plus the scan. */
 export function naiveCost(density: number): number {
-  return OVERHEAD + CORPUS_FAIL_SHARE * windowFill(density);
+  return OVERHEAD + EXPECTED_CORPUS_FAIL_SHARE * windowFill(density);
 }
 
 /** The tally's counted cost per Event: overhead plus O(1) bookkeeping. Density-independent. */
 function tallyCost(): number {
-  return OVERHEAD + CORPUS_FAIL_SHARE * TALLY_OP;
+  return OVERHEAD + EXPECTED_CORPUS_FAIL_SHARE * TALLY_OP;
 }
 
 /** The anchor cost: the naive scan priced at the corpus peak density. */
@@ -62,5 +74,5 @@ export function rateFor(codePerAnchor: number, omega: number, skew: number): Ser
 /** The naive rule's rate at the shipped OMEGA, skew 1: about 20 events per tick. */
 export const REFERENCE_SLOW_RATE: ServiceRate = rateFor(NAIVE_CODE_PER_ANCHOR, OMEGA, 1);
 
-/** The tally rule's rate at the shipped OMEGA, skew 1: about 368 events per tick. */
+/** The tally rule's rate at the shipped OMEGA, skew 1: about 825 events per tick. */
 export const REFERENCE_FAST_RATE: ServiceRate = rateFor(TALLY_CODE_PER_ANCHOR, OMEGA, 1);
