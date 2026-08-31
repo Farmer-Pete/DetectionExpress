@@ -7,6 +7,7 @@ import {
   WAVE_COUNT,
   WAVE_DURATION_TICKS,
   WAVE_RATES,
+  WAVE_WARN_TICKS,
 } from "../game/tuning";
 import { buildSchedule } from "./schedule";
 
@@ -56,15 +57,20 @@ describe("buildSchedule", () => {
     expect(buildSchedule()).toEqual(buildSchedule());
   });
 
-  it("keeps DRAIN_GAP_TICKS at or above the publish stride (F012)", () => {
+  it("keeps the observable successor-incoming window at or above the publish stride (F012, F023)", () => {
     // The publish stride, CLOCK_HZ / PUBLISH_HZ, is the coarsest sample spacing the
     // sampler ever takes (currently 3 ticks). A successor wave's checkpoint lands
-    // exactly DRAIN_GAP_TICKS after the prior wave ends (see the test above), and
-    // that gap is the only window in which `waveStateAt` can read the successor's
-    // 'incoming' phase (wave-state.ts's precedence note). A gap smaller than the
-    // publish stride can let every publish sample land on either side of that
-    // window and skip it, or shrink it to zero ticks, so the flash/shake/
-    // announcement silently never fires for that wave.
-    expect(DRAIN_GAP_TICKS).toBeGreaterThanOrEqual(CLOCK_HZ / PUBLISH_HZ);
+    // exactly DRAIN_GAP_TICKS after the prior wave ends (see the test above), so the
+    // gap is an upper bound on the successor's 'incoming' window — but `active`
+    // outranks `incoming` (wave-state.ts's precedence note), so the prior wave still
+    // reads 'active' until WAVE_WARN_TICKS opens the successor's warn window, which
+    // can land later than the gap's own start. The window `waveStateAt` can actually
+    // read is therefore min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS) ticks wide, not
+    // DRAIN_GAP_TICKS alone. A window smaller than the publish stride can let every
+    // publish sample land on either side of it, or shrink it to zero ticks, so the
+    // flash/shake/announcement silently never fires for that wave.
+    expect(Math.min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)).toBeGreaterThanOrEqual(
+      CLOCK_HZ / PUBLISH_HZ,
+    );
   });
 });

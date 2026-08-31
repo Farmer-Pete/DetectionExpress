@@ -30,10 +30,14 @@ export interface WaveReading {
  * reachable and must resolve predictably. A consequence of that precedence: a
  * successor wave's `incoming` phase is only ever observable at a tick that sits
  * strictly after the prior wave's end, so it needs a positive drain gap between
- * the two waves to have any ticks to occupy at all — and, for the sampler to
- * actually catch one of those ticks, that gap must be at least the publish
- * stride (`CLOCK_HZ / PUBLISH_HZ`), the invariant `DRAIN_GAP_TICKS` documents
- * and `schedule.test.ts` locks (F012).
+ * the two waves to have any ticks to occupy at all. And because `active`
+ * outranks `incoming`, that window can never spill backward into the prior
+ * wave even when `WAVE_WARN_TICKS` would otherwise open it earlier: the
+ * observable window is exactly `min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)` ticks
+ * wide. For the sampler to actually catch one of those ticks, that width must
+ * be at least the publish stride (`CLOCK_HZ / PUBLISH_HZ`), the invariant
+ * `DRAIN_GAP_TICKS` and `WAVE_WARN_TICKS` document and `schedule.test.ts`
+ * locks (F012, F023).
  *
  * `incoming` covers the half-open warn window immediately before a wave's
  * start: `ticksUntilNext` in `(0, warnTicks]`. `eventsPerTick` on an `active`

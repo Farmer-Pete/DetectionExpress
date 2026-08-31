@@ -88,10 +88,6 @@ describe("admitArrivals: empty and boundary waves", () => {
     expect(admitArrivals([])).toEqual([]);
   });
 
-  it("admits nothing from a zero-duration wave", () => {
-    expect(admitArrivals([{ startTick: 0, durationTicks: 0, eventsPerTick: 5 }])).toEqual([]);
-  });
-
   it("admits nothing from a zero rate", () => {
     expect(admitArrivals([{ startTick: 0, durationTicks: 10, eventsPerTick: 0 }])).toEqual([]);
   });
@@ -112,6 +108,10 @@ describe("admitArrivals: bad input throws", () => {
 
   it("rejects a negative durationTicks", () => {
     expect(() => admitArrivals([{ startTick: 0, durationTicks: -1, eventsPerTick: 1 }])).toThrow();
+  });
+
+  it("rejects a zero-duration wave (F023: durationTicks must be positive)", () => {
+    expect(() => admitArrivals([{ startTick: 0, durationTicks: 0, eventsPerTick: 5 }])).toThrow();
   });
 
   it("rejects a NaN eventsPerTick", () => {

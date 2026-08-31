@@ -20,7 +20,11 @@
  *
  * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
  * (`useWavePhaseEdge`) toggles `.shake` on the app root for `SHAKE_MS` on the
- * incoming -> active edge, independent of LogPanel's own `.waveflash`.
+ * incoming -> active edge, independent of LogPanel's own `.waveflash`. The
+ * shake gates on run conclusion (F004+F006): `useWavePhaseEdge` reads
+ * `"calm"` once `snapshot.status` is no longer `"running"`, so a shake never
+ * fires off a frozen terminal frame, and a fresh run re-arms the edge once it
+ * starts running again.
  */
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
@@ -104,8 +108,12 @@ export function App({ createPipelineController, createWorldController }: AppProp
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
   // never shakes. This fires in the metro view too (the wave reading just stays
   // calm there, since only the pipeline engine publishes it), which is harmless.
+  // Gated on conclusion, not the transport freeze (F004+F006): while the run is
+  // running, the hook sees the live phase; once it has concluded, it sees
+  // `"calm"` instead, so the edge cannot fire off a frozen terminal frame.
   const wavePhase = useGameStore((s) => s.snapshot.wave.phase);
-  const edgeToken = useWavePhaseEdge(wavePhase);
+  const status = useGameStore((s) => s.snapshot.status);
+  const edgeToken = useWavePhaseEdge(status === "running" ? wavePhase : "calm");
   const [shaking, setShaking] = useState(false);
   useEffect(() => {
     if (edgeToken === 0) {

@@ -374,3 +374,73 @@ describe("LogPanel wave flash (one-shot on incoming -> active)", () => {
     expect(panel?.className).not.toMatch(/waveflash/);
   });
 });
+
+describe("LogPanel animated cues gate on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("never flashes when the incoming -> active edge lands in the same update the run concludes", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still flashes across the incoming -> active edge while the run keeps running", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("LogPanel queue-bar danger pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("omits the pulse class at danger severity once the run has failed", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "failed" },
+    });
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
+  });
+
+  it("keeps the pulse class at danger severity while the run is running", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "running" },
+    });
+    render(<LogPanel />);
+    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
+  });
+});

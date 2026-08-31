@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
-import { buildFindingGroups, countActiveHits, prettifyReason } from "./view-model";
+import {
+  buildFindingGroups,
+  countActiveHits,
+  prettifyReason,
+  urgentAnnouncement,
+} from "./view-model";
 
 /**
  * Build a LiveFinding fixture. `subjectType` lands on the emitted Finding (an
@@ -305,5 +310,23 @@ describe("countActiveHits (#38 juice item 3+4)", () => {
       live({ seq: i + 1, state: "hit" }),
     );
     expect(countActiveHits(findings)).toEqual({ count: URGENT_HITS + 2, urgent: true });
+  });
+});
+
+describe("urgentAnnouncement (GH38 review round 3, F002+F012)", () => {
+  it("is empty when not urgent", () => {
+    expect(urgentAnnouncement(false, 0)).toBe("");
+    expect(urgentAnnouncement(false, URGENT_HITS - 1)).toBe("");
+  });
+
+  it("is a complete phrase, with no leading comma, when urgent", () => {
+    const text = urgentAnnouncement(true, URGENT_HITS);
+    expect(text).toBe(`findings urgent, ${URGENT_HITS} active`);
+    expect(text.startsWith(",")).toBe(false);
+  });
+
+  it("names no CONTEXT.md Alert-avoid word (hit, detection, notification, flag)", () => {
+    const text = urgentAnnouncement(true, URGENT_HITS + 4);
+    expect(text.toLowerCase()).not.toMatch(/\bhits?\b|\bdetection\b|\bnotification\b|\bflag\b/);
   });
 });

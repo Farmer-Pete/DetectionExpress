@@ -47,20 +47,19 @@ body {
 /* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
    applied only inside the `prefers-reduced-motion: no-preference` block near
    the end of this file. The state-bearing animations (`heart`, driving
-   `.wave-readout-incoming`, `.findings-panel.urgent`, and the
+   `.wave-readout-incoming`, `.findings-panel.urgent-pulse`, and the
    `severityFill`-driven fill colors) also carry a static, unanimated form
    outside that guard, so color and count changes still read with motion off.
    The one-shot transients (`waveflash`, `shake`) are the opposite: they ARE
    the effect, so they intentionally have no static form to fall back to (see
    the "Wave juice animations" comment below, near the guard itself). Colors
-   are existing palette tokens only, per
-   `docs/design/hud-palette.md`; translucent stops mix against the tokens with
-   `color-mix`, per that doc's mix rule. */
+   are existing palette tokens only, per `docs/design/hud-palette.md`;
+   translucent stops mix those tokens with `color-mix` for a soft glow. */
 @keyframes waveflash {
   0% {
     box-shadow:
-      0 0 0 2px var(--alert) inset,
-      0 0 26px color-mix(in srgb, var(--alert) 25%, transparent);
+      0 0 0 2px var(--ink) inset,
+      0 0 26px color-mix(in srgb, var(--ink) 25%, transparent);
   }
   100% {
     box-shadow: none;
@@ -94,7 +93,9 @@ body {
 @keyframes urgentborder {
   0%,
   100% {
-    border-color: color-mix(in srgb, var(--threat) 55%, transparent);
+    /* WCAG 3:1 against --panel (~3.62:1); the box-shadow glow below stays a
+       translucent mix since it is decoration, not the boundary itself. */
+    border-color: color-mix(in srgb, var(--threat) 80%, white);
   }
   50% {
     border-color: var(--threat);
@@ -277,10 +278,12 @@ body {
 }
 
 /* Panel throb (#38 juice item 4): static outside the reduced-motion guard, so
-   the threat border reads even with motion off (GH38+40-PLAN.md decision 4). The
-   guard near the end of this file layers the urgentborder pulse on top. */
+   the threat border reads even with motion off (GH38+40-PLAN.md decision 4).
+   WCAG 3:1 against --panel (~3.62:1). The `.urgent-pulse` modifier (added only
+   while the run is live, F004+F006) is what the guard near the end of this
+   file layers the urgentborder animation onto; `.urgent` alone never animates. */
 .findings-panel.urgent {
-  border-color: color-mix(in srgb, var(--threat) 55%, transparent);
+  border-color: color-mix(in srgb, var(--threat) 80%, white);
 }
 
 /* Active count header (#38 juice item 3). */
@@ -1343,7 +1346,7 @@ body {
     animation: heart 0.45s infinite;
   }
 
-  .findings-panel.urgent {
+  .findings-panel.urgent-pulse {
     animation: urgentborder 1s infinite;
   }
 }

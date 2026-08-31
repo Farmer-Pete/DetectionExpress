@@ -59,6 +59,10 @@ export function Hud() {
   const compute = useGameStore((state) => state.snapshot.compute);
   const status = useGameStore((state) => state.snapshot.status);
   const failureReason = useGameStore((state) => state.snapshot.failureReason);
+  // The severity fill color persists on a frozen terminal frame; only the
+  // ANIMATED heartbeat pulse gates on run conclusion (F004+F006), the same
+  // family rule LogPanel's queue bar and FindingsPanel's border follow.
+  const running = status === "running";
   return (
     <div className="hud">
       <Gauge label="Throughput" value={throughput} max={20} unit="/s" fill="var(--a1)" />
@@ -68,7 +72,7 @@ export function Hud() {
         max={QUEUE_MAX}
         unit=""
         fill={severityFill(queued / QUEUE_MAX)}
-        pulse={severityLevel(queued / QUEUE_MAX) === "danger"}
+        pulse={running && severityLevel(queued / QUEUE_MAX) === "danger"}
       />
       <Gauge
         label="Compute"

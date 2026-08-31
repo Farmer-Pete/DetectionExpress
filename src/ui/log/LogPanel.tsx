@@ -30,6 +30,17 @@
  * its `.waveflash` class and clears it itself, independent of App's
  * `.shake`). The queue bar also gains a `queue-bar-danger` pulse class at
  * danger severity (juice item 2).
+ *
+ * The conclusion gate (F004+F006): severity COLORS persist on the frozen
+ * terminal frame (`severityFill` stays ungated), but ANIMATED cues — the
+ * flash edge and the danger pulse — gate on `snapshot.status === "running"`.
+ * `running` is derived once, early, and feeds `useWavePhaseEdge` a `"calm"`
+ * input while not running, so a status flip alone can never manufacture an
+ * edge; `running` is deliberately left out of the flash effect's own deps
+ * (only `edgeToken` drives it), since adding it would re-fire the last edge
+ * on a status flip instead of gating admission at the source. This is about
+ * conclusion, never the transport freeze: pausing (`transport.frozen`) leaves
+ * every cue live, since the run can still resume.
  */
 import { memo, useEffect, useState } from "react";
 import type { Speed } from "../../game/run-controller";
@@ -130,11 +141,21 @@ export function LogPanel() {
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
 
+  // Derived early, before the edge hook: gate on conclusion (won/failed), never
+  // on the transport freeze (F003, F004+F006). A paused run can still resume,
+  // so its frozen reading stays live; a concluded run cannot, so its cues must
+  // stop.
+  const running = status === "running";
+
   // One-shot ownership (GH38+40-PLAN.md, "Wave indicator + flash + shake"): this
   // panel owns its own `.waveflash` class and clears it itself, independent of
   // App's `.shake`. `edgeToken` changes exactly once per incoming -> active
-  // edge; skip its initial `0` so mount never flashes.
-  const edgeToken = useWavePhaseEdge(wave.phase);
+  // edge; skip its initial `0` so mount never flashes. The hook's INPUT is
+  // gated on `running`, not its output: feeding it `"calm"` while concluded
+  // means a status flip alone can never manufacture an edge. `running` stays
+  // out of the effect's own deps below (only `edgeToken` drives it) — adding it
+  // there would re-fire the last edge on a status flip instead.
+  const edgeToken = useWavePhaseEdge(running ? wave.phase : "calm");
   const [flashing, setFlashing] = useState(false);
   useEffect(() => {
     if (edgeToken === 0) {
@@ -184,12 +205,12 @@ export function LogPanel() {
   const showSticky = !caughtUp && !cursorVisible;
 
   const newestFirst = events.slice().reverse();
-  // Gate on conclusion (won/failed), never on the transport freeze: a paused run
-  // can still resume, so its frozen reading stays live; a concluded run cannot,
-  // so its stale reading must not keep showing (F003).
-  const running = status === "running";
+  // `running` (F003) also gates the readout text: a concluded run's stale
+  // reading must not keep showing.
   const readout = running ? waveReadout(wave) : null;
-  const dangerPulse = severityLevel(frac) === "danger";
+  // severityFill (the bar's color) stays ungated — that's the persistent color
+  // cue (F004+F006) — but the pulse is animated, so it gates on `running` too.
+  const dangerPulse = running && severityLevel(frac) === "danger";
 
   return (
     <div className={flashing ? "log-panel waveflash" : "log-panel"}>

@@ -152,10 +152,11 @@ export const WAVE_DURATION_TICKS = 240;
  * fast rule drains the whole wave inside it, but the naive scan cannot, so the two
  * separate at the checkpoint. Locked with the wave rates by the band test.
  *
- * #40 knob, constrained: must stay `>= CLOCK_HZ / PUBLISH_HZ` (the publish
- * stride), or a successor wave's brief 'incoming' phase can fall between publish
- * samples, or vanish entirely, and silently drop the flash/shake/announcement.
- * Locked by `schedule.test.ts`'s F012 case; see `wave-state.ts`'s precedence note.
+ * #40 knob, constrained: `min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)` must stay `>=
+ * CLOCK_HZ / PUBLISH_HZ` (the publish stride), or a successor wave's brief
+ * 'incoming' phase can fall between publish samples, or vanish entirely, and
+ * silently drop the flash/shake/announcement. Locked by `schedule.test.ts`'s
+ * F012 case; see `wave-state.ts`'s precedence note.
  */
 export const DRAIN_GAP_TICKS = 45;
 
@@ -176,9 +177,10 @@ export const CORRECTNESS_FLOOR = 50;
  * fraction of its cycle.
  *
  * #40 knob, constrained: for a successor wave's 'incoming' phase to be
- * observable at all, `DRAIN_GAP_TICKS` must stay `>= CLOCK_HZ / PUBLISH_HZ`
- * (see that constant's note and `wave-state.ts`'s precedence note). This
- * constant does not itself need to clear that bound.
+ * observable at all, `min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)` must stay `>=
+ * CLOCK_HZ / PUBLISH_HZ` (see `DRAIN_GAP_TICKS`'s note and `wave-state.ts`'s
+ * precedence note). This constant is one half of that min() bound, so it must
+ * clear the stride too, not just the gap.
  */
 export const WAVE_WARN_TICKS = 30;
 

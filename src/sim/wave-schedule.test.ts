@@ -27,6 +27,12 @@ describe("assertWaveFields (F002)", () => {
     ).toThrow();
   });
 
+  it("rejects a zero durationTicks (F023: a wave must emit at least one tick)", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 0, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
   it("rejects a non-integer durationTicks", () => {
     expect(() =>
       assertWaveFields({ startTick: 0, durationTicks: 5.5, eventsPerTick: 1 }, 0),

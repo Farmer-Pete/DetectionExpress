@@ -131,3 +131,21 @@ describe("Hud gauge pulse routing (#38 juice item 2)", () => {
     expect(gaugeFill("Compute").className).not.toMatch(/gauge-fill-pulse/);
   });
 });
+
+describe("Hud gauge pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  it("omits the Queue pulse at danger severity once the run has failed", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 200, completed: 40, status: "failed" },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).not.toMatch(/gauge-fill-pulse/);
+  });
+
+  it("keeps the Queue pulse at danger severity while the run is running", () => {
+    useGameStore.setState({
+      snapshot: { ...emptySnapshot(), admitted: 200, completed: 40, status: "running" },
+    });
+    render(<Hud />);
+    expect(gaugeFill("Queue").className).toMatch(/gauge-fill-pulse/);
+  });
+});

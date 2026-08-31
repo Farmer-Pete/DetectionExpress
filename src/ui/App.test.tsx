@@ -360,3 +360,103 @@ describe("App wave shake (#38 juice item 1)", () => {
     expect(shell?.className).not.toMatch(/shake/);
   });
 });
+
+describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status"]): void {
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });
+  }
+
+  it("never shakes when the incoming -> active edge lands in the same update the run concludes", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app");
+      expect(shell?.className).not.toMatch(/shake/);
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still shakes across the incoming -> active edge while the run keeps running", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-arms after a suppressed terminal edge: a new run's calm -> incoming -> active(running) still shakes", () => {
+    vi.useFakeTimers();
+    try {
+      // The first run's edge lands as it concludes, so it is suppressed (per the
+      // case above).
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app");
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+
+      // A fresh run starts: calm, then incoming, then active, all while running.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "calm", index: 0, ticksUntilNext: 40, eventsPerTick: null },
+          "running",
+        );
+      });
+      act(() => {
+        setWaveAndStatus(
+          { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+          "running",
+        );
+      });
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

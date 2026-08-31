@@ -70,6 +70,18 @@ export function countActiveHits(findings: readonly LiveFinding[]): ActiveHits {
 }
 
 /**
+ * The panel header's persistent `role="status"` text (F002+F012, GH38 review
+ * round 3). A complete phrase when urgent, so a screen reader hears one whole
+ * sentence rather than a lone ", urgent" fragment tacked onto silence; empty
+ * otherwise, so the live region falls quiet below the threshold. Per
+ * CONTEXT.md's Alert entry, the phrase must avoid "hit", "detection",
+ * "notification", and "flag".
+ */
+export function urgentAnnouncement(urgent: boolean, activeCount: number): string {
+  return urgent ? `findings urgent, ${activeCount} active` : "";
+}
+
+/**
  * Prettify a raw reason token for display. Splits on `_` and camelCase boundaries,
  * then sentence-cases the result. `pin_brute_force` -> `Pin brute force`. Pure and
  * total: an empty or already-clean token comes back sentence-cased.

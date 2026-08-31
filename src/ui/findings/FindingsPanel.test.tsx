@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
 import { URGENT_HITS } from "../../game/tuning";
@@ -210,5 +210,101 @@ describe("FindingsPanel", () => {
     expect(screen.queryByText("e12")).toBeNull();
     fireEvent.click(more);
     expect(screen.getByText("e12")).toBeDefined();
+  });
+});
+
+describe("FindingsPanel persistent status region (GH38 review round 3, F002+F012)", () => {
+  it("mounts the status node even with zero findings, silent", () => {
+    publish([]);
+    const { container } = render(<InspectorShell />);
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    expect(within(panel).getByRole("status").textContent).toBe("");
+  });
+
+  it("mutates the SAME status node's text to the complete urgent phrase once a burst crosses URGENT_HITS", () => {
+    publish([]);
+    const { container } = render(<InspectorShell />);
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    const status = within(panel).getByRole("status");
+    expect(status.textContent).toBe("");
+
+    const burst = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    act(() => {
+      publish(burst);
+    });
+
+    // The SAME DOM node, only its text mutated — a node that mounts pre-filled
+    // announces nothing, so identity is what makes the announcement fire.
+    expect(within(panel).getByRole("status")).toBe(status);
+    expect(status.textContent).toBe(`findings urgent, ${URGENT_HITS} active`);
+    expect(status.textContent?.startsWith(",")).toBe(false);
+  });
+
+  it("keeps the status text empty below URGENT_HITS", () => {
+    const findings = Array.from({ length: URGENT_HITS - 1 }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    const { container } = render(<InspectorShell />);
+    const panel = container.querySelector<HTMLElement>(".findings-panel");
+    if (!panel) {
+      throw new Error("expected the findings panel");
+    }
+    expect(within(panel).getByRole("status").textContent).toBe("");
+  });
+
+  it("leaves the visible '⚠ N active' count text unchanged by the status region", () => {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    publish(findings);
+    render(<InspectorShell />);
+    expect(screen.getByText(`⚠ ${URGENT_HITS} active`)).toBeDefined();
+  });
+});
+
+describe("FindingsPanel active-count glyph (GH38 review round 3, F017)", () => {
+  it("omits the ⚠ glyph when the active count is zero, keeping the count and 'active' text", () => {
+    publish([live({ seq: 1, subjectType: "account", entity: "a", state: "watch" })]);
+    render(<InspectorShell />);
+    expect(screen.getByText("0 active")).toBeDefined();
+    expect(screen.queryByText(/⚠/)).toBeNull();
+  });
+
+  it("shows the ⚠ glyph once the active count is above zero", () => {
+    publish([live({ seq: 1, subjectType: "account", entity: "a", state: "hit" })]);
+    render(<InspectorShell />);
+    expect(screen.getByText("⚠ 1 active")).toBeDefined();
+  });
+});
+
+describe("FindingsPanel urgent pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
+  function publishUrgent(status: "running" | "failed" | "won"): void {
+    const findings = Array.from({ length: URGENT_HITS }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, state: "hit" }),
+    );
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), findings, status } });
+  }
+
+  it("keeps the static urgent border but drops the pulse class once the run has failed", () => {
+    publishUrgent("failed");
+    const { container } = render(<InspectorShell />);
+    const panelClass = container.querySelector(".findings-panel")?.className ?? "";
+    expect(panelClass).toMatch(/\burgent\b/);
+    expect(panelClass).not.toMatch(/urgent-pulse/);
+  });
+
+  it("carries the pulse class while the run is running", () => {
+    publishUrgent("running");
+    const { container } = render(<InspectorShell />);
+    expect(container.querySelector(".findings-panel")?.className).toMatch(/urgent-pulse/);
   });
 });
