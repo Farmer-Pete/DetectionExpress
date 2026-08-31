@@ -1,7 +1,11 @@
 # ADR 0008 — Native algorithm hot-reload on one dev server
 
-- Status: Accepted
+- Status: Accepted (per-slug authoring revised by ADR 0010)
 - Date: 2026-08-29
+- Revised by ADR 0010 (one engine for all hunts): the per-slug resolution of
+  `src/algorithms/<slug>.ts` is superseded by a single fixed override,
+  `src/algorithms/engine.ts`, with a slugless `algo:` handshake. The one-dev-server
+  and native-module decisions below still hold.
 - Supersedes the local dev kit (the standalone same-origin host and the two-build split).
 - Renumbered from `0004-local-dev-kit` to resolve the duplicate `0004` (shared with
   `0004-measured-cost-model`), closing the housekeeping note in ADR 0006 (issue #85). The

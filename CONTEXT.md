@@ -13,7 +13,7 @@ The player-built system that detects threats in the reading stream. Its structur
 _Avoid_: Pipeline (a Pipeline is one part of an Engine), machine, program.
 
 **Algorithm**:
-The processing approach the player designs. The Pipeline and its Rules realize it. The player improves the Engine by rewriting the Algorithm, not by buying upgrades.
+The processing approach the Engine runs. The Pipeline and its Rules realize it. The Engine ships with a finished Algorithm. A curious player can still rewrite it, but progression does not depend on that.
 _Avoid_: Solution, logic, strategy, build.
 
 **Pipeline**:
@@ -63,7 +63,7 @@ _Avoid_: Contract, target, goal.
 ### Play structure
 
 **Scenario**:
-One playable level. It runs in real time and can be lost. Each Scenario raises the pressure with more Endpoints, new data formats, new Hunts, or new Vulnerabilities.
+One hunt from the catalogue: a stream of sensor readings with a real Attack hidden inside. It runs in real time. The player feeds any Scenarios to the one Engine, one or several or all at once, and watches it react. Each Scenario raises the pressure with more Endpoints, new data formats, new Hunts, or new Vulnerabilities.
 _Avoid_: Level, stage, mission, map.
 
 **Hunt**:
