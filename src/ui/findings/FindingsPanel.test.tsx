@@ -244,7 +244,9 @@ describe("FindingsPanel persistent status region (GH38 review round 3, F002+F012
     // The SAME DOM node, only its text mutated — a node that mounts pre-filled
     // announces nothing, so identity is what makes the announcement fire.
     expect(within(panel).getByRole("status")).toBe(status);
-    expect(status.textContent).toBe(`findings urgent, ${URGENT_HITS} active`);
+    // The phrase is phase-only (GH38 review round 4, F002): no live count, so
+    // the region does not re-announce on every further hit increment.
+    expect(status.textContent).toBe("findings urgent");
     expect(status.textContent?.startsWith(",")).toBe(false);
   });
 

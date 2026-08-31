@@ -313,20 +313,25 @@ describe("countActiveHits (#38 juice item 3+4)", () => {
   });
 });
 
-describe("urgentAnnouncement (GH38 review round 3, F002+F012)", () => {
+describe("urgentAnnouncement (GH38 review round 4, F002)", () => {
   it("is empty when not urgent", () => {
-    expect(urgentAnnouncement(false, 0)).toBe("");
-    expect(urgentAnnouncement(false, URGENT_HITS - 1)).toBe("");
+    expect(urgentAnnouncement(false)).toBe("");
   });
 
   it("is a complete phrase, with no leading comma, when urgent", () => {
-    const text = urgentAnnouncement(true, URGENT_HITS);
-    expect(text).toBe(`findings urgent, ${URGENT_HITS} active`);
+    const text = urgentAnnouncement(true);
+    expect(text).toBe("findings urgent");
     expect(text.startsWith(",")).toBe(false);
   });
 
+  it("carries no live count, so it does not re-announce on every hit increment", () => {
+    // A fixed phrase regardless of how many hits are urgent — the count lives
+    // only in the visible "N active" text, never in the announcement.
+    expect(urgentAnnouncement(true)).toBe(urgentAnnouncement(true));
+  });
+
   it("names no CONTEXT.md Alert-avoid word (hit, detection, notification, flag)", () => {
-    const text = urgentAnnouncement(true, URGENT_HITS + 4);
+    const text = urgentAnnouncement(true);
     expect(text.toLowerCase()).not.toMatch(/\bhits?\b|\bdetection\b|\bnotification\b|\bflag\b/);
   });
 });

@@ -71,14 +71,17 @@ export function countActiveHits(findings: readonly LiveFinding[]): ActiveHits {
 
 /**
  * The panel header's persistent `role="status"` text (F002+F012, GH38 review
- * round 3). A complete phrase when urgent, so a screen reader hears one whole
- * sentence rather than a lone ", urgent" fragment tacked onto silence; empty
- * otherwise, so the live region falls quiet below the threshold. Per
- * CONTEXT.md's Alert entry, the phrase must avoid "hit", "detection",
- * "notification", and "flag".
+ * round 4). A complete phrase when urgent, so a screen reader hears one whole
+ * sentence; empty otherwise, so the live region falls quiet below the
+ * threshold. The live hit count is deliberately excluded: embedding it made
+ * the region re-announce on every hit increment while already urgent, which
+ * is chatter, not signal. `waveAnnouncement` (LogPanel) applies the same
+ * restraint, carrying only the phase and never the ticking countdown; this
+ * function mirrors it. Per CONTEXT.md's Alert entry, the phrase must avoid
+ * "hit", "detection", "notification", and "flag".
  */
-export function urgentAnnouncement(urgent: boolean, activeCount: number): string {
-  return urgent ? `findings urgent, ${activeCount} active` : "";
+export function urgentAnnouncement(urgent: boolean): "findings urgent" | "" {
+  return urgent ? "findings urgent" : "";
 }
 
 /**

@@ -202,11 +202,12 @@ describe("LogPanel speed control", () => {
 });
 
 describe("LogPanel wave readout (#38 juice item 1)", () => {
-  it("shows the countdown to the next wave, in whole game-seconds, while calm", () => {
-    // ticksUntilNext 42 * GAME_SECONDS_PER_TICK (2) = 84.
+  it("shows the countdown to the next wave, quantized to a 30-game-second bucket, while calm", () => {
+    // ticksUntilNext 42 * GAME_SECONDS_PER_TICK (2) = 84 raw game-seconds,
+    // which rounds up to the 90 bucket (ceil(84 / 30) * 30).
     setWave({ phase: "calm", index: 0, ticksUntilNext: 42, eventsPerTick: null });
     render(<LogPanel />);
-    expect(screen.getByText("next wave in 84s")).toBeDefined();
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
   });
 
   it("swaps to the WAVE INCOMING readout while incoming", () => {
@@ -262,34 +263,47 @@ describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)"
   });
 });
 
-describe("LogPanel wave countdown seconds (GH38 review round 1, fix 3)", () => {
-  it("renders known tick values as whole game-seconds", () => {
+describe("LogPanel wave countdown bucketing (GH38 review round 4, F014)", () => {
+  it("renders known tick values at their 30-game-second bucket", () => {
+    // 30 ticks * GAME_SECONDS_PER_TICK (2) = 60 raw game-seconds, already a
+    // bucket multiple, so it renders unchanged.
     setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
     const { rerender } = render(<LogPanel />);
     expect(screen.getByText("next wave in 60s")).toBeDefined();
 
+    // 1 tick * 2 = 2 raw game-seconds, rounding up into the first bucket.
     setWave({ phase: "calm", index: 0, ticksUntilNext: 1, eventsPerTick: null });
     rerender(<LogPanel />);
-    expect(screen.getByText("next wave in 2s")).toBeDefined();
+    expect(screen.getByText("next wave in 30s")).toBeDefined();
   });
 
-  it("ceils a fractional tick countdown so it steps once per whole second, not once per sample", () => {
-    // Real ticksUntilNext values are always whole ticks, so at the shipped
-    // GAME_SECONDS_PER_TICK (2, a whole number) no two distinct real tick counts
-    // ever land in the same second. This directly exercises the ceil quantization
-    // that guards against that changing: two samples a fraction of a tick apart,
-    // 29.1 and 29.5, both multiply into the (58, 59] bucket and must render
-    // identically instead of flickering between adjacent samples.
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 29.1, eventsPerTick: null });
+  it("renders adjacent tick values inside one 30s bucket identically", () => {
+    // 31 ticks -> 62 raw seconds and 45 ticks -> 90 raw seconds both land in
+    // the (60, 90] bucket, so both must render "90s" instead of drifting
+    // downward sample to sample.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
     const { rerender } = render(<LogPanel />);
     const first = screen.getByText(/next wave in \d+s/).textContent;
 
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 29.5, eventsPerTick: null });
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 45, eventsPerTick: null });
     rerender(<LogPanel />);
     const second = screen.getByText(/next wave in \d+s/).textContent;
 
-    expect(first).toBe("next wave in 59s");
+    expect(first).toBe("next wave in 90s");
     expect(second).toBe(first);
+  });
+
+  it("renders bucket-boundary values differently", () => {
+    // 45 ticks -> 90 raw seconds (bucket 90) vs 46 ticks -> 92 raw seconds
+    // (bucket 120): one tick apart, but crossing the boundary must change
+    // the displayed text.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 45, eventsPerTick: null });
+    const { rerender } = render(<LogPanel />);
+    expect(screen.getByText("next wave in 90s")).toBeDefined();
+
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 46, eventsPerTick: null });
+    rerender(<LogPanel />);
+    expect(screen.getByText("next wave in 120s")).toBeDefined();
   });
 });
 
@@ -320,10 +334,10 @@ describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () 
     expect(screen.getByRole("status").textContent).toMatch(/wave incoming/i);
   });
 
-  it("falls silent again in the role=status region once the wave goes active", () => {
+  it("announces wave arrived once the wave goes active (GH38 review round 4, F007)", () => {
     setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
     render(<LogPanel />);
-    expect(screen.getByRole("status").textContent).toBe("");
+    expect(screen.getByRole("status").textContent).toMatch(/wave arrived/i);
   });
 });
 

@@ -93,12 +93,15 @@ body {
 @keyframes urgentborder {
   0%,
   100% {
-    /* WCAG 3:1 against --panel (~3.62:1); the box-shadow glow below stays a
-       translucent mix since it is decoration, not the boundary itself. */
+    /* WCAG 3:1 against --panel (~3.62:1), held constant across all three
+       stops so the pulse's peak never dips below its trough's contrast (GH38
+       review round 4, F001 — the 50% stop previously used raw --threat, only
+       ~2.94:1). The box-shadow glow below still modulates the pulse, since it
+       is decoration, not the boundary itself. */
     border-color: color-mix(in srgb, var(--threat) 80%, white);
   }
   50% {
-    border-color: var(--threat);
+    border-color: color-mix(in srgb, var(--threat) 80%, white);
     box-shadow: 0 0 20px color-mix(in srgb, var(--threat) 13%, transparent);
   }
 }

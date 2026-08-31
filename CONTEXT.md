@@ -101,7 +101,7 @@ The performance ramp. Event volume and burst size climb. New Endpoints add new d
 _Avoid_: Load, traffic.
 
 **Wave**:
-A scripted benign rise in Event volume for a bounded stretch per the run's schedule. It is not an Attack and not a Stress event: no intrusion hides in it, and it exposes no unhandled Side effect.
+A scripted rise in benign Event volume for a bounded stretch per the run's schedule. The rise itself is neither an Attack nor a Stress event, though Attacks may strike while it runs.
 _Avoid_: surge, burst, spike, rush.
 
 **Feature request**:

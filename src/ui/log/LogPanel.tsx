@@ -15,17 +15,19 @@
  * DOM measurement.
  *
  * The transport row also carries the wave readout (#38 juice item 1): "next
- * wave in Ns" (whole game-seconds) while calm, a pulsing "◈ WAVE INCOMING"
- * while incoming, and nothing while a wave is active or after the last one (no
- * countdown to show). Both the readout and the status announcement gate on
+ * wave in Ns" (N quantized to a 30-game-second bucket, see `waveReadout`)
+ * while calm, a pulsing "◈ WAVE INCOMING" while incoming, and nothing while a
+ * wave is active or after the last one (no countdown to show). Both the
+ * readout and the status announcement gate on
  * `snapshot.status === "running"` (F003): once a run has concluded (won or
  * failed) neither renders, since a wave reading from a stopped clock is stale,
  * not a live cue. That gate is about conclusion, not the transport freeze —
  * pausing (`transport.frozen`) leaves the readout showing the frozen reading,
  * since the run can still resume. That visible text is `aria-hidden` because
  * it ticks too fast to announce; a separate `role="status"` region carries
- * only the low-frequency phase change ("wave incoming"), which fires at most a
- * few times per run. On the incoming -> active edge the panel's own column
+ * only the low-frequency phase change ("wave incoming", then "wave arrived"
+ * once the wave starts), which fires at most a few times per run. On the
+ * incoming -> active edge the panel's own column
  * flashes once (`useWavePhaseEdge`, one-shot ownership: this component owns
  * its `.waveflash` class and clears it itself, independent of App's
  * `.shake`). The queue bar also gains a `queue-bar-danger` pulse class at
@@ -56,29 +58,57 @@ import { formatRow } from "./formatters";
 const WAVEFLASH_MS = 600;
 
 /**
+ * The countdown's display bucket, in game-seconds (GH38 review round 4,
+ * F014). `ticksUntilNext` is always a whole tick count, so ceiling it to a
+ * whole second is a no-op: the text would still change on every ~50ms publish
+ * sample, six game-seconds at a time. Per-second display stepping would not
+ * fix that either — at 1x, game time runs `CLOCK_HZ * GAME_SECONDS_PER_TICK`
+ * = 120 game-seconds per wall-second, so a once-per-second step still races
+ * the sampler. Bucketing to 30 game-seconds instead steps the readout only a
+ * handful of times per calm window. This value is a first-draft #40 tuning
+ * knob, not load-bearing.
+ */
+const WAVE_COUNTDOWN_BUCKET_S = 30;
+
+/**
  * The wave readout's text and urgency, or null when there is nothing to show
  * (active, or calm with no wave left). `incoming` drives the pulsing style.
- * The countdown is whole game-seconds, ceiled so it steps once per second
- * instead of racing with every sample (`ticksUntilNext` ticks down far faster
- * than a human can read).
+ * The countdown quantizes to `WAVE_COUNTDOWN_BUCKET_S`-second buckets (see
+ * that constant's comment for why a plain per-second ceil does not work).
  */
 function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
   if (wave.phase === "incoming") {
     return { text: "◈ WAVE INCOMING", incoming: true };
   }
   if (wave.ticksUntilNext !== null) {
-    const seconds = Math.ceil(wave.ticksUntilNext * GAME_SECONDS_PER_TICK);
+    const rawSeconds = wave.ticksUntilNext * GAME_SECONDS_PER_TICK;
+    const seconds = Math.ceil(rawSeconds / WAVE_COUNTDOWN_BUCKET_S) * WAVE_COUNTDOWN_BUCKET_S;
     return { text: `next wave in ${seconds}s`, incoming: false };
   }
   return null;
 }
 
 /**
- * The role="status" announcement: only the phase, never the ticking count, so
- * a screen reader hears "wave incoming" once per wave instead of every sample.
+ * The role="status" announcement: phase-mapped, never the ticking count, so a
+ * screen reader hears one whole phrase per phase change instead of every
+ * sample. "wave incoming" warns during the countdown; "wave arrived" fires
+ * once the wave actually starts (GH38 review round 4, F007) — without it, a
+ * screen reader user is warned but never learns the wave they were warned
+ * about began. The text holds constant through the whole active phase, so it
+ * announces exactly once at wave start, not on every publish sample. Calm
+ * renders "", so the region falls silent between waves.
  */
-function waveAnnouncement(phase: SimSnapshot["wave"]["phase"]): "wave incoming" | "" {
-  return phase === "incoming" ? "wave incoming" : "";
+function waveAnnouncement(
+  phase: SimSnapshot["wave"]["phase"],
+): "wave incoming" | "wave arrived" | "" {
+  switch (phase) {
+    case "incoming":
+      return "wave incoming";
+    case "active":
+      return "wave arrived";
+    case "calm":
+      return "";
+  }
 }
 
 /** The speed choices the transport offers, in ascending order, with their labels. */

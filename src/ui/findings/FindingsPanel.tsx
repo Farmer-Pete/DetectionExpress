@@ -77,7 +77,7 @@ export function FindingsPanel() {
           spells the crossing out for a screen reader, since motion carries no
           signal past a border color. */}
       <span className="visually-hidden" role="status">
-        {urgentAnnouncement(urgent, activeCount)}
+        {urgentAnnouncement(urgent)}
       </span>
       {findings.length === 0 ? (
         <EmptyState />
