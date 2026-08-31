@@ -548,6 +548,49 @@ describe("FxLayer run reset", () => {
     });
     expect(screen.getByTestId("fx-announcements").childElementCount).toBe(0);
   });
+
+  it("spawns nothing from a stale snapshot on a token-first transition, then fires normally once the fresh run lands", () => {
+    // `bumpRunToken` and the empty-snapshot publish are separate store actions
+    // (`run-controller.ts`): this reproduces the order where the token flips in
+    // its own render, with the OLD run's findings and decision still sitting in
+    // the store, unlike the other run-reset tests above, which bundle both store
+    // writes into one `act` (a same-render bump the reset must also cover, but
+    // not the only order it has to be correct under).
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(requireEl("[data-finding-seq='1']"), rect(40, 50, 60, 70));
+    publish([liveFinding({ seq: 1, eventIds: [10] })], [caughtDecision(1, "acct-7")]);
+    expect(useGameStore.getState().flashes.size).toBe(1);
+    expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("fx-pop")).toHaveLength(1);
+    expect(screen.getByTestId("fx-announcements").textContent).toContain("Caught: acct-7");
+
+    // Bump the token ALONE: the store's snapshot still holds the old run's finding
+    // and decision at this point. The reset must spawn nothing from them, and must
+    // clear what was already live.
+    act(() => {
+      useGameStore.getState().bumpRunToken();
+    });
+    expect(useGameStore.getState().flashes.size).toBe(0);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
+    expect(screen.getByTestId("fx-announcements").childElementCount).toBe(0);
+
+    // The empty-snapshot publish that normally follows the bump: still nothing
+    // spawns, since the old run's finding and decision are simply gone now, and
+    // the reset pass already zeroed the baselines they would have diffed against.
+    publish([], []);
+    expect(useGameStore.getState().flashes.size).toBe(0);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
+
+    // The fresh run reuses seq 1 for a different finding. It must fire normally:
+    // proof the zeroed baselines (not just the cleared overlay) survived the reset.
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    expect(useGameStore.getState().flashes.size).toBe(1);
+    expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+  });
 });
 
 describe("FxLayer mount over a populated store (F004)", () => {

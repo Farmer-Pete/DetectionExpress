@@ -369,7 +369,13 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
 
   // Diff this tick's findings and decisions against the last tick FxLayer saw, and
   // spawn FX for what landed. A runToken change resets every piece of cross-tick
-  // state first, so old-run FX never survive into the new run.
+  // state, then returns: `bumpRunToken` and the empty-snapshot publish are separate
+  // store actions, so this same render can still be carrying the OLD run's
+  // `findings`/`decisions` at the moment the token flips. Diffing those against the
+  // just-zeroed baselines in this same pass would replay every old-run finding and
+  // decision as a fresh landing. The reset pass spawns nothing; the fresh run's own
+  // later snapshots diff cleanly against the zeroed baselines on the next tick, and a
+  // fast rule's first real snapshot still fires normally then.
   useEffect(() => {
     if (runToken !== prevRunTokenRef.current) {
       prevRunTokenRef.current = runToken;
@@ -382,6 +388,7 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       setItems([]);
       setAnnouncements([]);
       useGameStore.getState().clearFlashes();
+      return;
     }
 
     // Reserve a palette slot for every reason in seq order, watches included, on its
