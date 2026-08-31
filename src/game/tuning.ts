@@ -53,6 +53,15 @@ export const CORRECTNESS_W_FN = 3;
 export const CORRECTNESS_W_FP = 1;
 
 /**
+ * T10 (GH34-35-PLAN.md 1.7/2.2). The decision log's cap: `ScorerConfig.decisionsCap`,
+ * mirroring the `liveHorizon` pattern. Oldest decisions drop past this count;
+ * `reading()`'s lifetime counts are unaffected. Expected decision volume under a
+ * normal run is roughly 14 caught plus occasional misses and false alarms, so this
+ * will not normally trim mid-run.
+ */
+export const DECISIONS_CAP = 50;
+
+/**
  * Slice 2 "Keep up" tuning constants (see `GH3-PLAN.md`, section 8). M1 needs the
  * measurement-engine set: the corpus size and density, the profiler's batch and
  * median protocol, the service-rate quantization denominator, the difficulty dial

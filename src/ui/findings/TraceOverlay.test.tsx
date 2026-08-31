@@ -1,0 +1,700 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode, useRef } from "react";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useGameStore } from "../../game/store";
+import type { Decision, LiveFinding } from "../../sim/correctness";
+import type { Context, Finding } from "../../sim/finding";
+import type { RingEvent } from "../../sim/inspector";
+import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
+import { DecisionsPanel } from "../decisions/DecisionsPanel";
+import { caughtDecision, falseDecision, missedDecision } from "../decisions/decision-fixtures";
+import { InspectorShell } from "./InspectorShell";
+
+// The zustand store is a singleton shared across test files, so reset every field this
+// file reads or writes before each test, or a leaked value would bleed across.
+beforeEach(() => {
+  useGameStore.setState({
+    snapshot: emptySnapshot(),
+    selection: null,
+    decisionSelection: null,
+    transport: { frozen: false, speed: 1 },
+  });
+});
+
+/** One ring event, distinguishable by id. */
+function ringEvent(id: number, over: Partial<RingEvent> = {}): RingEvent {
+  return {
+    id,
+    ts: id * 10,
+    endpoint: "kiosk-v1",
+    raw: { acct: `raw-${id}` },
+    normalized: { account: `norm-${id}` },
+    ...over,
+  };
+}
+
+interface LiveOverrides {
+  seq: number;
+  eventIds: number[];
+  entity?: string;
+  reason?: string;
+  state?: "hit" | "watch";
+  at?: number;
+  context?: Context;
+}
+
+/** One LiveFinding, grouped on "account" when `entity` is given, matching FindingsPanel's
+ *  own fixture shape so a real click on its row works end to end. */
+function live(over: LiveOverrides): LiveFinding {
+  const reason = over.reason ?? "pin_brute_force";
+  const finding: Finding = {
+    alert: { eventIds: over.eventIds, reason, at: 999 },
+    eventId: over.eventIds[0] ?? 0,
+    ...(over.entity !== undefined ? { subjectType: "account" } : {}),
+    ...(over.context !== undefined ? { context: over.context } : {}),
+  };
+  const result: LiveFinding = {
+    finding,
+    state: over.state ?? "hit",
+    reason,
+    eventIds: over.eventIds,
+    at: over.at ?? 5,
+    seq: over.seq,
+  };
+  if (over.entity !== undefined) {
+    result.entity = over.entity;
+  }
+  return result;
+}
+
+/** Publish a snapshot carrying the given findings and ring events. */
+function publish(findings: LiveFinding[], events: RingEvent[] = []): void {
+  const snapshot: SimSnapshot = { ...emptySnapshot(), findings, events };
+  useGameStore.setState({ snapshot });
+}
+
+/** Render the shell, click the named finding's row, and hand back the row element (the
+ *  trigger a real click would focus, native-button default focus behavior). */
+function openTraceByClick(name: RegExp): HTMLElement {
+  render(<InspectorShell />);
+  const row = screen.getByRole("button", { name });
+  row.focus();
+  fireEvent.click(row);
+  return row;
+}
+
+/**
+ * The decision-mode harness: `InspectorShell` and `DecisionsPanel` as siblings
+ * sharing one ref, mirroring how `App.tsx` composes them (2.4). Decision mode's
+ * focus fallback (decision 14) needs a real `DecisionsPanel` DOM node to fall back
+ * to, which a bare `<InspectorShell />` alone never mounts.
+ */
+function Harness() {
+  const decisionsPanelRef = useRef<HTMLElement>(null);
+  return (
+    <>
+      <InspectorShell decisionsPanelRef={decisionsPanelRef} />
+      <DecisionsPanel panelRef={decisionsPanelRef} />
+    </>
+  );
+}
+
+/** Render the harness, click the named decision's row, and hand back the row element. */
+function openDecisionTraceByClick(name: RegExp): HTMLElement {
+  render(<Harness />);
+  const row = screen.getByRole("button", { name });
+  row.focus();
+  fireEvent.click(row);
+  return row;
+}
+
+/** Publish a snapshot carrying the given decisions and ring events. */
+function publishDecisions(decisions: Decision[], events: RingEvent[] = []): void {
+  const snapshot: SimSnapshot = { ...emptySnapshot(), decisions, events };
+  useGameStore.setState({ snapshot });
+}
+
+describe("TraceOverlay", () => {
+  it("renders nothing when no finding is selected", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    render(<InspectorShell />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens a dialog on selection with the header, both nodes, and a hit verdict", () => {
+    publish(
+      [live({ seq: 1, eventIds: [0], entity: "acct-1", reason: "pin_brute_force" })],
+      [ringEvent(0)],
+    );
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeDefined();
+    const inDialog = within(dialog);
+    expect(inDialog.getByText("acct-1")).toBeDefined();
+    expect(inDialog.getByText(/ingest \+ normalize/i)).toBeDefined();
+    expect(inDialog.getByText(/judge/i)).toBeDefined();
+    expect(inDialog.getByText("finding raised")).toBeDefined();
+  });
+
+  it("renders the watch verdict when the finding is a watch, not a hit", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    expect(screen.getByText("watching, no finding yet")).toBeDefined();
+  });
+
+  it("carries the watch modifier class on the verdict line, not the ok-green hit styling", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const verdict = screen.getByText("watching, no finding yet");
+    expect(verdict.className).toContain("trace-verdict--watch");
+    expect(verdict.className).not.toContain("trace-verdict--hit");
+  });
+
+  it("carries the hit modifier class on the verdict line for a hit finding", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "hit" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const verdict = screen.getByText("finding raised");
+    expect(verdict.className).toContain("trace-verdict--hit");
+    expect(verdict.className).not.toContain("trace-verdict--watch");
+  });
+
+  it("labels the state badge with player-facing vocabulary, not the raw 'hit'/'watch' token", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "hit" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Alert")).toBeDefined();
+    expect(dialog.queryByText("hit")).toBeNull();
+  });
+
+  it("labels a watch's state badge as Watching", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Watching")).toBeDefined();
+  });
+
+  it("renders one card per cited event, raw over normalized, pretty-printed, with its endpoint, time, and payload labels", () => {
+    publish(
+      [live({ seq: 1, eventIds: [3], entity: "acct-1" })],
+      [
+        ringEvent(3, {
+          ts: 30,
+          endpoint: "kiosk-v1",
+          raw: { acct: "amy" },
+          normalized: { account: "amy" },
+        }),
+      ],
+    );
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    const inDialog = within(dialog);
+    expect(inDialog.getByText("kiosk-v1")).toBeDefined();
+    expect(inDialog.getByText("Ingest")).toBeDefined();
+    expect(inDialog.getByText("Normalized")).toBeDefined();
+    // getByText normalizes whitespace, which would fold the pretty-printed newlines away,
+    // so compare the raw/normalized <pre> elements' textContent exactly instead.
+    expect(dialog.querySelector(".trace-card-raw")?.textContent).toBe(
+      JSON.stringify({ acct: "amy" }, null, 2),
+    );
+    expect(dialog.querySelector(".trace-card-normalized")?.textContent).toBe(
+      JSON.stringify({ account: "amy" }, null, 2),
+    );
+  });
+
+  it("renders an aged-out placeholder card for a cited id evicted from the ring", () => {
+    publish([live({ seq: 1, eventIds: [0, 1], entity: "acct-1" })], [ringEvent(1)]);
+    openTraceByClick(/pin brute force/i);
+    expect(screen.getByText(/aged out of the recent stream/i)).toBeDefined();
+  });
+
+  it("renders the finding's kv context widget under the Judge node", () => {
+    publish(
+      [
+        live({
+          seq: 1,
+          eventIds: [0],
+          entity: "acct-1",
+          context: [
+            {
+              type: "kv",
+              entries: [{ label: "wrong PINs", value: 5 }],
+            },
+          ],
+        }),
+      ],
+      [ringEvent(0)],
+    );
+    openTraceByClick(/pin brute force/i);
+    expect(screen.getByText("wrong PINs")).toBeDefined();
+  });
+
+  it("closes on Esc, clearing the selection", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("closes on a backdrop click but not on a click inside the dialog", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(dialog);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not dismiss when a gesture starts inside the dialog and ends on the backdrop", () => {
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    const pre = dialog.querySelector(".trace-card-raw");
+    if (pre === null) {
+      throw new Error("expected a raw payload <pre>");
+    }
+    // A drag that selects text in the raw payload and releases over the backdrop: the
+    // pointerdown starts inside, so the paired click must not dismiss even though the
+    // click itself lands outside.
+    fireEvent.pointerDown(pre);
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+
+  it("does not dismiss when a gesture starts on the backdrop but ends inside the dialog (F003)", () => {
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    const pre = dialog.querySelector(".trace-card-raw");
+    if (pre === null) {
+      throw new Error("expected a raw payload <pre>");
+    }
+    const backdrop = dialog.parentElement;
+    if (backdrop === null) {
+      throw new Error("the dialog has no backdrop");
+    }
+    // The mirror case of the drag-out test above: the gesture STARTS on the backdrop
+    // (e.g. a mis-click that slides onto the dialog before release) but its pointerup
+    // ENDS inside the dialog. Neither endpoint alone was outside-and-inside; the
+    // dismiss must not fire, matching the "either endpoint inside never dismisses" rule.
+    fireEvent.pointerDown(backdrop);
+    fireEvent.pointerUp(pre);
+    fireEvent.click(backdrop);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+  });
+
+  it("wraps Shift+Tab to the last control when the dialog container itself holds focus, not yet on any inner control", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    // Opening always focuses the container itself, never a specific control, so this
+    // is the dialog's ordinary state right after open, not a contrived setup.
+    expect(document.activeElement).toBe(dialog);
+    const notCanceled = fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(notCanceled).toBe(false); // dispatchEvent reports false when preventDefault fired
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /close/i }));
+  });
+
+  it("wraps Tab at the edges to keep focus within the dialog", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    // The shipped dialog exposes only the close button today; append a second
+    // control here (FOCUSABLE_SELECTOR is generic so the trap survives controls
+    // added later, per src/ui/focus.ts) to exercise the wrap between two distinct
+    // elements rather than a single control wrapping to itself.
+    const extra = document.createElement("button");
+    extra.type = "button";
+    extra.textContent = "extra";
+    dialog.appendChild(extra);
+    const focusable = [...dialog.querySelectorAll<HTMLElement>("button, a[href]")];
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (first === undefined || last === undefined || first === last) {
+      throw new Error("expected two distinct focusable controls");
+    }
+
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("does not throw on Tab in the missed-decision solo panel, which carries fewer focusable controls", () => {
+    publishDecisions([missedDecision({ seq: 1 })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    expect(() => fireEvent.keyDown(dialog, { key: "Tab" })).not.toThrow();
+  });
+
+  it("has a close button that clears the selection", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(useGameStore.getState().selection).toBeNull();
+  });
+
+  it("moves focus into the dialog on open", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  it("restores focus to the trigger row on close, when it is still connected", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    const row = openTraceByClick(/pin brute force/i);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("restores focus to a row the click itself never focused (Safari does not focus a clicked button)", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    // Deliberately skip `row.focus()`: the click handler itself must force focus onto
+    // the row (FindingsPanel's own fix), not rely on the browser's click-to-focus.
+    fireEvent.click(row);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("falls back to the findings panel container when the trigger row was evicted by reconciliation", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    // A run restart (Apply, hot reload, or stop-then-restart) publishes emptySnapshot():
+    // the finding, and its row, are both gone. The store's own reconciliation clears the
+    // selection, so the dialog closes; the trigger is no longer connected.
+    act(() => {
+      useGameStore.getState().setSnapshot(emptySnapshot());
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector(".findings-panel"));
+  });
+
+  it("freezes on open when not already frozen, and unfreezes on close", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    openTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("respects a manual pre-freeze: it neither re-freezes nor unfreezes on close", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    useGameStore.getState().setFrozen(true);
+    openTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("forfeits its freeze claim once transport.frozen goes false while open, permanently", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true); // the overlay froze it
+
+    // The player unfreezes manually (e.g. Space) while the dialog is open: the overlay's
+    // claim is forfeited from this point on, permanently, per GH34-35-PLAN.md decision 5.
+    act(() => {
+      useGameStore.getState().setFrozen(false);
+    });
+    // The player re-freezes manually. The overlay must not treat this as its own claim.
+    act(() => {
+      useGameStore.getState().setFrozen(true);
+    });
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    // Closing must NOT undo the player's own re-freeze.
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("closes via reconciliation on a snapshot reset, resolving a freeze claim it still held", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => {
+      useGameStore.getState().setSnapshot(emptySnapshot());
+    });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("survives a stop-then-restart cycle, then runs a clean freeze cycle on the next selection", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    // The engine stops and restarts: a fresh scorer publishes an empty snapshot first.
+    act(() => {
+      useGameStore.getState().setSnapshot(emptySnapshot());
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    // The restarted run raises a fresh finding at a fresh seq. Selecting it must run a
+    // clean freeze cycle: no state from the last dialog's forfeit or claim leaks over.
+    act(() => {
+      publish([live({ seq: 1, eventIds: [0], entity: "acct-2" })], [ringEvent(0)]);
+    });
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    row.focus();
+    fireEvent.click(row);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("leaves the dialog and freeze untouched by an unrelated store update (a failed dry run)", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    openTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    // A failed dry run reports an error but never touches the snapshot: the live engine
+    // (and this dialog) is untouched.
+    act(() => {
+      useGameStore.getState().setError({ phase: "load", message: "boom" });
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("releases a freeze it initiated when it unmounts while open, e.g. the Metro/Pipeline view toggle", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    const { unmount } = render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    row.focus();
+    fireEvent.click(row);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    unmount();
+
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("leaves a manual pre-freeze alone when it unmounts while open", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    useGameStore.getState().setFrozen(true);
+    const { unmount } = render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    row.focus();
+    fireEvent.click(row);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    unmount();
+
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("settles frozen under StrictMode's phantom cleanup+re-setup when the dialog is already open on first mount, and closing still unfreezes", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    // Set the selection before the first render, so the dialog is open at mount,
+    // the exact case StrictMode's dev-only mount->cleanup->re-mount cycle exercises.
+    useGameStore.setState({ selection: { seq: 1 } });
+
+    render(
+      <StrictMode>
+        <InspectorShell />
+      </StrictMode>,
+    );
+
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+});
+
+describe("TraceOverlay decision mode (T10)", () => {
+  it("reopens a caught decision's evidence: outcome, entity, recorded-at, cited-event cards, and context", () => {
+    publishDecisions(
+      [
+        caughtDecision({
+          seq: 1,
+          eventIds: [3],
+          citedEvents: [
+            {
+              id: 3,
+              ts: 30,
+              endpoint: "kiosk-v1",
+              raw: { acct: "amy" },
+              normalized: { account: "amy" },
+            },
+          ],
+          entity: "acct-7",
+          resolvedAt: 65,
+          context: [{ type: "text", text: "5 of 5 wrong PINs" }],
+        }),
+      ],
+      [
+        {
+          id: 3,
+          ts: 999,
+          endpoint: "kiosk-v1",
+          raw: { acct: "LIVE" },
+          normalized: { account: "LIVE" },
+        },
+      ],
+    );
+    openDecisionTraceByClick(/pin brute force/i);
+    const dialogEl = screen.getByRole("dialog");
+    const dialog = within(dialogEl);
+    expect(dialog.getByText("Caught")).toBeDefined();
+    expect(dialog.getByText("acct-7")).toBeDefined();
+    // The card resolves against the decision's frozen citedEvents, never the live ring
+    // (which carries a decoy for the same id, proving the card is not reading it).
+    // getByText normalizes whitespace, folding away the pretty-print's newlines, so
+    // compare the <pre>'s textContent exactly instead.
+    expect(dialogEl.querySelector(".trace-card-raw")?.textContent).toBe(
+      JSON.stringify({ acct: "amy" }, null, 2),
+    );
+    expect(dialogEl.textContent).not.toContain("LIVE");
+    expect(dialog.getByText("5 of 5 wrong PINs")).toBeDefined();
+  });
+
+  it("reopens a false decision's evidence with an entity-less chip omitted", () => {
+    publishDecisions([falseDecision({ seq: 1, eventIds: [0] })]);
+    openDecisionTraceByClick(/impossible travel/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("False alert")).toBeDefined();
+  });
+
+  it("renders a missed decision as a solo panel: entity, reason (once), and the attack window, no evidence nodes", () => {
+    publishDecisions([missedDecision({ seq: 1, window: { startTs: 10, endTs: 100 } })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Missed")).toBeDefined();
+    expect(dialog.getByText("acct-9")).toBeDefined();
+    // The header already carries the reason; the solo panel must not repeat it.
+    expect(dialog.getAllByText(/pin brute force/i)).toHaveLength(1);
+    expect(dialog.queryByText(/ingest \+ normalize/i)).toBeNull();
+    expect(dialog.queryByText(/judge/i)).toBeNull();
+    expect(dialog.queryByRole("region", { name: "Ingest and Normalize" })).toBeNull();
+    expect(dialog.queryByRole("region", { name: "Judge" })).toBeNull();
+  });
+
+  it("shows the header's recorded-at time from resolvedAt, not the fabricated at", () => {
+    // caughtDecision()'s at is fixed to 999 game seconds (16:39); resolvedAt is 65 (1:05).
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0], resolvedAt: 65 })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("1:05")).toBeDefined();
+    expect(dialog.queryByText("16:39")).toBeNull();
+  });
+
+  it("closes on Esc, clearing the decision selection", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("restores focus to the trigger row on close, when it is still connected", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    const row = openDecisionTraceByClick(/pin brute force/i);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("restores focus to a row the click itself never focused (Safari does not focus a clicked button)", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    render(<Harness />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    // Deliberately skip `row.focus()`: the click handler itself must force focus onto
+    // the row (DecisionsPanel's own fix), not rely on the browser's click-to-focus.
+    fireEvent.click(row);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("falls back to the decisions panel container when the trigger row was evicted by reconciliation", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    // A run restart publishes emptySnapshot(): the decision, and its row, are both
+    // gone. The store's reconciliation clears decisionSelection, so the dialog closes.
+    act(() => {
+      useGameStore.getState().setSnapshot(emptySnapshot());
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector(".decisions-panel"));
+  });
+
+  it("freezes on open when not already frozen, and unfreezes on close", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    openDecisionTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("forfeits its freeze claim once transport.frozen goes false while open, permanently", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => {
+      useGameStore.getState().setFrozen(false); // the player unfreezes manually
+    });
+    act(() => {
+      useGameStore.getState().setFrozen(true); // the player re-freezes manually
+    });
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(useGameStore.getState().transport.frozen).toBe(true); // closing must not undo it
+  });
+
+  it("evicts a decision by the cap while its dialog is open after a manual unfreeze: closes via reconciliation, no spurious re-freeze, focus falls back", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    openDecisionTraceByClick(/pin brute force/i);
+    expect(useGameStore.getState().transport.frozen).toBe(true); // the overlay froze it
+
+    // The player unfreezes manually while the dialog is open: the claim is forfeited.
+    act(() => {
+      useGameStore.getState().setFrozen(false);
+    });
+
+    // The cap (or a restart) evicts the open decision from the log. Reconciliation
+    // clears the selection, closing the dialog via the same path a restart would.
+    act(() => {
+      useGameStore.getState().setSnapshot({ ...emptySnapshot(), decisions: [] });
+    });
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The forfeited claim must not spuriously re-freeze the run on close.
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    expect(document.activeElement).toBe(document.querySelector(".decisions-panel"));
+  });
+
+  it("prefers finding mode when a finding selection and a decision selection are both somehow set", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    render(<Harness />);
+    // Bypass the store's own mutual exclusion to prove the component's own precedence.
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          findings: [live({ seq: 2, eventIds: [0], entity: "acct-1" })],
+        },
+        selection: { seq: 2 },
+        decisionSelection: { seq: 1 },
+      });
+    });
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Alert")).toBeDefined(); // the live trace's state chip, not "caught"
+  });
+});

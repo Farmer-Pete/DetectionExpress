@@ -383,6 +383,422 @@ body {
   font-size: 0.8rem;
 }
 
+/* Trace overlay (T9) */
+.trace-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 22, 29, 0.72);
+}
+
+.trace-overlay {
+  width: min(760px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.2rem 1.4rem;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.trace-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.trace-entity-chip {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--a3) 30%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.trace-reason {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.trace-state {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  /* No longer uppercase (F009/F010): the label itself is now properly cased
+     ("Alert", "Watching", "False alert"), and shouting it in caps would fight
+     that. The extra weight keeps the badge's visual punch without the caps. */
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.trace-state--hit {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.trace-state--watch {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  /* Text brightened from --dim (about 2.2:1 on this tint) to clear WCAG AA (4.77:1). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
+}
+
+.trace-state--caught {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+  /* Text brightened from --ok (about 2.4:1 on this tint) to clear WCAG AA (4.73:1). */
+  color: color-mix(in srgb, var(--ok) 5%, var(--ink));
+}
+
+.trace-state--missed {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.trace-state--false {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  /* Text brightened from --dim (about 2.2:1 on this tint) to clear WCAG AA (4.77:1). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
+}
+
+.trace-time,
+.trace-recorded-at {
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+.trace-recorded-at-time {
+  color: var(--ink);
+}
+
+.trace-close {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.trace-close:hover {
+  border-color: var(--a1);
+}
+
+.trace-nodes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 640px) {
+  .trace-nodes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.trace-node {
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.trace-node-title {
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.trace-node-empty {
+  margin: 0;
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.85rem;
+}
+
+.trace-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trace-card {
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.trace-card--aged-out {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-style: italic;
+}
+
+.trace-card-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.72rem;
+}
+
+.trace-card-payload-label {
+  display: block;
+  margin: 0.3rem 0 0.15rem;
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trace-card-raw,
+.trace-card-normalized {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.trace-card-normalized {
+  color: var(--a4);
+}
+
+.trace-verdict {
+  margin: 0.7rem 0 0;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.trace-verdict--hit {
+  color: var(--ok);
+}
+
+.trace-verdict--watch {
+  /* The same dim treatment as .trace-state--watch's badge text, brightened from
+     plain --dim (2.40:1 on --panel2) to clear WCAG AA (5.16:1 on --panel2). */
+  color: color-mix(in srgb, var(--dim) 15%, var(--ink));
+}
+
+.trace-node-missed {
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+}
+
+.trace-missed-window {
+  margin: 0;
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Context widgets (text / kv / table / json), shared by the Judge node and the
+   decisions view. */
+.widget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.widget-title {
+  margin: 0 0 0.3rem;
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.widget-text-body {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.widget-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+.widget-kv-entry {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+
+.widget-kv-entry dt {
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+}
+
+.widget-kv-entry dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.widget-table-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.widget-table-grid th,
+.widget-table-grid td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.widget-table-grid th {
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.widget-json-body {
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+
+/* Decisions panel (T10) */
+.decisions-panel {
+  margin: 0 1rem 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.decisions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decisions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--panel2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.decisions-row:hover {
+  border-color: var(--line);
+}
+
+.decisions-row.is-selected {
+  border-color: var(--a1);
+  background: color-mix(in srgb, var(--a1) 18%, var(--panel2));
+}
+
+.decisions-outcome {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  /* No longer uppercase (F009/F010): the label is now properly cased ("Caught",
+     "Missed", "False alert"), and shouting it in caps would fight that. The
+     extra weight keeps the badge's visual punch without the caps. */
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.decisions-outcome--caught {
+  background: color-mix(in srgb, var(--ok) 30%, transparent);
+  /* Text brightened from --ok (about 2.0:1 on this tint) to clear WCAG AA (4.75:1).
+     Pure --ink alone tops out at 4.14:1 on this darker --panel2 tint, so this mixes
+     past it toward white rather than staying within an ok/ink blend. */
+  color: color-mix(in srgb, var(--ink) 60%, white);
+}
+
+.decisions-outcome--missed {
+  background: color-mix(in srgb, var(--threat) 30%, transparent);
+  color: var(--alert);
+}
+
+.decisions-outcome--false {
+  background: color-mix(in srgb, var(--dim) 30%, transparent);
+  /* Text brightened from --dim (about 1.9:1 on this tint) to clear WCAG AA (4.76:1). */
+  color: color-mix(in srgb, var(--ink) 85%, white);
+}
+
+.decisions-entity {
+  /* Text brightened from --a3 (1.77:1 on --panel2) to clear WCAG AA (4.77:1).
+     Mixed toward white, not --ink, so the entity chip keeps a recognizably
+     blue cast instead of washing out to near-ink. */
+  color: color-mix(in srgb, var(--a3) 40%, white);
+  font-variant-numeric: tabular-nums;
+}
+
+.decisions-time {
+  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-variant-numeric: tabular-nums;
+}
+
+.decisions-empty {
+  text-align: center;
+}
+
+.decisions-empty-title {
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.decisions-empty-note {
+  margin: 0;
+  /* Text brightened from --dim (3.09:1 on --panel) to clear WCAG AA (4.75:1). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.8rem;
+}
+
 /* Briefing */
 .briefing {
   margin: 0 1.5rem 0.75rem;

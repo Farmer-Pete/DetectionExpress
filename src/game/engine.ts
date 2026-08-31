@@ -286,6 +286,12 @@ export function start(options: StartOptions): EngineHandle {
     // The inspector needs no ground truth, so the engine builds it directly. This
     // is a deliberate asymmetry with the scorer, which the run controller injects.
     const inspector = createInspector({ ringSize: RING_SIZE });
+    // Late-bind the scorer's event resolver to this run's own fresh inspector
+    // (correctness.ts's `bindEventResolver` doc): the run controller builds the
+    // scorer before this inspector exists, so the two halves pair here, every time
+    // a run commits, never carrying a stale binding across an Apply, a hot reload,
+    // or a restart.
+    options.scorer.bindEventResolver((ids) => inspector.resolveEvents(ids));
 
     const runtime: NodeRuntime = {
       clock,

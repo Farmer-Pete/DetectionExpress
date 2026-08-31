@@ -93,7 +93,9 @@ describe.each([
       expect(watch?.context).toEqual([{ type: "text", text: `${n} of 5 wrong PINs` }]);
     }
 
-    // The 5th fail: a hit on the same anchor and reason, no isPartial, no widget.
+    // The 5th fail: a hit on the same anchor and reason, no isPartial, a kv widget
+    // summarizing the burst (wrong PINs, threshold, window) so a fresh run demos the
+    // Judge node.
     const hitFindings = perStep[4] ?? [];
     expect(hitFindings).toHaveLength(1);
     const hit = hitFindings[0];
@@ -101,7 +103,16 @@ describe.each([
     expect(hit?.eventId).toBe(0);
     expect(hit?.subjectType).toBe("account");
     expect(hit?.alert.reason).toBe("pin_brute_force");
-    expect(hit?.context).toBeUndefined();
+    expect(hit?.context).toEqual([
+      {
+        type: "kv",
+        entries: [
+          { label: "wrong PINs", value: 5 },
+          { label: "threshold", value: 5 },
+          { label: "window", value: "5:00" },
+        ],
+      },
+    ]);
     expect(hit?.alert.eventIds).toEqual([0, 1, 2, 3, 4]);
   });
 });

@@ -23,6 +23,7 @@ function missed(seq: number): MissedDecision {
     attackId: seq,
     entity: `entity-${seq}`,
     reason: "pin_brute_force",
+    resolvedAt: 0,
     window: { startTs: 0, endTs: 0 },
   };
 }
@@ -35,6 +36,8 @@ function caught(seq: number, liveSeq: number): CaughtDecision {
     attackId: seq,
     entity: `entity-${seq}`,
     finding: { alert: { reason: "pin_brute_force", at: 0, eventIds: [liveSeq] }, eventId: liveSeq },
+    citedEvents: [],
+    resolvedAt: 0,
     liveSeq,
   };
 }
@@ -45,6 +48,8 @@ function falseAlert(seq: number, liveSeq: number): FalseDecision {
     seq,
     at: 0,
     finding: { alert: { reason: "pin_brute_force", at: 0, eventIds: [liveSeq] }, eventId: liveSeq },
+    citedEvents: [],
+    resolvedAt: 0,
     liveSeq,
   };
 }

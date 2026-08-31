@@ -34,16 +34,25 @@ export function diffFindings(
 }
 
 /**
- * The decisions appended since `prevLength`. The log is append-only, so a slice from
- * the prior length is exactly the new tail; a caller who resets `prevLength` to 0
- * after a run restart naturally reads the fresh log as all new, with no reset logic
- * needed here.
+ * The decisions appended since the prior high-water mark. Keyed on `seq`, not array
+ * position: `decisionsCap` (T10) trims the log's oldest entries, so positions shift,
+ * but `seq` is a strictly monotonic append counter (`decisionCount()` equals the next
+ * one). A caller who resets `prevNextSeq` to 0 after a run restart naturally reads
+ * the fresh log as all new, with no reset logic needed here.
  */
+/** The next `seq` a fresh append would take: one past the newest retained decision,
+ *  0 on an empty log (matching a fresh scorer). The diff baseline `diffDecisions`
+ *  consumes, robust to the capped log dropping its oldest entries. */
+export function nextDecisionSeqOf(decisions: readonly Decision[]): number {
+  const last = decisions[decisions.length - 1];
+  return last === undefined ? 0 : last.seq + 1;
+}
+
 export function diffDecisions(
-  prevLength: number,
+  prevNextSeq: number,
   decisions: readonly Decision[],
 ): readonly Decision[] {
-  return decisions.slice(prevLength);
+  return decisions.filter((decision) => decision.seq >= prevNextSeq);
 }
 
 /**

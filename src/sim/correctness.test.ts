@@ -14,6 +14,7 @@ import {
 } from "./correctness";
 import type { PipeEvent } from "./event";
 import type { Finding } from "./finding";
+import type { RingEvent } from "./inspector";
 
 const REASON = "pin_brute_force";
 
@@ -668,5 +669,120 @@ describe("scorer liveFindings", () => {
     const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ entityMatch: true }));
     s.record([sf(found([10, 11], 50, REASON), "root")], at(50));
     expect(s.liveFindings()[0]?.entity).toBe("root");
+  });
+});
+
+/** One ring event, distinguishable by id, the shape `bindEventResolver` resolves to. */
+function ringEvent(id: number): RingEvent {
+  return { id, ts: id * 10, endpoint: "kiosk-v1", raw: { id }, normalized: { id } };
+}
+
+// Seam I (T10, GH34-35-PLAN.md 2.1): cited-event capture, resolvedAt, and the capped log.
+describe("scorer citedEvents, resolvedAt, and the capped log", () => {
+  it("captures citedEvents for a caught decision via the bound resolver", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.bindEventResolver((ids) => ids.map(ringEvent));
+    s.record(one([10, 11], 50), at(50));
+    expect(asCaught(s.decisions()[0]).citedEvents).toEqual([ringEvent(10), ringEvent(11)]);
+  });
+
+  it("captures citedEvents for a false decision via the bound resolver", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.bindEventResolver((ids) => ids.map(ringEvent));
+    s.record(one([99], 50), at(50)); // cites an id no Attack owns
+    expect(asFalse(s.decisions()[0]).citedEvents).toEqual([ringEvent(99)]);
+  });
+
+  it("leaves citedEvents empty when no resolver is bound", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([10, 11], 50), at(50));
+    expect(asCaught(s.decisions()[0]).citedEvents).toEqual([]);
+  });
+
+  it("omits ids the resolver could not resolve (evicted from the ring)", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    // Only id 10 resolves; 11 has aged out of the ring, mirroring the live trace.
+    s.bindEventResolver((ids) => ids.filter((id) => id === 10).map(ringEvent));
+    s.record(one([10, 11], 50), at(50));
+    expect(asCaught(s.decisions()[0]).citedEvents).toEqual([ringEvent(10)]);
+  });
+
+  it("freezes citedEvents with the rest of the decision", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.bindEventResolver((ids) => ids.map(ringEvent));
+    s.record(one([10, 11], 50), at(50));
+    const decision = asCaught(s.decisions()[0]);
+    expect(Object.isFrozen(decision.citedEvents)).toBe(true);
+    expect(Object.isFrozen(decision.citedEvents[0])).toBe(true);
+  });
+
+  it("drops the oldest decisions past decisionsCap, while reading() counts stay exact", () => {
+    const s = createScorer([], cfg({ decisionsCap: 2 }));
+    s.record(one([90], 10), at(10)); // false #1
+    s.record(one([91], 20), at(20)); // false #2
+    s.record(one([92], 30), at(30)); // false #3, evicts #1 from the log
+    expect(s.decisions()).toHaveLength(2);
+    expect(s.decisions().map((d) => asFalse(d).finding.alert.eventIds[0])).toEqual([91, 92]);
+    // reading() folds every outcome that ever resolved, unaffected by the log's cap.
+    expect(s.reading().falseAlerts).toBe(3);
+  });
+
+  it("keeps seq unique and strictly monotonic across appends once the cap engages", () => {
+    const s = createScorer([], cfg({ decisionsCap: 2 }));
+    for (let i = 0; i < 5; i++) {
+      s.record(one([90 + i], i * 10), at(i * 10));
+    }
+    const seqs = s.decisions().map((d) => d.seq);
+    expect(seqs).toEqual([3, 4]); // the last two of a strictly climbing 0..4, no reuse
+  });
+
+  it("keeps decisions() seq-ordered once the cap has dropped earlier entries", () => {
+    const s = createScorer([], cfg({ decisionsCap: 3 }));
+    for (let i = 0; i < 6; i++) {
+      s.record(one([90 + i], i * 10), at(i * 10));
+    }
+    const seqs = s.decisions().map((d) => d.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  });
+
+  it("keeps decisionsCap unbounded by default, preserving today's behavior", () => {
+    const s = createScorer([], cfg());
+    for (let i = 0; i < 10; i++) {
+      s.record(one([90 + i], i * 10), at(i * 10));
+    }
+    expect(s.decisions()).toHaveLength(10);
+  });
+
+  it("resolvedAt is the trusted env.ts, diverging from a lying alert.at", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    // The finding's own alert.at lies (999); env.ts (the real record() time) is 50.
+    const lying = found([10, 11], 999);
+    s.record([sf(lying)], at(50));
+    const d = asCaught(s.decisions()[0]);
+    expect(d.resolvedAt).toBe(50);
+    expect(d.at).toBe(999); // at stays the (untrusted) display metadata
+    expect(d.resolvedAt).not.toBe(d.at);
+  });
+
+  it("a false decision's resolvedAt is also the trusted env.ts", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    const lying = found([99], 999);
+    s.record([sf(lying)], at(50));
+    expect(asFalse(s.decisions()[0]).resolvedAt).toBe(50);
+  });
+
+  it("a closeExpired() miss carries resolvedAt === attack.window.endTs", () => {
+    const s = createScorer([attack(1, "root", 5, 100, [10, 11])], cfg());
+    s.record([], at(101)); // watermark passes endTs: closeExpired resolves the miss
+    const d = asMissed(s.decisions()[0]);
+    expect(d.resolvedAt).toBe(100);
+    expect(d.resolvedAt).toBe(d.at);
+  });
+
+  it("a finalize() miss carries resolvedAt === attack.window.endTs", () => {
+    const s = createScorer([attack(1, "root", 5, 100, [10, 11])], cfg());
+    s.finalize(); // no Event ever closed it
+    const d = asMissed(s.decisions()[0]);
+    expect(d.resolvedAt).toBe(100);
   });
 });

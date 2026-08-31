@@ -22,7 +22,12 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { type FlashSpawn, useGameStore } from "../../game/store";
 import type { Decision, LiveFinding } from "../../sim/correctness";
-import { diffDecisions, diffFindings, unfiredLandingDecisions } from "./fx-events";
+import {
+  diffDecisions,
+  diffFindings,
+  nextDecisionSeqOf,
+  unfiredLandingDecisions,
+} from "./fx-events";
 import { createHuntPalette, type HuntPalette } from "./palette";
 
 /** Crib timings from the prototype (GH37-PLAN.md): flash 1.2s, comet ~0.5s, pop ~1.1s. */
@@ -338,7 +343,8 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
   // snapshot while this ref starts fresh, so the first tick sees every existing hit as
   // a brand-new landing.
   const prevFindingsRef = useRef<readonly LiveFinding[]>(findings);
-  const prevDecisionsLengthRef = useRef(decisions.length);
+  // Seq high-water, not array length: the capped log shifts positions, seq never reuses.
+  const prevDecisionsNextSeqRef = useRef(nextDecisionSeqOf(decisions));
   // Seeded ONLY from findings already at "hit" at mount — NEVER from a "watch": diffFindings
   // suppresses on `firedSeqs.has(seq)` regardless of state, so seeding a watch's seq here
   // would silently swallow its later watch-to-hit promotion.
@@ -363,12 +369,18 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
 
   // Diff this tick's findings and decisions against the last tick FxLayer saw, and
   // spawn FX for what landed. A runToken change resets every piece of cross-tick
-  // state first, so old-run FX never survive into the new run.
+  // state, then returns: `bumpRunToken` and the empty-snapshot publish are separate
+  // store actions, so this same render can still be carrying the OLD run's
+  // `findings`/`decisions` at the moment the token flips. Diffing those against the
+  // just-zeroed baselines in this same pass would replay every old-run finding and
+  // decision as a fresh landing. The reset pass spawns nothing; the fresh run's own
+  // later snapshots diff cleanly against the zeroed baselines on the next tick, and a
+  // fast rule's first real snapshot still fires normally then.
   useEffect(() => {
     if (runToken !== prevRunTokenRef.current) {
       prevRunTokenRef.current = runToken;
       prevFindingsRef.current = [];
-      prevDecisionsLengthRef.current = 0;
+      prevDecisionsNextSeqRef.current = 0;
       firedSeqsRef.current = new Set();
       paletteRef.current.reset();
       pendingFlashesRef.current = [];
@@ -376,6 +388,7 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       setItems([]);
       setAnnouncements([]);
       useGameStore.getState().clearFlashes();
+      return;
     }
 
     // Reserve a palette slot for every reason in seq order, watches included, on its
@@ -390,8 +403,8 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
     }
     prevFindingsRef.current = findings;
 
-    const newDecisions = diffDecisions(prevDecisionsLengthRef.current, decisions);
-    prevDecisionsLengthRef.current = decisions.length;
+    const newDecisions = diffDecisions(prevDecisionsNextSeqRef.current, decisions);
+    prevDecisionsNextSeqRef.current = nextDecisionSeqOf(decisions);
 
     if (landed.length === 0 && newDecisions.length === 0) {
       return;

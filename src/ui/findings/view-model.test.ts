@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
-import { buildFindingGroups, prettifyReason } from "./view-model";
+import { buildFindingGroups, prettifyReason, stateLabel } from "./view-model";
 
 /**
  * Build a LiveFinding fixture. `subjectType` lands on the emitted Finding (an
@@ -47,6 +47,16 @@ describe("prettifyReason", () => {
 
   it("leaves an already-clean single word sentence-cased", () => {
     expect(prettifyReason("tailgating")).toBe("Tailgating");
+  });
+});
+
+describe("stateLabel", () => {
+  it("labels a hit as Alert, avoiding the raw 'hit' term (CONTEXT.md)", () => {
+    expect(stateLabel("hit")).toBe("Alert");
+  });
+
+  it("labels a watch as Watching", () => {
+    expect(stateLabel("watch")).toBe("Watching");
   });
 });
 

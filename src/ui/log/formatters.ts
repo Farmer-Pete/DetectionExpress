@@ -67,3 +67,13 @@ export function formatRow(endpoint: string, raw: JsonValue): RowView {
   }
   return formatter(raw);
 }
+
+/** `ts` is game seconds. Formats as an mm:ss clock; the formatter never reads real time.
+ *  Shared wherever a game-seconds time reaches the screen: the log panel, the trace
+ *  overlay, and the decisions panel. */
+export function formatClock(ts: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ts));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
