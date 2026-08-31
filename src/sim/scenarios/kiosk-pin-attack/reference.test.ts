@@ -99,7 +99,7 @@ describe("referenceSource (executed, seam 4 parity)", () => {
         entries: [
           { label: "wrong PINs", value: 5 },
           { label: "threshold", value: 5 },
-          { label: "window", value: 300 },
+          { label: "window", value: "5:00" },
         ],
       },
     ]);
