@@ -636,3 +636,68 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.processed).toBe(0);
   });
 });
+
+// Seam: the snapshot's decisions, bound to the inspector ring (GH34-35-PLAN.md 2.2).
+describe("engine publishes decisions bound to the inspector ring (T10)", () => {
+  /** One Event, one Attack it fully proves, so record() resolves it caught at once. */
+  function caughtSetup(): { events: PipeEvent[]; scorer: Scorer } {
+    const events = [ev(0, 0, { acct: "x" })];
+    const attack: Attack = {
+      id: 1,
+      entity: "root",
+      reason: "pin_brute_force",
+      window: { startTs: 0, endTs: 100 },
+      eventIds: [0],
+    };
+    return { events, scorer: createScorer([attack], { threshold: 1, window: 10, wFn: 3, wFp: 1 }) };
+  }
+
+  const alertingAlgorithm: TaskAlgorithm = {
+    normalize: (raw) => raw,
+    detect: () => [{ alert: { reason: "pin_brute_force", at: 0, eventIds: [0] }, eventId: 0 }],
+  };
+
+  it("carries a caught decision with citedEvents resolved against the inspector ring", async () => {
+    const { events, scorer } = caughtSetup();
+    const h = launch({
+      generator: scheduleOf(events),
+      algorithm: alertingAlgorithm,
+      scorer,
+      checkpoints: deadlineAt(50),
+    });
+    await step(h.driver, 51);
+    await h.handle.whenStopped;
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    expect(snap.decisions).toHaveLength(1);
+    const decision = snap.decisions[0];
+    expect(decision?.outcome).toBe("caught");
+    if (decision?.outcome !== "caught") return;
+    expect(decision.citedEvents).toHaveLength(1);
+    expect(decision.citedEvents[0]).toMatchObject({ id: 0, endpoint: "kiosk-v1" });
+  });
+
+  it("publishes a frozen decisions array of frozen decisions", async () => {
+    const { events, scorer } = caughtSetup();
+    const h = launch({
+      generator: scheduleOf(events),
+      algorithm: alertingAlgorithm,
+      scorer,
+      checkpoints: deadlineAt(50),
+    });
+    await step(h.driver, 51);
+    await h.handle.whenStopped;
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    expect(Object.isFrozen(snap.decisions)).toBe(true);
+    expect(snap.decisions[0] !== undefined && Object.isFrozen(snap.decisions[0])).toBe(true);
+  });
+
+  it("emptySnapshot has an empty, frozen decisions array", () => {
+    const snap = emptySnapshot();
+    expect(snap.decisions).toEqual([]);
+    expect(Object.isFrozen(snap.decisions)).toBe(true);
+  });
+});

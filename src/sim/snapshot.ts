@@ -3,7 +3,7 @@
  * publish tick. React reads it through primitive selectors; it never sees the
  * pipeline half-updated.
  */
-import type { CorrectnessReading, LiveFinding } from "./correctness";
+import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 
 /** The run lifecycle, as the HUD reads it. */
@@ -31,6 +31,12 @@ export interface SimSnapshot {
   completed: number;
   /** Open findings, seq-ordered. The UI ranks them; T3 publishes a stable order only. */
   findings: readonly LiveFinding[];
+  /**
+   * The resolved decision log, seq-ordered, capped at `DECISIONS_CAP` (T10). Already
+   * frozen top to bottom by the scorer; `emptySnapshot()` carries a frozen empty
+   * array too, so the contract is runtime-enforced, not just a TS `readonly`.
+   */
+  decisions: readonly Decision[];
   /** Recent Events, id-ordered, bounded to `RING_SIZE`. */
   events: readonly RingEvent[];
   /**
@@ -54,6 +60,7 @@ export function emptySnapshot(): SimSnapshot {
     admitted: 0,
     completed: 0,
     findings: [],
+    decisions: Object.freeze([]),
     events: [],
     processed: 0,
   };

@@ -43,6 +43,7 @@ import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  DECISIONS_CAP,
   PIN_BRUTE_FORCE_THRESHOLD,
   PROFILER_VERSION,
 } from "./tuning";
@@ -146,6 +147,7 @@ const SCORER_CONFIG: ScorerConfig = {
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
+  decisionsCap: DECISIONS_CAP,
 };
 
 function toErrorInfo(phase: string, error: unknown): RuleErrorInfo {
