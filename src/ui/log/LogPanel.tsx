@@ -44,6 +44,9 @@
  * the last edge on a status flip instead of gating admission at the source.
  * This is about conclusion, never the transport freeze: pausing
  * (`transport.frozen`) leaves every cue live, since the run can still resume.
+ * The flash render site itself also ANDs `flashing` with `running`, so an
+ * ALREADY in-flight flash clears the instant a run concludes, instead of
+ * running out its own timer over a frozen frame (CodeRabbit review).
  */
 import { memo, useEffect } from "react";
 import type { Speed } from "../../game/run-controller";
@@ -244,7 +247,7 @@ export function LogPanel() {
   const dangerPulse = running && severityLevel(frac) === "danger";
 
   return (
-    <div className={flashing ? "log-panel waveflash" : "log-panel"}>
+    <div className={flashing && running ? "log-panel waveflash" : "log-panel"}>
       <div className="log-header">
         <div className="transport">
           <button

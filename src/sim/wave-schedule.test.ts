@@ -61,6 +61,36 @@ describe("assertWaveFields (F002)", () => {
       assertWaveFields({ startTick: 0, durationTicks: 5, eventsPerTick: 1_000_000 }, 0),
     ).not.toThrow();
   });
+
+  it("rejects a startTick at 2**53 (past Number.MAX_SAFE_INTEGER)", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 2 ** 53, durationTicks: 5, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects a durationTicks at 2**53 (past Number.MAX_SAFE_INTEGER)", () => {
+    expect(() =>
+      assertWaveFields({ startTick: 0, durationTicks: 2 ** 53, eventsPerTick: 1 }, 0),
+    ).toThrow();
+  });
+
+  it("rejects a startTick/durationTicks pair whose sum overflows MAX_SAFE_INTEGER, even though each part is safe on its own", () => {
+    expect(() =>
+      assertWaveFields(
+        { startTick: Number.MAX_SAFE_INTEGER - 1, durationTicks: 2, eventsPerTick: 1 },
+        0,
+      ),
+    ).toThrow();
+  });
+
+  it("accepts a startTick/durationTicks pair that is large but stays within MAX_SAFE_INTEGER", () => {
+    expect(() =>
+      assertWaveFields(
+        { startTick: Number.MAX_SAFE_INTEGER - 10, durationTicks: 5, eventsPerTick: 1 },
+        0,
+      ),
+    ).not.toThrow();
+  });
 });
 
 describe("assertWaveScheduleOrdered", () => {

@@ -447,6 +447,37 @@ describe("LogPanel animated cues gate on run conclusion (GH38 review round 3, F0
       vi.useRealTimers();
     }
   });
+
+  it("clears an in-flight flash immediately when the run concludes mid-animation, without waiting for the timer (GH38 review)", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<LogPanel />);
+      const panel = container.querySelector(".log-panel");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(panel?.className).toMatch(/waveflash/);
+
+      // The run concludes mid-flash, well before the flash's own timer would clear it.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(panel?.className).not.toMatch(/waveflash/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("LogPanel queue-bar danger pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {

@@ -17,20 +17,30 @@ import type { Wave } from "./scenario";
 
 /**
  * Reject a wave whose own fields are malformed, independent of its position in
- * the schedule: `startTick` must be a non-negative integer, `durationTicks`
- * must be a positive integer (a wave that emits zero ticks is not a wave), so
- * every emitted tick stays whole, and `eventsPerTick` must be a finite,
- * non-negative number, so a per-tick accumulator can never stall or loop
- * forever. Carries no cap on `eventsPerTick`: an accumulator-specific ceiling
- * (like admission's `MAX_EVENTS_PER_TICK`) is a caller's own concern, not a
- * schedule-shape one.
+ * the schedule: `startTick` must be a non-negative safe integer, `durationTicks`
+ * must be a positive safe integer (a wave that emits zero ticks is not a wave),
+ * and their sum must not exceed `Number.MAX_SAFE_INTEGER`, so every emitted
+ * tick stays whole and in range for exact arithmetic. `eventsPerTick` must be
+ * a finite, non-negative number, so a per-tick accumulator can never stall or
+ * loop forever. Carries no cap on `eventsPerTick`: an accumulator-specific
+ * ceiling (like admission's `MAX_EVENTS_PER_TICK`) is a caller's own concern,
+ * not a schedule-shape one.
  */
 export function assertWaveFields(wave: Wave, index: number): void {
-  if (!Number.isInteger(wave.startTick) || wave.startTick < 0) {
-    throw new Error(`assertWaveFields: wave ${index} startTick must be a non-negative integer.`);
+  if (!Number.isSafeInteger(wave.startTick) || wave.startTick < 0) {
+    throw new Error(
+      `assertWaveFields: wave ${index} startTick must be a non-negative safe integer.`,
+    );
   }
-  if (!Number.isInteger(wave.durationTicks) || wave.durationTicks < 1) {
-    throw new Error(`assertWaveFields: wave ${index} durationTicks must be a positive integer.`);
+  if (!Number.isSafeInteger(wave.durationTicks) || wave.durationTicks < 1) {
+    throw new Error(
+      `assertWaveFields: wave ${index} durationTicks must be a positive safe integer.`,
+    );
+  }
+  if (wave.startTick + wave.durationTicks > Number.MAX_SAFE_INTEGER) {
+    throw new Error(
+      `assertWaveFields: wave ${index} startTick + durationTicks must not exceed Number.MAX_SAFE_INTEGER.`,
+    );
   }
   if (!Number.isFinite(wave.eventsPerTick) || wave.eventsPerTick < 0) {
     throw new Error(

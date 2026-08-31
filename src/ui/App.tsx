@@ -25,10 +25,13 @@
  * keyframe's `transform` makes its own element a containing block for any
  * `position: fixed` descendant (F006): `.app-shell` and `IntroOverlay` are
  * siblings inside `.app`, so shaking `.app-shell` never drags the overlay's
- * fixed backdrop along with it. The shake gates on run conclusion
- * (F004+F006): `useWavePhaseEdge` reads `"calm"` once `snapshot.status` is no
- * longer `"running"`, so a shake never fires off a frozen terminal frame, and
- * a fresh run re-arms the edge once it starts running again.
+ * fixed backdrop along with it. The shake gates on run conclusion in two
+ * places (F004+F006, CodeRabbit review): `useWavePhaseEdge` reads `"calm"`
+ * once `snapshot.status` is no longer `"running"`, so a shake never fires off
+ * a frozen terminal frame; separately, the render site ANDs the one-shot flag
+ * with `status === "running"`, so an ALREADY in-flight shake clears the
+ * instant a run concludes, instead of running out its own timer over a frozen
+ * frame. A fresh run re-arms the edge once it starts running again.
  */
 import { useEffect, useRef, useState } from "react";
 import type { AlgorithmsDevClient } from "../game/algorithms-dev-client";
@@ -293,8 +296,14 @@ export function App({ createPipelineController, createWorldController }: AppProp
           is truly modal. The overlay is a sibling of this container, so it stays
           interactive. The shake class also lands here, not on the outer wrapper
           above, so its transform never turns into a containing block for the
-          overlay's `position: fixed` backdrop (F006). */}
-      <div className={shaking ? "app-shell shake" : "app-shell"} inert={introOpen}>
+          overlay's `position: fixed` backdrop (F006). The class also ANDs
+          `shaking` with `status === "running"`, so an in-flight shake clears
+          immediately if the run concludes mid-animation, instead of running
+          out its own timer over a frozen frame (CodeRabbit review). */}
+      <div
+        className={shaking && status === "running" ? "app-shell shake" : "app-shell"}
+        inert={introOpen}
+      >
         <header className="topbar">
           <h1>Detection Express</h1>
           <span className="slice-tag">Observe the Engine, then cause chaos</span>

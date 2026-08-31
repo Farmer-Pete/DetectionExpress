@@ -482,4 +482,35 @@ describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006
       vi.useRealTimers();
     }
   });
+
+  it("clears an in-flight shake immediately when the run concludes mid-animation, without waiting for the timer (GH38 review)", () => {
+    vi.useFakeTimers();
+    try {
+      setWaveAndStatus(
+        { phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null },
+        "running",
+      );
+      const { container } = render(<App createPipelineController={() => stubController()} />);
+      const shell = container.querySelector(".app-shell");
+
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "running",
+        );
+      });
+      expect(shell?.className).toMatch(/shake/);
+
+      // The run concludes mid-shake, well before the shake's own timer would clear it.
+      act(() => {
+        setWaveAndStatus(
+          { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 },
+          "failed",
+        );
+      });
+      expect(shell?.className).not.toMatch(/shake/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -86,7 +86,7 @@ body {
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 9px currentColor;
+    box-shadow: 0 0 9px currentcolor;
   }
 }
 
@@ -200,7 +200,7 @@ body {
 }
 
 /* Gauge pulse (#38 juice item 2). `Gauge`'s `pulse` prop adds this class; the
-   caller only sets it at danger severity (Hud's Queue gauge), so `currentColor`
+   caller only sets it at danger severity (Hud's Queue gauge), so `currentcolor`
    below is safely the threat hue. The pulse animation itself lives in the
    reduced-motion guard near the end of this file; the fill's background,
    already `severityFill`'s danger color, is the static form. */
@@ -1228,7 +1228,7 @@ body {
 
 /* Queue-bar danger pulse (#38 juice item 2). LogPanel adds this at danger
    severity; the fill's background is already `severityFill`'s danger color
-   (the static form), so `currentColor` below is safely the threat hue. The
+   (the static form), so `currentcolor` below is safely the threat hue. The
    pulse animation itself lives in the reduced-motion guard near the end of
    this file. */
 .queue-bar-danger {
