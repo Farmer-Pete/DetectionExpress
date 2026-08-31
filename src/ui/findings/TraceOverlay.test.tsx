@@ -228,7 +228,8 @@ describe("TraceOverlay", () => {
   it("labels a watch's state badge as Watching", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1", state: "watch" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);
-    expect(screen.getByText("Watching")).toBeDefined();
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByText("Watching")).toBeDefined();
   });
 
   it("renders one card per cited event, raw over normalized, with its endpoint and time", () => {

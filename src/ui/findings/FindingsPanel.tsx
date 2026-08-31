@@ -21,7 +21,13 @@
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
-import { buildFindingGroups, type FindingGroup, type FindingRow, VISIBLE_CAP } from "./view-model";
+import {
+  buildFindingGroups,
+  type FindingGroup,
+  type FindingRow,
+  stateLabel,
+  VISIBLE_CAP,
+} from "./view-model";
 
 interface FindingsPanelProps {
   /** The focus-fallback ref TraceOverlay reads. Defaults to a locally-owned ref. */
@@ -155,7 +161,7 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
               : "findings-state findings-state--watch"
           }
         >
-          {row.state}
+          {stateLabel(row.state)}
         </span>
         <span className="findings-label">{row.label}</span>
         <span className="findings-cited">
