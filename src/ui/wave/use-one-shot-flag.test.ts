@@ -32,7 +32,7 @@ describe("useOneShotFlag", () => {
     expect(result.current).toBe(false);
   });
 
-  it("does not go true before the duration elapses", () => {
+  it("stays true until the duration elapses", () => {
     const { result, rerender } = setup(0, 300);
     rerender({ token: 1 });
     act(() => {

@@ -111,8 +111,9 @@ export function App({ createPipelineController, createWorldController }: AppProp
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
-  // never shakes. This fires in the metro view too (the wave reading just stays
-  // calm there, since only the pipeline engine publishes it), which is harmless.
+  // never shakes. The hook stays armed in the metro view too, which is harmless:
+  // switching views disposes the pipeline engine, so the snapshot freezes at its
+  // last published reading, and a frozen phase can never produce a new edge.
   // Gated on conclusion, not the transport freeze (F004+F006): while the run is
   // running, the hook sees the live phase; once it has concluded, it sees
   // `"calm"` instead, so the edge cannot fire off a frozen terminal frame.

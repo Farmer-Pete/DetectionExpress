@@ -315,9 +315,11 @@ describe("LogPanel wave countdown bucketing (GH38 review round 4, F014)", () => 
 
 describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () => {
   it("hides the fast-updating visible countdown from assistive tech", () => {
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    // 31 is the smallest tick count `waveStateAt` can ever report as calm
+    // (calm requires ticksUntilNext > WAVE_WARN_TICKS); 31 * 2s buckets to 90s.
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
     render(<LogPanel />);
-    const visible = screen.getByText("next wave in 60s");
+    const visible = screen.getByText("next wave in 90s");
     expect(visible.getAttribute("aria-hidden")).toBe("true");
   });
 
@@ -329,7 +331,7 @@ describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () 
   });
 
   it("carries a role=status region that stays silent while calm", () => {
-    setWave({ phase: "calm", index: 0, ticksUntilNext: 30, eventsPerTick: null });
+    setWave({ phase: "calm", index: 0, ticksUntilNext: 31, eventsPerTick: null });
     render(<LogPanel />);
     expect(screen.getByRole("status").textContent).toBe("");
   });

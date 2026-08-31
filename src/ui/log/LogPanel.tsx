@@ -77,12 +77,13 @@ const WAVE_COUNTDOWN_BUCKET_S = 30;
  * (active, or calm with no wave left). `incoming` drives the pulsing style.
  * The countdown quantizes to `WAVE_COUNTDOWN_BUCKET_S`-second buckets (see
  * that constant's comment for why a plain per-second ceil does not work).
- * Honest caveat, at the shipped tuning: `DRAIN_GAP_TICKS` (45) is the whole
- * calm gap before a successor wave, so every calm tick that gap can ever
- * produce buckets to the same constant "next wave in 90s" right up until the
- * phase flips to INCOMING — the reader never sees it count down. That is a
- * consequence of `WAVE_COUNTDOWN_BUCKET_S` (a #40 felt-pace knob) sized close
- * to the gap itself, not a bug; this comment records it, not fixes it.
+ * Honest caveat, at the shipped tuning: the intro calm (`INTRO_TICKS`, 120)
+ * genuinely counts down through the buckets (240s -> 90s), but a SUCCESSOR
+ * wave's whole calm gap is `DRAIN_GAP_TICKS` (45), and every calm tick that
+ * gap can produce buckets to the same constant "next wave in 90s" until the
+ * phase flips to INCOMING. That is a consequence of `WAVE_COUNTDOWN_BUCKET_S`
+ * (a #40 felt-pace knob) sized close to the gap, not a bug; this comment
+ * records it, not fixes it.
  */
 function waveReadout(wave: SimSnapshot["wave"]): { text: string; incoming: boolean } | null {
   if (wave.phase === "incoming") {
