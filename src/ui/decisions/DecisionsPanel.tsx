@@ -64,7 +64,15 @@ function DecisionRowItem({ row, selected, onSelect }: RowProps) {
         type="button"
         className={selected ? "decisions-row is-selected" : "decisions-row"}
         aria-pressed={selected}
-        onClick={() => onSelect(row.seq)}
+        onClick={(event) => {
+          // Safari does not focus a clicked <button> by default, unlike Chrome and
+          // Firefox. TraceOverlay's open-effect captures `document.activeElement` as
+          // the trigger to refocus on close (GH34-35-PLAN.md decision 14), so an
+          // unfocused row there would break that restore. Force the focus explicitly,
+          // independent of the browser's own click-to-focus behavior.
+          event.currentTarget.focus();
+          onSelect(row.seq);
+        }}
       >
         <span className={`decisions-outcome decisions-outcome--${row.outcome}`}>{row.outcome}</span>
         {row.entity !== null ? <span className="decisions-entity">{row.entity}</span> : null}

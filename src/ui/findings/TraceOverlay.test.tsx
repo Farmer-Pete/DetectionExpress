@@ -397,6 +397,17 @@ describe("TraceOverlay", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("restores focus to a row the click itself never focused (Safari does not focus a clicked button)", () => {
+    publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
+    render(<InspectorShell />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    // Deliberately skip `row.focus()`: the click handler itself must force focus onto
+    // the row (FindingsPanel's own fix), not rely on the browser's click-to-focus.
+    fireEvent.click(row);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
   it("falls back to the findings panel container when the trigger row was evicted by reconciliation", () => {
     publish([live({ seq: 1, eventIds: [0], entity: "acct-1" })], [ringEvent(0)]);
     openTraceByClick(/pin brute force/i);
@@ -632,6 +643,17 @@ describe("TraceOverlay decision mode (T10)", () => {
   it("restores focus to the trigger row on close, when it is still connected", () => {
     publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
     const row = openDecisionTraceByClick(/pin brute force/i);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("restores focus to a row the click itself never focused (Safari does not focus a clicked button)", () => {
+    publishDecisions([caughtDecision({ seq: 1, eventIds: [0] })]);
+    render(<Harness />);
+    const row = screen.getByRole("button", { name: /pin brute force/i });
+    // Deliberately skip `row.focus()`: the click handler itself must force focus onto
+    // the row (DecisionsPanel's own fix), not rely on the browser's click-to-focus.
+    fireEvent.click(row);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(document.activeElement).toBe(row);
   });
