@@ -1,75 +1,21 @@
 import { describe, expect, it } from "vitest";
-import type {
-  CaughtDecision,
-  Decision,
-  FalseDecision,
-  MissedDecision,
-} from "../../sim/correctness";
+import type { Decision } from "../../sim/correctness";
+import { caughtDecision, falseDecision, missedDecision } from "./decision-fixtures";
 import { buildDecisionRows, outcomeLabel } from "./view-model";
-
-/** A caught decision. `at` is a fabricated decoy; the row must read `resolvedAt`. */
-function caught(over: { seq: number; resolvedAt: number; entity?: string }): CaughtDecision {
-  return {
-    outcome: "caught",
-    seq: over.seq,
-    at: 999,
-    resolvedAt: over.resolvedAt,
-    attackId: 1,
-    entity: over.entity ?? "acct-7",
-    finding: {
-      alert: { reason: "pin_brute_force", at: 999, eventIds: [0] },
-      eventId: 0,
-    },
-    citedEvents: [],
-  };
-}
-
-/** A false decision, optionally with no resolved entity. */
-function falseDecision(over: { seq: number; resolvedAt: number; entity?: string }): FalseDecision {
-  const decision: FalseDecision = {
-    outcome: "false",
-    seq: over.seq,
-    at: 999,
-    resolvedAt: over.resolvedAt,
-    finding: {
-      alert: { reason: "impossible_travel", at: 999, eventIds: [0] },
-      eventId: 0,
-    },
-    citedEvents: [],
-  };
-  if (over.entity !== undefined) {
-    decision.entity = over.entity;
-  }
-  return decision;
-}
-
-/** A missed decision. */
-function missed(over: { seq: number; resolvedAt: number }): MissedDecision {
-  return {
-    outcome: "missed",
-    seq: over.seq,
-    at: over.resolvedAt,
-    resolvedAt: over.resolvedAt,
-    attackId: 1,
-    entity: "acct-9",
-    reason: "pin_brute_force",
-    window: { startTs: 0, endTs: over.resolvedAt },
-  };
-}
 
 describe("buildDecisionRows", () => {
   it("orders rows newest-first, reversing the seq-ascending log", () => {
     const decisions: Decision[] = [
-      caught({ seq: 0, resolvedAt: 10 }),
+      caughtDecision({ seq: 0, resolvedAt: 10 }),
       falseDecision({ seq: 1, resolvedAt: 20 }),
-      missed({ seq: 2, resolvedAt: 30 }),
+      missedDecision({ seq: 2, resolvedAt: 30 }),
     ];
     const rows = buildDecisionRows(decisions);
     expect(rows.map((r) => r.seq)).toEqual([2, 1, 0]);
   });
 
   it("maps a caught decision's outcome, entity, reason, and time", () => {
-    const rows = buildDecisionRows([caught({ seq: 0, resolvedAt: 42, entity: "acct-7" })]);
+    const rows = buildDecisionRows([caughtDecision({ seq: 0, resolvedAt: 42, entity: "acct-7" })]);
     expect(rows[0]).toMatchObject({
       seq: 0,
       outcome: "caught",
@@ -95,7 +41,7 @@ describe("buildDecisionRows", () => {
   });
 
   it("maps a missed decision's outcome, entity, reason, and time", () => {
-    const rows = buildDecisionRows([missed({ seq: 0, resolvedAt: 100 })]);
+    const rows = buildDecisionRows([missedDecision({ seq: 0, resolvedAt: 100 })]);
     expect(rows[0]).toMatchObject({
       outcome: "missed",
       entity: "acct-9",
@@ -105,8 +51,8 @@ describe("buildDecisionRows", () => {
   });
 
   it("reads the row time from resolvedAt, diverging from a fabricated at", () => {
-    // caught()/falseDecision() fix `at` to 999; resolvedAt is the real, trusted time.
-    const rows = buildDecisionRows([caught({ seq: 0, resolvedAt: 7 })]);
+    // caughtDecision()/falseDecision() fix `at` to 999; resolvedAt is the real, trusted time.
+    const rows = buildDecisionRows([caughtDecision({ seq: 0, resolvedAt: 7 })]);
     expect(rows[0]?.time).toBe(7);
     expect(rows[0]?.time).not.toBe(999);
   });

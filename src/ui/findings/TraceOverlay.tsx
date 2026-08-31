@@ -41,7 +41,7 @@
 import { type RefObject, useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
 import { outcomeLabel } from "../decisions/view-model";
-import { focusableControls, installOutsidePointerDismiss } from "../focus";
+import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { formatClock } from "../log/formatters";
 import {
   buildDecisionTraceViewModel,
@@ -187,36 +187,15 @@ export function TraceOverlay({ fallbackFocusRef, decisionsFallbackFocusRef }: Tr
       clearSelection();
       return;
     }
-    if (event.key !== "Tab") {
-      return;
-    }
-    // Wrap Tab/Shift+Tab at the dialog's edges, mirroring IntroOverlay's trap
-    // (src/ui/focus.ts). A missed decision's solo panel carries fewer focusable
-    // controls than the evidence layouts; the undefined guard covers it the same
-    // way IntroOverlay guards the zero-focusable case.
+    // Wrap Tab/Shift+Tab at the dialog's edges, shared with IntroOverlay's own
+    // trap (src/ui/focus.ts). A missed decision's solo panel carries fewer
+    // focusable controls than the evidence layouts; trapTab's own empty-controls
+    // guard covers that the same way it covers IntroOverlay's zero-focusable case.
     const dialog = dialogRef.current;
     if (dialog === null) {
       return;
     }
-    const controls = focusableControls(dialog);
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (first === undefined || last === undefined) {
-      return;
-    }
-    // Whether focus already sits on one of the trap's own controls. When it does not
-    // (e.g. the container itself is focused, because open-focus landed there before any
-    // control took it), Tab/Shift+Tab still has to land somewhere sane, so both edges
-    // wrap in that case too, not just the first/last exact match.
-    const active = document.activeElement;
-    const inControls = controls.some((control) => control === active);
-    if (event.shiftKey && (active === first || !inControls)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || !inControls)) {
-      event.preventDefault();
-      first.focus();
-    }
+    trapTab(dialog, event);
   };
 
   // A gesture outside the dialog, on the backdrop scrim, dismisses it — but only a

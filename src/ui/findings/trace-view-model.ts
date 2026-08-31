@@ -10,6 +10,7 @@
  */
 import type { DecisionOutcome } from "../../sim/correctness";
 import type { Context, JsonValue } from "../../sim/finding";
+import type { RingEvent } from "../../sim/inspector";
 import type { SimSnapshot } from "../../sim/snapshot";
 
 /** One cited event, resolved: its raw and normalized payload, ready to render. Not
@@ -53,17 +54,16 @@ function dedupIds(ids: readonly number[]): number[] {
 }
 
 /**
- * Build the trace view-model for the finding at `seq`, or `null` when no live
- * finding in `snapshot.findings` carries that seq.
+ * Resolve `ids` (deduped, first-occurrence order preserved) against `source`,
+ * one card per id: an event card when `source` carries it, an aged-out
+ * placeholder when it does not. Shared by finding mode (resolving against the
+ * live `snapshot.events` ring) and decision mode (resolving against a
+ * decision's own frozen `citedEvents`) — the only difference between the two
+ * is which `source` the caller passes in.
  */
-export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceViewModel | null {
-  const live = snapshot.findings.find((finding) => finding.seq === seq);
-  if (live === undefined) {
-    return null;
-  }
-
-  const cards: TraceCard[] = dedupIds(live.finding.alert.eventIds).map((id) => {
-    const event = snapshot.events.find((candidate) => candidate.id === id);
+function toCards(ids: readonly number[], source: readonly RingEvent[]): TraceCard[] {
+  return dedupIds(ids).map((id) => {
+    const event = source.find((candidate) => candidate.id === id);
     if (event === undefined) {
       return { kind: "aged-out", id };
     }
@@ -76,6 +76,19 @@ export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceVi
       normalized: event.normalized,
     };
   });
+}
+
+/**
+ * Build the trace view-model for the finding at `seq`, or `null` when no live
+ * finding in `snapshot.findings` carries that seq.
+ */
+export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceViewModel | null {
+  const live = snapshot.findings.find((finding) => finding.seq === seq);
+  if (live === undefined) {
+    return null;
+  }
+
+  const cards = toCards(live.finding.alert.eventIds, snapshot.events);
 
   const model: TraceViewModel = {
     reason: live.reason,
@@ -154,20 +167,7 @@ export function buildDecisionTraceViewModel(
     };
   }
 
-  const cards: TraceCard[] = dedupIds(decision.finding.alert.eventIds).map((id) => {
-    const cited = decision.citedEvents.find((event) => event.id === id);
-    if (cited === undefined) {
-      return { kind: "aged-out", id };
-    }
-    return {
-      kind: "event",
-      id,
-      ts: cited.ts,
-      endpoint: cited.endpoint,
-      raw: cited.raw,
-      normalized: cited.normalized,
-    };
-  });
+  const cards = toCards(decision.finding.alert.eventIds, decision.citedEvents);
 
   const model: DecisionTraceEvidence = {
     kind: "evidence",

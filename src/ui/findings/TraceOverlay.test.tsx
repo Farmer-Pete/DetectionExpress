@@ -2,17 +2,12 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode, useRef } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
-import type {
-  CaughtDecision,
-  Decision,
-  FalseDecision,
-  LiveFinding,
-  MissedDecision,
-} from "../../sim/correctness";
+import type { Decision, LiveFinding } from "../../sim/correctness";
 import type { Context, Finding } from "../../sim/finding";
 import type { RingEvent } from "../../sim/inspector";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { DecisionsPanel } from "../decisions/DecisionsPanel";
+import { caughtDecision, falseDecision, missedDecision } from "../decisions/decision-fixtures";
 import { InspectorShell } from "./InspectorShell";
 
 // The zustand store is a singleton shared across test files, so reset every field this
@@ -111,76 +106,6 @@ function openDecisionTraceByClick(name: RegExp): HTMLElement {
   row.focus();
   fireEvent.click(row);
   return row;
-}
-
-/** A caught decision. `at` is a fabricated decoy; the header must read `resolvedAt`. */
-function caughtDecision(over: {
-  seq: number;
-  eventIds: number[];
-  citedEvents?: RingEvent[];
-  entity?: string;
-  resolvedAt?: number;
-  context?: Context;
-}): CaughtDecision {
-  const finding: Finding = {
-    alert: { reason: "pin_brute_force", at: 999, eventIds: over.eventIds },
-    eventId: over.eventIds[0] ?? 0,
-    ...(over.context !== undefined ? { context: over.context } : {}),
-  };
-  return {
-    outcome: "caught",
-    seq: over.seq,
-    at: 999,
-    resolvedAt: over.resolvedAt ?? 5,
-    attackId: 1,
-    entity: over.entity ?? "acct-7",
-    finding,
-    citedEvents: over.citedEvents ?? [],
-  };
-}
-
-/** A false decision. */
-function falseDecision(over: {
-  seq: number;
-  eventIds: number[];
-  citedEvents?: RingEvent[];
-  entity?: string;
-  resolvedAt?: number;
-}): FalseDecision {
-  const decision: FalseDecision = {
-    outcome: "false",
-    seq: over.seq,
-    at: 999,
-    resolvedAt: over.resolvedAt ?? 5,
-    finding: {
-      alert: { reason: "impossible_travel", at: 999, eventIds: over.eventIds },
-      eventId: over.eventIds[0] ?? 0,
-    },
-    citedEvents: over.citedEvents ?? [],
-  };
-  if (over.entity !== undefined) {
-    decision.entity = over.entity;
-  }
-  return decision;
-}
-
-/** A missed decision. */
-function missedDecision(over: {
-  seq: number;
-  resolvedAt?: number;
-  window?: { startTs: number; endTs: number };
-}): MissedDecision {
-  const window = over.window ?? { startTs: 0, endTs: 100 };
-  return {
-    outcome: "missed",
-    seq: over.seq,
-    at: over.resolvedAt ?? window.endTs,
-    resolvedAt: over.resolvedAt ?? window.endTs,
-    attackId: 1,
-    entity: "acct-9",
-    reason: "pin_brute_force",
-    window,
-  };
 }
 
 /** Publish a snapshot carrying the given decisions and ring events. */

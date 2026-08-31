@@ -568,7 +568,7 @@ body {
   color: var(--ink);
   font-size: 0.75rem;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .trace-card-normalized {

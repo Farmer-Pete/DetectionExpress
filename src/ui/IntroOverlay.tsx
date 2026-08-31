@@ -13,7 +13,7 @@
  */
 import { useEffect, useRef } from "react";
 import type { IntroCopy } from "./content/narrative";
-import { focusableControls, installOutsidePointerDismiss } from "./focus";
+import { focusableControls, installOutsidePointerDismiss, trapTab } from "./focus";
 
 interface IntroOverlayProps {
   copy: IntroCopy;
@@ -59,31 +59,14 @@ export function IntroOverlay({
       onObserve();
       return;
     }
-    if (event.key !== "Tab") {
-      return;
-    }
     const dialog = dialogRef.current;
     if (dialog === null) {
       return;
     }
-    const controls = focusableControls(dialog);
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (first === undefined || last === undefined) {
-      return;
-    }
-    // Wrap the two edges so focus stays inside the dialog. `!inControls` is a no-op
-    // here in practice (open-focus always lands on `controls[0]`), kept only so this
-    // trap stays aligned with TraceOverlay's (`src/ui/focus.ts`).
-    const active = document.activeElement;
-    const inControls = controls.some((control) => control === active);
-    if (event.shiftKey && (active === first || !inControls)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (active === last || !inControls)) {
-      event.preventDefault();
-      first.focus();
-    }
+    // Wrap Tab/Shift+Tab at the dialog's edges (shared with TraceOverlay's own
+    // trap, `src/ui/focus.ts`). `!inControls`, one of trapTab's wrap conditions,
+    // is a no-op here in practice: open-focus always lands on `controls[0]`.
+    trapTab(dialog, event);
   };
 
   return (

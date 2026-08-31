@@ -23,6 +23,51 @@ export function focusableControls(dialog: HTMLElement): HTMLElement[] {
   );
 }
 
+/** The subset of a keyboard event `trapTab` reads: `event.key`, so it can no-op
+ *  on anything but Tab, plus the two fields it needs to wrap focus. Structural,
+ *  not a React import, so both a real `KeyboardEvent` and React's synthetic one
+ *  satisfy it without a cast. */
+interface TabKeyEvent {
+  key: string;
+  shiftKey: boolean;
+  preventDefault: () => void;
+}
+
+/**
+ * Wrap Tab/Shift+Tab at `dialog`'s edges, keeping focus inside it. Call this
+ * after a caller's own Escape branch, on every keydown; it no-ops (and returns
+ * `false`) on any key but Tab, or when the dialog carries no focusable control.
+ * Wraps both when focus sits exactly on the first/last control AND when it
+ * sits outside every control (`!inControls`, e.g. the dialog container itself,
+ * right after open-focus lands there before any control takes it). Returns
+ * whether it intercepted the key, so a caller never needs its own duplicate
+ * Tab check.
+ */
+export function trapTab(dialog: HTMLElement, event: TabKeyEvent): boolean {
+  if (event.key !== "Tab") {
+    return false;
+  }
+  const controls = focusableControls(dialog);
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  if (first === undefined || last === undefined) {
+    return false;
+  }
+  const active = document.activeElement;
+  const inControls = controls.some((control) => control === active);
+  if (event.shiftKey && (active === first || !inControls)) {
+    event.preventDefault();
+    last.focus();
+    return true;
+  }
+  if (!event.shiftKey && (active === last || !inControls)) {
+    event.preventDefault();
+    first.focus();
+    return true;
+  }
+  return false;
+}
+
 /**
  * Dismiss a dialog on a genuine outside click, never on a gesture that merely
  * ENDS outside it (e.g. selecting text inside the dialog and releasing the
