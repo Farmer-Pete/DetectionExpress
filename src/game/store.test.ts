@@ -233,9 +233,11 @@ describe("store fx slice", () => {
     expect(useGameStore.getState().flashes.has(9)).toBe(false);
   });
 
-  it("starts runToken at 0 and sets it on demand", () => {
+  it("starts runToken at 0 and bumps it monotonically", () => {
     expect(useGameStore.getState().runToken).toBe(0);
-    useGameStore.getState().setRunToken(3);
-    expect(useGameStore.getState().runToken).toBe(3);
+    useGameStore.getState().bumpRunToken();
+    expect(useGameStore.getState().runToken).toBe(1);
+    useGameStore.getState().bumpRunToken();
+    expect(useGameStore.getState().runToken).toBe(2);
   });
 });

@@ -82,9 +82,12 @@ interface GameState {
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
   flashes: Map<number, FlashEntry>;
   /**
-   * The run controller's generation, mirrored so FxLayer can detect a restart (Apply
-   * or reload) and reset its own state, since the scorer's `seq` and decision log
-   * both reset to zero on a fresh engine.
+   * A counter FxLayer watches to detect a restart (Apply or reload) and reset its own
+   * state, since the scorer's `seq` and decision log both reset to zero on a fresh
+   * engine. Monotonic and argless: the run controller's own `generation` is per-
+   * controller and a rebuilt controller (a fresh Metro-to-Pipeline mount) restarts it
+   * from 0, so writing that value here could reissue a token FxLayer already saw and
+   * skip the reset it exists to trigger.
    */
   runToken: number;
   setSnapshot: (snapshot: SimSnapshot) => void;
@@ -109,8 +112,8 @@ interface GameState {
    * flash spawned on the same row after it fired.
    */
   clearFlash: (eventId: number, gen: number) => void;
-  /** Set the run controller's generation. Written on every fresh engine install. */
-  setRunToken: (token: number) => void;
+  /** Bump the run token by one. Called on every fresh engine install. */
+  bumpRunToken: () => void;
 }
 
 export const useGameStore = create<GameState>((set) => ({
@@ -172,7 +175,7 @@ export const useGameStore = create<GameState>((set) => ({
       next.delete(eventId);
       return { flashes: next };
     }),
-  setRunToken: (token) => set({ runToken: token }),
+  bumpRunToken: () => set((s) => ({ runToken: s.runToken + 1 })),
 }));
 
 /**

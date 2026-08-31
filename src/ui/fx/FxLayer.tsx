@@ -172,6 +172,30 @@ function popFor(
   };
 }
 
+/**
+ * The screen-reader announcement for one decision (F007): plain words, not the pop's
+ * symbol-and-dot label, since PopNode's text is inside the `aria-hidden` overlay and
+ * is otherwise the only per-entity verdict surface.
+ */
+function announcementFor(decision: Decision): string {
+  if (decision.outcome === "caught") {
+    return `Caught: ${decision.entity}`;
+  }
+  if (decision.outcome === "false") {
+    return decision.entity !== undefined ? `False alert: ${decision.entity}` : "False alert";
+  }
+  return `Missed: ${decision.entity}`;
+}
+
+/** How many announcements the live region keeps. Older ones age out; a screen reader
+ *  only needs the recent handful, not the full run history. */
+const ANNOUNCEMENT_CAP = 5;
+
+interface Announcement {
+  id: number;
+  text: string;
+}
+
 // ---- prefers-reduced-motion ----
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
@@ -212,18 +236,38 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
   const reducedMotion = usePrefersReducedMotion();
 
   const [items, setItems] = useState<readonly FxOverlayItem[]>([]);
+  const [announcements, setAnnouncements] = useState<readonly Announcement[]>([]);
 
   const prevRunTokenRef = useRef(runToken);
-  const prevFindingsRef = useRef<readonly LiveFinding[]>([]);
-  const prevDecisionsLengthRef = useRef(0);
-  const firedSeqsRef = useRef<Set<number>>(new Set());
+  // Seed from what the store already holds at mount, not empty: a remount (a view
+  // round-trip, React Strict Mode, or any future mount over a populated store) must
+  // not replay FX for findings and decisions that landed before FxLayer existed
+  // (F004). Seeding empty here is exactly the bug: the store keeps the prior run's
+  // snapshot while this ref starts fresh, so the first tick sees every existing hit as
+  // a brand-new landing.
+  const prevFindingsRef = useRef<readonly LiveFinding[]>(findings);
+  const prevDecisionsLengthRef = useRef(decisions.length);
+  // Seeded ONLY from findings already at "hit" at mount — NEVER from a "watch": diffFindings
+  // suppresses on `firedSeqs.has(seq)` regardless of state, so seeding a watch's seq here
+  // would silently swallow its later watch-to-hit promotion.
+  const firedSeqsRef = useRef<Set<number>>(
+    new Set(findings.filter((finding) => finding.state === "hit").map((finding) => finding.seq)),
+  );
   const paletteRef = useRef<HuntPalette>(createHuntPalette());
   // The flash gen counter is monotonic for FxLayer's whole lifetime and does NOT reset
   // on a runToken change, so a stale pre-restart timer can never clear a post-restart
   // flash (GH37-PLAN.md "Cited row flash").
   const nextGenRef = useRef(0);
   const nextItemIdRef = useRef(0);
+  const nextAnnouncementIdRef = useRef(0);
   const pendingFlashesRef = useRef<PendingFlashClear[]>([]);
+  // The rAF loop's own view of the live overlay items, kept in lockstep with the
+  // `items` state so the loop (F011) can decide, without waiting on a render, whether
+  // there is still work to animate.
+  const itemsRef = useRef<readonly FxOverlayItem[]>([]);
+  // Set once the tick effect below mounts; the spawn effect calls it to wake a parked
+  // loop. A no-op before mount and after unmount.
+  const wakeLoopRef = useRef<() => void>(() => {});
 
   // Diff this tick's findings and decisions against the last tick FxLayer saw, and
   // spawn FX for what landed. A runToken change resets every piece of cross-tick
@@ -236,6 +280,7 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       firedSeqsRef.current = new Set();
       paletteRef.current.reset();
       pendingFlashesRef.current = [];
+      itemsRef.current = [];
       setItems([]);
       useGameStore.setState({ flashes: new Map() });
     }
@@ -299,13 +344,34 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
       useGameStore.getState().spawnFlashes(flashSpawns);
     }
     if (newItems.length > 0) {
-      setItems((current) => [...current, ...newItems]);
+      const next = [...itemsRef.current, ...newItems];
+      itemsRef.current = next;
+      setItems(next);
+    }
+    if (newDecisions.length > 0) {
+      // F007: a plain-word announcement per decision, appended in order, into the
+      // aria-live region — independent of `reducedMotion`, so it fires under it too.
+      const newAnnouncements = newDecisions.map(
+        (decision): Announcement => ({
+          id: nextAnnouncementIdRef.current++,
+          text: announcementFor(decision),
+        }),
+      );
+      setAnnouncements((current) => [...current, ...newAnnouncements].slice(-ANNOUNCEMENT_CAP));
+    }
+    if (flashSpawns.length > 0 || newItems.length > 0) {
+      wakeLoopRef.current(); // F011: a spawn wakes a parked loop
     }
   }, [findings, decisions, runToken, reducedMotion, clock]);
 
   // The rAF loop: expires pending flashes and overlay items against the FX clock, so
-  // in-flight FX finish their animation regardless of the sim's freeze state.
+  // in-flight FX finish their animation regardless of the sim's freeze state. It parks
+  // itself (stops requesting frames) once nothing is pending, rather than rescheduling
+  // for the component's whole lifetime (F011); the spawn effect above wakes it back up
+  // through `wakeLoopRef` the moment there is work again.
   useEffect(() => {
+    let frameId: number | null = null;
+
     const tick = (now: number): void => {
       const stillPending: PendingFlashClear[] = [];
       for (const pending of pendingFlashesRef.current) {
@@ -316,15 +382,28 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
         }
       }
       pendingFlashesRef.current = stillPending;
-      setItems((current) => {
-        const kept = current.filter((item) => now < item.createdAt + itemDuration(item));
-        return kept.length === current.length ? current : kept;
-      });
-      frameId = clock.requestFrame(tick);
+
+      const kept = itemsRef.current.filter((item) => now < item.createdAt + itemDuration(item));
+      if (kept.length !== itemsRef.current.length) {
+        itemsRef.current = kept;
+        setItems(kept);
+      }
+
+      frameId = stillPending.length > 0 || kept.length > 0 ? clock.requestFrame(tick) : null;
     };
-    let frameId = clock.requestFrame(tick);
+
+    const wake = (): void => {
+      if (frameId === null) {
+        frameId = clock.requestFrame(tick);
+      }
+    };
+    wakeLoopRef.current = wake;
+
     return () => {
-      clock.cancelFrame(frameId);
+      wakeLoopRef.current = () => {};
+      if (frameId !== null) {
+        clock.cancelFrame(frameId);
+      }
       for (const pending of pendingFlashesRef.current) {
         useGameStore.getState().clearFlash(pending.eventId, pending.gen);
       }
@@ -332,16 +411,41 @@ export function FxLayer({ clock = REAL_CLOCK }: FxLayerProps = {}) {
     };
   }, [clock]);
 
+  // F016: when reduced motion flips ON, drop in-flight comets at once rather than
+  // waiting for the rAF loop to expire them naturally. Pops are unaffected — they
+  // finish; comets are the flight-path offenders reduced motion exists to remove.
+  useEffect(() => {
+    if (!reducedMotion) {
+      return;
+    }
+    const withoutComets = itemsRef.current.filter((item) => item.kind !== "comet");
+    if (withoutComets.length !== itemsRef.current.length) {
+      itemsRef.current = withoutComets;
+      setItems(withoutComets);
+    }
+  }, [reducedMotion]);
+
   return (
-    <div className="fx-layer" aria-hidden="true">
-      {items.map((item) =>
-        item.kind === "comet" ? (
-          <CometNode key={item.id} item={item} />
-        ) : (
-          <PopNode key={item.id} item={item} />
-        ),
-      )}
-    </div>
+    <>
+      <div className="fx-layer" aria-hidden="true">
+        {items.map((item) =>
+          item.kind === "comet" ? (
+            <CometNode key={item.id} item={item} />
+          ) : (
+            <PopNode key={item.id} item={item} />
+          ),
+        )}
+      </div>
+      {/* F007: the only per-entity verdict surface for screen readers. Sighted players
+          get PopNode's text, but that lives inside the aria-hidden overlay above, so
+          this plain-word region is the sole announcement path — kept outside that
+          subtree and never itself aria-hidden. */}
+      <div className="visually-hidden" aria-live="polite" data-testid="fx-announcements">
+        {announcements.map((announcement) => (
+          <div key={announcement.id}>{announcement.text}</div>
+        ))}
+      </div>
+    </>
   );
 }
 

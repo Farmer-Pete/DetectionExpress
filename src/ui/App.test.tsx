@@ -4,10 +4,37 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
+import type { CaughtDecision, LiveFinding } from "../sim/correctness";
 import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
+import { emptySnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenario } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
+
+/** A minimal hit LiveFinding fixture; a round-trip test only needs its seq and eventIds. */
+function liveFinding(seq: number, eventIds: number[]): LiveFinding {
+  return {
+    finding: { alert: { reason: "brute", at: 0, eventIds }, eventId: eventIds[0] ?? seq },
+    state: "hit",
+    reason: "brute",
+    eventIds,
+    at: 0,
+    seq,
+  };
+}
+
+/** A minimal CaughtDecision fixture, crediting the given live row. */
+function caughtDecision(liveSeq: number): CaughtDecision {
+  return {
+    outcome: "caught",
+    seq: 0,
+    at: 0,
+    attackId: 1,
+    entity: "acct-1",
+    finding: { alert: { reason: "brute", at: 0, eventIds: [1] }, eventId: 1 },
+    liveSeq,
+  };
+}
 
 // The zustand store is a singleton shared across test files, so reset the fields
 // this file reads before each test, or a leaked `sourceLocked` would hide the Apply
@@ -298,6 +325,33 @@ describe("App view toggle", () => {
     if (!rebuilt) return;
     expect(rebuilt.frozenCalls).toContain(true);
     expect(rebuilt.speedCalls).toContain(2);
+  });
+
+  it("fires no FX replay burst across a Metro-to-Pipeline re-entry after findings already landed", () => {
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        findings: [liveFinding(1, [10])],
+        decisions: [caughtDecision(1)],
+      },
+    });
+    render(
+      <App
+        createPipelineController={() => stubController()}
+        createWorldController={() => stubWorldController()}
+      />,
+    );
+    // Mounting FxLayer over an already-populated store fires nothing (F004 fix).
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
+
+    // The pipeline teardown reset the snapshot to empty (F024); the fresh FxLayer that
+    // remounts over it, or any future populated re-entry, both fire nothing.
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
   });
 
   it("builds a fresh controller per epoch under strict-mode double invoke", () => {

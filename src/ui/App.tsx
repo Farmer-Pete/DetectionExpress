@@ -65,7 +65,7 @@ function buildController(): RunController {
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,
     setRunPending: useGameStore.getState().setRunPending,
-    setRunToken: useGameStore.getState().setRunToken,
+    bumpRunToken: useGameStore.getState().bumpRunToken,
   });
 }
 

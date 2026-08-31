@@ -17,12 +17,15 @@ class ManualFxClock implements FxClock {
   private time = 0;
   private queue = new Map<number, FrameRequestCallback>();
   private nextId = 1;
+  /** Total requestFrame calls, so a test can prove the loop parks (F011). */
+  requestFrameCalls = 0;
 
   now(): number {
     return this.time;
   }
 
   requestFrame(callback: FrameRequestCallback): number {
+    this.requestFrameCalls++;
     const id = this.nextId++;
     this.queue.set(id, callback);
     return id;
@@ -50,6 +53,30 @@ function stubReducedMotion(matches: boolean): void {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
   }));
+}
+
+/** A reduced-motion media stub whose `flip` fires the change listener FxLayer registered. */
+function mutableReducedMotionMedia(initial: boolean): { flip: (matches: boolean) => void } {
+  let matches = initial;
+  let listener: (() => void) | null = null;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return matches;
+    },
+    media: query,
+    addEventListener: (_type: "change", callback: () => void) => {
+      listener = callback;
+    },
+    removeEventListener: () => {
+      listener = null;
+    },
+  }));
+  return {
+    flip: (next: boolean) => {
+      matches = next;
+      listener?.();
+    },
+  };
 }
 
 /** A DOMRect-shaped stub carrying only the fields FxLayer reads. */
@@ -320,6 +347,17 @@ describe("FxLayer reduced motion", () => {
     expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0); // no flight path
     expect(screen.getAllByTestId("fx-pop")).toHaveLength(1); // the label still appears
   });
+
+  it("removes in-flight comet items immediately when reduced motion flips on mid-flight (F016)", () => {
+    const media = mutableReducedMotionMedia(false);
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+
+    act(() => media.flip(true));
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+  });
 });
 
 describe("FxLayer timing", () => {
@@ -352,7 +390,8 @@ describe("FxLayer run reset", () => {
     expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
 
     act(() => {
-      useGameStore.setState({ runToken: 1, snapshot: emptySnapshot() });
+      useGameStore.getState().bumpRunToken();
+      useGameStore.setState({ snapshot: emptySnapshot() });
     });
     expect(useGameStore.getState().flashes.size).toBe(0);
     expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
@@ -362,6 +401,109 @@ describe("FxLayer run reset", () => {
     publish([liveFinding({ seq: 1, eventIds: [10] })]);
     expect(useGameStore.getState().flashes.size).toBe(1);
     expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+  });
+});
+
+describe("FxLayer mount over a populated store (F004)", () => {
+  it("fires nothing on mount when the store already holds hit findings and a decision log", () => {
+    const clock = new ManualFxClock();
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          findings: [liveFinding({ seq: 1, eventIds: [10] })],
+          decisions: [caughtDecision(1)],
+        },
+      });
+    });
+    renderHarness(clock, [10], [1]);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
+    expect(useGameStore.getState().flashes.size).toBe(0);
+  });
+
+  it("still fires once a runToken bump reuses the same seq for a fresh finding", () => {
+    const clock = new ManualFxClock();
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          findings: [liveFinding({ seq: 1, eventIds: [10] })],
+          decisions: [caughtDecision(1)],
+        },
+      });
+    });
+    renderHarness(clock, [10], [1]);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+
+    act(() => {
+      useGameStore.getState().bumpRunToken();
+      useGameStore.setState({ snapshot: emptySnapshot() });
+    });
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+  });
+
+  it("still fires a watch finding present at mount once it promotes to a hit", () => {
+    const clock = new ManualFxClock();
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          findings: [liveFinding({ seq: 1, state: "watch", eventIds: [10] })],
+        },
+      });
+    });
+    renderHarness(clock, [10], [1]);
+    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
+
+    publish([liveFinding({ seq: 1, state: "hit", eventIds: [10] })]);
+    expect(screen.getAllByTestId("fx-comet").length).toBeGreaterThan(0);
+  });
+});
+
+describe("FxLayer verdict announcements (F007)", () => {
+  it("announces a caught decision in plain words, live and outside the aria-hidden overlay", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], [1]);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(requireEl("[data-finding-seq='1']"), rect(40, 50, 60, 70));
+    publish([], [caughtDecision(1, "acct-7")]);
+
+    const live = screen.getByTestId("fx-announcements");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.closest('[aria-hidden="true"]')).toBeNull();
+    expect(live.textContent).toContain("Caught: acct-7");
+  });
+
+  it("announces a false alert and a miss in plain words", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [], []);
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    publish([], [falseDecision(2), missedDecision("acct-9")]);
+
+    const live = screen.getByTestId("fx-announcements");
+    expect(live.textContent).toContain("False alert");
+    expect(live.textContent).toContain("Missed: acct-9");
+  });
+});
+
+describe("FxLayer rAF parking (F011)", () => {
+  it("requests no frames until a spawn, then parks again once everything expires", () => {
+    const clock = new ManualFxClock();
+    renderHarness(clock, [10], [1]);
+    expect(clock.requestFrameCalls).toBe(0); // nothing pending at mount: parked
+
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    expect(clock.requestFrameCalls).toBeGreaterThan(0);
+
+    act(() => clock.advance(2000)); // past every FX duration: flash and comet both expire
+    const callsAfterExpiry = clock.requestFrameCalls;
+    act(() => clock.advance(2000)); // parked: this tick must not have rescheduled itself
+    expect(clock.requestFrameCalls).toBe(callsAfterExpiry);
+
+    publish([liveFinding({ seq: 2, eventIds: [10] })]); // a fresh spawn wakes the loop
+    expect(clock.requestFrameCalls).toBeGreaterThan(callsAfterExpiry);
   });
 });
 
