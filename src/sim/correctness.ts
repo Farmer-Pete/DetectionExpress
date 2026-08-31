@@ -9,12 +9,13 @@
  * outcomes feeds the gauge, so a Rule edit shows within a window. Both run
  * through `score`. An empty ring reads 100.
  *
- * The scorer also keeps a durable, append-only decision log (`decisions()`): one
- * resolved `Decision` per judgement, each carrying a deep-cloned, frozen snapshot,
- * so a later slice's UI history survives log aging. The log is optionally capped
- * (`ScorerConfig.decisionsCap`): oldest entries drop, but `seq` is an independent
- * monotonic counter (`nextDecisionSeq`), never `log.length`, so capping can never
- * reuse a seq. A caught or false decision also carries `citedEvents`, resolved at
+ * The scorer also keeps an append-only decision log (`decisions()`): one resolved
+ * `Decision` per judgement, appended in order and never rewritten, each carrying a
+ * deep-cloned, frozen snapshot, so a later slice's UI history survives log aging.
+ * Append-only holds up to an optional cap (`ScorerConfig.decisionsCap`); beyond it
+ * the oldest entries drop, but `seq` is an independent monotonic counter
+ * (`nextDecisionSeq`), never `log.length`, so capping can never reuse a seq. A
+ * caught or false decision also carries `citedEvents`, resolved at
  * append time through a late-bound resolver (`bindEventResolver`) the run controller
  * wires to the inspector ring, so the T10 decisions history can reopen evidence a
  * later reconciliation would otherwise have silently dropped.
@@ -224,10 +225,11 @@ export interface Scorer {
    * append time. Late-bound because the run controller builds the scorer before the
    * engine builds the inspector (`sim/inspector.ts`'s `resolveEvents`), so no single
    * constructor call site can wire both. Every committed run gets a fresh scorer and
-   * a fresh inspector (Apply, hot reload, a failed dry run, disposal, and restart all
-   * build a new pair together, never rebind a survivor onto a new partner), so a
-   * rebind always pairs the current run's two halves. Unbound (the default) resolves
-   * every id to nothing, so `citedEvents` is simply empty.
+   * a fresh inspector (Apply, hot reload, and restart all build a new pair together,
+   * never rebind a survivor onto a new partner — a failed dry run returns before
+   * either is built, leaving the live pair untouched, and disposal only stops the
+   * engine), so a rebind always pairs the current run's two halves. Unbound (the
+   * default) resolves every id to nothing, so `citedEvents` is simply empty.
    */
   bindEventResolver(resolve: (ids: readonly number[]) => RingEvent[]): void;
 }
