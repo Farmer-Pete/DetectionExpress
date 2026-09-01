@@ -9,11 +9,11 @@ The player observes the station watch. They do not stop anyone at the gate, and 
 ### Core
 
 **Engine**:
-The player-built system that detects threats in the reading stream. Its structure is general, but the theme stays the train station.
-_Avoid_: Pipeline (a Pipeline is one part of an Engine), machine, program.
+The finished system that detects threats in the reading stream. Its structure is general, but the theme stays the train station. A curious player can still rewrite it, but progression does not depend on that.
+_Avoid_: Pipeline (a Pipeline is one part of an Engine), machine, program, player-built.
 
 **Algorithm**:
-The processing approach the player designs. The Pipeline and its Rules realize it. The player improves the Engine by rewriting the Algorithm, not by buying upgrades.
+The processing approach the Engine runs. The Pipeline and its Rules realize it. The Engine ships with a finished Algorithm. A curious player can still rewrite it, but progression does not depend on that.
 _Avoid_: Solution, logic, strategy, build.
 
 **Pipeline**:
@@ -63,7 +63,7 @@ _Avoid_: Contract, target, goal.
 ### Play structure
 
 **Scenario**:
-One playable level. It runs in real time and can be lost. Each Scenario raises the pressure with more Endpoints, new data formats, new Hunts, or new Vulnerabilities.
+One hunt from the catalogue: a stream of sensor readings with a real Attack hidden inside. It runs in real time. The Engine can compose any number of Scenarios at once; today's UI runs one Scenario at a time, with a multi-Scenario picker as a follow-up. As Scenarios are added, pressure rises with more Endpoints, new data formats, new Hunts, or new Vulnerabilities.
 _Avoid_: Level, stage, mission, map.
 
 **Hunt**:

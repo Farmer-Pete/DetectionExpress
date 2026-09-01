@@ -11,8 +11,9 @@ import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
-import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -27,12 +28,10 @@ import {
   CORRECTNESS_WINDOW,
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
   WAVE_WARN_TICKS,
 } from "./tuning";
 
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
@@ -245,7 +244,7 @@ function referenceTaskAlgorithm(): TaskAlgorithm {
 
 describe("engine integration with the reference Algorithm", () => {
   function runReference(): { harness: Harness; finalTick: number } {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
     const harness = launch({
       generator: scheduleOf(run.events),
@@ -257,7 +256,7 @@ describe("engine integration with the reference Algorithm", () => {
   }
 
   it("wins at the final deadline with full Correctness and every Attack caught", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const { harness, finalTick } = runReference();
     await step(harness.driver, finalTick + 2, 300);
     await harness.handle.whenStopped;
@@ -575,6 +574,7 @@ describe("engine Correctness settles at a checkpoint (M2 seam 11)", () => {
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 10 },
       eventIds: [0, 1, 2, 3, 4],
+      threshold: PIN_BRUTE_FORCE_THRESHOLD,
     };
     // Events at ts 0..8 (ticks 0..4), all before the window close and the gap.
     const events = [0, 1, 2, 3, 4].map((k) => ev(k, k * GAME_SECONDS_PER_TICK));
@@ -778,8 +778,9 @@ describe("engine publishes decisions bound to the inspector ring (T10)", () => {
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 100 },
       eventIds: [0],
+      threshold: 1,
     };
-    return { events, scorer: createScorer([attack], { threshold: 1, window: 10, wFn: 3, wFp: 1 }) };
+    return { events, scorer: createScorer([attack], { window: 10, wFn: 3, wFp: 1 }) };
   }
 
   const alertingAlgorithm: TaskAlgorithm = {
@@ -871,7 +872,7 @@ describe("engine publishes a live finding's citedEvents, resolved against the in
 // GH37-PLAN.md: the scorer's decision log rides along in the same snapshot.
 describe("engine publishes the scorer's decision log", () => {
   it("carries every decision the reference run resolves, in the final snapshot", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
     const harness = launch({
       generator: scheduleOf(run.events),
@@ -939,6 +940,7 @@ describe("engine carries a finalize decision through to the terminal snapshot", 
       reason: "pin_brute_force",
       window: { startTs: 0, endTs: 100_000 },
       eventIds: [0, 1],
+      threshold: 2,
     };
     const events = [ev(0, 0), ev(1, GAME_SECONDS_PER_TICK)];
     const h = launch({

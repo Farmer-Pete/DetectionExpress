@@ -1,5 +1,5 @@
 /**
- * Burst planning and Ground truth for the kiosk-pin-attack Scenario. Each wave
+ * Burst planning and Ground truth for the pin-brute-force Scenario. Each wave
  * carries `ATTACKS_PER_WAVE[wave]` bursts (2, 4, 8), each on its own globally
  * distinct victim, so its evidence lands while the wave is active and never in a
  * drain gap. Bursts inside one wave are staggered so they spread across it; bursts
@@ -7,14 +7,10 @@
  * counts per account. Each burst fits inside one detection window, so the rule can
  * always catch it. The scorer reads the resulting Attacks; the Rule never sees them.
  */
-import {
-  ATTACKS_PER_WAVE,
-  GAME_SECONDS_PER_TICK,
-  PIN_BRUTE_FORCE_THRESHOLD,
-  SCAN_WINDOW_TICKS,
-} from "../../../game/tuning";
-import type { Attack } from "../../attack";
+import { GAME_SECONDS_PER_TICK } from "../../../game/tuning";
+import { type Attack, assertValidThreshold } from "../../attack";
 import type { Wave } from "../../scenario";
+import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "./tuning";
 
 /** The pattern this Scenario reveals. Both the ground truth and the reference use it. */
 export const PIN_BRUTE_FORCE_REASON = "pin_brute_force";
@@ -127,13 +123,23 @@ export function planAttacks(
   return plans;
 }
 
-/** The Attack ground truth for a plan, once its failures have their Event ids. */
+/**
+ * The Attack ground truth for a plan, once its failures have their Event ids.
+ * Validates its own threshold before returning it (the generation seam): a bad
+ * tuning value fails loudly here rather than reaching the scorer.
+ */
 export function attackFromPlan(plan: AttackPlan, eventIds: number[]): Attack {
-  return {
+  const attack: Attack = {
     id: plan.id,
     entity: plan.account,
     reason: PIN_BRUTE_FORCE_REASON,
     window: plan.window,
     eventIds,
+    // Per-attack scoring (GH42-PLAN.md): this hunt's own threshold, read by the
+    // scorer instead of a global config value, so a mixed run scores each hunt
+    // by its own evidence bar.
+    threshold: PIN_BRUTE_FORCE_THRESHOLD,
   };
+  assertValidThreshold(attack);
+  return attack;
 }

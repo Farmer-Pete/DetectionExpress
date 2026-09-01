@@ -43,7 +43,7 @@ function fakeClient(resume: () => boolean = () => false): AlgorithmsDevClient {
 describe("useLocalIde", () => {
   it("stays inert by default: the real devHotChannel() finds no import.meta.hot in the test environment", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useLocalIde({ slug: "kiosk-pin-attack", controllerRef }));
+    const { result } = renderHook(() => useLocalIde({ controllerRef }));
     expect(result.current.algoReady).toBe(false);
   });
 
@@ -51,14 +51,12 @@ describe("useLocalIde", () => {
     const loadClient = vi.fn();
     const getChannel = () => null;
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() =>
-      useLocalIde({ slug: "kiosk-pin-attack", controllerRef, getChannel, loadClient }),
-    );
+    const { result } = renderHook(() => useLocalIde({ controllerRef, getChannel, loadClient }));
     expect(result.current.algoReady).toBe(false);
     expect(loadClient).not.toHaveBeenCalled();
   });
 
-  it("builds the client with the expected slug/channel args and enters local mode when resume() returns true", async () => {
+  it("builds the client with the expected channel args and enters local mode when resume() returns true", async () => {
     const channel = fakeChannel();
     const client = fakeClient(() => true);
     const createAlgorithmsDevClient = vi.fn((_deps: AlgorithmsDevClientDeps) => client);
@@ -71,16 +69,13 @@ describe("useLocalIde", () => {
     const loadClient = () => Promise.resolve(module);
 
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() =>
-      useLocalIde({ slug: "kiosk-pin-attack", controllerRef, getChannel, loadClient }),
-    );
+    const { result } = renderHook(() => useLocalIde({ controllerRef, getChannel, loadClient }));
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(createAlgorithmsDevClient).toHaveBeenCalledTimes(1);
     const deps = createAlgorithmsDevClient.mock.calls[0]?.[0];
-    expect(deps?.slug).toBe("kiosk-pin-attack");
     expect(deps?.channel).toBe(channel);
     // The session is the real browser sessionStorage, and the store adapter delegates
     // to the real game store rather than some detached object: getSource reads the live
@@ -116,9 +111,7 @@ describe("useLocalIde", () => {
     const getChannel = () => fakeChannel();
     const loadClient = () => Promise.reject(new Error("boom"));
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() =>
-      useLocalIde({ slug: "s", controllerRef, getChannel, loadClient }),
-    );
+    const { result } = renderHook(() => useLocalIde({ controllerRef, getChannel, loadClient }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -130,9 +123,7 @@ describe("useLocalIde", () => {
     const getChannel = () => fakeChannel();
     const loadClient = () => Promise.resolve({ createAlgorithmsDevClient: () => client });
     const controllerRef = createRef<RunController | null>();
-    const { unmount } = renderHook(() =>
-      useLocalIde({ slug: "s", controllerRef, getChannel, loadClient }),
-    );
+    const { unmount } = renderHook(() => useLocalIde({ controllerRef, getChannel, loadClient }));
     await act(async () => {
       await Promise.resolve();
     });
@@ -145,7 +136,7 @@ describe("useLocalIde", () => {
     const getChannel = () => null;
     const controllerRef = createRef<RunController | null>();
     controllerRef.current = stubController(run);
-    const { result } = renderHook(() => useLocalIde({ slug: "s", controllerRef, getChannel }));
+    const { result } = renderHook(() => useLocalIde({ controllerRef, getChannel }));
 
     act(() => result.current.onEnterLocalMode());
     expect(result.current.localMode).toBe(true);
@@ -171,7 +162,7 @@ describe("useLocalIde", () => {
     const controllerRef = createRef<RunController | null>();
     const firstRun = vi.fn();
     controllerRef.current = stubController(firstRun);
-    renderHook(() => useLocalIde({ slug: "s", controllerRef, getChannel, loadClient }));
+    renderHook(() => useLocalIde({ controllerRef, getChannel, loadClient }));
     await act(async () => {
       await Promise.resolve();
     });

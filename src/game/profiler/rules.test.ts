@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PIN_BRUTE_FORCE_THRESHOLD } from "../tuning";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import {
   type Detector,
   type KioskDetectView,

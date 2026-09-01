@@ -4,9 +4,9 @@ import { isRawKioskV1, type RawKioskV1 } from "../sim/endpoints/kiosk/formats/ki
 import type { PipeEvent } from "../sim/event";
 import type { Finding } from "../sim/finding";
 import type { GraphEdge, GraphNode } from "../sim/graph";
-import { buildOptimizationAlgorithm } from "../sim/scenarios/kiosk-pin-attack/optimization";
-import { buildReferenceAlgorithm } from "../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
+import { buildOptimizationAlgorithm } from "../sim/scenarios/pin-brute-force/optimization";
+import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -18,7 +18,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
 } from "./tuning";
 
 /**
@@ -44,7 +43,6 @@ const EDGES: GraphEdge[] = [
 ];
 
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
@@ -101,8 +99,8 @@ interface RunOptions {
   scorer: Scorer;
   generator: () => PipeEvent | null;
   serviceRate: ServiceRate;
-  checkpoints: ReturnType<typeof kioskPinAttack.generate>["checkpoints"];
-  waves: ReturnType<typeof kioskPinAttack.generate>["waves"];
+  checkpoints: ReturnType<typeof pinBruteForce.generate>["checkpoints"];
+  waves: ReturnType<typeof pinBruteForce.generate>["waves"];
 }
 
 interface RunResult {
@@ -138,7 +136,7 @@ function scheduleOf(events: PipeEvent[]): () => PipeEvent | null {
 
 describe("the naive default drowns through the real engine (M3 integration)", () => {
   it("fails at the final deadline on Queue, not on Correctness", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const result = await runToDeadline(
       {
         algorithm: taskAlgorithmFor(buildReferenceAlgorithm()),
@@ -159,7 +157,7 @@ describe("the naive default drowns through the real engine (M3 integration)", ()
 
 describe("the applied Optimization wins through the real engine (M3 integration)", () => {
   it("wins at the final deadline with every Attack caught and Correctness held", async () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     const result = await runToDeadline(
       {
         algorithm: taskAlgorithmFor(buildOptimizationAlgorithm()),
@@ -193,7 +191,7 @@ describe("determinism per machine (M3 seam 14)", () => {
       }));
 
     const build = () => {
-      const run = kioskPinAttack.generate(LEVEL_SEED);
+      const run = pinBruteForce.generate(LEVEL_SEED);
       return {
         algorithm: taskAlgorithmFor(buildReferenceAlgorithm()),
         scorer: createScorer(run.attacks, SCORER_CONFIG),

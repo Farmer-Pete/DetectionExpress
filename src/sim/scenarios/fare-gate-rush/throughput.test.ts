@@ -87,7 +87,7 @@ const EDGES: GraphEdge[] = [
 ];
 
 /** Correctness is vacuous with attacks: [] and no alerts, so any config works. */
-const SCORER_CONFIG: ScorerConfig = { threshold: 1, window: 1, wFn: 1, wFp: 1 };
+const SCORER_CONFIG: ScorerConfig = { window: 1, wFn: 1, wFp: 1 };
 
 /** The no-alert fixture: identity normalize, detect always returns no Findings. */
 const noAlertAlgorithm: TaskAlgorithm = {

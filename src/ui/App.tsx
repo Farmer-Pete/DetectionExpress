@@ -55,14 +55,14 @@
  * frame. A fresh run re-arms the edge once it starts running again.
  */
 import { useRef, useState } from "react";
+import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
-import { kioskPinAttack } from "../sim/scenarios/kiosk-pin-attack/scenario";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
-import { chaosLevels, liveScenario } from "./content/narrative";
+import { chaosLevels, liveScenarioFrom } from "./content/narrative";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { LocalIdeToggle } from "./dev/LocalIdeToggle";
 import { useLocalIde } from "./dev/use-local-ide";
@@ -74,7 +74,6 @@ import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { usePipelineController } from "./run/use-pipeline-controller";
 import { useWorldController } from "./run/use-world-controller";
-import { scenarioSlug } from "./scenarios";
 import { Topbar } from "./Topbar";
 import type { View } from "./view";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
@@ -82,6 +81,9 @@ import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
 /** Matches the CSS `shake` keyframes' 0.3s duration (`src/index.css`). */
 const SHAKE_MS = 300;
+
+/** The live scenario's display copy, joined from the registry's catalogue entry. */
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 interface AppProps {
   // Controller FACTORIES: each mode builds a FRESH controller when it becomes visible
@@ -129,8 +131,6 @@ export function App({ createPipelineController, createWorldController }: AppProp
   // the reopen control's ref/handler.
   const intro = useIntroOverlay();
 
-  const slug = scenarioSlug(kioskPinAttack.id);
-
   // The pipeline controller lifecycle, extracted to its own hook (GH109-PLAN.md): a
   // fresh controller per visible epoch, seeded from the store transport, disposed
   // (with the F024 empty-snapshot repaint and cleared selection) on hide or unmount,
@@ -147,8 +147,9 @@ export function App({ createPipelineController, createWorldController }: AppProp
 
   // The dev-only local-IDE (algorithms hot-reload) client, extracted to its own hook
   // (GH109-PLAN.md): the `import.meta.env.DEV` + live-HMR-channel gate, the
-  // `algoReady`/`localMode` state, and the enter/stop handlers.
-  const dev = useLocalIde({ slug, controllerRef });
+  // `algoReady`/`localMode` state, and the enter/stop handlers. The one-engine model
+  // (ADR 0010) makes it slugless: the override is the fixed `src/algorithms/engine.ts`.
+  const dev = useLocalIde({ controllerRef });
 
   return (
     // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
@@ -187,8 +188,11 @@ export function App({ createPipelineController, createWorldController }: AppProp
           <Hud />
           <InspectorShell findingsPanelRef={findingsPanelRef} />
           <DecisionsPanel panelRef={decisionsPanelRef} />
-          <Briefing tagline={liveScenario.tagline} text={kioskPinAttack.briefing} />
-          <AlgorithmEditor onRun={() => controllerRef.current?.run()} slug={slug} />
+          <Briefing
+            tagline={liveScenario.tagline}
+            text={defaultEntry.catalogue.security.briefing}
+          />
+          <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
           <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
           <LocalIdeToggle
             ready={dev.algoReady}

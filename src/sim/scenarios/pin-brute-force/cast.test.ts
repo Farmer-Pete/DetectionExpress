@@ -1,9 +1,15 @@
 import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import { SCAN_WINDOW_TICKS } from "../../../game/tuning";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
 import { world } from "../../world/world";
-import { assembleAttacker, type BenignVisit, budgetFumbles, buildIdentityPools } from "./cast";
+import {
+  assembleAttacker,
+  type BenignVisit,
+  budgetFumbles,
+  buildIdentityPools,
+  buildPartitionedIdentityPools,
+} from "./cast";
+import { SCAN_WINDOW_TICKS } from "./tuning";
 
 describe("buildIdentityPools", () => {
   it("is deterministic for a seed", () => {
@@ -24,6 +30,65 @@ describe("buildIdentityPools", () => {
     const a = buildIdentityPools(randomLcg(7), world, 40).accounts;
     const b = buildIdentityPools(randomLcg(8), world, 40).accounts;
     expect(a).not.toEqual(b);
+  });
+});
+
+// GH42-PLAN.md "Composable streams": entity disjointness is set at generation. A
+// partition slices a fixed, seed-independent namespace, so two runs given
+// different partitions never share an account, no matter what seed generated
+// each run.
+describe("buildPartitionedIdentityPools", () => {
+  it("draws disjoint account slices for different partitions, independent of any run seed", () => {
+    const p0 = buildPartitionedIdentityPools(world, 40, 0).accounts;
+    const p1 = buildPartitionedIdentityPools(world, 40, 1).accounts;
+    expect(p0).toHaveLength(40);
+    expect(p1).toHaveLength(40);
+    expect(new Set(p0).size).toBe(40);
+    expect(new Set(p1).size).toBe(40);
+    const overlap = p0.filter((account) => p1.includes(account));
+    expect(overlap).toEqual([]);
+  });
+
+  it("is deterministic: the same partition always yields the same slice", () => {
+    const a = buildPartitionedIdentityPools(world, 40, 2);
+    const b = buildPartitionedIdentityPools(world, 40, 2);
+    expect(a).toEqual(b);
+  });
+
+  it("carries the same world stations and kiosk terminals as buildIdentityPools", () => {
+    const pools = buildPartitionedIdentityPools(world, 40, 0);
+    expect(pools.stations).toEqual(world.stations.map((s) => s.id));
+    expect(pools.terminals).toEqual(KIOSK_TERMINALS);
+  });
+
+  it("rejects a negative or out-of-range partition", () => {
+    expect(() => buildPartitionedIdentityPools(world, 40, -1)).toThrow(/partition/);
+    expect(() => buildPartitionedIdentityPools(world, 40, 999)).toThrow(/partition/);
+  });
+
+  it("keeps partitions disjoint even when two runs request different account counts", () => {
+    // GH42 code review: the partition slice rides a fixed per-partition block, not the
+    // caller's accountCount, so a wide run in one partition and a narrow run in the next
+    // never overlap. Before the fix, count 40 partition 0 ([0,40)) and count 20 partition
+    // 1 ([20,40)) collided.
+    const wide = buildPartitionedIdentityPools(world, 40, 0).accounts;
+    const narrow = buildPartitionedIdentityPools(world, 20, 1).accounts;
+    expect(wide).toHaveLength(40);
+    expect(narrow).toHaveLength(20);
+    const overlap = wide.filter((account) => narrow.includes(account));
+    expect(overlap).toEqual([]);
+  });
+
+  it("rejects an accountCount wider than the per-partition block", () => {
+    expect(() => buildPartitionedIdentityPools(world, 65, 0)).toThrow(
+      /ACCOUNTS_PER_PARTITION|accountCount|\[0,/,
+    );
+  });
+
+  it("rejects a NaN, negative, or fractional accountCount", () => {
+    expect(() => buildPartitionedIdentityPools(world, Number.NaN, 0)).toThrow(/accountCount/);
+    expect(() => buildPartitionedIdentityPools(world, -1, 0)).toThrow(/accountCount/);
+    expect(() => buildPartitionedIdentityPools(world, 1.5, 0)).toThrow(/accountCount/);
   });
 });
 

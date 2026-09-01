@@ -1,7 +1,11 @@
 # ADR 0008 — Native algorithm hot-reload on one dev server
 
-- Status: Accepted
+- Status: Accepted (per-slug authoring revised by ADR 0010)
 - Date: 2026-08-29
+- Revised by ADR 0010 (one engine for all hunts): the per-slug resolution of
+  `src/algorithms/<slug>.ts` is superseded by a single fixed override,
+  `src/algorithms/engine.ts`, with a slugless `algo:` handshake. The one-dev-server
+  and native-module decisions below still hold.
 - Supersedes the local dev kit (the standalone same-origin host and the two-build split).
 - Renumbered from `0004-local-dev-kit` to resolve the duplicate `0004` (shared with
   `0004-measured-cost-model`), closing the housekeeping note in ADR 0006 (issue #85). The
@@ -32,27 +36,31 @@ Serve TypeScript algorithms as native Vite modules, hot-reloaded, on one dev ser
 
 - **One dev server.** Vite is the only dev server. Retire `dd-dev.mjs` and the two-build
   split. `pnpm run dev` serves both game development and local-IDE authoring.
-- **Local algorithms are real modules.** A player edits `src/algorithms/<slug>.ts` in their
-  own editor. Vite strips the types with esbuild and serves it. Real imports give real types,
-  so there is no hand-written declaration file to maintain.
+- **Local algorithms are real modules.** A player edits the one fixed override,
+  `src/algorithms/engine.ts`, in their own editor. Vite strips the types with esbuild and
+  serves it. Real imports give real types, so there is no hand-written declaration file to
+  maintain. (ADR 0010: this replaced per-slug files, one per scenario.)
 - **The in-game editor stays JavaScript.** It runs a source string through a Blob import, as
   before. The public CDN site does not change and ships no transpiler.
 - **The default engine is checked in, outside the player folder.** It lives at
-  `src/sim/default-engine.ts` so anti-slop lint covers it; Biome cannot lint a gitignored
-  file. `src/algorithms/` is player scratch space, gitignored whole, so no player file is
-  committed by accident.
+  `src/game/default-engine.ts` (composed from the scenario rules, ADR 0010) so anti-slop
+  lint covers it; Biome cannot lint a gitignored file. `src/algorithms/` is player scratch
+  space, gitignored whole, so no player file is committed by accident.
 - **The mechanism is a thin change notification, not a protocol.** A dev-only plugin watches
-  `src/algorithms/*` and holds one monotonic version counter. It answers `algo:hello { slug }`
-  by resolving the active file (`src/algorithms/<slug>.ts` if it exists, else the default
-  engine) and replies `algo:changed { slug, path, version }`. On any change it re-resolves and
-  pings. The client re-imports the versioned URL and runs the module.
+  every direct child of `src/algorithms/` — a change to `engine.ts` or to any helper file
+  beside it triggers a ping — and holds one monotonic version counter. It answers a slugless
+  `algo:hello` by resolving the active file (`src/algorithms/engine.ts` if it exists, else the
+  default engine) and replies `algo:changed { path, version }`. On any create, change, or
+  delete under the directory it bumps the counter, re-resolves, and pings. The client
+  re-imports the versioned URL and runs the module. (ADR 0010: the
+  handshake dropped its `slug` field; one fixed file replaces per-slug resolution.)
 
 ```text
-  player saves src/algorithms/<slug>.ts
+  player saves src/algorithms/engine.ts
         │  Vite recompiles (esbuild strips types)
         v
-  plugin -> one ping: algo:changed { slug, path, version }
-        │  client: my slug?
+  plugin -> one ping: algo:changed { path, version }
+        │  client: is this my file?
         v
   client re-imports  import(path + "?v=" + version)   (cache-bust, fresh code)
         │

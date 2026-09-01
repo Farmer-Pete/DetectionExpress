@@ -14,16 +14,16 @@
 import type { RefObject } from "react";
 import { useEffect, useRef } from "react";
 import { localAlgorithmUrl } from "../../game/algorithms-resolve";
+import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
-import { kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
 import { emptySnapshot } from "../../sim/snapshot";
 import type { View } from "../view";
 
 /** The real controller factory. Tests inject a stub through `createController`. */
 function buildController(): RunController {
   return createRunController({
-    scenario: kioskPinAttack,
+    scenario: defaultScenario,
     getGraph,
     // The one discriminated input. A local override (set by the dev-only algorithms
     // client) drives url mode; otherwise the in-game editor drives source mode.

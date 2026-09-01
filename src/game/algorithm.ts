@@ -56,7 +56,7 @@ export function toLoadTarget(algorithmSource: AlgorithmSource): LoadTarget {
  * when the module omits it.
  */
 export interface LoadedAlgorithm {
-  normalize: (raw: unknown) => unknown;
+  normalize: (raw: unknown, endpoint: string) => unknown;
   detect: (event: unknown) => unknown;
 }
 
@@ -87,15 +87,16 @@ export function adaptModule(loaded: AlgorithmModule): LoadedAlgorithm {
   if (!detect) {
     throw new Error("The Algorithm must export a `detect` function.");
   }
-  let normalize: (raw: unknown) => unknown;
+  let normalize: (raw: unknown, endpoint: string) => unknown;
   if (loaded.normalize === undefined) {
     normalize = (data: unknown) => data; // omitted: default to identity
+  } else if (loaded.normalize instanceof Function) {
+    // Forward the endpoint too: one engine over many wire formats dispatches
+    // `normalize(raw, endpoint)` on it. A single-format module simply ignores it.
+    const fn = loaded.normalize;
+    normalize = (raw: unknown, endpoint: string) => fn(raw, endpoint);
   } else {
-    const callable = asCallable(loaded.normalize);
-    if (!callable) {
-      throw new Error("The Algorithm's `normalize` export, if present, must be a function.");
-    }
-    normalize = callable;
+    throw new Error("The Algorithm's `normalize` export, if present, must be a function.");
   }
   return { normalize, detect };
 }

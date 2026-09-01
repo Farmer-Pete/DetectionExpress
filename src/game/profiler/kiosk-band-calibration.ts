@@ -14,14 +14,12 @@
  * rises with it (about 798 events/tick) because the naive scan's window fill grows.
  */
 
-import type { ServiceRate } from "../../sim/service-governor";
 import {
-  CORPUS_ACCOUNTS,
-  CORPUS_PEAK_EVENTS_PER_TICK,
-  OMEGA,
   PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
-} from "../tuning";
+} from "../../sim/scenarios/pin-brute-force/tuning";
+import type { ServiceRate } from "../../sim/service-governor";
+import { CORPUS_ACCOUNTS, CORPUS_PEAK_EVENTS_PER_TICK, OMEGA } from "../tuning";
 import { quantizeServiceRate } from "./quantize";
 
 /**

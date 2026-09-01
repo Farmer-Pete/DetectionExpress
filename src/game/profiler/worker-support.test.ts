@@ -67,7 +67,7 @@ describe("adaptLoaded", () => {
 
   it("passes the normalize result through as a plain object", () => {
     const rule = adaptLoaded(loaded);
-    expect(rule.normalize({ t: 1, acct: "x", term: "y", res: "WRONG_PIN" })).toEqual({
+    expect(rule.normalize({ t: 1, acct: "x", term: "y", res: "WRONG_PIN" }, "kiosk-v1")).toEqual({
       account: "amy",
       terminal: "KIOSK-01",
       outcome: "fail",
@@ -94,6 +94,8 @@ describe("adaptLoaded", () => {
 
   it("throws when normalize returns a non-object", () => {
     const bad: LoadedAlgorithm = { normalize: () => 42, detect: () => [] };
-    expect(() => adaptLoaded(bad).normalize({ t: 1, acct: "x", term: "y", res: "OK" })).toThrow();
+    expect(() =>
+      adaptLoaded(bad).normalize({ t: 1, acct: "x", term: "y", res: "OK" }, "kiosk-v1"),
+    ).toThrow();
   });
 });

@@ -7,17 +7,17 @@
  * real `import.meta.hot` channel and the store behind an `import.meta.env.DEV` gate (see
  * `algorithms-dev-flag.ts`), so the production bundle carries none of it.
  *
- * Protocol (all custom HMR events):
+ * Protocol (all custom HMR events). One engine, not one algorithm per slug:
  *
- * - The client subscribes by SLUG, not by path, because only the plugin can stat the
+ * - The client subscribes to the one engine, because only the plugin can stat the
  *   filesystem. On entering local mode it registers its `algo:changed` listener, then
- *   sends `algo:hello { slug }`. The plugin resolves the active file and replies
- *   `algo:changed { slug, path, version }`, so local mode runs on entry with no save.
- * - On any create/change/delete under `src/algorithms/`, the plugin re-resolves the slug
- *   and pings the new `{ slug, path, version }`. A create of the preferred `<slug>.ts`
- *   is an active-selection change: the plugin now resolves to it, so the client imports
- *   it. A ping for any other slug is ignored.
- * - On a matching ping the client stores `{ path, version }` (the App derives the url-mode
+ *   sends `algo:hello` (no slug). The plugin resolves the active file — the fixed
+ *   override `src/algorithms/engine.ts` or the default engine — and replies
+ *   `algo:changed { path, version }`, so local mode runs on entry with no save.
+ * - On any create/change/delete under `src/algorithms/`, the plugin re-resolves the
+ *   override and pings the new `{ path, version }`. A create of `engine.ts` is an
+ *   active-selection change: the plugin now resolves to it, so the client imports it.
+ * - On a ping the client stores `{ path, version }` (the App derives the url-mode
  *   `AlgorithmSource` and its cache-busting URL) and triggers a run. The run controller
  *   awaits the import inside its generation-guarded epoch, so a reordered load cannot win.
  *
@@ -65,8 +65,6 @@ export interface SessionStorageLike {
 }
 
 export interface AlgorithmsDevClientDeps {
-  /** The Scenario slug this client subscribes to. */
-  slug: string;
   channel: HotChannelLike;
   store: DevClientStore;
   /** Trigger a run: the controller reloads from the store's current source choice. */
@@ -120,12 +118,12 @@ function parseObject(raw: string): object | null {
 
 /** Parse an `algo:changed` frame's payload, or null on a malformed or partial frame. */
 function asChangedFrame(data: unknown): ChangedFrame | null {
-  if (!(data instanceof Object) || !("slug" in data && "path" in data && "version" in data)) {
+  if (!(data instanceof Object) || !("path" in data && "version" in data)) {
     return null;
   }
-  const { slug, path, version } = data;
-  if (isString(slug) && isString(path) && isFiniteNumber(version)) {
-    return { slug, path, version };
+  const { path, version } = data;
+  if (isString(path) && isFiniteNumber(version)) {
+    return { path, version };
   }
   return null;
 }
@@ -144,7 +142,7 @@ function readSnapshot(session: SessionStorageLike): LocalModeSnapshot | null {
 }
 
 export function createAlgorithmsDevClient(deps: AlgorithmsDevClientDeps): AlgorithmsDevClient {
-  const { slug, channel, store, run, session } = deps;
+  const { channel, store, run, session } = deps;
 
   let generation = 0;
   let currentHandler: ((data: unknown) => void) | null = null;
@@ -168,15 +166,15 @@ export function createAlgorithmsDevClient(deps: AlgorithmsDevClientDeps): Algori
         return; // stale: a stop, switch, or re-subscribe bumped the generation
       }
       const frame = asChangedFrame(data);
-      if (frame === null || frame.slug !== slug) {
-        return; // malformed, or a ping for another algorithm: ignore
+      if (frame === null) {
+        return; // malformed: ignore
       }
       store.setLocalAlgorithm({ path: frame.path, version: frame.version });
       run();
     };
     currentHandler = handler;
     channel.on("algo:changed", handler);
-    channel.send("algo:hello", { slug });
+    channel.send("algo:hello");
   };
 
   return {

@@ -22,7 +22,7 @@
  * silently dropped.
  */
 
-import type { Attack } from "./attack";
+import { type Attack, assertValidThreshold } from "./attack";
 import type { PipeEvent } from "./event";
 import type { AlertReason, Finding } from "./finding";
 import type { RingEvent } from "./inspector";
@@ -48,8 +48,6 @@ export function score(counts: Counts, wFn: number, wFp: number): number {
 
 /** The scorer's tuning: injected so `sim/` stays free of `game/` constants. */
 export interface ScorerConfig {
-  /** Distinct cited ids an Alert must share with an Attack to credit it. */
-  threshold: number;
   /** Outcomes kept in the rolling gauge ring. */
   window: number;
   /** False-negative (missed Attack) weight. */
@@ -289,6 +287,19 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   // eventId -> the Attack that owns it, built once from Ground truth.
   const owner = new Map<number, number>();
   for (const attack of attacks) {
+    // The scorer seam: a bad threshold fails loudly here, before it can silently
+    // under- or over-credit an Alert.
+    assertValidThreshold(attack);
+    // `hitsFor` credits on DISTINCT cited ids, so a threshold exceeding the count of
+    // distinct evidence can never be met: the Attack would silently record as missed
+    // rather than fail at setup. Reject it here at the same seam.
+    const distinctEvidence = new Set(attack.eventIds).size;
+    if (distinctEvidence < attack.threshold) {
+      throw new Error(
+        `Attack ${attack.id} has ${distinctEvidence} distinct evidence ids but a threshold of ` +
+          `${attack.threshold}, so no Alert could ever satisfy it.`,
+      );
+    }
     state.set(attack.id, "pending");
     for (const eventId of attack.eventIds) {
       owner.set(eventId, attack.id);
@@ -531,7 +542,13 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       const predicate = useEntity
         ? attack.entity === scored.entity
         : attack.reason === alert.reason;
-      if (predicate && (hits.get(attack.id) ?? 0) >= config.threshold) {
+      // Per-attack threshold (GH42-PLAN.md "Scoring for mixed hunts"): every Attack
+      // carries its own required `threshold`, validated at construction, so a mixed
+      // run always credits each hunt by its own evidence bar. No config-level
+      // fallback: a fallback tuned for one hunt (e.g. pin-brute-force's) would
+      // silently misscore any other hunt that forgot to set its own value.
+      const threshold = attack.threshold;
+      if (predicate && (hits.get(attack.id) ?? 0) >= threshold) {
         resolve(attack, "caught");
         append({
           outcome: "caught",

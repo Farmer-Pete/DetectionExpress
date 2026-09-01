@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Decision, LiveFinding } from "../sim/correctness";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import { referenceSource } from "./engine-source";
 import { getGraph, useGameStore } from "./store";
 import { LEVEL_SEED } from "./tuning";
 

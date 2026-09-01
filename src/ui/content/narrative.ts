@@ -1,14 +1,20 @@
 /**
  * The single source of the onboarding prose. This is UI copy, not simulation
  * logic, so it lives in `ui/`. It holds the intro overlay text, the Hire Me pitch,
- * the five-level chaos ladder, the one live scenario's presentation, and the source
- * repo link. No React. Each type is consumed by a component through its props, so
- * the values reach the screen and Knip stays clean.
+ * the five-level chaos ladder, and the source repo link. No React. Each type is
+ * consumed by a component through its props, so the values reach the screen and
+ * Knip stays clean.
  *
- * The live scenario's briefing string is not here. It belongs to the Scenario
- * contract, so it stays on the sim scenario. Display name and tagline are UI prose,
- * so they live here.
+ * The live scenario's briefing string is not here either. Display text comes
+ * from the registry's catalogue join, the one source of it (GH42-PLAN.md
+ * "Registry and catalogue metadata"): `Scenario` (the sim contract) carries no
+ * briefing of its own, so there is nothing to drift against. The live scenario's
+ * display name and tagline come from that same join, not from a hardcoded
+ * singleton here: `liveScenarioFrom` below only shapes a joined
+ * `ScenarioRegistryEntry` into the UI's `LiveScenario` view, at the one
+ * chaos-ladder level today's single shipped hunt occupies.
  */
+import type { ScenarioRegistryEntry } from "../../game/registry";
 
 /** A ladder rung: one level of rising chaos. Used by the exported content types. */
 type ChaosLevelNumber = 1 | 2 | 3 | 4 | 5;
@@ -105,9 +111,19 @@ export const chaosLevels: readonly ChaosLevel[] = [
   },
 ];
 
-export const liveScenario: LiveScenario = {
-  id: "kiosk-pin-attack",
-  displayName: "PIN Brute Force",
-  tagline: "One angry rider, one PIN pad, a thousand guesses.",
-  level: 1,
-};
+/** Today's only playable hunt sits at chaos level 1 (see the chaos ladder above). */
+const LIVE_SCENARIO_LEVEL: ChaosLevelNumber = 1;
+
+/**
+ * Build the UI's live-scenario view from a registry entry joined to its catalogue:
+ * its name and tagline, at the fixed chaos-ladder level the one shipped hunt
+ * occupies. Pure, so a caller builds it straight from `defaultEntry` with no React.
+ */
+export function liveScenarioFrom(entry: ScenarioRegistryEntry): LiveScenario {
+  return {
+    id: entry.id,
+    displayName: entry.catalogue.name,
+    tagline: entry.catalogue.flavor.tagline,
+    level: LIVE_SCENARIO_LEVEL,
+  };
+}

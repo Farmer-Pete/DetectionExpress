@@ -4,7 +4,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
 } from "../../../game/tuning";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
@@ -15,7 +14,8 @@ import {
   type OptimizationAlgorithm,
   optimizationSource,
 } from "./optimization";
-import { kioskPinAttack } from "./scenario";
+import { pinBruteForce } from "./scenario";
+import { PIN_BRUTE_FORCE_THRESHOLD } from "./tuning";
 
 /**
  * Evaluate an Algorithm source string in-process and adapt it to `OptimizationAlgorithm`,
@@ -82,9 +82,8 @@ describe("optimizationSource", () => {
 
 describe("buildOptimizationAlgorithm", () => {
   it("scores 100 via the scorer over the whole run, catching every Attack", () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
