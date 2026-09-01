@@ -1,7 +1,7 @@
 /**
- * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the Metro/
- * Pipeline view toggle, the "How this works" reopen button, the two side-panel
- * openers (GH118-PLAN.md), and Hire Me. It consumes `reopenRef`/`onReopen` from
+ * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the embedded
+ * metro map's show/hide toggle, the two side-panel openers (GH118-PLAN.md), the "How
+ * this works" reopen button, and Hire Me. It consumes `reopenRef`/`onReopen` from
  * `useIntroOverlay` and `onOpenChaos`/`onOpenAlgorithm` from `useSidePanel` rather
  * than owning either, so these tests stub all of it.
  */
@@ -13,8 +13,8 @@ import { Topbar } from "./Topbar";
 
 function renderTopbar(overrides: Partial<Parameters<typeof Topbar>[0]> = {}) {
   const props: Parameters<typeof Topbar>[0] = {
-    view: "pipeline",
-    onToggleView: vi.fn(),
+    mapShown: true,
+    onToggleMap: vi.fn(),
     reopenRef: createRef<HTMLButtonElement>(),
     onReopen: vi.fn(),
     onOpenChaos: vi.fn(),
@@ -35,19 +35,19 @@ describe("Topbar", () => {
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
   });
 
-  it("labels the view toggle for the pipeline view and flips it for metro", () => {
-    const { rerender, props } = renderTopbar({ view: "pipeline" });
-    expect(screen.getByRole("button", { name: "Metro view" })).toBeDefined();
+  it("labels the map toggle for the hidden map and flips it once shown", () => {
+    const { rerender, props } = renderTopbar({ mapShown: false });
+    expect(screen.getByRole("button", { name: "Show metro view" })).toBeDefined();
 
-    rerender(<Topbar {...props} view="metro" />);
-    expect(screen.getByRole("button", { name: "Pipeline view" })).toBeDefined();
+    rerender(<Topbar {...props} mapShown={true} />);
+    expect(screen.getByRole("button", { name: "Hide metro view" })).toBeDefined();
   });
 
-  it("calls onToggleView when the view toggle is clicked", () => {
-    const onToggleView = vi.fn();
-    renderTopbar({ onToggleView });
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
-    expect(onToggleView).toHaveBeenCalledTimes(1);
+  it("calls onToggleMap when the map toggle is clicked", () => {
+    const onToggleMap = vi.fn();
+    renderTopbar({ mapShown: false, onToggleMap });
+    fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
+    expect(onToggleMap).toHaveBeenCalledTimes(1);
   });
 
   it("wires the reopen button to reopenRef and calls onReopen when clicked", () => {
@@ -60,13 +60,12 @@ describe("Topbar", () => {
     expect(onReopen).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the chaos ladder and algorithm openers in the pipeline view, wired to their refs and callbacks", () => {
+  it("shows the chaos ladder and algorithm openers, wired to their refs and callbacks", () => {
     const onOpenChaos = vi.fn();
     const onOpenAlgorithm = vi.fn();
     const chaosButtonRef = createRef<HTMLButtonElement>();
     const algorithmButtonRef = createRef<HTMLButtonElement>();
     renderTopbar({
-      view: "pipeline",
       onOpenChaos,
       onOpenAlgorithm,
       chaosButtonRef,
@@ -82,11 +81,5 @@ describe("Topbar", () => {
     expect(onOpenChaos).toHaveBeenCalledTimes(1);
     fireEvent.click(algorithmButton);
     expect(onOpenAlgorithm).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides the chaos ladder and algorithm openers in the metro view", () => {
-    renderTopbar({ view: "metro" });
-    expect(screen.queryByRole("button", { name: "Chaos ladder" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Algorithm" })).toBeNull();
   });
 });

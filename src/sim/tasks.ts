@@ -325,6 +325,14 @@ export interface NodeRuntime {
   inspector: TaskInspector;
   /** The Ingest source: the scheduled Events, then null when exhausted. */
   nextEvent: () => PipeEvent | null;
+  /**
+   * The live scored source (GH117-PLAN.md "Part C"). When present it REPLACES
+   * `nextEvent` as the Ingest task's source: the task drives this pump instead of
+   * `runIngest`, so the engine's tick listener feeds scored events in as they emit.
+   * Omitted, the Ingest task plays the pre-generated `nextEvent` schedule exactly as
+   * before — the reference path parity guard 2 compares against.
+   */
+  pump?: (out: Channel<PipeMessage>, clock: TaskClock, onAdmit: () => void) => Promise<void>;
   /** The quantized per-Event service rate the Detect governor charges. */
   serviceRate: ServiceRate;
 }
@@ -348,13 +356,14 @@ function requireChannel(
   return channel;
 }
 
-const ingestTask: NodeTask = (nodeId, wiring, runtime) =>
-  runIngest(
-    requireChannel(wiring.output, nodeId, "output"),
-    runtime.clock,
-    runtime.nextEvent,
-    runtime.onAdmit,
-  );
+const ingestTask: NodeTask = (nodeId, wiring, runtime) => {
+  const out = requireChannel(wiring.output, nodeId, "output");
+  // The live scored source, when injected, replaces the pull schedule: the engine's
+  // tick listener offers events into it and this task pumps them out (GH117 Part C).
+  return runtime.pump
+    ? runtime.pump(out, runtime.clock, runtime.onAdmit)
+    : runIngest(out, runtime.clock, runtime.nextEvent, runtime.onAdmit);
+};
 
 const normalizeTask: NodeTask = (nodeId, wiring, runtime) =>
   runNormalize(

@@ -102,21 +102,23 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
       pinBruteForceCorpus.arriveLeadTicks + Math.floor((k * usableTicks) / pairCount);
 
     actors.push(
-      pinBruteForceCorpus.assemblePatron({
-        id: `patron-${k}`,
-        account,
-        station,
-        terminal,
-        startTick: slotTick,
-        dwellTicks: 1,
-        fumbleFails: 0,
-      }),
+      pinBruteForceCorpus
+        .assemblePatron({
+          id: `patron-${k}`,
+          account,
+          station,
+          terminal,
+          startTick: slotTick,
+          dwellTicks: 1,
+          fumbleFails: 0,
+        })
+        .build(),
     );
     const failTimestamps = Array.from(
       { length: failCount },
       (_v, i) => (slotTick + i) * GAME_SECONDS_PER_TICK,
     );
-    const { actor } = pinBruteForceCorpus.assembleAttacker({
+    const { descriptor } = pinBruteForceCorpus.assembleAttacker({
       id: `attack-${k}`,
       attackId: k + 1,
       account,
@@ -124,7 +126,7 @@ export function buildCorpus(seed: number, size: number, eventsPerTick: number): 
       terminal,
       failTimestamps,
     });
-    actors.push(actor);
+    actors.push(descriptor.build());
   }
 
   const env: WorldEnv = {

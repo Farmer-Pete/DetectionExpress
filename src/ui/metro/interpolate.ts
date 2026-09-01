@@ -6,6 +6,7 @@
  * presence sits on its node. Pure: it reads the layout and the presence, nothing
  * else, so it is unit-tested without a canvas.
  */
+import type { RunStatus } from "../../sim/snapshot";
 import type { Point } from "../../sim/world/layout";
 import type { MapNodeId, Presence } from "../../sim/world/presence";
 
@@ -63,4 +64,15 @@ export function presencePoint(
   const raw = span <= 0 ? 1 : (nowTick - presence.fromTick) / span;
   const t = Math.max(0, Math.min(1, raw));
   return lerp(pointOf(layout, presence.from), pointOf(layout, presence.to), t);
+}
+
+/**
+ * The render clock's speed: how fast `renderNow` should extrapolate past the last
+ * published tick. Zero while frozen (the transport pause) AND once the run has
+ * concluded (`status !== "running"`), so the map holds its last frame under the
+ * "simulation ended" overlay instead of sliding actors on to positions the sim never
+ * reached. Pure, so the frozen-at-the-end rule is unit-tested without a canvas.
+ */
+export function renderSpeed(frozen: boolean, speed: number, status: RunStatus): number {
+  return frozen || status !== "running" ? 0 : speed;
 }

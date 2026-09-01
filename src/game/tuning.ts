@@ -202,18 +202,18 @@ export const SEVERITY_DANGER_FRAC = 0.8;
 export const URGENT_HITS = 3;
 
 /**
- * M0 (living metro, #87). The world loop steps the actor schedule ONE tick at a
- * time; this many such steps run per clock tick. A positive integer, default 1, so
- * the sim advances at CLOCK_HZ by default. Raising it speeds the world without
- * touching the publish rate, which stays pinned to PUBLISH_HZ.
+ * The merged engine (GH117) advances the actor schedule ONE sim tick per game Clock
+ * tick, so this multiplier is pinned at 1 (it once let the retired standalone world
+ * loop step faster than the Clock; that step-accumulator model is gone — one Clock
+ * now). Kept as a named factor, not inlined, so `FLASH_LIFE_TICKS` below still reads
+ * as "1.1 wall seconds of sim ticks" rather than a bare `CLOCK_HZ` multiply.
  */
-export const SIM_TICKS_PER_CLOCK_TICK = 1;
+const SIM_TICKS_PER_CLOCK_TICK = 1;
 
 /**
  * A sensor flash lives 1.1 sim seconds (87-VIEW-NOTES.md section 5), derived from the
  * clock rate so its ring expands and fades over its full life. The canvas fades over
- * this span. The sim advances SIM_TICKS_PER_CLOCK_TICK sim ticks per clock tick, so the
- * life is scaled by it to hold the 1.1s wall intent whatever the sim step multiplier.
+ * this span.
  */
 export const FLASH_LIFE_TICKS = Math.round(1.1 * CLOCK_HZ * SIM_TICKS_PER_CLOCK_TICK);
 
@@ -256,12 +256,6 @@ export const RIDER_WINDOW_TICKS = 600;
  */
 export const RIDER_BALANCE_MIN = 10;
 export const RIDER_BALANCE_MAX = 200;
-
-/**
- * How many recent normalized readings the world snapshot carries for the event log.
- * Older readings are dropped, so the log stays bounded on a perpetual run.
- */
-export const WORLD_LOG_RETENTION = 120;
 
 /**
  * M3 (living metro, #87) staff and doors. A seeded spawner keeps a small transient

@@ -1,7 +1,7 @@
 /**
  * The pipeline controller lifecycle, extracted from `App.tsx` (GH109-PLAN.md): a
- * fresh `RunController` per visible epoch, seeded from the store's transport, and
- * disposed (permanently) on hide or unmount, including React strict-mode's
+ * fresh `RunController` per mounted epoch, seeded from the store's transport, and
+ * disposed (permanently) on unmount, including React strict-mode's
  * mount/unmount/mount cycle. Render never drives the loop.
  *
  * `controllerRef` is the hook's only return, since a call site outside the effect
@@ -16,13 +16,16 @@ import { useEffect, useRef } from "react";
 import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
+import { buildBlueprint } from "../../sim/scenarios/pin-brute-force/scenario";
 import { emptySnapshot } from "../../sim/snapshot";
-import type { View } from "../view";
 
 /** The real controller factory. Tests inject a stub through `createController`. */
 function buildController(): RunController {
   return createRunController({
     scenario: defaultScenario,
+    // The app's one scenario is pin-brute-force, so its blueprint drives the map cast
+    // (GH117 Part B). A later step collapses the pipeline and metro controllers into one.
+    buildBlueprint,
     getGraph,
     // The in-game editor's source string.
     getAlgorithmSource: () => useGameStore.getState().source,
@@ -35,26 +38,23 @@ function buildController(): RunController {
 }
 
 export interface UsePipelineControllerArgs {
-  view: View;
   /** Test injection. Defaults to the real buildController. `| undefined` is explicit so a
       caller under exactOptionalPropertyTypes (this repo, tsconfig) can pass an optional
       prop value that may itself be undefined, matching the ModalHost convention. */
   createController?: (() => RunController) | undefined;
 }
 
-export function usePipelineController({ view, createController }: UsePipelineControllerArgs): {
-  /** The live pipeline controller ref. Null in the metro view. */
+export function usePipelineController({ createController }: UsePipelineControllerArgs): {
+  /** The live pipeline controller ref. */
   controllerRef: RefObject<RunController | null>;
 } {
   const controllerRef = useRef<RunController | null>(null);
 
-  // The pipeline controller lifecycle, conditional on the pipeline view. A fresh
-  // controller per visible epoch; the cleanup disposes it (permanently) on hide or
-  // unmount, including React strict-mode's mount/unmount/mount cycle.
+  // The pipeline controller lifecycle: a fresh controller per mounted epoch; the
+  // cleanup disposes it (permanently) on unmount, including React strict-mode's
+  // mount/unmount/mount cycle. GH117 unified the metro map onto this same engine, so
+  // there is only the one engine now — no view toggle gates this effect.
   useEffect(() => {
-    if (view !== "pipeline") {
-      return;
-    }
     const active = (createController ?? buildController)();
     controllerRef.current = active;
     active.run();
@@ -70,21 +70,20 @@ export function usePipelineController({ view, createController }: UsePipelineCon
         controllerRef.current = null;
       }
       // The engine is gone. Repaint the empty state now, not left showing this run's
-      // rows, so a later Metro-to-Pipeline remount does not flash stale panels during
-      // the next controller's load+profile window (F024). This only runs on teardown
-      // (a view switch or unmount), never inside run()'s awaits, so a mid-run Apply
-      // still leaves the old run's snapshot on screen until the new engine commits.
+      // rows, so a later remount does not flash stale panels during the next
+      // controller's load+profile window (F024). This only runs on teardown (unmount),
+      // never inside run()'s awaits, so a mid-run Apply still leaves the old run's
+      // snapshot on screen until the new engine commits.
       useGameStore.getState().setSnapshot(emptySnapshot());
       useGameStore.getState().clearSelection();
     };
-  }, [view, createController]);
+  }, [createController]);
 
   // Reflect the store's transport mirror into the pipeline controller. This handles a
   // user toggle from the panel. An engine swap (mount, Apply, hot-reload) is handled by
   // the controller reapplying its retained state on startEngine, which this effect
   // misses because the store value did not change. The two guards together drop no
-  // state. `controllerRef` holds the pipeline controller, which is live only in the
-  // pipeline view; in the metro view the ref is null and the reflection is a no-op.
+  // state.
   const frozen = useGameStore((s) => s.transport.frozen);
   useEffect(() => {
     controllerRef.current?.setFrozen(frozen);

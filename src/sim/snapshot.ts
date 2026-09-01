@@ -6,6 +6,10 @@
 import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 import type { WaveReading } from "./wave-state";
+// `ActorView`, `FlashEvent`, `DoorView`, and `CrowdView` stay defined in
+// `world-snapshot.ts` for now (GH117 Part E, to minimize churn); import them from
+// there directly.
+import type { ActorView, CrowdView, DoorView, FlashEvent } from "./world-snapshot";
 
 /** The run lifecycle, as the HUD reads it. */
 export type RunStatus = "running" | "won" | "failed";
@@ -53,6 +57,24 @@ export interface SimSnapshot {
    * run's waves, not a value the UI infers on its own (GH38+40-PLAN.md decision 2).
    */
   wave: WaveReading;
+  /**
+   * Live actors the embedded map draws, with semantic presence (GH117 Part E). Empty
+   * until the engine steps the cast onto this snapshot; the current producer still
+   * publishes `[]`.
+   */
+  actors: readonly ActorView[];
+  /** Short, fading sensor-fire marks the map draws. Empty until the engine wires it. */
+  flashes: readonly FlashEvent[];
+  /** Door projection (reducer output). Empty until the engine wires it. */
+  doors: readonly DoorView[];
+  /** Camera reducer output: per-node crowd counts. Empty until the engine wires it. */
+  crowds: readonly CrowdView[];
+  /**
+   * The authoritative integer game tick for the map, distinct from any UI-only
+   * fractional render estimate (which stays inside `ActorLayer.tsx`). 0 until the
+   * engine wires it.
+   */
+  nowTick: number;
 }
 
 /** The reading before the first sample: empty, calm, and perfectly correct. */
@@ -71,5 +93,10 @@ export function emptySnapshot(): SimSnapshot {
     events: [],
     processed: 0,
     wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
+    actors: Object.freeze([]),
+    flashes: Object.freeze([]),
+    doors: Object.freeze([]),
+    crowds: Object.freeze([]),
+    nowTick: 0,
   };
 }

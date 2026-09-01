@@ -85,6 +85,46 @@ export interface Admission<Reading, Env> {
   initialPresence(firstTick: number): Presence;
 }
 
+/**
+ * Which seed domain an actor belongs to (GH117-PLAN.md "Scheduler seed isolation").
+ * A `"scored-scenario"` actor is part of the scenario cast whose Events the scorer
+ * reads; parity with the batch-composed run depends on its assigned seed and its
+ * first-draw `seededPriority` never moving. `"ambient"` is everything else sharing
+ * the schedule. `assignSeeds` below seeds every scored-scenario id first, as if no
+ * ambient id existed, then seeds the ambient ids against what is already taken, so
+ * adding ambient actors can never perturb a scenario actor's seed.
+ */
+export type ActorProvenance = "scored-scenario" | "ambient";
+
+/**
+ * An immutable recipe for one live actor: enough to build a fresh instance on
+ * demand, without holding any of that instance's own mutable state. Actors are
+ * mutable closures (a PIN attacker's `phase`, an account rider's `phase`), so a
+ * blueprint that must build the same cast more than once — once for the batch
+ * precompose, once for a live schedule — cannot hold built instances. It holds
+ * this instead: a provenance tag, the presence to show before the actor's first
+ * `act()` (mirroring `Admission.initialPresence`), and a pure `build()` that
+ * returns a fresh instance sharing no state with any other call.
+ */
+export interface ActorDescriptor<Reading, Env> {
+  readonly provenance: ActorProvenance;
+  /**
+   * The view kind the engine records for this actor's `ActorView`, mirroring
+   * `Admission.kind` and `WorldFixture.kind`. The live engine reads it when it steps
+   * the cast for the map (GH117-PLAN.md "Part B"); the batch precompose ignores it.
+   */
+  readonly kind: ActorView["kind"];
+  readonly initialPresence: (firstTick: number) => Presence;
+  build(): Actor<Reading, Env>;
+}
+
+/** Build one fresh actor per descriptor, in order. Two calls share no mutable state. */
+export function instantiateActors<Reading, Env>(
+  descriptors: readonly ActorDescriptor<Reading, Env>[],
+): Actor<Reading, Env>[] {
+  return descriptors.map((descriptor) => descriptor.build());
+}
+
 /** The steppable schedule: half-open forward stepping, runtime admission, eviction. */
 export interface Schedule<Reading, Env> {
   /** Run every actor due below `horizon`, forward only. Returns the step's delta. */
@@ -102,6 +142,13 @@ interface CreateScheduleInput<Reading, Env> {
   actors: readonly Actor<Reading, Env>[];
   env: Env;
   runSeed: number;
+  /**
+   * The ids to seed in the "ambient" domain (see `ActorProvenance`, `assignSeeds`).
+   * Every id NOT in this set is "scored-scenario". Omitted, every id is
+   * scored-scenario, reproducing today's single-domain seeding unchanged — every
+   * existing caller that never passes this gets byte-identical seeds.
+   */
+  ambientIds?: ReadonlySet<string>;
 }
 
 /** Everything `runActors` needs, passed by name. */
@@ -110,6 +157,8 @@ interface RunActorsInput<Reading, Env> {
   env: Env;
   runSeed: number;
   horizon: number;
+  /** See `CreateScheduleInput.ambientIds`. */
+  ambientIds?: ReadonlySet<string>;
 }
 
 /**
@@ -266,15 +315,27 @@ export function actorSeedHash(runSeed: number, actorId: string): number {
 }
 
 /**
- * Assign each id a distinct seed in sorted-id order, so the outcome does not depend
- * on the input array order. On a taken seed it rehashes `"${runSeed}:${actorId}#${n}"`,
- * raising `n` until the seed is free, so two ids that collide onto one 32-bit value
- * still get distinct streams.
+ * Assign each id a distinct seed. Ids are split into two seed domains by
+ * `ambientIds`: every id NOT in `ambientIds` (the "scored-scenario" domain) is
+ * seeded first, in sorted order among itself, exactly as this function behaved
+ * before ambient actors existed — so an id's outcome never depends on the input
+ * array order, and never depends on whether any ambient id is even present. The
+ * `ambientIds` are seeded second, in sorted order among themselves, against every
+ * seed already taken. On a taken seed it rehashes `"${runSeed}:${id}#${n}"`, raising
+ * `n` until the seed is free, exactly as before — the only change is domain order:
+ * a collision can only ever bump an ambient id, never a scored-scenario one, because
+ * a scored-scenario id's seed is always fully decided before any ambient id is even
+ * considered. Passing no `ambientIds` (the default) puts every id in the
+ * scored-scenario domain, reproducing the original single-domain behavior exactly.
  */
-function assignSeeds(runSeed: number, ids: string[]): Map<string, number> {
+function assignSeeds(
+  runSeed: number,
+  ids: string[],
+  ambientIds: ReadonlySet<string> = new Set(),
+): Map<string, number> {
   const used = new Set<number>();
   const seeds = new Map<string, number>();
-  for (const id of [...ids].sort()) {
+  const assign = (id: string): void => {
     let seed = actorSeedHash(runSeed, id);
     let attempt = 1;
     while (used.has(seed)) {
@@ -283,6 +344,12 @@ function assignSeeds(runSeed: number, ids: string[]): Map<string, number> {
     }
     used.add(seed);
     seeds.set(id, seed);
+  };
+  for (const id of ids.filter((id) => !ambientIds.has(id)).sort()) {
+    assign(id);
+  }
+  for (const id of ids.filter((id) => ambientIds.has(id)).sort()) {
+    assign(id);
   }
   return seeds;
 }
@@ -339,12 +406,12 @@ function isValidStart(nextTick: number | "dormant"): boolean {
 export function createSchedule<Reading, Env>(
   input: CreateScheduleInput<Reading, Env>,
 ): Schedule<Reading, Env> {
-  const { actors, env, runSeed } = input;
+  const { actors, env, runSeed, ambientIds } = input;
   const ids = actors.map((actor) => actor.id);
   if (new Set(ids).size !== ids.length) {
     throw new Error("createSchedule: two actors share an id.");
   }
-  const seeds = assignSeeds(runSeed, ids);
+  const seeds = assignSeeds(runSeed, ids, ambientIds);
 
   // Due order lives in the heap; the records map tracks the live set for
   // `activeIds`/eviction; `liveSeeds` backs the collision rehash on admission.
@@ -483,13 +550,18 @@ export function createSchedule<Reading, Env>(
 export function runActors<Reading, Env>(
   input: RunActorsInput<Reading, Env>,
 ): TimedReading<Reading>[] {
-  const { actors, env, runSeed, horizon } = input;
+  const { actors, env, runSeed, horizon, ambientIds } = input;
   // Reject a bad horizon up front, before seeding or any actor's start(), so the
   // batch path's observable behavior on invalid input matches the pre-step scheduler.
   if (!Number.isInteger(horizon) || horizon < 0) {
     throw new Error("runActors: horizon must be a finite, non-negative integer.");
   }
-  const schedule = createSchedule({ actors, env, runSeed });
+  const schedule = createSchedule({
+    actors,
+    env,
+    runSeed,
+    ...(ambientIds === undefined ? {} : { ambientIds }),
+  });
   const step = schedule.advanceTo(horizon);
   return step.readings;
 }

@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
+import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
+import type { Actor } from "../sim/actors/actor";
+import { createHost, initialHostPresence } from "../sim/actors/host";
+import { createOperator, initialOperatorPresence } from "../sim/actors/operator";
+import type { RiderTripConfig } from "../sim/actors/rider-core";
+import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import { createWorldRider, initialRiderPresence } from "../sim/actors/world-rider";
 import type { Attack } from "../sim/attack";
 import {
   createScorer,
@@ -8,17 +16,39 @@ import {
   type ScorerConfig,
 } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
+import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
+import {
+  createPinAttacker,
+  initialPinAttackerPresence,
+} from "../sim/scenarios/pin-brute-force/pin-attacker";
 import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
-import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { buildBlueprint, pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
+import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
+import { distanceTable } from "../sim/world/distance";
+import { consoleNodeId, kioskNodeId, relayNodeId } from "../sim/world/layout";
+import type { Presence } from "../sim/world/presence";
+import { buildTimetable } from "../sim/world/timetable";
+import { world } from "../sim/world/world";
+import type { WorldEnv, WorldReading } from "../sim/world-reading";
+import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
 import { ManualDriver, type TickDriver } from "./clock";
-import { type StartOptions, start } from "./engine";
+import {
+  type AmbientCast,
+  type AmbientFixture,
+  type ScenarioCast,
+  type ScenarioCastMember,
+  type ScoredIngestSource,
+  type StartOptions,
+  start,
+} from "./engine";
+import { membersOf, scoringFields } from "./parity-test-helpers";
 import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
@@ -26,8 +56,12 @@ import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
+  HOST_RELAY_TICKS,
   LEVEL_SEED,
+  OPERATOR_COMMAND_TICKS,
+  RIDER_GOHOME_DWELL_TICKS,
   WAVE_WARN_TICKS,
 } from "./tuning";
 
@@ -102,6 +136,8 @@ interface LaunchOpts {
   serviceRate?: ServiceRate;
   checkpoints?: Checkpoint[];
   waves?: Wave[];
+  scenarioCast?: ScenarioCast;
+  ambientCast?: AmbientCast;
 }
 
 interface Harness {
@@ -124,6 +160,8 @@ function launch(opts: LaunchOpts): Harness {
     checkpoints: opts.checkpoints ?? [],
     waves: opts.waves ?? [],
     driver,
+    ...(opts.scenarioCast ? { scenarioCast: opts.scenarioCast } : {}),
+    ...(opts.ambientCast ? { ambientCast: opts.ambientCast } : {}),
     ...(opts.onError ? { onError: opts.onError } : {}),
   };
   const handle = start(options);
@@ -200,6 +238,36 @@ describe("engine start guards", () => {
         driver,
       }),
     ).toThrow();
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
+  it("throws when scoredIngest is passed without scenarioCast, and allocates nothing", () => {
+    // scoredIngest.ingress.offer/close only ever run inside the scenarioCast branch
+    // (GH117 Part C). Without a cast, the pump would still install off scoredIngest
+    // alone, park on take() forever, and silently never admit anything. The start-time
+    // guard converts that into a loud setup error instead.
+    const driver = new SpyDriver();
+    const scoredIngest: ScoredIngestSource = {
+      ingress: new ScoredIngress(),
+      toEvent: () => {
+        throw new Error("unreachable: the guard must throw before this is ever called");
+      },
+      lastScoredTick: 0,
+    };
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves: [],
+        scoredIngest,
+        driver,
+      }),
+    ).toThrow(/scoredIngest requires scenarioCast/);
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
@@ -690,6 +758,15 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.events).toEqual([]);
     expect(snap.processed).toBe(0);
   });
+
+  it("emptySnapshot carries empty map fields and nowTick 0 (GH117 Part E)", () => {
+    const snap = emptySnapshot();
+    expect(snap.actors).toEqual([]);
+    expect(snap.flashes).toEqual([]);
+    expect(snap.doors).toEqual([]);
+    expect(snap.crowds).toEqual([]);
+    expect(snap.nowTick).toBe(0);
+  });
 });
 
 describe("engine publishes the wave reading (GH38+40-PLAN.md Part 1)", () => {
@@ -955,5 +1032,727 @@ describe("engine carries a finalize decision through to the terminal snapshot", 
     if (!last) return;
     const missed = last.decisions.find((d) => d.outcome === "missed");
     expect(missed).toMatchObject({ attackId: 1, entity: "root" });
+  });
+});
+
+// GH117-PLAN.md "Part B": the engine ALSO steps the scenario cast on its one Clock and
+// publishes the cast's presence and wrong-PIN / sign-in flashes into the map fields.
+// Scoring is untouched — it always runs off `generator`, never the cast.
+const CAST_ENV: WorldEnv = {
+  world,
+  distances: distanceTable(world),
+  timetable: buildTimetable(world),
+};
+
+/** A PIN attacker cast member: kind "pin-attacker", one wrong-PIN fail per timestamp. */
+function attackerMember(id: string, station: string, failTimestamps: number[]): ScenarioCastMember {
+  const config = { id, account: "victim", station, terminal: "K1", failTimestamps };
+  return {
+    actor: createPinAttacker(config),
+    kind: "pin-attacker",
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialPinAttackerPresence(station, firstTick),
+  };
+}
+
+/** A benign patron cast member: kind "account-rider", `fumbleFails` fails then a sign-in. */
+function patronMember(
+  id: string,
+  station: string,
+  startTick: number,
+  fumbleFails: 0 | 1 | 2,
+): ScenarioCastMember {
+  const config = {
+    id,
+    account: "rider",
+    station,
+    terminal: "K1",
+    startTick,
+    dwellTicks: 4,
+    fumbleFails,
+  };
+  return {
+    actor: createAccountRider(config),
+    kind: "account-rider",
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialAccountRiderPresence(station, firstTick),
+  };
+}
+
+/** A test stub that acts every tick, recording the tick, to prove the step cadence. */
+function metronome(id: string, station: string, acted: number[]): Actor<WorldReading, WorldEnv> {
+  return {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      acted.push(tick);
+      const reading: WorldReading = {
+        sensor: "kiosk",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          account: "m",
+          station,
+          terminal: "K1",
+          outcome: "success",
+        },
+      };
+      return {
+        readings: [reading],
+        nextTick: tick + 1,
+        presence: { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 },
+      };
+    },
+  };
+}
+
+function castOf(members: ScenarioCastMember[], runSeed = 1): ScenarioCast {
+  return { members, env: CAST_ENV, runSeed };
+}
+
+describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
+  it("publishes ActorView presence, tagging an attacker pin-attacker and a patron its own kind", async () => {
+    const cast = castOf([
+      attackerMember("attack-0", "cen", [40]), // arrives at tick 0, fails at tick 20
+      patronMember("patron-0", "cen", 3, 0), // signs in at tick 3
+    ]);
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 4);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const byId = new Map(snap.actors.map((a) => [a.id, a]));
+    expect(byId.get("attack-0")?.kind).toBe("pin-attacker");
+    expect(byId.get("patron-0")?.kind).toBe("account-rider");
+    // The attacker has arrived and stands at its victim's station.
+    expect(byId.get("attack-0")?.presence).toMatchObject({ kind: "at", node: "cen" });
+    h.handle.stop();
+  });
+
+  it("advances exactly one integer tick per game tick, seeded by the priming advanceTo(1)", async () => {
+    const acted: number[] = [];
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: metronome("m", "cen", acted),
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: 1,
+    };
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 12);
+    h.handle.stop();
+    // Priming acts tick 0; each of the 12 clock ticks acts the next tick, in order.
+    expect(acted).toEqual(Array.from({ length: 13 }, (_, i) => i));
+  });
+
+  it("does not change the stepping tick order when Clock.setSpeed is called", async () => {
+    const acted: number[] = [];
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: metronome("m", "cen", acted),
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: 1,
+    };
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 5);
+    h.handle.setSpeed(2); // wall-clock pacing only; the tick sequence must not move
+    await step(h.driver, 5);
+    h.handle.setSpeed(0.5);
+    await step(h.driver, 5);
+    h.handle.stop();
+    // A contiguous 0..15 despite the speed changes: one integer tick per game tick.
+    expect(acted).toEqual(Array.from({ length: 16 }, (_, i) => i));
+  });
+
+  it("raises a pinfail flash for a wrong-PIN fail and a signin flash for a sign-in, on the kiosk chip", async () => {
+    const cast = castOf([
+      attackerMember("attack-0", "cen", [40]), // wrong-PIN fail at tick 20
+      patronMember("patron-0", "cen", 3, 1), // one fumble fail then a success, at tick 3
+    ]);
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 21);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const kiosk = kioskNodeId("cen");
+    const pinfails = snap.flashes.filter((f) => f.kind === "pinfail");
+    const signins = snap.flashes.filter((f) => f.kind === "signin");
+    // Two wrong-PIN fails (the patron's fumble at tick 3, the attacker's at tick 20) and
+    // one sign-in (the patron's success at tick 3), all on the station's kiosk chip.
+    expect(pinfails.map((f) => f.atTick).sort((a, b) => a - b)).toEqual([3, 20]);
+    expect(signins).toHaveLength(1);
+    expect(signins[0]?.atTick).toBe(3);
+    for (const flash of [...pinfails, ...signins]) {
+      expect(flash.node).toBe(kiosk);
+    }
+    h.handle.stop();
+  });
+
+  it("carries the real blueprint's cast, mapping attackers to pin-attacker and patrons to account-rider", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const members: ScenarioCastMember[] = membersOf(blueprint);
+    const h = launch({
+      scenarioCast: { members, env: blueprint.env, runSeed: LEVEL_SEED },
+      checkpoints: deadlineAt(100),
+    });
+    await step(h.driver, 3);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const kinds = new Set(snap.actors.map((a) => a.kind));
+    expect(kinds.has("pin-attacker")).toBe(true);
+    expect(kinds.has("account-rider")).toBe(true);
+    h.handle.stop();
+  });
+
+  it("keeps scoring byte-identical whether or not a scenario cast is attached", async () => {
+    const run = pinBruteForce.generate(LEVEL_SEED);
+    const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+    const bare = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+    });
+    await step(bare.driver, finalTick + 2, 300);
+    await bare.handle.whenStopped;
+
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const members: ScenarioCastMember[] = membersOf(blueprint);
+    const withCast = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+      scenarioCast: { members, env: blueprint.env, runSeed: LEVEL_SEED },
+    });
+    await step(withCast.driver, finalTick + 2, 300);
+    await withCast.handle.whenStopped;
+
+    const bareLast = bare.last();
+    const castLast = withCast.last();
+    expect(bareLast).toBeDefined();
+    expect(castLast).toBeDefined();
+    if (!bareLast || !castLast) return;
+    // Scoring is identical; only the map fields (actors/flashes/nowTick) differ.
+    expect(scoringFields(castLast)).toEqual(scoringFields(bareLast));
+    // The cast really ran (some publish carried live actors), while the bare run never
+    // stepped one: its map fields stay empty and nowTick stays 0, exactly as before.
+    expect(withCast.snapshots.some((snap) => snap.actors.length > 0)).toBe(true);
+    expect(bareLast.actors).toHaveLength(0);
+    expect(bareLast.nowTick).toBe(0);
+  });
+});
+
+// GH117-PLAN.md "Part B" (ambient): the merged engine ALSO folds the metro's ambient life
+// (trains, operators, hosts, and the seeded rider/staff/account spawners) onto the SAME
+// Clock and schedule as the scenario cast, populating every map field. Scoring is still
+// the pre-generated generator's, never the ambient cast (decision 8).
+const AMBIENT_TIMETABLE = buildTimetable(world);
+const AMBIENT_ENV: WorldEnv = {
+  world,
+  distances: distanceTable(world),
+  timetable: AMBIENT_TIMETABLE,
+  // The ambient operators and hosts read the control reference; the scenario cast ignores it.
+  control: controlReference,
+};
+
+/** The full ambient cast (trains/operators/hosts + the three seeded spawners) for a seed. */
+function fullAmbient(seed: number): AmbientCast {
+  return {
+    fixtures: buildAmbientFixtures(world, AMBIENT_TIMETABLE),
+    ...buildAmbientSpawners(world, seed),
+  };
+}
+
+/**
+ * A scenario cast member whose `act` records each tick's seeded rng draw. Two runs with an
+ * identical assigned seed record an identical draw sequence; an ambient collision that
+ * perturbed the scenario seed would change it. This is the load-bearing seed-isolation probe.
+ */
+function seedRecorder(
+  id: string,
+  station: string,
+  draws: { tick: number; value: number }[],
+): ScenarioCastMember {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick, rng }) => {
+      draws.push({ tick, value: rng() });
+      const reading: WorldReading = {
+        sensor: "kiosk",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          account: "sr",
+          station,
+          terminal: "K1",
+          outcome: "success",
+        },
+      };
+      return {
+        readings: [reading],
+        nextTick: tick + 1,
+        presence: { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 },
+      };
+    },
+  };
+  return {
+    actor,
+    kind: "account-rider",
+    provenance: "scored-scenario",
+    initialPresence: (t) => initialAccountRiderPresence(station, t),
+  };
+}
+
+/** An ambient account-rider spawner that admits exactly one rider at `atTick`, then stops. */
+function oneAmbientAccountRider(id: string, station: string, atTick: number): AccountRiderSpawner {
+  let done = false;
+  return {
+    tick: (nowTick) => {
+      if (done || nowTick < atTick) {
+        return [];
+      }
+      done = true;
+      return [
+        {
+          actor: createAccountRider({
+            id,
+            account: "ambient",
+            station,
+            terminal: "K1",
+            startTick: nowTick,
+            dwellTicks: 4,
+          }),
+          kind: "account-rider",
+          initialPresence: (t) => initialAccountRiderPresence(station, t),
+        },
+      ];
+    },
+  };
+}
+
+describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Part B ambient)", () => {
+  it("publishes ambient trains, riders, and staff with the right kinds and fills doors and crowds", async () => {
+    const cast: ScenarioCast = {
+      members: [attackerMember("attack-0", "cen", [400])],
+      env: AMBIENT_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const h = launch({
+      scenarioCast: cast,
+      ambientCast: fullAmbient(LEVEL_SEED),
+      checkpoints: deadlineAt(600),
+    });
+    await step(h.driver, 240, 10);
+    h.handle.stop();
+
+    const kinds = new Set(h.snapshots.flatMap((snap) => snap.actors.map((a) => a.kind)));
+    // The scenario attacker rode the same schedule as the ambient trains, riders, and staff.
+    expect(kinds.has("pin-attacker")).toBe(true);
+    expect(kinds.has("train")).toBe(true);
+    expect(kinds.has("rider")).toBe(true);
+    expect(kinds.has("staff")).toBe(true);
+    // The reducers ran over the ambient grants: doors opened, crowds counted.
+    expect(h.snapshots.some((snap) => snap.doors.length > 0)).toBe(true);
+    expect(h.snapshots.some((snap) => snap.crowds.length > 0)).toBe(true);
+    // nowTick advanced with the run.
+    expect(h.last()?.nowTick).toBeGreaterThan(0);
+  });
+
+  it("steps the scenario cast identically whether or not the ambient cast is present (seed isolation)", async () => {
+    const bareDraws: { tick: number; value: number }[] = [];
+    const bare = launch({
+      scenarioCast: {
+        members: [seedRecorder("sr-0", "cen", bareDraws)],
+        env: AMBIENT_ENV,
+        runSeed: LEVEL_SEED,
+      },
+      checkpoints: deadlineAt(200),
+    });
+    await step(bare.driver, 40, 10);
+    bare.handle.stop();
+
+    const ambientDraws: { tick: number; value: number }[] = [];
+    const withAmbient = launch({
+      scenarioCast: {
+        members: [seedRecorder("sr-0", "cen", ambientDraws)],
+        env: AMBIENT_ENV,
+        runSeed: LEVEL_SEED,
+      },
+      ambientCast: fullAmbient(LEVEL_SEED),
+      checkpoints: deadlineAt(200),
+    });
+    await step(withAmbient.driver, 40, 10);
+    withAmbient.handle.stop();
+
+    // The scenario actor's seeded rng stream is byte-identical: same ticks, same draws, so
+    // the ambient cast never perturbed its assigned seed or same-tick priority.
+    expect(ambientDraws.length).toBeGreaterThan(0);
+    expect(ambientDraws).toEqual(bareDraws);
+    // And the ambient run really did carry ambient actors, so the comparison is meaningful.
+    expect(
+      withAmbient.snapshots.some((snap) => snap.actors.some((a) => a.provenance === "ambient")),
+    ).toBe(true);
+  });
+
+  it("tags the scenario actor scored-scenario and the ambient actor ambient", async () => {
+    const cast: ScenarioCast = {
+      members: [patronMember("patron-0", "cen", 3, 0)], // a scored sign-in at tick 3
+      env: CAST_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const ambient: AmbientCast = {
+      fixtures: [],
+      accountSpawner: oneAmbientAccountRider("A-amb", "cen", 6), // an ambient sign-in near tick 6
+    };
+    const h = launch({ scenarioCast: cast, ambientCast: ambient, checkpoints: deadlineAt(60) });
+    await step(h.driver, 20, 10);
+    h.handle.stop();
+
+    // Union every published snapshot's actors so a not-yet-admitted actor cannot hide.
+    const seen = new Map<string, string | undefined>();
+    for (const snap of h.snapshots) {
+      for (const actor of snap.actors) {
+        seen.set(actor.id, actor.provenance);
+      }
+    }
+    expect(seen.get("patron-0")).toBe("scored-scenario");
+    expect(seen.get("A-amb")).toBe("ambient");
+  });
+
+  it("keeps scoring byte-identical with the ambient cast attached (CRITICAL parity)", async () => {
+    const run = pinBruteForce.generate(LEVEL_SEED);
+    const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+    const bare = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+    });
+    await step(bare.driver, finalTick + 2, 300);
+    await bare.handle.whenStopped;
+
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const members: ScenarioCastMember[] = membersOf(blueprint);
+    const env: WorldEnv = { ...blueprint.env, control: controlReference };
+    const withAmbient = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+      scenarioCast: { members, env, runSeed: LEVEL_SEED },
+      ambientCast: {
+        fixtures: buildAmbientFixtures(world, env.timetable),
+        ...buildAmbientSpawners(world, LEVEL_SEED),
+      },
+    });
+    await step(withAmbient.driver, finalTick + 2, 300);
+    await withAmbient.handle.whenStopped;
+
+    const bareLast = bare.last();
+    const castLast = withAmbient.last();
+    expect(bareLast).toBeDefined();
+    expect(castLast).toBeDefined();
+    if (!bareLast || !castLast) return;
+    // Scoring runs off the pre-generated generator, so it is identical with the whole living
+    // metro attached; only the map fields differ.
+    expect(scoringFields(castLast)).toEqual(scoringFields(bareLast));
+    expect(
+      withAmbient.snapshots.some((snap) => snap.actors.some((a) => a.provenance === "ambient")),
+    ).toBe(true);
+  });
+});
+
+// The next three describe blocks are ported from world-engine.test.ts and
+// world-control.test.ts ahead of GH117-PLAN.md deleting those files (and world-engine.ts
+// itself). Each proves a merged-engine behavior that no surviving test otherwise reaches:
+// the M6 control cast's flash folding, a real rider's full one-trip-then-evicted lifecycle,
+// and the map fields staying bounded over a long run. The camera reducer, the door
+// reducer, and the staff walk/rider-boarding-dwell math keep their own direct unit tests
+// (camera-reducer.test.ts, door-reducer.test.ts, staff-spawner.test.ts, world-rider.test.ts),
+// so those are not re-proven here.
+
+/** The M6 control cast's env: the ambient operator and host fixtures read `control`. */
+const CONTROL_ENV: WorldEnv = { ...CAST_ENV, control: controlReference };
+
+/** One operator at the OCC and one host at "dep", exactly as the legacy world run built them. */
+function controlFixtures(): AmbientFixture[] {
+  const occId = world.controlCenter.id;
+  return [
+    {
+      actor: createOperator({
+        id: "OP1",
+        node: occId,
+        console: controlReference.consoles[0] ?? { operator: "red.disp", host: "OCC-1" },
+        startTick: 0,
+        cadenceTicks: OPERATOR_COMMAND_TICKS,
+      }),
+      kind: "operator",
+      initialPresence: (firstTick) => initialOperatorPresence(occId, firstTick),
+    },
+    {
+      actor: createHost({
+        id: "H1",
+        site: "dep",
+        host: "YARD-NET-1",
+        startTick: 0,
+        cadenceTicks: HOST_RELAY_TICKS,
+      }),
+      kind: "host",
+      initialPresence: (firstTick) => initialHostPresence("dep", firstTick),
+    },
+  ];
+}
+
+describe("engine folds the M6 control cast onto the merged snapshot (ported from world-control.test.ts)", () => {
+  it("raises a command flash on the OCC console chip", async () => {
+    const occId = world.controlCenter.id;
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(200),
+    });
+    await step(h.driver, 40, 10);
+    h.handle.stop();
+
+    const commandFlash = h.snapshots
+      .flatMap((snap) => snap.flashes)
+      .find((f) => f.kind === "command");
+    expect(commandFlash?.node).toBe(consoleNodeId(occId));
+  });
+
+  it("raises a packet flash on the site relay chip", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(200),
+    });
+    await step(h.driver, 40, 10);
+    h.handle.stop();
+
+    const packetFlash = h.snapshots
+      .flatMap((snap) => snap.flashes)
+      .find((f) => f.kind === "packet");
+    expect(packetFlash?.node).toBe(relayNodeId("dep"));
+  });
+
+  it("keeps the operator and host present the whole run (never evicted)", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(700),
+    });
+    await step(h.driver, 600, 10);
+    h.handle.stop();
+
+    const kinds = h.last()?.actors.map((a) => a.kind) ?? [];
+    expect(kinds).toContain("operator");
+    expect(kinds).toContain("host");
+  });
+});
+
+/**
+ * A controlled rider spawner (GH116): admits one real `createWorldRider` whenever no
+ * rider is live, mirroring the real `rider-spawner`'s refill-toward-target behavior
+ * (target 1 here) without its randomness, so the test stays deterministic. Each
+ * admission mints a fresh, distinct id, so a later id proves a genuine replacement, not
+ * the same rider re-admitted.
+ */
+function controlledRiderSpawner(origin: string): RiderSpawner {
+  let births = 0;
+  return {
+    tick: (nowTick, liveRiders) => {
+      if (liveRiders > 0) {
+        return [];
+      }
+      const id = `E${births}`;
+      births += 1;
+      // A high balance so the trip is always affordable and no TVM top-up detour
+      // complicates the lifecycle this test is proving.
+      const tripConfig: RiderTripConfig = {
+        card: id,
+        origin,
+        balance: 1_000_000,
+        window: { startTick: nowTick, endTick: nowTick + 100_000 },
+        fare: { base: 10, perMinute: 5 },
+        jitterTicks: { min: 0, max: 4 },
+        dwellTicks: { min: 2, max: 6 },
+      };
+      return [
+        {
+          actor: createWorldRider(tripConfig),
+          kind: "rider",
+          initialPresence: (firstTick) => initialRiderPresence(origin, firstTick),
+        },
+      ];
+    },
+  };
+}
+
+describe("engine folds a real rider through one trip, a dwell, eviction, and a replacement (GH116, ported from world-engine.test.ts)", () => {
+  it("takes a real rider through one trip, a go-home dwell, eviction, and a replacement admission", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [], spawner: controlledRiderSpawner("cen") },
+      checkpoints: deadlineAt(2000),
+    });
+    await step(h.driver, 1000, 5);
+    h.handle.stop();
+
+    const ridersOf = (snap: SimSnapshot) => snap.actors.filter((view) => view.kind === "rider");
+
+    // The first rider is admitted and shows up in the view.
+    const firstSeen = h.snapshots.find((snap) => ridersOf(snap).length > 0);
+    expect(firstSeen).toBeDefined();
+    const firstId = firstSeen ? ridersOf(firstSeen)[0]?.id : undefined;
+    expect(firstId).toBeDefined();
+
+    // The first rider's own tap-out (its one trip's exit) is the moment its presence
+    // transitions to standing `at` its destination -- the go-home dwell's start.
+    const arrivedSnap = h.snapshots.find((snap) =>
+      ridersOf(snap).some((view) => view.id === firstId && view.presence.kind === "at"),
+    );
+    expect(arrivedSnap).toBeDefined();
+    const arrivedPresence = arrivedSnap
+      ? ridersOf(arrivedSnap).find((view) => view.id === firstId)?.presence
+      : undefined;
+    const tapOutTick = arrivedPresence?.kind === "at" ? arrivedPresence.fromTick : Number.NaN;
+
+    // A snapshot taken shortly after the tap-out but before the go-home dwell elapses
+    // still shows the first rider present, standing `at` its destination.
+    const midDwell = h.snapshots.find(
+      (snap) =>
+        snap.nowTick > tapOutTick &&
+        snap.nowTick < tapOutTick + RIDER_GOHOME_DWELL_TICKS &&
+        ridersOf(snap).some((view) => view.id === firstId),
+    );
+    expect(midDwell).toBeDefined();
+    const stillAt = midDwell?.actors.find((view) => view.id === firstId)?.presence;
+    expect(stillAt?.kind).toBe("at");
+
+    // Eventually the first rider is evicted (gone from every later snapshot)...
+    const lastSeenIndex = h.snapshots.findLastIndex((snap) =>
+      ridersOf(snap).some((view) => view.id === firstId),
+    );
+    expect(lastSeenIndex).toBeGreaterThan(-1);
+    const afterFirstEvicted = h.snapshots.slice(lastSeenIndex + 1);
+    expect(
+      afterFirstEvicted.every((snap) => !ridersOf(snap).some((view) => view.id === firstId)),
+    ).toBe(true);
+
+    // ...and a genuinely distinct replacement rider is admitted afterward, proving the
+    // spawner refilled toward its target once the first rider's slot freed up.
+    const replacement = afterFirstEvicted.find((snap) => ridersOf(snap).length > 0);
+    expect(replacement).toBeDefined();
+    const replacementId = replacement ? ridersOf(replacement)[0]?.id : undefined;
+    expect(replacementId).toBeDefined();
+    expect(replacementId).not.toBe(firstId);
+  });
+});
+
+/** A fixture that taps a fare gate at `station` every tick, forever. */
+function tapperFixture(id: string, station: string): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      const reading: WorldReading = {
+        sensor: "fare-gate",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          card: id,
+          station,
+          line: "blue",
+          direction: "in",
+          result: "ok",
+          balance: 100,
+        },
+      };
+      const presence: Presence = { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 };
+      return { readings: [reading], nextTick: tick + 1, presence };
+    },
+  };
+  return {
+    actor,
+    kind: "rider",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: station,
+      fromTick: 0,
+      untilTick: firstTick,
+    }),
+  };
+}
+
+describe("engine bounded cost over a long run (ported from world-engine.test.ts)", () => {
+  it("keeps flashes bounded", async () => {
+    let maxFlashes = 0;
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [tapperFixture("C1", "cen")] },
+      checkpoints: deadlineAt(6000),
+      setSnapshot: (snap) => {
+        maxFlashes = Math.max(maxFlashes, snap.flashes.length);
+      },
+    });
+    await step(h.driver, 5000, 3);
+    h.handle.stop();
+    // One flash per tick, pruned to the window, so it never grows without bound.
+    expect(maxFlashes).toBeLessThanOrEqual(FLASH_WINDOW_TICKS + 1);
+  });
+
+  it("evicts a dormant actor's provenance entry alongside its view, not just from views", async () => {
+    // provenanceById is a private closure in start(), so there is no public getter for
+    // its size. Spy on the one built-in it's built from (Map.prototype.delete) instead,
+    // and count DISTINCT Map instances that delete the dormant id: `createSchedule`'s own
+    // internal registry (actor.ts) always prunes it on dormancy, and `views` always did
+    // too, so a fixed-but-unpruned provenanceById holds the count at 2. A third distinct
+    // instance is direct evidence provenanceById was pruned as well.
+    const deleteSpy = vi.spyOn(Map.prototype, "delete");
+    try {
+      const h = launch({
+        scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+        ambientCast: {
+          fixtures: [],
+          accountSpawner: oneAmbientAccountRider("prov-evict-1", "cen", 6), // dormant at tick 10
+        },
+        checkpoints: deadlineAt(60),
+      });
+      await step(h.driver, 30, 10);
+      h.handle.stop();
+
+      // Sanity: the rider really was admitted, then evicted (gone from a later snapshot).
+      const seenIndex = h.snapshots.findIndex((snap) =>
+        snap.actors.some((a) => a.id === "prov-evict-1"),
+      );
+      expect(seenIndex).toBeGreaterThan(-1);
+      const evictedLater = h.snapshots
+        .slice(seenIndex + 1)
+        .some((snap) => !snap.actors.some((a) => a.id === "prov-evict-1"));
+      expect(evictedLater).toBe(true);
+
+      // Three distinct registries had `.delete("prov-evict-1")` called on them: the
+      // schedule's own bookkeeping, `views`, and `provenanceById`.
+      const registriesThatDeletedIt = new Set(
+        deleteSpy.mock.calls
+          .map((call, i) => ({ id: call[0], instance: deleteSpy.mock.instances[i] }))
+          .filter((entry) => entry.id === "prov-evict-1")
+          .map((entry) => entry.instance),
+      );
+      expect(registriesThatDeletedIt.size).toBeGreaterThanOrEqual(3);
+    } finally {
+      deleteSpy.mockRestore();
+    }
   });
 });

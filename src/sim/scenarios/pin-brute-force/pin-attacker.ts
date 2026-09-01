@@ -46,6 +46,15 @@ export interface PinAttackerConfig {
 type Phase = { kind: "arrive" } | { kind: "failing"; index: number };
 
 /**
+ * The presence a freshly built PIN attacker carries before its first `act()`:
+ * standing `at` its station, mirroring `initialAccountRiderPresence` in
+ * `account-rider.ts`. A blueprint descriptor's `initialPresence` factory reads this.
+ */
+export function initialPinAttackerPresence(station: string, firstTick: number): Presence {
+  return { kind: "at", node: station, fromTick: firstTick, untilTick: firstTick };
+}
+
+/**
  * Build one PIN attacker over its config. Validates the plan up front (both callers
  * satisfy these by construction) and returns an actor that emits one kiosk `fail`
  * per fail tick, then goes dormant. It reports a presence the view interpolates:

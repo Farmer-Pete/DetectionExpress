@@ -109,6 +109,25 @@ describe("store", () => {
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
   });
 
+  it("round-trips a snapshot carrying non-empty map fields through setSnapshot (GH117 Part E)", () => {
+    const snapshot: SimSnapshot = {
+      ...emptySnapshot(),
+      actors: [
+        {
+          id: "attacker-1",
+          kind: "pin-attacker",
+          presence: { kind: "at", node: "k1", fromTick: 0, untilTick: "open" },
+        },
+      ],
+      flashes: [{ id: 1, kind: "pinfail", node: "k1", atTick: 5 }],
+      doors: [{ node: "d1", open: true }],
+      crowds: [{ node: "c1", persons: 3, grants: 2 }],
+      nowTick: 42,
+    };
+    useGameStore.getState().setSnapshot(snapshot);
+    expect(useGameStore.getState().snapshot).toEqual(snapshot);
+  });
+
   it("starts closed and toggles the overlay-open flag through setOverlayOpen", () => {
     expect(useGameStore.getState().overlayOpen).toBe(false);
     useGameStore.getState().setOverlayOpen(true);

@@ -16,6 +16,17 @@
  * rate, and the checkpoints are all injected by the run controller, so `sim/` stays
  * pure and the engine never builds them or reads a sensor field itself.
  */
+import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
+import {
+  type Actor,
+  type ActorProvenance,
+  type Admission,
+  createSchedule,
+  type StepResult,
+  type TimedReading,
+} from "../sim/actors/actor";
+import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import type { StaffSpawner } from "../sim/actors/staff-spawner";
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
 import type { PipeEvent, PipeMessage } from "../sim/event";
@@ -23,22 +34,139 @@ import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/grap
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
 import type { Checkpoint, Wave } from "../sim/scenario";
+import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
 import { waveStateAt } from "../sim/wave-state";
-import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
+  cameraNodeId,
+  consoleNodeId,
+  contactNodeId,
+  gateIdForStation,
+  gateNodeId,
+  kioskNodeId,
+  readerNodeId,
+  relayNodeId,
+  tvmNodeId,
+} from "../sim/world/layout";
+import type { Presence } from "../sim/world/presence";
+import type { WorldEnv, WorldReading } from "../sim/world-reading";
+import type { ActorView, CrowdView, DoorView, FlashEvent } from "../sim/world-snapshot";
+import { type CameraGrant, createCameraReducer } from "./camera-reducer";
+import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
+import { createDoorReducer } from "./door-reducer";
+import {
+  CAMERA_WINDOW_TICKS,
   CHANNEL_CAP,
   CLOCK_HZ,
   CORRECTNESS_FLOOR,
+  DOOR_DWELL_TICKS,
+  FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
   WAVE_WARN_TICKS,
 } from "./tuning";
+
+/**
+ * One member of the instantiated scenario cast the engine steps for the map
+ * (GH117-PLAN.md "Part B"). It pairs a fresh actor (from `blueprint.instantiate()`)
+ * with the three things the blueprint descriptor carries that the engine needs at
+ * runtime: the view `kind` it draws as, its `provenance` (all `scored-scenario`
+ * today; the admission filter reads it in a later step), and the `initialPresence`
+ * to seed its `ActorView` with before its first `act()`. Mirrors `WorldFixture`.
+ */
+export interface ScenarioCastMember {
+  actor: Actor<WorldReading, WorldEnv>;
+  kind: ActorView["kind"];
+  provenance: ActorProvenance;
+  initialPresence: (firstTick: number) => Presence;
+}
+
+/**
+ * The scenario cast plus the two run inputs a schedule needs to step it: the shared
+ * read-only `env` and the `runSeed` that seeds each actor. Passed as one all-or-nothing
+ * object so the existing scored-engine tests, which inject none, run byte-identically:
+ * no schedule, no stepping listener, `nowTick` stays 0 and the map fields stay empty.
+ */
+export interface ScenarioCast {
+  readonly members: readonly ScenarioCastMember[];
+  readonly env: WorldEnv;
+  readonly runSeed: number;
+}
+
+/**
+ * One ambient startup fixture the merged engine steps for the map (GH117-PLAN.md
+ * "Part B"): a train, an operator, or a host. It pairs a fresh actor with the view
+ * `kind` it draws as and the `initialPresence` to seed its `ActorView`. Provenance is
+ * always `"ambient"`, so it is not carried here. Structurally identical to the legacy
+ * `WorldFixture`, so `world-run-controller`'s builders satisfy it unchanged.
+ */
+export interface AmbientFixture {
+  actor: Actor<WorldReading, WorldEnv>;
+  kind: ActorView["kind"];
+  initialPresence: (firstTick: number) => Presence;
+}
+
+/**
+ * The metro's ambient life the merged engine folds onto the same Clock and schedule as
+ * the scenario cast (GH117-PLAN.md "Part B", decision 3). `fixtures` are the persistent
+ * startup actors (trains, operators, hosts); the three optional spawners are the seeded
+ * runtime sources the engine admits each tick, every admission tagged `"ambient"`
+ * provenance. Attached alongside `scenarioCast`, it shares that cast's `env` and
+ * `runSeed`: one schedule, one env, one seed. Ambient fixture ids seed in the ambient
+ * domain (`createSchedule`'s `ambientIds`), so a scenario actor's seed never moves.
+ * Omitted, the engine steps the scenario cast alone, exactly as before.
+ */
+export interface AmbientCast {
+  readonly fixtures: readonly AmbientFixture[];
+  readonly spawner?: RiderSpawner;
+  readonly staffSpawner?: StaffSpawner;
+  readonly accountSpawner?: AccountRiderSpawner;
+}
+
+/**
+ * The live scored source (GH117-PLAN.md "Part C" and "Part D"). Present, it REPLACES
+ * the pre-generated `generator` as the pipeline's Ingest source: the cast-stepping tick
+ * listener formats each `scored-scenario` kiosk reading through `toEvent`, assigns the
+ * next dense id in emission order, and offers it into `ingress`; the Ingest node pumps
+ * it. When the tick loop passes `lastScoredTick` the engine closes `ingress`, so the
+ * pipeline drains and finalizes once. Takes effect only alongside `scenarioCast` (its
+ * offers come from the stepped cast). Omitted, scoring runs off `generator` exactly as
+ * before — the reference path parity guard 2 compares against.
+ */
+export interface ScoredIngestSource {
+  ingress: ScoredIngress;
+  toEvent: (timed: TimedReading<WorldReading>, id: number) => PipeEvent;
+  lastScoredTick: number;
+}
+
+/** The outcome the engine chose at one checkpoint, reported through `onCheckpoint`. */
+type CheckpointOutcome = "pass" | "queue" | "correctness" | "won";
+
+/**
+ * A TEST-ONLY observation of one checkpoint evaluation (GH117-PLAN.md "Parity guards",
+ * guard 2). Checkpoints are evaluated but not published in a normal run, so the paired
+ * engine-equivalence test needs this seam to compare the live and reference engines at
+ * each checkpoint tick. Inert in production: the run controller never passes a handler.
+ */
+export interface CheckpointObservation {
+  /** The checkpoint's tick. */
+  atTick: number;
+  /** Its index in the checkpoint list. */
+  index: number;
+  /** Outstanding Events (admitted minus completed) the checkpoint saw. */
+  queued: number;
+  admitted: number;
+  completed: number;
+  /** The scorer's rolling Correctness at the checkpoint boundary. */
+  correctness: number;
+  /** The outcome the engine chose from that state. */
+  outcome: CheckpointOutcome;
+}
 
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
 export interface StartOptions {
@@ -56,10 +184,36 @@ export interface StartOptions {
   checkpoints: Checkpoint[];
   /** The wave boundaries the sampler reads to publish `snapshot.wave` each tick. */
   waves: Wave[];
+  /**
+   * The instantiated scenario cast the engine steps on its own single Clock to
+   * publish map presence and wrong-PIN / sign-in flashes (GH117-PLAN.md "Part B").
+   * Optional: omitted, the engine runs exactly as before — scoring always runs off
+   * `generator`, never this cast, so it is untouched whether a cast is present or not.
+   */
+  scenarioCast?: ScenarioCast;
+  /**
+   * The metro's ambient life, folded onto the same Clock and schedule as `scenarioCast`
+   * (GH117-PLAN.md "Part B"). Takes effect only alongside `scenarioCast`, whose `env` and
+   * `runSeed` it shares. Omitted, the engine steps the scenario cast alone. Its readings
+   * are visual and log-only: scoring always runs off `generator`, never this cast.
+   */
+  ambientCast?: AmbientCast;
+  /**
+   * The live scored source (GH117-PLAN.md "Part C"). Present, the pipeline scores off
+   * the stepped scenario cast instead of `generator`, and the engine closes it at the
+   * scored horizon. Takes effect only alongside `scenarioCast`. Omitted, scoring runs
+   * off `generator` exactly as before.
+   */
+  scoredIngest?: ScoredIngestSource;
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Reports an engine or Rule failure. */
   onError?: (error: unknown) => void;
+  /**
+   * TEST-ONLY: observe each checkpoint as the engine evaluates it (parity guard 2).
+   * Inert in production — the run controller never passes it.
+   */
+  onCheckpoint?: (observation: CheckpointObservation) => void;
 }
 
 /** A running engine. `stop` tears it down; `whenStopped` settles for tests. */
@@ -121,6 +275,20 @@ interface RunState {
  * with no ticks elapsed keeps the prior throughput, but always refreshes Queue,
  * Correctness, and the run counters, so the terminal reading cannot drift.
  */
+/**
+ * The map view the sampler folds into each snapshot (GH117-PLAN.md "Part B"). The
+ * cast stepper owns the authoritative state and exposes it through these getters, so
+ * the sampler reads one consistent view per publish. With no scenario cast, the
+ * defaults keep the map fields empty and `nowTick` at 0, exactly as before.
+ */
+interface MapView {
+  getActors: () => readonly ActorView[];
+  getFlashes: () => readonly FlashEvent[];
+  getNowTick: () => number;
+  getDoors: () => readonly DoorView[];
+  getCrowds: () => readonly CrowdView[];
+}
+
 function makeSampler(
   clock: Clock,
   channels: Map<string, Channel<PipeMessage>>,
@@ -129,6 +297,7 @@ function makeSampler(
   setSnapshot: (snapshot: SimSnapshot) => void,
   run: RunState,
   waves: readonly Wave[],
+  map: MapView,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
@@ -187,6 +356,15 @@ function makeSampler(
       events: ring.events,
       processed: ring.processed,
       wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
+      // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
+      // living metro — scenario cast plus ambient life — into one authoritative view the
+      // sampler reads here: presence, every sensor's flashes, the door and crowd reducer
+      // output, and the bounded newest-first sensor log. With no cast these read empty.
+      actors: map.getActors(),
+      flashes: map.getFlashes(),
+      doors: map.getDoors(),
+      crowds: map.getCrowds(),
+      nowTick: map.getNowTick(),
     });
   };
 }
@@ -201,6 +379,13 @@ export function start(options: StartOptions): EngineHandle {
   const graph = options.getGraph();
   validateLinearChain(graph.nodes, graph.edges); // throws before allocation
   assertWaveScheduleOrdered(options.waves); // throws before allocation
+  // scoredIngest only ever offers or closes inside the `if (cast)` branch below, so
+  // without a scenarioCast nothing ever calls ingress.offer/close: Ingest parks on
+  // take() forever, admitted stays 0, and a queued === 0 terminal checkpoint reports a
+  // false "won". Reject the misuse at setup instead of letting it silently hang.
+  if (options.scoredIngest && !options.scenarioCast) {
+    throw new Error("start: scoredIngest requires scenarioCast, or its Ingest never admits.");
+  }
 
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
@@ -227,6 +412,13 @@ export function start(options: StartOptions): EngineHandle {
     }
     stopped = true;
     teardownStep("clock.stop", () => clock?.stop());
+    // Cancel any parked pump waiter through the same supervision as the clock and
+    // channel waiters (GH117-PLAN.md "Part C", teardown). A pump parked on `take()`
+    // (horizon not yet passed, an early checkpoint failure ended the run) unwinds only
+    // through fail(); one parked on the clock gate unwinds through clock.stop() above.
+    teardownStep("scoredIngest.fail", () =>
+      options.scoredIngest?.ingress.fail(new ClockStoppedError()),
+    );
     if (channels) {
       for (const channel of channels.values()) {
         teardownStep("channel.close", () => channel.close());
@@ -291,6 +483,315 @@ export function start(options: StartOptions): EngineHandle {
     }
     channels = channelMap; // publish to the outer scope so stop() can close each
 
+    // GH117 Part B: the scenario-cast stepper's authoritative map view. It holds the
+    // ActorView presence map and the windowed flash list; the sampler folds them into
+    // every snapshot through `mapView`. Declared unconditionally so the getters read a
+    // consistent empty view when no cast is injected (the existing scored-engine tests):
+    // `nowTick` stays 0 and the map fields stay empty, exactly as before.
+    const views = new Map<string, ActorView>();
+    const mapFlashes: FlashEvent[] = [];
+    let latestDoors: readonly DoorView[] = [];
+    let latestCrowds: readonly CrowdView[] = [];
+    let mapNowTick = 0;
+    const mapView: MapView = {
+      getActors: () => [...views.values()],
+      getFlashes: () => [...mapFlashes],
+      getNowTick: () => mapNowTick,
+      getDoors: () => latestDoors.map((door) => ({ ...door })),
+      getCrowds: () => latestCrowds.map((crowd) => ({ ...crowd })),
+    };
+
+    // The cast stepper, on this same single Clock. Scoring is untouched — it always
+    // runs off `options.generator`; this only advances the cast for the map. Speed is
+    // Clock.setSpeed pacing only, so the schedule advances one integer tick per game
+    // tick regardless of speed, and the tick sequence never changes with speed.
+    // The live scored source (GH117-PLAN.md "Part C"/"Part D"). Present, the tick
+    // listener offers each scored-scenario kiosk reading into it (below) and the Ingest
+    // node pumps it, replacing `generator`. Its dense event id runs in emission order.
+    const scoredIngest = options.scoredIngest;
+    let nextScoredEventId = 0;
+
+    const cast = options.scenarioCast;
+    if (cast) {
+      const ambient = options.ambientCast;
+      const ambientFixtures = ambient?.fixtures ?? [];
+
+      // One schedule for the whole living metro: the scenario cast plus the ambient
+      // fixtures. The ambient fixture ids seed in the ambient domain, so every scenario
+      // actor's seed and same-tick priority stay byte-identical to the scenario-only run
+      // (GH117-PLAN.md "Scheduler seed isolation"). This is the parity-critical call.
+      const ambientFixtureIds = new Set(ambientFixtures.map((fixture) => fixture.actor.id));
+      const schedule = createSchedule({
+        actors: [
+          ...cast.members.map((member) => member.actor),
+          ...ambientFixtures.map((fixture) => fixture.actor),
+        ],
+        env: cast.env,
+        runSeed: cast.runSeed,
+        ambientIds: ambientFixtureIds,
+      });
+
+      // The engine's actor-ID provenance registry (GH117-PLAN.md "Part D"): every
+      // scenario member keeps its own provenance, every ambient fixture is `"ambient"`,
+      // and each runtime ambient admission adds itself below. The next step reads this to
+      // enforce the scoring boundary; here it tags the actors and their readings.
+      const provenanceById = new Map<string, ActorProvenance>();
+      for (const member of cast.members) {
+        provenanceById.set(member.actor.id, member.provenance);
+      }
+      for (const fixture of ambientFixtures) {
+        provenanceById.set(fixture.actor.id, "ambient");
+      }
+
+      // Seed each non-dormant actor's view from its first tick, as the world engine seeds
+      // its fixtures (world-engine.ts). A member that starts dormant is omitted.
+      const initial = schedule.initialTicks();
+      const seedView = (
+        id: string,
+        kind: ActorView["kind"],
+        presence: Presence,
+        provenance: ActorProvenance,
+      ): void => {
+        views.set(id, { id, kind, presence, provenance });
+      };
+      for (const member of cast.members) {
+        const firstTick = initial.get(member.actor.id);
+        if (firstTick !== undefined) {
+          seedView(
+            member.actor.id,
+            member.kind,
+            member.initialPresence(firstTick),
+            member.provenance,
+          );
+        }
+      }
+      for (const fixture of ambientFixtures) {
+        const firstTick = initial.get(fixture.actor.id);
+        if (firstTick !== undefined) {
+          seedView(fixture.actor.id, fixture.kind, fixture.initialPresence(firstTick), "ambient");
+        }
+      }
+
+      // The OCC node id an occ-console command flash lands on (the console reading is
+      // OCC-only and carries no location of its own).
+      const occId = cast.env.world.controlCenter.id;
+      // The door and camera projections over the frozen env (ADR-0007): engine reducers,
+      // never scheduler actors. They drive the ambient door-contact and platform-camera
+      // readings, their flashes, and the crowd-density marks (world-engine.ts).
+      const doorReducer = createDoorReducer(DOOR_DWELL_TICKS);
+      const cameraReducer = createCameraReducer(CAMERA_WINDOW_TICKS);
+      const liveOfKind = (kind: ActorView["kind"]): number =>
+        [...views.values()].filter((view) => view.kind === kind).length;
+
+      let nextFlashId = 0;
+      // Fold one step: raise a flash per reading on its sensor's chip, overlay the
+      // presence deltas, then evict the actors that went dormant. A kiosk fail is a
+      // wrong-PIN "pinfail", a success a "signin"; the other sensor arms belong to the
+      // ambient cast.
+      const applyStep = (step: StepResult<WorldReading>): void => {
+        for (const timed of step.readings) {
+          const reading = timed.reading;
+          if (reading.sensor === "kiosk") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: reading.reading.outcome === "fail" ? "pinfail" : "signin",
+              node: kioskNodeId(reading.reading.station),
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "fare-gate") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "tap",
+              node: gateNodeId(reading.reading.station),
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "train-tracker") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "train",
+              node: reading.reading.station,
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "door-reader") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "grant",
+              node: readerNodeId(reading.reading.site),
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "tvm") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "topup",
+              node: tvmNodeId(reading.reading.station),
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "occ-console") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "command",
+              node: consoleNodeId(occId),
+              atTick: timed.tick,
+            });
+          } else if (reading.sensor === "network-relay") {
+            mapFlashes.push({
+              id: nextFlashId++,
+              kind: "packet",
+              node: relayNodeId(reading.reading.site),
+              atTick: timed.tick,
+            });
+          }
+          const provenance = provenanceById.get(timed.actorId) ?? "ambient";
+          // The scoring boundary (GH117-PLAN.md "Part D"): only a scored-scenario kiosk
+          // reading is formatted, dense-id-assigned, and offered to the pipeline. An
+          // ambient kiosk reading already raised its flash above but never enters the
+          // channels, so it can never bump the dense id or `admitted`. The id runs in
+          // emission order, matching the precomposed run parity guard 1 pins.
+          if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
+            scoredIngest.ingress.offer(scoredIngest.toEvent(timed, nextScoredEventId++));
+          }
+        }
+        for (const [id, presence] of step.presences) {
+          const view = views.get(id);
+          if (view !== undefined) {
+            views.set(id, { ...view, presence });
+          }
+        }
+        // Evict the dormant actor from both registries, or provenanceById grows with
+        // total admissions instead of live actors on a perpetual run. Safe: this
+        // step's readings (above) already read provenance before this loop runs, and
+        // ids are never reused (createSchedule reserves every startup id; the
+        // spawners mint monotonic ids), so no later actor can inherit a stale entry.
+        for (const id of step.dormant) {
+          views.delete(id);
+          provenanceById.delete(id);
+        }
+      };
+
+      // Run the door reducer for one tick over that tick's staff grants, AFTER the actor
+      // readings are logged. It closes doors past their dwell and opens the tick's grants;
+      // each open/close raises a flash on the door-contact chip. Refresh the open-door
+      // marks too.
+      const reduceDoors = (step: StepResult<WorldReading>, tick: number): void => {
+        const grants: { location: string; door: string }[] = [];
+        for (const timed of step.readings) {
+          if (timed.reading.sensor === "door-reader") {
+            grants.push({ location: timed.reading.reading.site, door: timed.reading.reading.door });
+          }
+        }
+        for (const event of doorReducer.step(grants, tick)) {
+          mapFlashes.push({
+            id: nextFlashId++,
+            kind: "door",
+            node: contactNodeId(event.location),
+            atTick: tick,
+          });
+        }
+        const openNodes = new Set(
+          doorReducer.openDoors().map((door) => contactNodeId(door.location)),
+        );
+        latestDoors = [...openNodes].map((node) => ({ node, open: true }));
+      };
+
+      // Run the camera reducer for one tick over that tick's fare-gate grants, AFTER the
+      // door reducer, so the fixed source order (actor, door, camera) holds. It counts the
+      // grants per gate over a rolling window and refreshes the crowd marks.
+      const reduceCamera = (step: StepResult<WorldReading>, tick: number): void => {
+        const grants: CameraGrant[] = [];
+        for (const timed of step.readings) {
+          if (timed.reading.sensor === "fare-gate" && timed.reading.reading.result === "ok") {
+            const station = timed.reading.reading.station;
+            const gate = gateIdForStation(station);
+            grants.push({ station, gate });
+          }
+        }
+        const counts = cameraReducer.step(grants, tick);
+        latestCrowds = counts.map((count) => ({
+          node: cameraNodeId(count.station),
+          persons: count.persons,
+          grants: count.grants,
+        }));
+      };
+
+      // Admit each ambient spawner's due births at the frontier and seed each view,
+      // tagging every admission `"ambient"`. Each spawner is capped by its own live count.
+      // Ticked at the post-advance frontier so an admission lands at or after it.
+      const spawnTransients = (frontier: number): void => {
+        const admit = (admissions: readonly Admission<WorldReading, WorldEnv>[]): void => {
+          for (const admission of admissions) {
+            const firstTick = schedule.admit(admission);
+            provenanceById.set(admission.actor.id, "ambient");
+            seedView(
+              admission.actor.id,
+              admission.kind,
+              admission.initialPresence(firstTick),
+              "ambient",
+            );
+          }
+        };
+        admit(ambient?.spawner?.tick(frontier, liveOfKind("rider")) ?? []);
+        admit(ambient?.staffSpawner?.tick(frontier, liveOfKind("staff")) ?? []);
+        admit(ambient?.accountSpawner?.tick(frontier, liveOfKind("account-rider")) ?? []);
+      };
+
+      // Drop flashes older than the window behind the current tick, so the list stays
+      // bounded on a perpetual run (world-engine.ts).
+      const pruneFlashes = (): void => {
+        const cutoff = mapNowTick - FLASH_WINDOW_TICKS;
+        let drop = 0;
+        while (drop < mapFlashes.length && (mapFlashes[drop]?.atTick ?? mapNowTick) < cutoff) {
+          drop += 1;
+        }
+        if (drop > 0) {
+          mapFlashes.splice(0, drop);
+        }
+      };
+
+      // Fold one whole game tick `tick` (the tick just becoming due): advance the schedule
+      // one integer tick, apply the readings, run the door then camera reducers over that
+      // tick's grants, admit the ambient spawners at the new frontier (tick + 1), then set
+      // the map's authoritative tick and prune the flash window.
+      const foldTick = (tick: number): void => {
+        const step = schedule.advanceTo(tick + 1);
+        applyStep(step);
+        reduceDoors(step, tick);
+        reduceCamera(step, tick);
+        spawnTransients(tick + 1);
+        mapNowTick = tick;
+        pruneFlashes();
+        // Scored horizon (GH117-PLAN.md "Part C"): once this tick reaches the last
+        // scored emission tick, every scored event for the run has been offered above,
+        // so close the ingress. The pipeline then drains, END_OF_STREAM fires
+        // scorer.finalize once, and the run concludes. Idempotent, so a later tick
+        // re-calling it is a no-op; no scored reading emits past the horizon, so no
+        // offer ever races an already-closed ingress.
+        if (scoredIngest && tick >= scoredIngest.lastScoredTick) {
+          scoredIngest.ingress.close();
+        }
+      };
+
+      // Tick zero: prime the schedule once at startup, before the clock loop, with
+      // foldTick(0) (advanceTo(1), NOT advanceTo(0), which emits nothing under the
+      // half-open rule). Any ts=0 reading is folded now; now() is still 0 here.
+      foldTick(0);
+
+      // The actor-stepping tick listener, registered FIRST — before the sampler and the
+      // checkpoint listener — so this tick's presence is already folded when the sampler
+      // publishes and the enqueue would sit ahead of admission (Part C). Each game tick
+      // folds now() (one integer tick), so a reading emitted on tick T carries atTick
+      // T <= nowTick. A throwing actor is a failed outcome, like a task.
+      clock.onTick(() => {
+        if (stopped) {
+          return;
+        }
+        try {
+          foldTick(clock?.now() ?? 0);
+        } catch (error) {
+          fail(error);
+        }
+      });
+    }
+
     // The inspector needs no ground truth, so the engine builds it directly. This
     // is a deliberate asymmetry with the scorer, which the run controller injects.
     const inspector = createInspector({ ringSize: RING_SIZE });
@@ -313,6 +814,13 @@ export function start(options: StartOptions): EngineHandle {
       scorer: options.scorer,
       inspector,
       nextEvent: options.generator,
+      // The live scored source replaces the pull schedule when injected (GH117 Part C).
+      ...(scoredIngest
+        ? {
+            pump: (out, tickClock, onAdmit): Promise<void> =>
+              scoredIngest.ingress.pump(out, tickClock, onAdmit),
+          }
+        : {}),
       serviceRate: options.serviceRate,
     };
     // Spawn one task per node, looked up by kind. A thrown Rule rejects its task
@@ -342,6 +850,7 @@ export function start(options: StartOptions): EngineHandle {
         getFailureReason: () => failureReason,
       },
       options.waves,
+      mapView,
     );
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it
@@ -376,15 +885,36 @@ export function start(options: StartOptions): EngineHandle {
         options.scorer.advanceTo(cp.atTick * GAME_SECONDS_PER_TICK);
         const queued = admitted - completed;
         const isFinal = nextCheckpoint === checkpoints.length - 1;
-        if (queued !== 0) {
+        const rolling = options.scorer.reading().rolling;
+        // The outcome this checkpoint state implies, computed once so the test-only
+        // observation seam (parity guard 2) and the terminal transitions read the same
+        // decision. `pass` clears an interim checkpoint; the other three are terminal.
+        const outcome: CheckpointOutcome =
+          queued !== 0
+            ? "queue"
+            : rolling < CORRECTNESS_FLOOR
+              ? "correctness"
+              : isFinal
+                ? "won"
+                : "pass";
+        options.onCheckpoint?.({
+          atTick: cp.atTick,
+          index: nextCheckpoint,
+          queued,
+          admitted,
+          completed,
+          correctness: rolling,
+          outcome,
+        });
+        if (outcome === "queue") {
           finishOutcome("failed", "queue");
           return;
         }
-        if (options.scorer.reading().rolling < CORRECTNESS_FLOOR) {
+        if (outcome === "correctness") {
           finishOutcome("failed", "correctness");
           return;
         }
-        if (isFinal) {
+        if (outcome === "won") {
           finishOutcome("won", null);
           return;
         }

@@ -55,7 +55,7 @@ export interface DoorReaderReading {
  * traffic toggles `open`/`close`; the `forced`/`held` values are for a later attack
  * ticket. The engine's door reducer emits these, never a scheduler actor.
  */
-export interface DoorContactReading {
+interface DoorContactReading {
   /** Game seconds. */
   ts: number;
   site: string;
@@ -90,7 +90,7 @@ interface TvmReading {
  * scheduler actor. `ts` is in game seconds; `gate` is the gate id the reducer groups
  * by, derived from `station` via `gateIdForStation`.
  */
-export interface CameraReading {
+interface CameraReading {
   /** Game seconds. */
   ts: number;
   station: string;
@@ -165,19 +165,4 @@ export interface WorldEnv {
    * pre-M6 tests build a valid env without it; the world controller always sets it.
    */
   control?: ControlReference;
-}
-
-/**
- * The engine's unified per-tick log entry. Every reading, whatever produced it, is
- * wrapped into this one type so a reducer always knows which tick a reading came
- * from. The source order is fixed each tick — actor readings first, then the door
- * reducer, then the camera reducer — so the combined stream is deterministic. M0
- * only produces `"actor"` entries; the reducer sources land in M3 and M5.
- */
-export interface TimedWorldReading {
-  reading: WorldReading;
-  tick: number;
-  source: "actor" | "door" | "camera";
-  /** Set for source `"actor"`: the actor that emitted the reading. */
-  actorId?: string;
 }

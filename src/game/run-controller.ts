@@ -19,15 +19,26 @@
  * the scorer, generator, service rate, and checkpoints into the engine. The engine
  * never builds them.
  */
+import type { ScenarioBlueprint } from "../sim/compose-scenario";
 import { createScorer, type ScorerConfig } from "../sim/correctness";
+import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
-import type { Scenario } from "../sim/scenario";
+import type { GeneratedRun, Scenario } from "../sim/scenario";
+import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import type { WorldEnv } from "../sim/world-reading";
 import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
-import { type EngineHandle, type StartOptions, start as startDefault } from "./engine";
+import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
+import {
+  type AmbientCast,
+  type EngineHandle,
+  type ScenarioCast,
+  type StartOptions,
+  start as startDefault,
+} from "./engine";
 import { tabHidden } from "./profiler/guard";
 import { profile, spawnProfilerWorker } from "./profiler/profile";
 import { serviceRateForCode } from "./profiler/quantize";
@@ -102,6 +113,16 @@ export interface RunController {
 
 export interface RunControllerDeps {
   scenario: Scenario;
+  /**
+   * Build the scenario's immutable blueprint for a seed (GH117-PLAN.md "Part B").
+   * Injected, not read off `scenario`, so a test scenario that has none simply omits
+   * it. When present, the controller builds the blueprint once: the scorer and the
+   * pre-generated generator come from its precomposed run (byte for byte what
+   * `scenario.generate(seed)` returns), and the SAME blueprint yields the instantiated
+   * live cast plus env the engine steps for the map. Omitted, the controller falls back
+   * to `generate` and runs with no cast — scoring is identical either way.
+   */
+  buildBlueprint?: (seed: number) => ScenarioBlueprint<{ id: number }>;
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
   /**
    * The in-game editor's source string. The controller derives the loader, the
@@ -369,6 +390,49 @@ function makeWorkerResolveServiceRate(
   };
 }
 
+/**
+ * Assemble the whole living metro the engine steps for the map (GH117-PLAN.md "Part B"):
+ * the scored scenario cast plus the ambient life, over ONE shared env and seed.
+ *
+ * The scenario cast comes from the blueprint: `instantiate()` builds fresh actors in
+ * descriptor order, each pairing by index with its descriptor's `kind`, `provenance`, and
+ * `initialPresence`. The ambient cast (trains, operators, hosts, and the three spawners)
+ * is built from the same world and seed. Both step over one env: the blueprint's env,
+ * augmented with `control`, which the ambient operators and hosts read. Adding `control`
+ * cannot move a scenario reading — the scenario actors read no env — so the precompose's
+ * parity holds. `runSeed` seeds the shared schedule, matching the batch path's seeding.
+ */
+function buildMapCast(
+  blueprint: ScenarioBlueprint<{ id: number }>,
+  runSeed: number,
+): { scenarioCast: ScenarioCast; ambientCast: AmbientCast } {
+  const actors = blueprint.instantiate();
+  const members = actors.map((actor, i) => {
+    const descriptor = blueprint.descriptors[i];
+    if (descriptor === undefined) {
+      throw new Error(
+        `run-controller: instantiate() returned ${actors.length} actors but the blueprint has ` +
+          `${blueprint.descriptors.length} descriptors; they must align by index.`,
+      );
+    }
+    return {
+      actor,
+      kind: descriptor.kind,
+      provenance: descriptor.provenance,
+      initialPresence: descriptor.initialPresence,
+    };
+  });
+  // One env for the whole cast: the blueprint's, plus the control-room reference the
+  // ambient operator and host fixtures read. Scenario actors ignore it, so parity holds.
+  const env: WorldEnv = { ...blueprint.env, control: controlReference };
+  const world = env.world;
+  const ambientCast: AmbientCast = {
+    fixtures: buildAmbientFixtures(world, env.timetable),
+    ...buildAmbientSpawners(world, runSeed),
+  };
+  return { scenarioCast: { members, env, runSeed }, ambientCast };
+}
+
 export function createRunController(deps: RunControllerDeps): RunController {
   const load = deps.loadAlgorithm ?? loadAlgorithmDefault;
   const spawn = deps.spawnProfilerWorker ?? spawnProfilerWorker;
@@ -470,11 +534,35 @@ export function createRunController(deps: RunControllerDeps): RunController {
       // or replaced, so a failed dry-run never orphans the running engine.
       let phase = "setup";
       try {
-        const generated = deps.scenario.generate(seed); // fresh per run
+        // Build the blueprint once when the scenario provides one (GH117 Part B). The
+        // scorer and generator come from its precomposed run — byte for byte what
+        // `generate(seed)` returns — and the same blueprint yields the live cast + env.
+        // A scenario without a blueprint falls back to `generate` and runs with no cast.
+        const blueprint = deps.buildBlueprint?.(seed) ?? null;
+        const generated: GeneratedRun = blueprint
+          ? {
+              events: [...blueprint.precomposed.events],
+              attacks: [...blueprint.precomposed.attacks],
+              checkpoints: [...blueprint.checkpoints],
+              waves: [...blueprint.waves],
+            }
+          : deps.scenario.generate(seed); // fresh per run
         const scorer = createScorer(generated.attacks, SCORER_CONFIG);
         let index = 0;
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
+        const mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
+        // GH117 Part C: when a blueprint drives a live cast, score off the live stepped
+        // stream, not the pre-generated `generator`. The engine offers each scored
+        // reading into this ingress and closes it at `lastScoredTick`; `generator`
+        // stays wired as the no-blueprint fallback. Guard 2 proves the two agree.
+        const scoredIngest = blueprint
+          ? {
+              ingress: new ScoredIngress(),
+              toEvent: blueprint.toEvent,
+              lastScoredTick: blueprint.lastScoredTick,
+            }
+          : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
@@ -488,6 +576,10 @@ export function createRunController(deps: RunControllerDeps): RunController {
           serviceRate,
           checkpoints: generated.checkpoints,
           waves: generated.waves,
+          ...(mapCast
+            ? { scenarioCast: mapCast.scenarioCast, ambientCast: mapCast.ambientCast }
+            : {}),
+          ...(scoredIngest ? { scoredIngest } : {}),
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;

@@ -5,42 +5,12 @@ import { referenceSource } from "../game/engine-source";
 import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
-import type { WorldRunController } from "../game/world-run-controller";
-import type { CaughtDecision, LiveFinding } from "../sim/correctness";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
-
-/** A minimal hit LiveFinding fixture; a round-trip test only needs its seq and eventIds. */
-function liveFinding(seq: number, eventIds: number[]): LiveFinding {
-  return {
-    finding: { alert: { reason: "brute", at: 0, eventIds }, eventId: eventIds[0] ?? seq },
-    state: "hit",
-    reason: "brute",
-    eventIds,
-    at: 0,
-    seq,
-    citedEvents: [],
-  };
-}
-
-/** A minimal CaughtDecision fixture, crediting the given live row. */
-function caughtDecision(liveSeq: number): CaughtDecision {
-  return {
-    outcome: "caught",
-    seq: 0,
-    at: 0,
-    attackId: 1,
-    entity: "acct-1",
-    finding: { alert: { reason: "brute", at: 0, eventIds: [1] }, eventId: 1 },
-    citedEvents: [],
-    resolvedAt: 0,
-    liveSeq,
-  };
-}
 
 // The zustand store is a singleton shared across test files, so reset the fields
 // this file reads before each test. Mirrors the reset pattern in store.test.ts.
@@ -85,26 +55,6 @@ function stubController(): RunController & {
     },
     setSpeed(speed) {
       speedCalls.push(speed);
-    },
-    dispose() {
-      disposes += 1;
-    },
-  };
-}
-
-/** A no-op world controller, the same shape as the real one. */
-function stubWorldController(): WorldRunController & { runs: number; disposes: number } {
-  let runs = 0;
-  let disposes = 0;
-  return {
-    get runs() {
-      return runs;
-    },
-    get disposes() {
-      return disposes;
-    },
-    run() {
-      runs += 1;
     },
     dispose() {
       disposes += 1;
@@ -357,60 +307,35 @@ describe("App onboarding", () => {
   });
 });
 
-describe("App view toggle", () => {
-  it("builds the pipeline loop on mount and not the world loop", () => {
+describe("App map toggle (GH117: one engine, the map is a display toggle)", () => {
+  it("builds the one pipeline loop on mount", () => {
     const pipes: ReturnType<typeof stubController>[] = [];
-    const worlds: ReturnType<typeof stubWorldController>[] = [];
     render(
       <App
         createPipelineController={() => {
           const stub = stubController();
           pipes.push(stub);
-          return stub;
-        }}
-        createWorldController={() => {
-          const stub = stubWorldController();
-          worlds.push(stub);
           return stub;
         }}
       />,
     );
     expect(pipes).toHaveLength(1);
     expect(pipes[0]?.runs).toBe(1);
-    expect(worlds).toHaveLength(0);
   });
 
-  it("disposes the pipeline loop and builds the world loop on toggle to metro", () => {
-    const pipes: ReturnType<typeof stubController>[] = [];
-    const worlds: ReturnType<typeof stubWorldController>[] = [];
-    render(
-      <App
-        createPipelineController={() => {
-          const stub = stubController();
-          pipes.push(stub);
-          return stub;
-        }}
-        createWorldController={() => {
-          const stub = stubWorldController();
-          worlds.push(stub);
-          return stub;
-        }}
-      />,
+  it("renders the Hud, the map region, and the inspector shell together, map between Hud and the inspector", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    expect(container.querySelector(".hud")).not.toBeNull();
+    expect(container.querySelector(".metro-view")).not.toBeNull();
+    expect(container.querySelector(".inspector-shell")).not.toBeNull();
+    // querySelectorAll returns matches in document order, so this list IS the order.
+    const classes = [...container.querySelectorAll(".hud, .metro-view, .inspector-shell")].map(
+      (el) => el.className,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
-    // The pipeline loop is disposed; a fresh world loop is built and run.
-    expect(pipes[0]?.disposes).toBe(1);
-    expect(worlds).toHaveLength(1);
-    expect(worlds[0]?.runs).toBe(1);
-    // The metro chrome is on screen now.
-    expect(screen.getByText("LIVING METRO")).toBeDefined();
+    expect(classes).toEqual(["hud", "metro-view", "inspector-shell"]);
   });
 
-  it("seeds a freshly built pipeline controller from the store transport after a view round-trip", () => {
-    // A Metro round-trip builds a new pipeline controller; the reflection effects keyed
-    // on [frozen]/[speed] do not re-fire on a view change, so the effect must seed the
-    // fresh controller itself. Otherwise it would run unfrozen at 1x under a frozen/2x panel.
-    useGameStore.setState({ transport: { frozen: true, speed: 2 } });
+  it("shows the map region by default and hides it on toggle, without touching the pipeline loop", () => {
     const pipes: ReturnType<typeof stubController>[] = [];
     render(
       <App
@@ -419,77 +344,19 @@ describe("App view toggle", () => {
           pipes.push(stub);
           return stub;
         }}
-        createWorldController={() => stubWorldController()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
-    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
-    expect(pipes).toHaveLength(2);
-    const rebuilt = pipes[1];
-    expect(rebuilt).toBeDefined();
-    if (!rebuilt) return;
-    expect(rebuilt.frozenCalls).toContain(true);
-    expect(rebuilt.speedCalls).toContain(2);
-  });
+    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
 
-  it("fires no FX replay burst across a Metro-to-Pipeline re-entry after findings already landed", () => {
-    useGameStore.setState({
-      snapshot: {
-        ...emptySnapshot(),
-        findings: [liveFinding(1, [10])],
-        decisions: [caughtDecision(1)],
-      },
-    });
-    render(
-      <App
-        createPipelineController={() => stubController()}
-        createWorldController={() => stubWorldController()}
-      />,
-    );
-    // Mounting FxLayer over an already-populated store fires nothing (F004 fix).
-    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
-    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
+    expect(screen.queryByRole("img", { name: "Metro network map" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
+    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
 
-    // The pipeline teardown reset the snapshot to empty (F024) on the way out above.
-    // Repopulate it before re-entering, so the fresh FxLayer built on re-entry mounts
-    // over a genuinely populated store — the F004 scenario this test is named for —
-    // rather than an empty one that would pass this assertion trivially.
-    useGameStore.setState({
-      snapshot: {
-        ...emptySnapshot(),
-        findings: [liveFinding(2, [20])],
-        decisions: [caughtDecision(2)],
-      },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
-
-    // The fresh FxLayer seeds its mount baseline from that already-populated store,
-    // the same as the very first mount above, so re-entry fires nothing either.
-    expect(screen.queryAllByTestId("fx-comet")).toHaveLength(0);
-    expect(screen.queryAllByTestId("fx-pop")).toHaveLength(0);
-  });
-
-  it("resets the findings panel to the empty state on pipeline re-entry, before the new controller commits (F024)", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), findings: [liveFinding(1, [10])] },
-    });
-    render(
-      <App
-        createPipelineController={() => stubController()}
-        createWorldController={() => stubWorldController()}
-      />,
-    );
-    expect(screen.queryByText("No findings yet")).toBeNull(); // the landed finding shows
-
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
-    fireEvent.click(screen.getByRole("button", { name: "Pipeline view" }));
-
-    // The stub controller's run() never calls setSnapshot, so this proves the teardown
-    // reset repainted the empty state itself, not a real engine commit.
-    expect(screen.getByText("No findings yet")).toBeDefined();
+    // Never rebuilt or disposed across either toggle: the one engine keeps running.
+    expect(pipes).toHaveLength(1);
+    expect(pipes[0]?.disposes).toBe(0);
   });
 
   it("builds a fresh controller per epoch under strict-mode double invoke", () => {
@@ -502,7 +369,6 @@ describe("App view toggle", () => {
             pipes.push(stub);
             return stub;
           }}
-          createWorldController={() => stubWorldController()}
         />
       </StrictMode>,
     );
