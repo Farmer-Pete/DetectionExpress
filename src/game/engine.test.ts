@@ -833,6 +833,42 @@ describe("engine publishes decisions bound to the inspector ring (T10)", () => {
   });
 });
 
+// Freeze-on-raise: a live finding's own citedEvents, resolved against the inspector ring
+// at capture time and carried on the row itself (LiveFinding.citedEvents), so its trace
+// need not resolve against the churning ring later.
+describe("engine publishes a live finding's citedEvents, resolved against the inspector ring", () => {
+  it("carries citedEvents on a live finding, observed mid-run, before finalize clears it", async () => {
+    const alertingAlgorithm: TaskAlgorithm = {
+      normalize: (raw) => raw,
+      detect: () => [{ alert: { reason: "pin_brute_force", at: 0, eventIds: [0] }, eventId: 0 }],
+    };
+    // A far-future second Event keeps Ingest's source open (it never returns null), so
+    // the run never reaches end-of-stream and finalize() — which clears the whole live
+    // set — never fires during this test. That is the only way to observe a live
+    // finding's citedEvents at all: by the time a real run terminates, the row is gone.
+    let sent = 0;
+    const openSource = (): PipeEvent => {
+      sent += 1;
+      return sent === 1 ? ev(0, 0, { acct: "x" }) : ev(999, 1_000_000, { acct: "x" });
+    };
+    const h = launch({
+      generator: openSource,
+      algorithm: alertingAlgorithm,
+      checkpoints: deadlineAt(1_000_000),
+    });
+    await step(h.driver, 5);
+    const midway = h.last();
+    expect(midway).toBeDefined();
+    if (!midway) return;
+    expect(midway.status).toBe("running"); // still open: finalize has not run
+    expect(midway.findings).toHaveLength(1);
+    expect(midway.findings[0]?.citedEvents).toHaveLength(1);
+    expect(midway.findings[0]?.citedEvents[0]).toMatchObject({ id: 0, endpoint: "kiosk-v1" });
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+});
+
 // GH37-PLAN.md: the scorer's decision log rides along in the same snapshot.
 describe("engine publishes the scorer's decision log", () => {
   it("carries every decision the reference run resolves, in the final snapshot", async () => {

@@ -178,6 +178,14 @@ export interface LiveFinding {
   at: number;
   /** Stable insertion id for the UI. */
   seq: number;
+  /**
+   * The cited events, resolved through the bound resolver and ACCUMULATED across this
+   * row's emissions (merge, never replace): each upsert keeps the events already held
+   * for ids still cited and adds newly resolvable ids. Frozen with the entry. Empty when
+   * no resolver is bound. An id never resolvable while it was captured is simply absent,
+   * the same contract as a decision's `citedEvents` and the trace's aged-out placeholder.
+   */
+  citedEvents: readonly RingEvent[];
 }
 
 export interface Scorer {
@@ -449,6 +457,20 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
         : JSON.stringify(["anchor", finding.eventId, finding.alert.reason]);
     const existing = live.get(key);
     const seq = existing ? existing.seq : nextLiveSeq++;
+    // Merge, do not replace (see the LiveFinding.citedEvents doc). Prefer an event already
+    // captured (resolved when the ring still held it) over a fresh resolve, which may miss an
+    // early id the ring has since evicted. Drop ids no longer cited; omit ids never resolved.
+    const prior = existing?.citedEvents ?? [];
+    const priorById = new Map(prior.map((e) => [e.id, e]));
+    const freshById = new Map(resolveEvents(finding.alert.eventIds).map((e) => [e.id, e]));
+    const citedEvents: RingEvent[] = [];
+    const seen = new Set<number>();
+    for (const id of finding.alert.eventIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const event = priorById.get(id) ?? freshById.get(id);
+      if (event !== undefined) citedEvents.push(event);
+    }
     const entry: LiveFinding = {
       finding,
       state: liveState,
@@ -456,6 +478,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       eventIds: finding.alert.eventIds,
       at: ts,
       seq,
+      citedEvents,
     };
     if (scored.entity !== undefined) {
       entry.entity = scored.entity;

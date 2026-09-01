@@ -23,6 +23,7 @@ function liveFinding(seq: number, eventIds: number[]): LiveFinding {
     eventIds,
     at: 0,
     seq,
+    citedEvents: [],
   };
 }
 

@@ -413,6 +413,48 @@ body {
   background: color-mix(in srgb, var(--a1) 18%, var(--panel));
 }
 
+/* Single-finding card: the whole card is one button, so a click anywhere on it —
+   including the entity header that was previously dead space — selects the finding.
+   The button itself is transparent chrome; `.findings-card-line` keeps the row's inset
+   pill look and carries the hover/selected affordance, matching `.findings-row`. */
+.findings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.findings-card .findings-group-head {
+  margin-bottom: 0;
+}
+
+.findings-card-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 0.82rem;
+}
+
+.findings-card:hover .findings-card-line {
+  border-color: var(--line);
+}
+
+.findings-card[aria-pressed="true"] .findings-card-line {
+  border-color: var(--a1);
+  background: color-mix(in srgb, var(--a1) 18%, var(--panel));
+}
+
 .findings-state {
   flex: 0 0 auto;
   padding: 0.05rem 0.4rem;
@@ -1675,13 +1717,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  flex: 1 1 auto;
-  /* Bound the row list so up to RING_SIZE rows scroll inside the panel instead of
-     growing the page. The sticky "engine N behind" bar is a child of this element,
-     so it pins to the bottom of this scroll area. min-height:0 lets it shrink in the
-     flex column; the max-height caps it even when no ancestor gives a definite height. */
+  /* Fill the card instead of stopping at a fixed height. `flex: 1 1 0` grows the
+     stream to fill whatever height `.inspector-stream` is stretched to (the grid
+     row is sized by the taller findings column beside it), while a `0` basis keeps
+     the row list's own content OUT of the intrinsic-height calc, so the log never
+     drives the row taller — it conforms to it. `min-height: 0` + `overflow-y: auto`
+     scroll the up-to-RING_SIZE rows inside the card rather than growing the page.
+     The sticky "engine N behind" bar is a child, so it pins to this scroll area's
+     bottom. The `.inspector-shell` min-height gives a definite floor when the
+     findings column is short (or in isolated tests), so the stream still has a
+     height to fill. */
+  flex: 1 1 0;
   min-height: 0;
-  max-height: clamp(220px, 40vh, 360px);
   overflow-y: auto;
 }
 

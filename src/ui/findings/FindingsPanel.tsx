@@ -128,36 +128,103 @@ interface GroupCardProps {
   onSelect: (seq: number) => void;
 }
 
-/** One entity's card: an entity chip, an agreement badge, and its rows. */
+/** The entity chip and agreement badge shared by a card's finding(s). */
+function GroupHead({ group }: { group: FindingGroup }) {
+  return (
+    <span className="findings-group-head">
+      {group.entity !== null ? (
+        <span className="findings-entity-chip">
+          {group.entityKind !== undefined ? (
+            <>
+              <span className="findings-entity-kind">{group.entityKind}</span>
+              {/* A spoken separator so a screen reader does not run the kind and the
+                  value together, e.g. "account acct-7". */}
+              <span className="visually-hidden">: </span>
+            </>
+          ) : null}
+          <span className="findings-entity-value">{group.entity}</span>
+        </span>
+      ) : (
+        <span className="findings-entity-chip findings-entity-chip--solo">Unresolved</span>
+      )}
+      {group.agreement ? (
+        <span className="findings-agreement" title="Two hunts agree on this entity">
+          Agreement
+          {/* The visible word carries the signal; this spells it out for a screen
+              reader, since a title tooltip is not reliably announced. */}
+          <span className="visually-hidden"> — two hunts corroborate this entity</span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** A finding's state chip, its label, and its cited count — the clickable line. */
+function RowBody({ row }: { row: FindingRow }) {
+  return (
+    <>
+      <span
+        className={
+          row.state === "hit"
+            ? "findings-state findings-state--hit"
+            : "findings-state findings-state--watch"
+        }
+      >
+        {stateLabel(row.state)}
+      </span>
+      <span className="findings-label">{row.label}</span>
+      <span className="findings-cited">
+        {row.citedCount}
+        <span className="visually-hidden"> cited events</span>
+      </span>
+    </>
+  );
+}
+
+/**
+ * One entity's card. In the common case a group holds a single finding, so the WHOLE
+ * card is one button: a click anywhere on it — including the account header, which was
+ * previously dead space above the row — selects the finding. A group holding two or
+ * more findings keeps the shared entity header above one button per row, since the card
+ * then maps to several distinct selectable findings and a card-wide button could not say
+ * which one a click meant.
+ */
 function FindingGroupCard({ group, selectedSeq, onSelect }: GroupCardProps) {
   const selected = group.rows.some((row) => row.seq === selectedSeq);
+  const className = selected ? "findings-group is-selected" : "findings-group";
+
+  const [only] = group.rows;
+  if (group.rows.length === 1 && only !== undefined) {
+    const row = only;
+    const rowSelected = row.seq === selectedSeq;
+    return (
+      <li className={className}>
+        <button
+          type="button"
+          className="findings-card"
+          aria-pressed={rowSelected}
+          // T12's FxLayer measures this element's rect to anchor a caught/false pop and
+          // comet; see GH37-PLAN.md "Comets and pops".
+          data-finding-seq={row.seq}
+          onClick={(event) => {
+            // Force focus so TraceOverlay's trigger-capture works in Safari too; see
+            // FindingRowItem for the full note.
+            event.currentTarget.focus();
+            onSelect(row.seq);
+          }}
+        >
+          <GroupHead group={group} />
+          <span className="findings-card-line">
+            <RowBody row={row} />
+          </span>
+        </button>
+      </li>
+    );
+  }
+
   return (
-    <li className={selected ? "findings-group is-selected" : "findings-group"}>
-      <div className="findings-group-head">
-        {group.entity !== null ? (
-          <span className="findings-entity-chip">
-            {group.entityKind !== undefined ? (
-              <>
-                <span className="findings-entity-kind">{group.entityKind}</span>
-                {/* A spoken separator so a screen reader does not run the kind and the
-                    value together, e.g. "account acct-7". */}
-                <span className="visually-hidden">: </span>
-              </>
-            ) : null}
-            <span className="findings-entity-value">{group.entity}</span>
-          </span>
-        ) : (
-          <span className="findings-entity-chip findings-entity-chip--solo">Unresolved</span>
-        )}
-        {group.agreement ? (
-          <span className="findings-agreement" title="Two hunts agree on this entity">
-            Agreement
-            {/* The visible word carries the signal; this spells it out for a screen
-                reader, since a title tooltip is not reliably announced. */}
-            <span className="visually-hidden"> — two hunts corroborate this entity</span>
-          </span>
-        ) : null}
-      </div>
+    <li className={className}>
+      <GroupHead group={group} />
       <ul className="findings-rows">
         {group.rows.map((row) => (
           <FindingRowItem
@@ -199,20 +266,7 @@ function FindingRowItem({ row, selected, onSelect }: RowProps) {
           onSelect(row.seq);
         }}
       >
-        <span
-          className={
-            row.state === "hit"
-              ? "findings-state findings-state--hit"
-              : "findings-state findings-state--watch"
-          }
-        >
-          {stateLabel(row.state)}
-        </span>
-        <span className="findings-label">{row.label}</span>
-        <span className="findings-cited">
-          {row.citedCount}
-          <span className="visually-hidden"> cited events</span>
-        </span>
+        <RowBody row={row} />
       </button>
     </li>
   );

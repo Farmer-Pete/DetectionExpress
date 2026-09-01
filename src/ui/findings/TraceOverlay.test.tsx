@@ -42,6 +42,9 @@ interface LiveOverrides {
   state?: "hit" | "watch";
   at?: number;
   context?: Context;
+  /** The finding's own frozen evidence; finding mode resolves cards against this,
+   *  never `snapshot.events`. Defaults to `[]` (every cited id ages out). */
+  citedEvents?: RingEvent[];
 }
 
 /** One LiveFinding, grouped on "account" when `entity` is given, matching FindingsPanel's
@@ -61,6 +64,7 @@ function live(over: LiveOverrides): LiveFinding {
     eventIds: over.eventIds,
     at: over.at ?? 5,
     seq: over.seq,
+    citedEvents: over.citedEvents ?? [],
   };
   if (over.entity !== undefined) {
     result.entity = over.entity;
@@ -184,17 +188,21 @@ describe("TraceOverlay", () => {
   });
 
   it("renders one card per cited event, raw over normalized, pretty-printed, with its endpoint, time, and payload labels", () => {
-    publish(
-      [live({ seq: 1, eventIds: [3], entity: "acct-1" })],
-      [
-        ringEvent(3, {
-          ts: 30,
-          endpoint: "kiosk-v1",
-          raw: { acct: "amy" },
-          normalized: { account: "amy" },
-        }),
-      ],
-    );
+    publish([
+      live({
+        seq: 1,
+        eventIds: [3],
+        entity: "acct-1",
+        citedEvents: [
+          ringEvent(3, {
+            ts: 30,
+            endpoint: "kiosk-v1",
+            raw: { acct: "amy" },
+            normalized: { account: "amy" },
+          }),
+        ],
+      }),
+    ]);
     openTraceByClick(/pin brute force/i);
     const dialog = screen.getByRole("dialog");
     const inDialog = within(dialog);
@@ -211,8 +219,8 @@ describe("TraceOverlay", () => {
     );
   });
 
-  it("renders an aged-out placeholder card for a cited id evicted from the ring", () => {
-    publish([live({ seq: 1, eventIds: [0, 1], entity: "acct-1" })], [ringEvent(1)]);
+  it("renders an aged-out placeholder card for a cited id never resolved into citedEvents", () => {
+    publish([live({ seq: 1, eventIds: [0, 1], entity: "acct-1", citedEvents: [ringEvent(1)] })]);
     openTraceByClick(/pin brute force/i);
     expect(screen.getByText(/aged out of the recent stream/i)).toBeDefined();
   });
@@ -261,7 +269,7 @@ describe("TraceOverlay", () => {
   });
 
   it("does not dismiss when a gesture starts inside the dialog and ends on the backdrop", () => {
-    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1", citedEvents: [ringEvent(3)] })]);
     openTraceByClick(/pin brute force/i);
     const dialog = screen.getByRole("dialog");
     const pre = dialog.querySelector(".trace-card-raw");
@@ -281,7 +289,7 @@ describe("TraceOverlay", () => {
   });
 
   it("does not dismiss when a gesture starts on the backdrop but ends inside the dialog (F003)", () => {
-    publish([live({ seq: 1, eventIds: [3], entity: "acct-1" })], [ringEvent(3)]);
+    publish([live({ seq: 1, eventIds: [3], entity: "acct-1", citedEvents: [ringEvent(3)] })]);
     openTraceByClick(/pin brute force/i);
     const dialog = screen.getByRole("dialog");
     const pre = dialog.querySelector(".trace-card-raw");

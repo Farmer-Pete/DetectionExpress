@@ -237,6 +237,22 @@ export const useGameStore = create<GameState>((set) => ({
   bumpRunToken: () => set((s) => ({ runToken: s.runToken + 1 })),
 }));
 
+declare global {
+  interface Window {
+    /** Dev-only store handle, set just below. Absent in the production build. */
+    __store?: typeof useGameStore;
+  }
+}
+
+// Dev-only console handle for the store. It strips out of the production build,
+// where `import.meta.env.DEV` inlines to `false`. Use it to debug state churn from
+// the browser console. `__store.getState()` reads a snapshot. `__store.subscribe`
+// logs each change. Wrap a setter to stack-trace who calls it. This is a debugging
+// aid, never a code path: nothing in the app reads `window.__store`.
+if (import.meta.env.DEV) {
+  window.__store = useGameStore;
+}
+
 /**
  * The fixed topology, mapped to the validator's shape for the engine. Each call
  * returns fresh arrays of fresh objects, so no consumer can mutate the shared
