@@ -15,9 +15,6 @@ coverage
 *.local
 *.tgz
 
-# Dev-host output: Algorithm files the local host writes into the developer's cwd
-/algorithms/
-
 # TypeScript incremental build info
 *.tsbuildinfo
 

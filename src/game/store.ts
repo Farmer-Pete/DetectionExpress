@@ -48,23 +48,17 @@ interface GameState {
   snapshot: SimSnapshot;
   /** The player's Algorithm source. The editor edits it; the run controller loads it. */
   source: string;
-  /**
-   * The active local-IDE override, or null in in-game-editor (source) mode. Set by the
-   * dev-only algorithms client when a watched file changes; the App reads it to choose a
-   * url-mode `AlgorithmSource` over the in-game `source`. Dev-only in practice, but
-   * generic and harmless in the static build (always null).
-   */
-  localAlgorithm: { path: string; version: number } | null;
   /** The deterministic level seed for the run. */
   seed: number;
   /** The current run or Rule error, or null. The editor shows it. */
   error: RuleErrorInfo | null;
   /**
-   * True while an external source drives the run (a local-IDE file, hot-reloaded by the
-   * algorithms-hmr plugin), so the editor locks its textarea. Generic, not dev-specific:
-   * the production build carries it too, always false and harmless.
+   * True while any overlay (the side panel, the intro, the trace dialog) is open.
+   * Published by `App`'s `modalOpen` derivation. The `LogPanel` Space shortcut reads
+   * it to bail while an overlay owns the run, since its window listener ignores the
+   * inert shell.
    */
-  sourceLocked: boolean;
+  overlayOpen: boolean;
   /**
    * True while a `run()` loads and profiles a source (the Apply dry-run, app mount, or
    * a dev hot-reload). The editor disables Apply and reads "Checking..." while it holds.
@@ -98,9 +92,9 @@ interface GameState {
   runToken: number;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setAlgorithmSource: (source: string) => void;
-  setLocalAlgorithm: (value: { path: string; version: number } | null) => void;
   setError: (error: RuleErrorInfo | null) => void;
-  setSourceLocked: (locked: boolean) => void;
+  /** Sets the overlay-open flag. */
+  setOverlayOpen: (open: boolean) => void;
   setRunPending: (pending: boolean) => void;
   /**
    * Select a finding by seq. Re-selecting the same seq clears the selection.
@@ -141,10 +135,9 @@ interface GameState {
 export const useGameStore = create<GameState>((set) => ({
   snapshot: emptySnapshot(),
   source: referenceSource,
-  localAlgorithm: null,
   seed: LEVEL_SEED,
   error: null,
-  sourceLocked: false,
+  overlayOpen: false,
   runPending: false,
   selection: null,
   decisionSelection: null,
@@ -177,9 +170,8 @@ export const useGameStore = create<GameState>((set) => ({
       return next;
     }),
   setAlgorithmSource: (source) => set({ source }),
-  setLocalAlgorithm: (localAlgorithm) => set({ localAlgorithm }),
   setError: (error) => set({ error }),
-  setSourceLocked: (locked) => set({ sourceLocked: locked }),
+  setOverlayOpen: (open) => set({ overlayOpen: open }),
   setRunPending: (pending) => set({ runPending: pending }),
   // The dialog is single, so selecting either kind always clears the other. A
   // selection is stored only for a seq present in the current snapshot, so

@@ -9,10 +9,9 @@ beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
     source: referenceSource,
-    localAlgorithm: null,
     seed: LEVEL_SEED,
     error: null,
-    sourceLocked: false,
+    overlayOpen: false,
     runPending: false,
     selection: null,
     decisionSelection: null,
@@ -110,23 +109,12 @@ describe("store", () => {
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
   });
 
-  it("starts in source mode and holds a local override through setLocalAlgorithm", () => {
-    expect(useGameStore.getState().localAlgorithm).toBeNull();
-    useGameStore.getState().setLocalAlgorithm({ path: "/src/algorithms/kiosk.ts", version: 4 });
-    expect(useGameStore.getState().localAlgorithm).toEqual({
-      path: "/src/algorithms/kiosk.ts",
-      version: 4,
-    });
-    useGameStore.getState().setLocalAlgorithm(null);
-    expect(useGameStore.getState().localAlgorithm).toBeNull();
-  });
-
-  it("starts unlocked and toggles the source lock through setSourceLocked", () => {
-    expect(useGameStore.getState().sourceLocked).toBe(false);
-    useGameStore.getState().setSourceLocked(true);
-    expect(useGameStore.getState().sourceLocked).toBe(true);
-    useGameStore.getState().setSourceLocked(false);
-    expect(useGameStore.getState().sourceLocked).toBe(false);
+  it("starts closed and toggles the overlay-open flag through setOverlayOpen", () => {
+    expect(useGameStore.getState().overlayOpen).toBe(false);
+    useGameStore.getState().setOverlayOpen(true);
+    expect(useGameStore.getState().overlayOpen).toBe(true);
+    useGameStore.getState().setOverlayOpen(false);
+    expect(useGameStore.getState().overlayOpen).toBe(false);
   });
 
   it("starts with no run pending and toggles it through setRunPending", () => {

@@ -34,15 +34,6 @@ pnpm run build     # production build
 ## Rewrite the engine (optional)
 
 The game ships one finished engine, composed from the scenario rules. Progression never
-needs you to touch it, but if you want to, there are two ways to edit the same engine.
-
-- **In the game.** The in-game editor holds the assembled JavaScript engine. Edit it and
-  press Run.
-- **In your own editor.** Run `pnpm run dev`, press "Edit in IDE" in the game, and edit the
-  single override at `src/algorithms/engine.ts`. It is real TypeScript, so your editor
-  type-checks it as you write. Vite hot-reloads each save into the running game.
-  `src/algorithms/` is gitignored, so your files never get committed. The checked-in default
-  it overrides is `src/game/default-engine.ts`.
-
-`pnpm run typecheck` checks your algorithm too, so a type error fails locally the same way your
-editor flags it. See `docs/adr/0008-native-algorithm-hot-reload.md` for how it works.
+needs you to touch it, but if you want to, open the Algorithm tab of the side panel. It
+holds the assembled JavaScript engine as editable text. Edit it and press Apply: a failed
+edit shows its error in the panel and leaves the running engine untouched.

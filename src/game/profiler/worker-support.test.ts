@@ -11,30 +11,18 @@ import { adaptLoaded, parseRequest } from "./worker-support";
  * helpers the run-time Detect task uses. See GH3-PLAN.md section 6.5.
  */
 describe("parseRequest", () => {
-  it("accepts a well-formed url-target request", () => {
-    const request = { target: { kind: "url", url: "src/algorithms/kiosk.ts?v=2" }, hidden: false };
+  it("accepts a well-formed request", () => {
+    const request = { source: "export const detect = () => []", hidden: true };
     expect(parseRequest(request)).toEqual({
-      target: { kind: "url", url: "src/algorithms/kiosk.ts?v=2" },
-      hidden: false,
-    });
-  });
-
-  it("accepts a well-formed source-target request", () => {
-    const request = {
-      target: { kind: "source", source: "export const detect = () => []" },
-      hidden: true,
-    };
-    expect(parseRequest(request)).toEqual({
-      target: { kind: "source", source: "export const detect = () => []" },
+      source: "export const detect = () => []",
       hidden: true,
     });
   });
 
   it("rejects a request missing or malformed in its fields", () => {
-    expect(() => parseRequest({ target: { kind: "url", url: 42 }, hidden: false })).toThrow();
-    expect(() => parseRequest({ target: { kind: "source" }, hidden: false })).toThrow();
-    expect(() => parseRequest({ target: { kind: "bogus" }, hidden: false })).toThrow();
-    expect(() => parseRequest({ source: "x", hidden: false })).toThrow(); // the old flat shape
+    expect(() => parseRequest({ source: 42, hidden: false })).toThrow();
+    expect(() => parseRequest({ hidden: false })).toThrow();
+    expect(() => parseRequest({ source: "x" })).toThrow();
     expect(() => parseRequest(null)).toThrow();
   });
 });

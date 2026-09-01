@@ -26,11 +26,11 @@ beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
     source: referenceSource,
-    sourceLocked: false,
     runPending: false,
     selection: null,
     decisionSelection: null,
     transport: { frozen: false, speed: 1 },
+    overlayOpen: false,
   });
   markIntroSeen();
 });

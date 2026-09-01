@@ -1,7 +1,12 @@
 # ADR 0008 — Native algorithm hot-reload on one dev server
 
-- Status: Accepted (per-slug authoring revised by ADR 0010)
+- Status: Superseded by GH118 (2026-09-01)
 - Date: 2026-08-29
+- Superseded by GH118: the native hot-reload dev server, the `src/algorithms/` override,
+  the `algo:` handshake, and the `AlgorithmSource` url load mode were all removed. The
+  in-app Algorithm editor is now the only authoring path: edit the source in the side
+  panel's Algorithm tab and press Apply to reload it. This ADR is kept for history; the
+  files and types it names below no longer exist.
 - Revised by ADR 0010 (one engine for all hunts): the per-slug resolution of
   `src/algorithms/<slug>.ts` is superseded by a single fixed override,
   `src/algorithms/engine.ts`, with a slugless `algo:` handshake. The one-dev-server
@@ -11,6 +16,11 @@
   `0004-measured-cost-model`), closing the housekeeping note in ADR 0006 (issue #85). The
   target was `0007`, but ADR `0007-actor-based-world-simulation` (#88) landed on `main`
   first and took that number, so this ADR is `0008`.
+
+> Everything from here to the end of this ADR is historical. It describes the native
+> hot-reload dev server and the local-IDE authoring path GH118 removed; where a
+> section below says a decision "still holds" or gives reversal instructions, read
+> that as a record of what was true before GH118, not current guidance.
 
 ## Context
 

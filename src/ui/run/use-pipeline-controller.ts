@@ -4,16 +4,15 @@
  * disposed (permanently) on hide or unmount, including React strict-mode's
  * mount/unmount/mount cycle. Render never drives the loop.
  *
- * `controllerRef` is the hook's only return, since three call sites outside the
- * effect need the live controller at call time: `AlgorithmEditor`'s `onRun`, and the
- * dev client's `run` and `onStopLocalMode` (through `useLocalIde`, which takes the
- * ref). Reading `.current` at call time, rather than closing over the controller,
- * keeps those call sites correct across a rebuild without a stale closure.
+ * `controllerRef` is the hook's only return, since a call site outside the effect
+ * needs the live controller at call time: the side panel's Apply, through
+ * `useSidePanel`'s `onApply` (GH118-PLAN.md), which takes the ref. Reading `.current`
+ * at call time, rather than closing over the controller, keeps that call site
+ * correct across a rebuild without a stale closure.
  */
 
 import type { RefObject } from "react";
 import { useEffect, useRef } from "react";
-import { localAlgorithmUrl } from "../../game/algorithms-resolve";
 import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
@@ -25,16 +24,8 @@ function buildController(): RunController {
   return createRunController({
     scenario: defaultScenario,
     getGraph,
-    // The one discriminated input. A local override (set by the dev-only algorithms
-    // client) drives url mode; otherwise the in-game editor drives source mode.
-    getAlgorithmSource: () => {
-      const state = useGameStore.getState();
-      if (state.localAlgorithm !== null) {
-        const { path, version } = state.localAlgorithm;
-        return { kind: "url", path, version, url: localAlgorithmUrl(path, version) };
-      }
-      return { kind: "source", source: state.source };
-    },
+    // The in-game editor's source string.
+    getAlgorithmSource: () => useGameStore.getState().source,
     getSeed: () => useGameStore.getState().seed,
     setSnapshot: useGameStore.getState().setSnapshot,
     setError: useGameStore.getState().setError,

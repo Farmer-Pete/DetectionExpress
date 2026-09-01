@@ -13,13 +13,20 @@ const FOCUSABLE_SELECTOR =
 /**
  * A dialog's focusable controls, in DOM order. Attribute-only checks (no
  * `offsetWidth`/`getClientRects`, which happy-dom never lays out): a disabled
- * control, or one sitting inside an `aria-hidden`, `hidden`, or `inert`
- * subtree, is excluded even though it matches the selector above.
+ * control, one with a negative `tabIndex`, or one sitting inside an
+ * `aria-hidden`, `hidden`, or `inert` subtree, is excluded even though it
+ * matches the selector above. The `tabIndex < 0` guard matters for the native
+ * controls (`button`, `input`, ...) the selector matches unconditionally: a
+ * roving-tabindex tab strip marks its inactive tabs `tabIndex={-1}`, so they
+ * are focusable by script but out of the Tab order — the trap must skip them,
+ * or it would treat an inactive tab as an edge control and let Tab escape.
  */
 export function focusableControls(dialog: HTMLElement): HTMLElement[] {
   return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
     (el) =>
-      !el.matches(":disabled") && el.closest('[aria-hidden="true"], [hidden], [inert]') === null,
+      el.tabIndex >= 0 &&
+      !el.matches(":disabled") &&
+      el.closest('[aria-hidden="true"], [hidden], [inert]') === null,
   );
 }
 

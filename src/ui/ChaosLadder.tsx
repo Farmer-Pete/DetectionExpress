@@ -3,8 +3,8 @@
  * The one live scenario is marked playable inside its level and named there. The
  * other levels are described, not yet playable.
  *
- * It renders a stable `#chaos-ladder` anchor. The intro's "Cause chaos" action
- * scrolls to it after the overlay dismisses.
+ * It renders a stable `#chaos-ladder` id, a harmless section landmark. It is the
+ * side panel's default tab (GH118-PLAN.md); the intro no longer scrolls to it.
  */
 import type { ChaosLevel, LiveScenario } from "./content/narrative";
 

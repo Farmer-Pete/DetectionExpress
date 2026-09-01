@@ -217,6 +217,12 @@ export function LogPanel() {
   // control's native activation happen once; otherwise it toggles freeze and calls
   // preventDefault to stop the page from scrolling. Net effect: Space never fights a
   // focused control and toggles freeze exactly once from the panel background.
+  //
+  // It also bails while the store's `overlayOpen` is true (GH118-PLAN.md): this window
+  // listener has no idea the shell is `inert` behind an open overlay (the side panel,
+  // the intro, the trace dialog), so without this gate Space could resume a run the
+  // player can't see or reach. Read fresh from `getState()`, same as `frozen`, so the
+  // gate never goes stale either.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.code !== "Space" && event.key !== " ") {
@@ -224,6 +230,9 @@ export function LogPanel() {
       }
       if (event.repeat || isEditableTarget(event.target)) {
         return;
+      }
+      if (useGameStore.getState().overlayOpen) {
+        return; // an overlay owns the run; the inert shell must not resume it
       }
       const target = event.target;
       if (
