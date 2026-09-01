@@ -63,13 +63,19 @@ const STATION_XY: Record<string, Point> = {
   sum: { x: 300, y: 544 },
 };
 
-/** The ported site and OCC coordinate table (view notes section 1). */
+/**
+ * The site and OCC coordinate table. GH116 moved every site beside its station
+ * (not straight below it, which collides with the station's chip row) and moved
+ * the OCC next to Central. Verified clear of every station circle, station chip,
+ * rail segment, and other site box by the geometry invariant in `layout.test.ts`
+ * (see GH116-PLAN.md "Commit 1").
+ */
 const SITE_XY: Record<string, Point> = {
-  dep: { x: 578, y: 520 },
-  sig: { x: 398, y: 546 },
-  sub: { x: 742, y: 398 },
+  dep: { x: 528, y: 455 },
+  sig: { x: 415, y: 443 },
+  sub: { x: 735, y: 345 },
 };
-const OCC_XY: Point = { x: 806, y: 496 };
+const OCC_XY: Point = { x: 528, y: 340 };
 const OCC_ID = "occ";
 
 /** Every station draws the same four public sensor chips, in this order. */

@@ -277,8 +277,15 @@ export const STAFF_TARGET = 3;
 export const STAFF_ARRIVAL_MIN_TICKS = 30;
 export const STAFF_ARRIVAL_MAX_TICKS = 90;
 
-/** A staff member's walk-in / walk-out duration, in whole ticks (> 0). */
-export const STAFF_WALK_TICKS = 20;
+/**
+ * GH116: a staff member's walk-in / walk-out duration couples to the straight-line
+ * distance between its nearest station and its location (site or OCC), instead of a
+ * flat tick count. `STAFF_WALK_SPEED` is design-units per tick; `STAFF_WALK_MIN_TICKS`
+ * floors the result so even an adjacent pair still visibly walks. See
+ * `staffWalkTicks` in `staff-spawner.ts`.
+ */
+export const STAFF_WALK_SPEED = 5;
+export const STAFF_WALK_MIN_TICKS = 6;
 
 /** Ticks between a staff member's consecutive door taps as it crosses the zones (> 0). */
 export const STAFF_DOOR_STEP_TICKS = 8;

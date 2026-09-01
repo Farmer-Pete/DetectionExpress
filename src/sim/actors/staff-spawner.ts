@@ -17,9 +17,12 @@ import {
   STAFF_ARRIVAL_MIN_TICKS,
   STAFF_BADGE_POOL,
   STAFF_DOOR_STEP_TICKS,
-  STAFF_WALK_TICKS,
+  STAFF_WALK_MIN_TICKS,
+  STAFF_WALK_SPEED,
 } from "../../game/tuning";
 import { type Badge, buildBadges } from "../entities/badge";
+import { metroLayout, type Point } from "../world/layout";
+import type { MapNodeId } from "../world/presence";
 import type { World } from "../world/world";
 import type { WorldEnv, WorldReading } from "../world-reading";
 import { type Admission, actorSeedHash } from "./actor";
@@ -51,18 +54,48 @@ export interface StaffSpawner {
  */
 const OCC_NEAREST_STATION = "cen";
 
-/** One door-bearing location a staff can visit: its id and the station to walk from. */
+/**
+ * GH116: a staff member's walk-in / walk-out duration, derived from the straight-line
+ * distance (design units) between its nearest station and its location, instead of the
+ * old flat `STAFF_WALK_TICKS`. Floored at `STAFF_WALK_MIN_TICKS` so even an adjacent
+ * pair still visibly walks. Pure: no RNG, no world access, so it is trivial to unit
+ * test against hand-worked distances (ARCHITECTURE rule 8).
+ */
+export function staffWalkTicks(distance: number): number {
+  return Math.max(STAFF_WALK_MIN_TICKS, Math.round(distance / STAFF_WALK_SPEED));
+}
+
+/** One door-bearing location a staff can visit: its id, the station to walk from, and the walk length. */
 interface StaffDestination {
   location: string;
   nearestStation: string;
+  walkTicks: number;
+}
+
+/** The straight-line distance between a station and a location, both read from the layout. */
+function walkDistance(layout: ReadonlyMap<MapNodeId, Point>, from: string, to: string): number {
+  const start = layout.get(from);
+  const end = layout.get(to);
+  if (start === undefined || end === undefined) {
+    throw new Error(`staff-spawner: no layout point for "${from}" or "${to}".`);
+  }
+  return Math.hypot(end.x - start.x, end.y - start.y);
 }
 
 /** The door-bearing destinations: every site (with its nearest station) and the OCC. */
 function destinations(world: World): readonly StaffDestination[] {
-  return [
-    ...world.sites.map((site) => ({ location: site.id, nearestStation: site.nearestStation })),
-    { location: world.controlCenter.id, nearestStation: OCC_NEAREST_STATION },
-  ];
+  const layout = metroLayout(world);
+  const sites = world.sites.map((site) => ({
+    location: site.id,
+    nearestStation: site.nearestStation,
+    walkTicks: staffWalkTicks(walkDistance(layout, site.nearestStation, site.id)),
+  }));
+  const occ = {
+    location: world.controlCenter.id,
+    nearestStation: OCC_NEAREST_STATION,
+    walkTicks: staffWalkTicks(walkDistance(layout, OCC_NEAREST_STATION, world.controlCenter.id)),
+  };
+  return [...sites, occ];
 }
 
 export function createStaffSpawner(config: StaffSpawnerConfig): StaffSpawner {
@@ -87,7 +120,7 @@ export function createStaffSpawner(config: StaffSpawnerConfig): StaffSpawner {
       location: place?.location ?? "dep",
       nearestStation,
       startTick: atTick,
-      walkTicks: STAFF_WALK_TICKS,
+      walkTicks: place?.walkTicks ?? staffWalkTicks(0),
       stepTicks: STAFF_DOOR_STEP_TICKS,
     };
     return {
