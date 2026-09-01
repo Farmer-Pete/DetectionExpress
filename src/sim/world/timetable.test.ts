@@ -47,7 +47,12 @@ function trainEvents(lineId: string, horizon: number): TrainEvent[] {
   });
 }
 
-/** The next real service for a pair, read straight off the train's emitted events. */
+/**
+ * The next real service for a pair, read straight off the train's emitted events. The
+ * departure search is exclusive (a departure AT `afterTick` is already leaving, so it
+ * doesn't count), and boarding happens at the later of `afterTick` or that departure's
+ * arrival (`depTick - dwell`), matching `nextService`'s clamp.
+ */
 function serviceFromEvents(
   events: readonly TrainEvent[],
   from: string,
@@ -56,7 +61,7 @@ function serviceFromEvents(
 ): { boardTick: number; alightTick: number } | null {
   for (let i = 0; i < events.length; i++) {
     const dep = events[i];
-    if (dep === undefined || dep.event !== "dep" || dep.station !== from || dep.tick < afterTick) {
+    if (dep === undefined || dep.event !== "dep" || dep.station !== from || dep.tick <= afterTick) {
       continue;
     }
     for (let j = i + 1; j < events.length; j++) {
@@ -65,7 +70,8 @@ function serviceFromEvents(
         break;
       }
       if (step.event === "arr" && step.station === to) {
-        return { boardTick: dep.tick, alightTick: step.tick };
+        const boardTick = Math.max(afterTick, dep.tick - TRAIN_DWELL_TICKS);
+        return { boardTick, alightTick: step.tick };
       }
       if (step.event === "dep" && step.station === from) {
         break;
@@ -186,12 +192,14 @@ describe("nextService", () => {
 
   it("rides a multi-hop trip through the intermediate dwells (har -> cen)", () => {
     const events = trainEvents("red", 2000);
-    const expected = serviceFromEvents(events, "har", "cen", 0);
-    const service = nextService(timetable.line("red"), "har", "cen", 0);
+    // Departure selection is exclusive, so planning at tick 5 still skips the har
+    // departure that already left at tick 0; this boards the train's return pass,
+    // which also runs har -> mkt -> cen.
+    const afterTick = 5;
+    const expected = serviceFromEvents(events, "har", "cen", afterTick);
+    const service = nextService(timetable.line("red"), "har", "cen", afterTick);
     expect(service).toEqual(expected);
-    // The Red train departs har at tick 0 and reaches cen two hops later; the ride
-    // spans the mkt dwell, so alight is strictly after board.
-    expect(service?.boardTick).toBe(0);
+    expect(service?.boardTick).toBeGreaterThanOrEqual(afterTick);
     expect(service?.alightTick).toBeGreaterThan(service?.boardTick ?? 0);
   });
 
@@ -270,5 +278,84 @@ describe("nextService", () => {
       expect(service?.boardTick).toBeGreaterThanOrEqual(afterTick);
       expect(service?.alightTick).toBeGreaterThan(service?.boardTick ?? 0);
     }
+  });
+
+  it("boards at the train's arrival, not its departure, for a mid-run pass", () => {
+    // Planning well before the boarded train even reaches "cen" clamps boardTick to
+    // that train's arrival: depTick - dwellTicks, strictly before the departure.
+    const events = trainEvents("red", 2000);
+    const departure = events.find((event) => event.event === "dep" && event.station === "cen");
+    expect(departure).toBeDefined();
+    if (departure === undefined) {
+      throw new Error("expected a real cen departure");
+    }
+    const alight = events.find(
+      (event) => event.event === "arr" && event.station === "riv" && event.tick > departure.tick,
+    );
+    expect(alight).toBeDefined();
+    if (alight === undefined) {
+      throw new Error("expected a real riv arrival after the cen departure");
+    }
+
+    const service = nextService(timetable.line("red"), "cen", "riv", 0);
+    expect(service?.boardTick).toBe(departure.tick - TRAIN_DWELL_TICKS);
+    expect(service?.boardTick).toBeLessThan(departure.tick);
+    expect(service?.alightTick).toBe(alight.tick);
+  });
+
+  it("boards immediately when planning lands inside an already-open dwell", () => {
+    // Planning after the train has arrived but before it leaves boards right now:
+    // boardTick == afterTick, still strictly before the departure.
+    const events = trainEvents("red", 2000);
+    const departure = events.find((event) => event.event === "dep" && event.station === "cen");
+    expect(departure).toBeDefined();
+    if (departure === undefined) {
+      throw new Error("expected a real cen departure");
+    }
+    const afterTick = departure.tick - 5; // inside the 15-tick dwell, after the arrival
+    expect(afterTick).toBeGreaterThan(departure.tick - TRAIN_DWELL_TICKS);
+
+    const service = nextService(timetable.line("red"), "cen", "riv", afterTick);
+    expect(service?.boardTick).toBe(afterTick);
+    expect(service?.boardTick).toBeLessThan(departure.tick);
+  });
+
+  it("skips a departure planned for exactly its own leaving tick", () => {
+    // afterTick equal to a real departure's tick cannot board that train; it catches
+    // the NEXT departure heading toward "riv" instead (the oracle is direction-aware,
+    // same as nextService: a wrong-direction departure at "cen" doesn't count).
+    const events = trainEvents("red", 2000);
+    const departure = events.find((event) => event.event === "dep" && event.station === "cen");
+    expect(departure).toBeDefined();
+    if (departure === undefined) {
+      throw new Error("expected a real cen departure");
+    }
+
+    const expected = serviceFromEvents(events, "cen", "riv", departure.tick);
+    const service = nextService(timetable.line("red"), "cen", "riv", departure.tick);
+    expect(service).toEqual(expected);
+    // It never boards the train already leaving: the boarding window sits at or after
+    // the tick that train departed, not inside its now-closed dwell.
+    expect(service?.boardTick).toBeGreaterThanOrEqual(departure.tick);
+  });
+
+  it("skips the tick-0 launch at first launch and never returns a negative boardTick", () => {
+    // The Red train departs har at tick 0. A rider planning at tick 0 cannot board a
+    // train that is already leaving, so it catches the line's LATER har departure, and
+    // boardTick is always at or after afterTick (0 here), never negative.
+    const events = trainEvents("red", 3000);
+    const launch = events.find((event) => event.event === "dep" && event.station === "har");
+    expect(launch?.tick).toBe(0);
+    const laterDeparture = events.find(
+      (event) => event.event === "dep" && event.station === "har" && event.tick > 0,
+    );
+    expect(laterDeparture).toBeDefined();
+    if (laterDeparture === undefined) {
+      throw new Error("expected a later har departure");
+    }
+
+    const service = nextService(timetable.line("red"), "har", "mkt", 0);
+    expect(service?.boardTick).toBeGreaterThanOrEqual(0);
+    expect(service?.boardTick).toBe(Math.max(0, laterDeparture.tick - TRAIN_DWELL_TICKS));
   });
 });

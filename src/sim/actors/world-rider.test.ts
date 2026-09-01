@@ -1,6 +1,6 @@
 import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import { GAME_SECONDS_PER_TICK, TVM_TOPUP_AMOUNT } from "../../game/tuning";
+import { GAME_SECONDS_PER_TICK, TRAIN_DWELL_TICKS, TVM_TOPUP_AMOUNT } from "../../game/tuning";
 import { distanceTable } from "../world/distance";
 import { buildTimetable, trainIdForLine } from "../world/timetable";
 import { world } from "../world/world";
@@ -128,11 +128,20 @@ describe("createWorldRider coupled to trains", () => {
     }
     const dest = alightReading.reading.station;
 
-    // The coupling is real: the boarded train is the line's train, and it truly
-    // departs the origin at boardTick and arrives the destination at alightTick.
+    // The coupling is real: the boarded train is the line's real train, and it truly
+    // arrives the destination at alightTick. The tap-in itself lands DURING that
+    // train's dwell at the origin -- strictly before its real departure, never at or
+    // after it -- so the rider boards a stopped train, not one already leaving.
     expect(boardPresence.train).toBe(trainIdForLine(world, line));
     const events = trainEvents(line, HORIZON);
-    expect(events).toContainEqual({ event: "dep", station: origin, tick: boardTick });
+    const departure = events.find(
+      (event) => event.event === "dep" && event.station === origin && event.tick > boardTick,
+    );
+    expect(departure).toBeDefined();
+    if (departure === undefined) {
+      throw new Error("expected a real departure from the origin after the board tick");
+    }
+    expect(departure.tick - boardTick).toBeLessThanOrEqual(TRAIN_DWELL_TICKS);
     expect(events).toContainEqual({ event: "arr", station: dest, tick: alightTick });
   });
 
@@ -184,11 +193,21 @@ describe("createWorldRider coupled to trains", () => {
       }
       const events = trainEvents(tapIn.reading.line, HORIZON);
       expect(presence.train).toBe(trainIdForLine(world, tapIn.reading.line));
-      expect(events).toContainEqual({
-        event: "dep",
-        station: tapIn.reading.station,
-        tick: steps[i]?.tick,
-      });
+      // The tap-in tick is the boarding-window start: strictly before the boarded
+      // train's real departure, and within its dwell -- boarding a stopped train, not
+      // one already moving.
+      const boardTick = steps[i]?.tick ?? -1;
+      const departure = events.find(
+        (event) =>
+          event.event === "dep" &&
+          event.station === tapIn.reading.station &&
+          event.tick > boardTick,
+      );
+      expect(departure).toBeDefined();
+      if (departure === undefined) {
+        throw new Error("expected a real departure after the board tick");
+      }
+      expect(departure.tick - boardTick).toBeLessThanOrEqual(TRAIN_DWELL_TICKS);
       expect(events).toContainEqual({
         event: "arr",
         station: tapOut.reading.station,

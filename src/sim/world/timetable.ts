@@ -97,9 +97,14 @@ export function buildTimetable(world: World): Timetable {
   };
 }
 
-/** The next service found for a boarding: when the train leaves `from`, when it reaches `to`. */
+/** The next service found for a boarding: when the rider boards at `from`, when it reaches `to`. */
 export interface Service {
-  /** The tick the line's train departs `from`, at or after `afterTick`. The rider taps in here. */
+  /**
+   * The boarding-window start inside the dwell: the later of `afterTick` (the rider's
+   * planning tick) and the boarded train's arrival (`departure.depTick - schedule.dwellTicks`).
+   * Always at or after `afterTick` and always strictly before that train's departure, so
+   * the rider always taps in on a train that is still dwelling, never one already leaving.
+   */
   boardTick: number;
   /** The tick that same train arrives at `to`, having ridden through any stops between. */
   alightTick: number;
@@ -119,11 +124,15 @@ export function trainIdForLine(world: World, lineId: string): string {
 }
 
 /**
- * The next service on one line from `from` to `to` at or after `afterTick`: the tick
- * the line's single train DEPARTS `from` heading toward `to`, and the tick it ARRIVES
- * at `to`. It finds the earliest departure from `from` whose direction reaches `to`
- * before the train returns to `from`, and rides it there. The tick math is the shared
- * stepping, so the ticks equal `createTrain`'s emitted `dep`/`arr`.
+ * The next service on one line from `from` to `to` planned at or after `afterTick`: the
+ * tick the rider BOARDS (inside the dwell, at or after `afterTick` and strictly before
+ * that train departs `from` heading toward `to`), and the tick it ARRIVES at `to`. It
+ * finds the earliest departure from `from`, strictly after `afterTick`, whose direction
+ * reaches `to` before the train returns to `from`, and rides it there. A departure AT
+ * `afterTick` is already leaving, so it is skipped; the rider catches the next one
+ * instead of a train it can no longer board. The arrival/departure tick math is the
+ * shared stepping, so `alightTick` and the boarded train's real departure equal
+ * `createTrain`'s emitted `dep`/`arr`.
  *
  * Periodic and unbounded in time. The train's motion repeats every `cycle.period` ticks,
  * so rather than simulate every leg up to a distant `afterTick` (which would eventually
@@ -170,10 +179,13 @@ export function nextService(
     if (
       departure === undefined ||
       departure.fromStation !== from ||
-      departure.depTick < afterTick
+      departure.depTick <= afterTick
     ) {
       continue;
     }
+    // Board during the dwell, not at departure: the later of the rider's planning tick
+    // and this train's arrival, both strictly before it leaves.
+    const boardTick = Math.max(afterTick, departure.depTick - schedule.dwellTicks);
     // Ride forward from this departure until the train reaches `to`. If it returns to
     // `from` first, this departure was heading the wrong way; try the next one.
     for (let leg = boarding; leg < legs.length; leg++) {
@@ -187,7 +199,7 @@ export function nextService(
         break;
       }
       if (current.toStation === to) {
-        return { boardTick: departure.depTick, alightTick: current.arrTick };
+        return { boardTick, alightTick: current.arrTick };
       }
     }
   }
