@@ -60,10 +60,10 @@ bonus.
   inlines the dependency graph into one readable JS module, formatted by Biome and
   served as a Vite virtual module. Nothing generated is committed.
 
-- **Authoring is one engine, not per slug.** The local-IDE override is one fixed
-  file, `src/algorithms/engine.ts`, with the composed default as the fallback. The
-  `algo:` hot-reload handshake drops the slug. This replaces ADR 0008's per-slug
-  resolution.
+- **Authoring is one engine, not per slug.** The engine is composed from a core plus
+  one rule file per scenario, into a single editor source. A player edits that source
+  in the app and presses Apply to reload it. (An earlier local-IDE override file and
+  `algo:` hot-reload handshake were removed in GH118; see ADR 0008.)
 
 ## Consequences
 
@@ -75,8 +75,8 @@ bonus.
   score correctly under one engine.
 - The normalize seam changes: `normalize` gains the endpoint. This touches
   `src/sim/tasks.ts` and the algorithm contract.
-- ADR 0008's per-slug model is revised in prose and in code. The resolver and the
-  HMR plugin key on one engine.
+- ADR 0008's per-slug model was revised here, then retired entirely in GH118: the
+  resolver and the HMR plugin were removed with the rest of the local-IDE path.
 - A drift guard test binds `docs/world/scenarios.json`, the registered scenarios,
   and the engine rules together, so the names cannot drift again.
 

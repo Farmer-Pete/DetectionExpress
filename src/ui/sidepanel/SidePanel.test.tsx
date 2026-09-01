@@ -54,6 +54,28 @@ describe("SidePanel", () => {
     expect(panel.getAttribute("aria-labelledby")).toBe(tab.id);
   });
 
+  it("renders both tabpanels, hides the inactive one, so every tab's aria-controls resolves", () => {
+    const { container } = renderPanel({ tab: "chaos" });
+    const panels = container.querySelectorAll<HTMLElement>('[role="tabpanel"]');
+    expect(panels).toHaveLength(2);
+    const chaosPanel = document.getElementById("sidepanel-tabpanel-chaos");
+    const algorithmPanel = document.getElementById("sidepanel-tabpanel-algorithm");
+    expect(chaosPanel?.hasAttribute("hidden")).toBe(false);
+    expect(algorithmPanel?.hasAttribute("hidden")).toBe(true);
+    for (const tab of screen.getAllByRole("tab")) {
+      const controls = tab.getAttribute("aria-controls");
+      expect(controls).not.toBeNull();
+      expect(document.getElementById(controls ?? "")).not.toBeNull();
+    }
+  });
+
+  it("opening on the algorithm tab moves focus to the algorithm tab, not the inactive chaos tab", () => {
+    // The focus-trap fix: the inactive chaos tab carries tabIndex=-1 and must be skipped,
+    // so open-focus lands on the selected algorithm tab, the first real focusable control.
+    renderPanel({ tab: "algorithm" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /algorithm/i }));
+  });
+
   it("clicking the algorithm tab calls onSelectTab", () => {
     const { onSelectTab } = renderPanel({ tab: "chaos" });
     fireEvent.click(screen.getByRole("tab", { name: /algorithm/i }));

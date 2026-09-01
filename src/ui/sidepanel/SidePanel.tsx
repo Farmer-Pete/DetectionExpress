@@ -29,7 +29,10 @@
  * `"tabpanel"`, `aria-selected`, each tab's `aria-controls` names its panel and the
  * panel's `aria-labelledby` names its tab, and ArrowRight/ArrowLeft both select and
  * move DOM focus to the adjacent tab (roving tabindex: only the active tab is in the
- * Tab order).
+ * Tab order). BOTH tabpanels render at all times, the inactive one carrying `hidden`.
+ * That keeps every tab's `aria-controls` pointing at an element that exists, and a
+ * `hidden` subtree is excluded from `focusableControls`, so the off-screen panel's
+ * controls never enter the focus trap.
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { defaultEntry } from "../../game/registry";
@@ -176,15 +179,21 @@ export function SidePanel({
         </div>
         <div
           role="tabpanel"
-          id={`sidepanel-tabpanel-${tab}`}
-          aria-labelledby={`sidepanel-tab-${tab}`}
+          id="sidepanel-tabpanel-chaos"
+          aria-labelledby="sidepanel-tab-chaos"
           className="sidepanel-body"
+          hidden={tab !== "chaos"}
         >
-          {tab === "chaos" ? (
-            <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
-          ) : (
-            <AlgorithmEditor onRun={onApply} />
-          )}
+          <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+        </div>
+        <div
+          role="tabpanel"
+          id="sidepanel-tabpanel-algorithm"
+          aria-labelledby="sidepanel-tab-algorithm"
+          className="sidepanel-body"
+          hidden={tab !== "algorithm"}
+        >
+          <AlgorithmEditor onRun={onApply} />
         </div>
       </div>
     </div>
