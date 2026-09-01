@@ -19,14 +19,15 @@ import { assembleEngineSource } from "./engine-assembler.ts";
 const VIRTUAL_ID = "virtual:engine-source";
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
 
-/** True when a changed file is one the assembled engine is built from. */
+/**
+ * True when a changed file is one the assembled engine is built from. The assembler
+ * also inlines each rule's own dependencies (a scenario's `tuning.ts`, anything
+ * `core.ts` imports), so this watches the whole `src/sim` TypeScript tree rather than
+ * naming each file the assembler happens to reach today.
+ */
 function isEngineSource(file: string): boolean {
   const normalized = file.replace(/\\/g, "/");
-  return (
-    normalized.includes("/src/sim/engine/core.ts") ||
-    /\/src\/sim\/endpoints\/[^/]+\/normalize\.ts$/.test(normalized) ||
-    /\/src\/sim\/scenarios\/[^/]+\/rule\.ts$/.test(normalized)
-  );
+  return /\/src\/sim\/.*\.ts$/.test(normalized) && !normalized.endsWith(".test.ts");
 }
 
 export function assembleEngine(): Plugin {

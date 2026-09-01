@@ -20,11 +20,18 @@ import {
   PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
 } from "../../sim/scenarios/pin-brute-force/tuning";
-import { defaultEntry } from "../registry";
+import { scenarioEntry } from "../registry";
 import { GAME_SECONDS_PER_TICK } from "../tuning";
 
+/** The registered pin-brute-force entry, looked up by id rather than assumed to sort
+ *  first, so a second registered scenario can never silently swap in its corpus. */
+const pinBruteForceEntry = scenarioEntry("pin-brute-force");
+if (pinBruteForceEntry === undefined) {
+  throw new Error('profiler/rules: no "pin-brute-force" entry is registered.');
+}
+
 /** The cast contract, read through the registry, never a scenario folder directly. */
-const pinBruteForceCorpus = defaultEntry.corpus;
+const pinBruteForceCorpus = pinBruteForceEntry.corpus;
 
 /** The reason the kiosk PIN brute-force Alert names. Shared with the scorer. */
 const REASON = pinBruteForceCorpus.reason;

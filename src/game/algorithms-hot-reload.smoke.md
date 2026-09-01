@@ -7,9 +7,9 @@ All the client and plugin logic is covered by the fake-channel unit tests:
 
 - `algorithms-resolve.test.ts` — active-file resolution (the fixed `engine.ts` override
   or the default engine), framing, the monotonic version counter.
-- `algorithms-dev-client.test.ts` — bootstrap `algo:hello` (slugless), applying an
-  `algo:changed`, stale-generation drop after stop/re-subscribe, enter/stop
-  snapshot-and-restore, forced-reload resume from `sessionStorage`.
+- `algorithms-dev-client.test.ts` — bootstrap `algo:hello`, applying an `algo:changed`,
+  stale-generation drop after stop/re-subscribe, enter/stop snapshot-and-restore,
+  forced-reload resume from `sessionStorage`.
 
 Run this smoke by hand after any change to `algorithms-hmr.ts`,
 `algorithms-dev-client.ts`, or the App wiring.
@@ -21,12 +21,12 @@ Run this smoke by hand after any change to `algorithms-hmr.ts`,
 2. Open the app. The run starts on the in-game editor source (source mode).
 3. Click **Edit in IDE**. The in-game editor locks. The client sends `algo:hello`; the
    plugin replies `algo:changed` with the default engine path (no override yet), so the
-   run switches to url mode on `/src/sim/default-engine.ts` with no page reload.
+   run switches to url mode on `/src/game/default-engine.ts` with no page reload.
 4. Create `src/algorithms/engine.ts` (a copy of the assembled editor source is a good
    start). The plugin re-resolves to the new override and pings it; the run re-imports
    the override with no reload.
-5. Edit `match` in that file and save. The run updates on every save — fresh code, no full
-   page reload. The profiler re-measures the new module (Chrome or Firefox).
+5. Edit a rule expression in that file and save. The run updates on every save — fresh
+   code, no full page reload. The profiler re-measures the new module (Chrome or Firefox).
 6. Save a syntax error. The run reports a **load** error with no reload. Fix it; the run
    recovers cleanly on the next save.
 7. Delete `src/algorithms/engine.ts`. Vite forces ONE full page reload

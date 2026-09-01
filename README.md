@@ -7,7 +7,7 @@ sensors, data formats, and threats arrive.
 ## Docs
 
 - `CONTEXT.md` — the domain vocabulary.
-- `PLAN.md` — the build plan, sliced from Slice 0 to Slice 6.
+- The build plan lives in the GitHub issues and the ADRs under `docs/adr/`.
 - `ARCHITECTURE.md` — the sim and UI boundary. Read it before writing game code.
 
 ## Stack

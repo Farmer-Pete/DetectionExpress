@@ -55,6 +55,8 @@ export function isScenarioCorpus(value: unknown): value is ScenarioCorpus {
     value.pickSeeded instanceof Function &&
     "arriveLeadTicks" in value &&
     isNumber(value.arriveLeadTicks) &&
+    Number.isInteger(value.arriveLeadTicks) &&
+    value.arriveLeadTicks >= 0 &&
     "reason" in value &&
     isString(value.reason)
   );

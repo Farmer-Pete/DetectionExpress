@@ -13,11 +13,10 @@ selection to come. The code matched that shape. `App.tsx` imports one scenario. 
 default engine at `src/sim/default-engine.ts` holds one hunt's detect logic. ADR
 0008 resolves a player's algorithm per slug, one file per scenario.
 
-The product moved past that. The game now ships one engine that detects every hunt
-in the catalogue. The player does not step through levels. They pick any scenarios,
-one or several or all at once, feed them to the one engine, and watch it react. The
-primary act is composition and observation. Editing the engine stays possible, but
-it is a bonus, not the path.
+The target architecture moves past that. GH42 ships one composed engine with the
+`pin-brute-force` rule; registering the remaining catalogue hunts and adding the
+multi-scenario picker are follow-ups. Composition and observation are the intended
+primary act. Editing the engine stays possible, but it is a bonus, not the path.
 
 The old shape fights this in three places. The detect logic is welded to one
 scenario and copied three times. Every new scenario would edit central files:
@@ -33,8 +32,9 @@ bonus.
   from endpoint normalizers and detection rules. Each rule is
   `{ id, endpoints, detect }`, built by a factory so its state is fresh per run.
   `normalize(raw, endpoint)` dispatches by endpoint. `detect(e)` routes to every
-  rule that owns the event's endpoint. So one engine reads thirty wire formats and
-  runs thirty hunts.
+  rule that owns the event's endpoint. So one engine reads as many wire formats as
+  it has registered endpoint families and runs as many hunts as it has registered
+  rules.
 
 - **Scenarios are streams with ground truth.** A scenario folder holds its stream
   generator, its attack plan, its detection rule, and its tuning. It contributes a

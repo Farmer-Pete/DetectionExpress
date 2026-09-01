@@ -7,6 +7,7 @@ import {
   LOCAL_MODE_SNAPSHOT_KEY,
   type SessionStorageLike,
 } from "./algorithms-dev-client";
+import { DEFAULT_ENGINE_PATH } from "./algorithms-resolve";
 
 /** A fake HMR channel: records outbound sends and replays frames to `algo:changed`. */
 class FakeChannel implements HotChannelLike {
@@ -155,7 +156,7 @@ describe("algorithms dev client", () => {
     const h = harness();
     h.client.enter();
     // First the default-engine fallback, then a create of the override switches to it.
-    h.channel.emitChanged({ path: "/src/sim/default-engine.ts", version: 1 });
+    h.channel.emitChanged({ path: DEFAULT_ENGINE_PATH, version: 1 });
     h.channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 2 });
     expect(h.store.local).toEqual({ path: "/src/algorithms/engine.ts", version: 2 });
     expect(h.runs()).toBe(2);
@@ -244,8 +245,8 @@ describe("algorithms dev client", () => {
     expect(channel2.sentHello()).toBe(true); // re-subscribed after the reload
 
     // The plugin re-resolves to the default engine (the override was deleted).
-    channel2.emitChanged({ path: "/src/sim/default-engine.ts", version: 5 });
-    expect(store2.local).toEqual({ path: "/src/sim/default-engine.ts", version: 5 });
+    channel2.emitChanged({ path: DEFAULT_ENGINE_PATH, version: 5 });
+    expect(store2.local).toEqual({ path: DEFAULT_ENGINE_PATH, version: 5 });
 
     // Stop restores the ORIGINAL customized text, not the post-reload default.
     client2.stop();

@@ -43,7 +43,7 @@
       },
       "security": {
         "realWorldConcept": "Brute-force authentication (single-account password guessing).",
-        "briefing": "A brute-force attack tries many passwords against one account. Here the account is a rider login and the kiosk is the login screen. The Engine reads every kiosk PIN attempt live. It counts the wrong PINs per account inside a five-minute window. When one account crosses five, it raises one Alert for the whole burst, never one per tap. Real systems watch failed logins the same way, one account at a time.",
+        "briefing": "A brute-force attack tries many passwords against one account. Here the account is a rider login and the kiosk is the login screen. The Engine reads every kiosk PIN attempt live. It counts the wrong PINs per account inside a five-minute window. When one account reaches five, it raises one Alert for the whole burst, never one per tap. Real systems watch failed logins the same way, one account at a time.",
         "mitre": ["T1110"]
       },
       "resources": [

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { referenceSource } from "../../../game/engine-source";
 import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
@@ -277,17 +276,10 @@ describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () =>
   });
 });
 
-describe("referenceSource", () => {
-  it("imports lodash by absolute URL and exports the Rule", () => {
-    expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
-    // Rolldown's ESM output hoists every export to one footer statement rather than
-    // keeping an inline `export function`, so the declaration and the export show up
-    // as two separate, deterministic substrings rather than one.
-    expect(referenceSource).toContain("function normalize(raw, endpoint)");
-    expect(referenceSource).toContain("function detect(e)");
-    expect(referenceSource).toContain("export { detect, normalize };");
-  });
-});
+// The Rolldown-codegen shape of `referenceSource` (the teaching import, the hoisted
+// `normalize`/`detect`/`export` footer) is already asserted in `reference.test.ts` and
+// `engine-assembler.test.ts`; a third copy here would only need updating in lockstep on
+// any Rolldown format change, so it is not repeated in this file.
 
 // GH42-PLAN.md's minimal merge seam: `partition` rides the PUBLIC `Scenario.generate`
 // contract, not a scenario-specific function only this module's own tests could reach.
@@ -307,6 +299,10 @@ describe("generate's partition parameter (GH42-PLAN.md's minimal merge seam)", (
       new Set(run.attacks.map((attack) => attack.entity));
     const aAccounts = accountsOf(a);
     const bAccounts = accountsOf(b);
+    // Guards against a vacuous pass: an empty set would make the loop below check
+    // nothing and still report disjoint.
+    expect(aAccounts.size).toBeGreaterThan(0);
+    expect(bAccounts.size).toBeGreaterThan(0);
     for (const account of aAccounts) {
       expect(bAccounts.has(account)).toBe(false);
     }

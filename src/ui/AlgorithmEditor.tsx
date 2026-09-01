@@ -12,7 +12,7 @@
  * and Reset buttons hide, since a manual reload or edit would fight the hot-reload. This
  * is a generic lock, not dev code, so the production build keeps it (always unlocked there).
  *
- * "Download this Scenario" is generic too, so it ships in every build: it saves the
+ * "Download engine.ts" is generic too, so it ships in every build: it saves the
  * current source to a file, so a player can carry their engine into their own editor as a
  * starting point for the one fixed local override file, `src/algorithms/engine.ts`
  * (`game/algorithms-resolve.ts`'s `ENGINE_OVERRIDE_PATH`). One engine, no slug: the
@@ -53,7 +53,7 @@ export function AlgorithmEditor({ onRun }: AlgorithmEditorProps) {
       <div className="editor-bar">
         <span className="editor-title">Algorithm</span>
         <button type="button" className="editor-download" onClick={onDownload}>
-          Download this Scenario
+          Download engine.ts
         </button>
         {sourceLocked ? null : (
           <>

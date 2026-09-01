@@ -29,12 +29,19 @@ import { distanceTable } from "../../sim/world/distance";
 import { buildTimetable } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
 import type { WorldEnv, WorldReading } from "../../sim/world-reading";
-import { defaultEntry } from "../registry";
+import { scenarioEntry } from "../registry";
 import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK } from "../tuning";
+
+/** The registered pin-brute-force entry, looked up by id rather than assumed to sort
+ *  first, so a second registered scenario can never silently swap in its corpus. */
+const pinBruteForceEntry = scenarioEntry("pin-brute-force");
+if (pinBruteForceEntry === undefined) {
+  throw new Error('profiler/corpus: no "pin-brute-force" entry is registered.');
+}
 
 /** The cast primitives, read through the registry's corpus contract, never a
  *  scenario folder directly (GH42 code review). */
-const pinBruteForceCorpus = defaultEntry.corpus;
+const pinBruteForceCorpus = pinBruteForceEntry.corpus;
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {

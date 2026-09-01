@@ -138,6 +138,24 @@ describe("composeRegistry validation", () => {
     ).toThrow(/corpus/);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
+    "rejects a corpus whose arriveLeadTicks is %s",
+    (arriveLeadTicks) => {
+      expect(() =>
+        composeRegistry(
+          {
+            "./a": {
+              scenario: { id: "x", generate: () => ({}) },
+              buildRule: goodBuildRule,
+              corpus: { ...goodCorpus, arriveLeadTicks },
+            },
+          },
+          indexCatalogue([catalogueEntry("x")]),
+        ),
+      ).toThrow(/corpus/);
+    },
+  );
+
   it("rejects a Scenario missing generate", () => {
     expect(() =>
       composeRegistry(

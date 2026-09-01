@@ -49,11 +49,13 @@ const DEV_EVENT_MARKERS = ["algo:changed", "algo:hello"];
  *
  * A string literal, not a comment: the assembler now strips every comment from the
  * assembled source (its Rolldown `load` hook runs `ts.transpileModule` with
- * `removeComments: true`), so a comment-based marker would no longer survive.
- * `pin_brute_force` is the pin-brute-force rule's `REASON` value, a real runtime string
- * the rule's own logic reads, not decoration.
+ * `removeComments: true`), so a comment-based marker would no longer survive. This must
+ * also be a literal ONLY the assembled source emits: the pin-brute-force rule's own
+ * `REASON` value ships from the typed detection path too (`rule.ts`, `attacks.ts`), so
+ * it cannot prove the assembler ran. The teaching import (`engine-assembler.ts`'s
+ * `TEACHING_IMPORT`) is unique to the assembled output, so it is the marker instead.
  */
-const ASSEMBLED_ENGINE_MARKER = "pin_brute_force";
+const ASSEMBLED_ENGINE_MARKER = "https://esm.sh/lodash@4.17.21";
 
 /**
  * The app entry module. Its presence proves the build is non-vacuous — that it actually
@@ -153,7 +155,7 @@ if (isMainModule(process.argv[1], import.meta.url)) {
   if (result.ok) {
     console.log("verify:static — the production build carries no dev-only local-IDE code.");
   } else {
-    console.error("verify:static — dev-only code leaked into the production build:");
+    console.error("verify:static failed:");
     for (const failure of result.failures) {
       console.error(`  - ${failure}`);
     }

@@ -68,7 +68,7 @@ describe("AlgorithmEditor", () => {
   it("keeps the Download button available even while the source is locked", () => {
     useGameStore.setState({ sourceLocked: true });
     render(<AlgorithmEditor onRun={() => {}} />);
-    expect(screen.getByRole("button", { name: "Download this Scenario" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Download engine.ts" })).toBeDefined();
   });
 
   it("shows the error line bound to the store error", () => {
@@ -101,7 +101,7 @@ describe("AlgorithmEditor", () => {
     const revokeUrlSpy = vi.spyOn(URL, "revokeObjectURL");
     revokeUrlSpy.mockImplementation(() => {});
 
-    fireEvent.click(screen.getByRole("button", { name: "Download this Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download engine.ts" }));
 
     createSpy.mockRestore();
     createUrlSpy.mockRestore();
