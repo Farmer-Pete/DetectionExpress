@@ -287,6 +287,17 @@ export const STAFF_ARRIVAL_MAX_TICKS = 90;
 export const STAFF_WALK_SPEED = 5;
 export const STAFF_WALK_MIN_TICKS = 6;
 
+/**
+ * GH116: how long a live rider stands `at` its destination after tap-out before it
+ * goes dormant for good (one trip, then home). The render alight step starts on the
+ * next PUBLISHED snapshot, not the sim alight tick, and at 4x speed the publish
+ * stride is up to 12 sim ticks (`CLOCK_HZ / PUBLISH_HZ * 4`). This dwell must outlast
+ * `ALIGHT_TICKS` (12, in `ActorLayer.tsx`) PLUS that worst-case 12-tick publish
+ * stride, so the alight animation has room to start and finish before the engine
+ * evicts the rider, even at 4x. 25 clears 12 + 12 with one tick of standing margin.
+ */
+export const RIDER_GOHOME_DWELL_TICKS = 25;
+
 /** Ticks between a staff member's consecutive door taps as it crosses the zones (> 0). */
 export const STAFF_DOOR_STEP_TICKS = 8;
 

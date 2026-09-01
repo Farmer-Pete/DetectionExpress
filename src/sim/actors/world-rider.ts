@@ -4,7 +4,9 @@
  * same pure `rider-core` the batch `createRider` uses (single-sourced), but its ride
  * EXECUTION reads the timetable: it waits `at` its origin until the line's train departs
  * (its tap-in), rides `onTrain` until that train arrives at the destination (its
- * tap-out), then dwells at the destination before planning the next trip.
+ * tap-out), then dwells at the destination for a short go-home window before going
+ * dormant for good. One rider, one trip (GH116): it never plans a second one. The
+ * engine evicts it once dormant, and the spawner admits a fresh rider in its place.
  *
  * The coupling reads the timetable's `nextService`, not a live train, so it stays
  * deterministic and the taps stay separable from the trains. `nextService` shares the
@@ -13,7 +15,11 @@
  * actor, keeps its abstract-duration model and its byte-identical readings; only the
  * ride execution differs here. No wall clock, no React (ADR-0007, ARCHITECTURE rule 8).
  */
-import { GAME_SECONDS_PER_TICK, TVM_TOPUP_AMOUNT } from "../../game/tuning";
+import {
+  GAME_SECONDS_PER_TICK,
+  RIDER_GOHOME_DWELL_TICKS,
+  TVM_TOPUP_AMOUNT,
+} from "../../game/tuning";
 import type { Presence } from "../world/presence";
 import { nextService, trainIdForLine } from "../world/timetable";
 import type { WorldEnv, WorldReading } from "../world-reading";
@@ -29,7 +35,11 @@ export function initialRiderPresence(origin: string, firstTick: number): Presenc
   return { kind: "at", node: origin, fromTick: firstTick, untilTick: firstTick };
 }
 
-/** The live rider's ride phase: planning a trip, waiting to board, or riding a train. */
+/**
+ * The live rider's ride phase: planning its one trip, waiting to board, riding a
+ * train, or (GH116) standing at its destination for the go-home dwell before it goes
+ * dormant. `leaving` is terminal: the rider never returns to `planning` from it.
+ */
 type RidePhase =
   | { kind: "planning"; station: string }
   | {
@@ -41,7 +51,8 @@ type RidePhase =
       alightTick: number;
       train: string;
     }
-  | { kind: "riding"; alightTick: number };
+  | { kind: "riding"; alightTick: number }
+  | { kind: "leaving" };
 
 /**
  * Build one live rider over a trip config. The returned actor holds its own FSM state;
@@ -110,24 +121,35 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
       }
 
       if (phase.kind === "riding") {
-        // The train has arrived (tick === alightTick): tap out, then let the core draw
-        // the post-alight dwell and hand back the destination it is now `at`.
+        // The train has arrived (tick === alightTick): tap out. Still call `core.step`
+        // to draw its post-alight dwell sample, so the shared rng draw order is
+        // preserved exactly as it is for the batch `createRider`; the sampled dwell
+        // itself is unused here (GH116: one trip, then go home, not another dwell
+        // before re-planning).
         const transition = core.step(env, rng, tick);
         if (transition.kind !== "exit") {
           // The core must be mid-ride here; a non-exit is unreachable, so end cleanly.
           return { readings: [], nextTick: "dormant" };
         }
-        phase = { kind: "planning", station: transition.station };
+        const gohomeUntil = tick + RIDER_GOHOME_DWELL_TICKS;
+        phase = { kind: "leaving" };
         return {
           readings: [tap(transition.station, transition.line, "out", transition.balance, tick)],
-          nextTick: transition.nextTick,
+          nextTick: gohomeUntil,
           presence: {
             kind: "at",
             node: transition.station,
             fromTick: tick,
-            untilTick: transition.nextTick,
+            untilTick: gohomeUntil,
           },
         };
+      }
+
+      if (phase.kind === "leaving") {
+        // The go-home dwell has elapsed: the rider's one trip is over. It goes
+        // dormant for good, never returning to `planning`. The engine evicts it and
+        // the spawner admits a replacement toward `TARGET_RIDERS`.
+        return { readings: [], nextTick: "dormant" };
       }
 
       // PLANNING: decide the next trip through the shared core, then couple to the train.

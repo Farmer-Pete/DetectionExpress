@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import type { Actor, Admission } from "../sim/actors/actor";
+import type { RiderTripConfig } from "../sim/actors/rider-core";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import { createStaff, initialStaffPresence } from "../sim/actors/staff";
 import { createTrain, initialTrainPresence } from "../sim/actors/train";
+import { createWorldRider, initialRiderPresence } from "../sim/actors/world-rider";
 import { distanceTable } from "../sim/world/distance";
 import {
   contactNodeId,
@@ -25,6 +27,7 @@ import {
   FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
+  RIDER_GOHOME_DWELL_TICKS,
   WORLD_LOG_RETENTION,
 } from "./tuning";
 import { startWorld, type WorldFixture } from "./world-engine";
@@ -252,6 +255,127 @@ describe("world engine spawner", () => {
     const last = snapshots.at(-1);
     expect(last?.actors.map((view) => view.id).sort()).toEqual(["C000000", "C000001"]);
     expect(last?.counts.riders).toBe(2);
+  });
+});
+
+/**
+ * A controlled rider spawner (GH116): admits one real `createWorldRider` whenever no
+ * rider is live, mirroring the real `rider-spawner`'s refill-toward-target behavior
+ * (target 1 here) without its randomness, so the test stays deterministic. Each
+ * admission mints a fresh, distinct id, so a later id proves a genuine replacement,
+ * not the same rider re-admitted.
+ */
+function controlledRiderSpawner(origin: string): RiderSpawner {
+  let births = 0;
+  return {
+    tick: (nowTick, liveRiders) => {
+      if (liveRiders > 0) {
+        return [];
+      }
+      const id = `E${births}`;
+      births += 1;
+      // A high balance so the trip is always affordable and no TVM top-up detour
+      // complicates the lifecycle this test is proving.
+      const tripConfig: RiderTripConfig = {
+        card: id,
+        origin,
+        balance: 1_000_000,
+        window: { startTick: nowTick, endTick: nowTick + 100_000 },
+        fare: { base: 10, perMinute: 5 },
+        jitterTicks: { min: 0, max: 4 },
+        dwellTicks: { min: 2, max: 6 },
+      };
+      return [
+        {
+          actor: createWorldRider(tripConfig),
+          kind: "rider",
+          initialPresence: (firstTick) => initialRiderPresence(origin, firstTick),
+        },
+      ];
+    },
+  };
+}
+
+describe("world engine rider lifecycle (GH116)", () => {
+  it("takes a real rider through one trip, a go-home dwell, eviction, and a replacement admission", () => {
+    // This proves the engine-level lifecycle and refill loop only: a real
+    // `createWorldRider` plus a controlled spawner. `ActorLayer` never runs here (no
+    // 2D canvas context in the test DOM), so the board/alight render animation
+    // completing on screen stays a manual browser check, not something this test
+    // asserts.
+    const snapshots: WorldSnapshot[] = [];
+    const driver = new ManualDriver();
+    const handle = startWorld({
+      fixtures: [],
+      env,
+      runSeed: 1,
+      setWorldSnapshot: (snapshot) => snapshots.push(snapshot),
+      driver,
+      bindVisibility: noVisibility,
+      spawner: controlledRiderSpawner("cen"),
+    });
+    // Long enough for the first rider's dwell, its trip (wait + train ride), its
+    // go-home dwell, eviction, and the replacement's own admission and first dwell.
+    tick(driver, 1000);
+    handle.stop();
+
+    const ridersOf = (snapshot: WorldSnapshot) =>
+      snapshot.actors.filter((view) => view.kind === "rider");
+
+    // The first rider is admitted and shows up in the view.
+    const firstSeen = snapshots.find((snapshot) => ridersOf(snapshot).length > 0);
+    expect(firstSeen).toBeDefined();
+    const firstId = firstSeen ? ridersOf(firstSeen)[0]?.id : undefined;
+    expect(firstId).toBeDefined();
+
+    // The first rider's own tap-out (its one trip's exit) appears in the log exactly
+    // once -- the bounded log ring republishes the same entry across several
+    // snapshots, so dedupe by reference before counting -- and it is followed by that
+    // rider remaining in the view, not evicted immediately, for the go-home dwell.
+    const tapOutSet = new Set(
+      snapshots
+        .flatMap((snapshot) => snapshot.log)
+        .filter(
+          (entry) =>
+            entry.reading.sensor === "fare-gate" &&
+            entry.reading.reading.direction === "out" &&
+            entry.reading.reading.card === firstId,
+        ),
+    );
+    expect(tapOutSet.size).toBe(1);
+    const tapOutTick = [...tapOutSet][0]?.tick ?? Number.NaN;
+
+    // A snapshot taken shortly after the tap-out but before the go-home dwell elapses
+    // still shows the first rider present, standing `at` its destination.
+    const midDwell = snapshots.find(
+      (snapshot) =>
+        snapshot.nowTick > tapOutTick &&
+        snapshot.nowTick < tapOutTick + RIDER_GOHOME_DWELL_TICKS &&
+        ridersOf(snapshot).some((view) => view.id === firstId),
+    );
+    expect(midDwell).toBeDefined();
+    const stillAt = midDwell?.actors.find((view) => view.id === firstId)?.presence;
+    expect(stillAt?.kind).toBe("at");
+
+    // Eventually the first rider is evicted (gone from every later snapshot)...
+    const lastSeenIndex = snapshots.findLastIndex((snapshot) =>
+      ridersOf(snapshot).some((view) => view.id === firstId),
+    );
+    expect(lastSeenIndex).toBeGreaterThan(-1);
+    const afterFirstEvicted = snapshots.slice(lastSeenIndex + 1);
+    expect(
+      afterFirstEvicted.every(
+        (snapshot) => !ridersOf(snapshot).some((view) => view.id === firstId),
+      ),
+    ).toBe(true);
+
+    // ...and a genuinely distinct replacement rider is admitted afterward, proving the
+    // spawner refilled toward its target once the first rider's slot freed up.
+    const replacement = afterFirstEvicted.find((snapshot) => ridersOf(snapshot).length > 0);
+    expect(replacement).toBeDefined();
+    const replacementId = replacement ? ridersOf(replacement)[0]?.id : undefined;
+    expect(replacementId).toBeDefined();
+    expect(replacementId).not.toBe(firstId);
   });
 });
 

@@ -1,6 +1,11 @@
 import { randomLcg } from "d3-random";
 import { describe, expect, it } from "vitest";
-import { GAME_SECONDS_PER_TICK, TRAIN_DWELL_TICKS, TVM_TOPUP_AMOUNT } from "../../game/tuning";
+import {
+  GAME_SECONDS_PER_TICK,
+  RIDER_GOHOME_DWELL_TICKS,
+  TRAIN_DWELL_TICKS,
+  TVM_TOPUP_AMOUNT,
+} from "../../game/tuning";
 import { distanceTable } from "../world/distance";
 import { buildTimetable, trainIdForLine } from "../world/timetable";
 import { world } from "../world/world";
@@ -216,10 +221,10 @@ describe("createWorldRider coupled to trains", () => {
     }
   });
 
-  it("rides train after train across a very long run without throwing", () => {
-    // A rider admitted with a far-future window keeps calling `nextService` at large
-    // ticks. The coupling must stay live for the whole window, never throwing (which
-    // would stop the world loop), and keep emitting real taps.
+  it("takes exactly one trip across a very long window, then stays dormant, without throwing", () => {
+    // A rider admitted with a far-future window still makes only its one trip (GH116):
+    // it goes dormant long before the window closes. The coupling must stay stable for
+    // the whole window, never throwing (which would stop the world loop).
     const longConfig: RiderTripConfig = {
       ...base,
       origin: "har",
@@ -232,8 +237,55 @@ describe("createWorldRider coupled to trains", () => {
         taps += schedule.advanceTo(tick + 1).readings.length;
       }
     }).not.toThrow();
-    // Many trips over a 120k-tick window, each a tap-in and a tap-out.
-    expect(taps).toBeGreaterThan(50);
+    // Exactly one trip over the whole window: one tap-in and one tap-out, never more.
+    expect(taps).toBe(2);
+  });
+
+  it("takes exactly one trip, dwells at its destination for the go-home window, then goes dormant and never taps in again", () => {
+    // Drive the actor directly (not through the schedule) so the exact rng draws and
+    // the final "dormant" tick are both observable, the same way the TVM tests below
+    // drive it. This proves the whole one-trip lifecycle: plan -> ride -> exit ->
+    // leaving -> dormant, with no second trip.
+    const rng = randomLcg(4242);
+    const actor = createWorldRider(base);
+    const readings: WorldReading[] = [];
+    const presences: {
+      tick: number;
+      presence: NonNullable<ReturnType<typeof actor.act>["presence"]>;
+    }[] = [];
+    let next = actor.start({ rng });
+    let guard = 0;
+    while (next !== "dormant" && guard < 2000) {
+      const tick = next;
+      const result = actor.act({ env, rng, tick });
+      readings.push(...result.readings);
+      if (result.presence !== undefined) {
+        presences.push({ tick, presence: result.presence });
+      }
+      next = result.nextTick;
+      guard += 1;
+    }
+
+    const tapIns = readings.filter((reading) => tapDir(reading) === "in");
+    const tapOuts = readings.filter((reading) => tapDir(reading) === "out");
+    expect(tapIns).toHaveLength(1);
+    expect(tapOuts).toHaveLength(1);
+    const inIndex = tapIns[0] ? readings.indexOf(tapIns[0]) : -1;
+    const outIndex = tapOuts[0] ? readings.indexOf(tapOuts[0]) : -1;
+    expect(inIndex).toBeGreaterThanOrEqual(0);
+    expect(inIndex).toBeLessThan(outIndex);
+
+    // The tap-out's act also reports the destination `at` presence -- the last one
+    // recorded, since the final "leaving" act reports no presence -- and it spans
+    // exactly the go-home dwell, so the alight animation has room to finish.
+    const destPresence = presences.at(-1)?.presence;
+    expect(destPresence?.kind).toBe("at");
+    if (destPresence?.kind === "at") {
+      expect(destPresence.untilTick).toBe(destPresence.fromTick + RIDER_GOHOME_DWELL_TICKS);
+    }
+
+    // The actor ends dormant, not another planning cycle: no second tap-in ever fires.
+    expect(next).toBe("dormant");
   });
 
   it("is deterministic: a seed reproduces the same readings and presences", () => {
@@ -303,42 +355,52 @@ describe("createWorldRider TVM top-up (M4)", () => {
     }
   });
 
-  it("tops up at the origin TVM only when it cannot afford the next trip, then rides again", () => {
-    // A low balance runs out after a hop or two; instead of going dormant the rider
-    // tops up at its station's TVM and keeps riding.
-    const lowConfig: RiderTripConfig = {
+  it("tops up at the origin TVM when it cannot afford its first trip, then takes its one trip", () => {
+    // A balance below every fare from the origin (the cheapest fare is `fare.base`,
+    // 10) makes the very first trip unaffordable, whatever destination the core would
+    // draw. Instead of going dormant the rider tops up at its station's TVM, then
+    // takes its single trip (GH116: one trip, not a second ride after the top-up).
+    const unaffordable: RiderTripConfig = {
       ...base,
       origin: "cen",
-      balance: 25,
+      balance: 5,
       window: { startTick: 0, endTick: 800 },
     };
-    const schedule = createSchedule({ actors: [createWorldRider(lowConfig)], env, runSeed: 4242 });
+    const schedule = createSchedule({
+      actors: [createWorldRider(unaffordable)],
+      env,
+      runSeed: 4242,
+    });
     const timed = schedule.advanceTo(1000).readings;
 
     const topups = timed.filter((entry) => entry.reading.sensor === "tvm");
-    expect(topups.length).toBeGreaterThan(0);
+    expect(topups).toHaveLength(1);
 
     const topup = topups[0]?.reading;
     if (topup?.sensor !== "tvm") {
       throw new Error("expected a tvm reading");
     }
     expect(topup.reading.kind).toBe("topup");
-    expect(topup.reading.card).toBe(lowConfig.card);
+    expect(topup.reading.card).toBe(unaffordable.card);
     expect(topup.reading.machine).toBe("V1");
     expect(topup.reading.amount).toBe(TVM_TOPUP_AMOUNT);
     expect(Number.isInteger(topup.reading.amount)).toBe(true);
+    expect(topup.reading.station).toBe(unaffordable.origin);
     expect(world.stations.some((station) => station.id === topup.reading.station)).toBe(true);
 
     // The top-up fires on the low-balance path, not at the window's end: its tick is
     // well within the active window.
     const topupTick = topups[0]?.tick ?? Number.NaN;
-    expect(topupTick).toBeLessThan(lowConfig.window.endTick);
+    expect(topupTick).toBeLessThan(unaffordable.window.endTick);
 
-    // It lifts the balance so the trip becomes affordable: a fare-gate tap-in follows
-    // the first top-up, so the rider really rode again after refilling.
-    const rodeAgain = timed.some(
-      (entry) => tapDir(entry.reading) === "in" && entry.tick > topupTick,
-    );
-    expect(rodeAgain).toBe(true);
+    // It lifts the balance so the trip becomes affordable: exactly one tap-in follows
+    // the top-up, and exactly one tap-out follows that -- the rider's single trip, no
+    // second ride.
+    const tapIns = timed.filter((entry) => tapDir(entry.reading) === "in");
+    const tapOuts = timed.filter((entry) => tapDir(entry.reading) === "out");
+    expect(tapIns).toHaveLength(1);
+    expect(tapOuts).toHaveLength(1);
+    expect(tapIns[0]?.tick ?? Number.NaN).toBeGreaterThan(topupTick);
+    expect(tapOuts[0]?.tick ?? Number.NaN).toBeGreaterThan(tapIns[0]?.tick ?? Number.NaN);
   });
 });
