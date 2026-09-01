@@ -44,7 +44,6 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   DECISIONS_CAP,
-  PIN_BRUTE_FORCE_THRESHOLD,
   PROFILER_VERSION,
 } from "./tuning";
 
@@ -152,8 +151,14 @@ export interface RunControllerDeps {
   onFinished?: () => void;
 }
 
+/**
+ * `Attack.threshold` is required (GH42-PLAN.md "Scoring for mixed hunts"): every
+ * scenario's own Attacks set it (pin-brute-force's in `attackFromPlan`), so the
+ * scorer always credits by each hunt's own evidence bar. No threshold lives here:
+ * a config-level default tuned for one hunt would silently misscore any other
+ * hunt whose Attacks forgot to set their own value.
+ */
 const SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,

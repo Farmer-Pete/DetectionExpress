@@ -4,9 +4,9 @@ import { isRawKioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats
 import type { PipeEvent } from "../../sim/event";
 import type { Finding } from "../../sim/finding";
 import type { GraphEdge, GraphNode } from "../../sim/graph";
-import { buildOptimizationAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/optimization";
-import { buildReferenceAlgorithm } from "../../sim/scenarios/kiosk-pin-attack/reference";
-import { kioskPinAttack } from "../../sim/scenarios/kiosk-pin-attack/scenario";
+import { buildOptimizationAlgorithm } from "../../sim/scenarios/pin-brute-force/optimization";
+import { buildReferenceAlgorithm } from "../../sim/scenarios/pin-brute-force/reference";
+import { pinBruteForce } from "../../sim/scenarios/pin-brute-force/scenario";
 import { buildSchedule } from "../../sim/schedule";
 import { makeGovernor, type ServiceRate } from "../../sim/service-governor";
 import type { SimSnapshot } from "../../sim/snapshot";
@@ -22,7 +22,6 @@ import {
   GAME_SECONDS_PER_TICK,
   LEVEL_SEED,
   OMEGA,
-  PIN_BRUTE_FORCE_THRESHOLD,
   WAVE_RATES,
 } from "../tuning";
 import { simulate as bandSimulate, type SimResult } from "./band";
@@ -61,7 +60,7 @@ import {
  * is pure and deterministic under LEVEL_SEED, so every caller can share this one
  * run instead of re-running the whole scenario per call.
  */
-const canonicalEvents = kioskPinAttack.generate(LEVEL_SEED).events;
+const canonicalEvents = pinBruteForce.generate(LEVEL_SEED).events;
 
 /**
  * Events arriving at each tick, binned from the assembled canonical run. It consumes
@@ -165,7 +164,6 @@ const EDGES: GraphEdge[] = [
   { id: "e3", source: "detect", target: "sink" },
 ];
 const REAL_SCORER_CONFIG: ScorerConfig = {
-  threshold: PIN_BRUTE_FORCE_THRESHOLD,
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
@@ -200,7 +198,7 @@ function taskAlgorithmFor(twin: KioskTwin): TaskAlgorithm {
 }
 
 async function runRealEngine(algorithm: TaskAlgorithm, rate: ServiceRate) {
-  const run = kioskPinAttack.generate(LEVEL_SEED);
+  const run = pinBruteForce.generate(LEVEL_SEED);
   const driver = new ManualDriver();
   const snapshots: SimSnapshot[] = [];
   let index = 0;

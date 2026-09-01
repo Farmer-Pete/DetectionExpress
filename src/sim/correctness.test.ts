@@ -22,14 +22,25 @@ function counts(caught: number, missed: number, falseAlerts: number): Counts {
   return { caught, missed, falseAlerts };
 }
 
+// The pre-GH42 suite's implicit global threshold was 2 (the old `cfg()` default);
+// this fixture default keeps every call site that never cared about the exact
+// value unchanged now that `Attack.threshold` is required per-Attack.
 function attack(
   id: number,
   entity: string,
   startTs: number,
   endTs: number,
   eventIds: number[],
+  threshold = 2,
 ): Attack {
-  return { id, entity, reason: REASON, window: { startTs, endTs }, eventIds };
+  return {
+    id,
+    entity,
+    reason: REASON,
+    window: { startTs, endTs },
+    eventIds,
+    threshold,
+  };
 }
 
 /** A bare Event carrying only the scheduled time the scorer folds on. */
@@ -61,7 +72,7 @@ function one(eventIds: number[], ts: number, reason = REASON): ScoredFinding[] {
 }
 
 function cfg(over: Partial<ScorerConfig> = {}): ScorerConfig {
-  return { threshold: 2, window: 40, wFn: 3, wFp: 1, ...over };
+  return { window: 40, wFn: 3, wFp: 1, ...over };
 }
 
 /** Narrow a decision to `caught`, failing the test if it is any other outcome. */
@@ -127,14 +138,14 @@ describe("scorer (reason path, entityMatch off)", () => {
   });
 
   it("needs the threshold of DISTINCT cited ids; repeats do not qualify", () => {
-    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg({ threshold: 2 }));
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
     s.record(one([10, 10, 10], 50), at(50)); // one distinct id, threshold is two
     expect(s.reading().falseAlerts).toBe(1);
     expect(s.reading().caught).toBe(0);
   });
 
   it("treats a too-little-evidence Finding as false", () => {
-    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12])], cfg({ threshold: 3 }));
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11, 12], 3)], cfg());
     s.record(one([10, 11], 50), at(50)); // two of three, below threshold
     expect(s.reading().falseAlerts).toBe(1);
     expect(s.reading().caught).toBe(0);
@@ -234,6 +245,59 @@ describe("scorer (reason path, entityMatch off)", () => {
     expect(r.caught).toBe(1);
     expect(r.missed).toBe(2);
     expect(r.rolling).toBe(0); // ring holds [missed, missed]
+  });
+});
+
+// GH42-PLAN.md "Scoring for mixed hunts": a mixed run carries Attacks with different
+// thresholds, so the scorer must read each Attack's own `threshold`, not one global
+// config value.
+describe("scorer (per-attack threshold, GH42 mixed hunts)", () => {
+  it("credits each Attack by its own threshold, ignoring the other Attack's threshold", () => {
+    // Two pending Attacks, different entities and different thresholds.
+    const s = createScorer(
+      [attack(1, "a", 0, 100, [10, 11], 2), attack(2, "b", 0, 100, [20, 21, 22, 23], 4)],
+      cfg(),
+    );
+    // "a" needs only 2 distinct cited ids: its own threshold is satisfied.
+    s.record(one([10, 11], 50), at(50));
+    // "b" needs 4, but this Finding cites only 3 of its owned ids: below ITS OWN
+    // threshold.
+    s.record(one([20, 21, 22], 60), at(60));
+    const r = s.reading();
+    expect(r.caught).toBe(1); // only "a"
+    expect(r.falseAlerts).toBe(1); // "b"'s under-threshold finding credits nothing
+    expect(r.missed).toBe(0);
+  });
+
+  it("catches an Attack once its own threshold is met", () => {
+    const s = createScorer([attack(1, "b", 0, 100, [20, 21, 22, 23], 4)], cfg());
+    s.record(one([20, 21, 22, 23], 60), at(60)); // all 4 of its owned ids
+    expect(s.reading().caught).toBe(1);
+    expect(s.reading().falseAlerts).toBe(0);
+  });
+
+  it("rejects a non-positive-integer threshold at the scorer seam, naming the failure mode", () => {
+    // GH42 code review: Attack.threshold is required and validated, with no
+    // config-level fallback, so a bad tuning value must fail loudly here rather
+    // than silently under- or over-crediting an Alert.
+    const bad: Attack = {
+      id: 1,
+      entity: "root",
+      reason: REASON,
+      window: { startTs: 0, endTs: 100 },
+      eventIds: [10, 11],
+      threshold: 0,
+    };
+    expect(() => createScorer([bad], cfg())).toThrow(/threshold must be a positive integer/);
+  });
+
+  it("rejects an Attack whose distinct evidence cannot meet its threshold", () => {
+    // GH42 code review: `hitsFor` dedups cited ids, so a threshold above the count
+    // of DISTINCT evidence ids can never be satisfied. Repeated ids do not help: two
+    // copies of id 10 are one distinct id, below a threshold of two. That must fail at
+    // the scorer seam rather than silently recording a missed hunt.
+    const unsatisfiable = attack(1, "root", 0, 100, [10, 10], 2);
+    expect(() => createScorer([unsatisfiable], cfg())).toThrow(/distinct evidence/);
   });
 });
 

@@ -1,15 +1,18 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { referenceSource } from "../game/engine-source";
+import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import type { WorldRunController } from "../game/world-run-controller";
 import type { CaughtDecision, LiveFinding } from "../sim/correctness";
-import { referenceSource } from "../sim/scenarios/kiosk-pin-attack/reference";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
-import { hireMe, introCopy, liveScenario } from "./content/narrative";
+import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
+
+const liveScenario = liveScenarioFrom(defaultEntry);
 
 /** A minimal hit LiveFinding fixture; a round-trip test only needs its seq and eventIds. */
 function liveFinding(seq: number, eventIds: number[]): LiveFinding {

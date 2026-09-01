@@ -7,13 +7,7 @@ import {
   LOCAL_MODE_SNAPSHOT_KEY,
   type SessionStorageLike,
 } from "./algorithms-dev-client";
-
-const SLUG = "kiosk-pin-attack";
-
-/** A string primitive, by its tag rather than a `typeof` representation check. */
-function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]";
-}
+import { DEFAULT_ENGINE_PATH } from "./algorithms-resolve";
 
 /** A fake HMR channel: records outbound sends and replays frames to `algo:changed`. */
 class FakeChannel implements HotChannelLike {
@@ -36,18 +30,9 @@ class FakeChannel implements HotChannelLike {
     this.sent.push({ event, data });
   }
 
-  /** The last slug a bootstrap `algo:hello` asked about, or null. */
-  lastHelloSlug(): string | null {
-    for (let i = this.sent.length - 1; i >= 0; i -= 1) {
-      const frame = this.sent[i];
-      if (frame !== undefined && frame.event === "algo:hello") {
-        const data = frame.data;
-        if (data instanceof Object && "slug" in data && isString(data.slug)) {
-          return data.slug;
-        }
-      }
-    }
-    return null;
+  /** Whether a bootstrap `algo:hello` was ever sent (the handshake carries no slug). */
+  sentHello(): boolean {
+    return this.sent.some((frame) => frame.event === "algo:hello");
   }
 
   /** How many listeners are currently registered (a leak check). */
@@ -131,7 +116,6 @@ function harness(overrides: Partial<AlgorithmsDevClientDeps> = {}): Harness {
   let runs = 0;
 
   const client = createAlgorithmsDevClient({
-    slug: SLUG,
     channel,
     store,
     run: () => {
@@ -145,10 +129,10 @@ function harness(overrides: Partial<AlgorithmsDevClientDeps> = {}): Harness {
 }
 
 describe("algorithms dev client", () => {
-  it("bootstraps with algo:hello for its slug on enter", () => {
+  it("bootstraps with algo:hello for the one engine on enter", () => {
     const h = harness();
     h.client.enter();
-    expect(h.channel.lastHelloSlug()).toBe(SLUG);
+    expect(h.channel.sentHello()).toBe(true);
   });
 
   it("locks the editor and snapshots the in-game source on enter", () => {
@@ -160,41 +144,33 @@ describe("algorithms dev client", () => {
     );
   });
 
-  it("applies a matching algo:changed frame and runs", () => {
+  it("applies an algo:changed frame and runs", () => {
     const h = harness();
     h.client.enter();
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 3 });
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 3 });
+    h.channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 3 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/engine.ts", version: 3 });
     expect(h.runs()).toBe(1);
   });
 
-  it("switches to the override when a create ping arrives for the preferred slug", () => {
+  it("switches to the override when a create ping arrives for engine.ts", () => {
     const h = harness();
     h.client.enter();
     // First the default-engine fallback, then a create of the override switches to it.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/sim/default-engine.ts", version: 1 });
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 2 });
+    h.channel.emitChanged({ path: DEFAULT_ENGINE_PATH, version: 1 });
+    h.channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 2 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/engine.ts", version: 2 });
     expect(h.runs()).toBe(2);
-  });
-
-  it("ignores a frame for another algorithm's slug", () => {
-    const h = harness();
-    h.client.enter();
-    h.channel.emitChanged({ slug: "other-scenario", path: "/src/algorithms/other.ts", version: 9 });
-    expect(h.store.local).toBeNull();
-    expect(h.runs()).toBe(0);
   });
 
   it("ignores a malformed frame instead of throwing", () => {
     const h = harness();
     h.client.enter();
-    expect(() => h.channel.emitChanged({ slug: SLUG, path: 5, version: "x" })).not.toThrow();
+    expect(() => h.channel.emitChanged({ path: 5, version: "x" })).not.toThrow();
     expect(() => h.channel.emitChanged("not an object")).not.toThrow();
     expect(h.store.local).toBeNull();
     expect(h.runs()).toBe(0);
     // A good frame still applies after a bad one, so the channel is not wedged.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 1 });
+    h.channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 1 });
     expect(h.runs()).toBe(1);
   });
 
@@ -203,7 +179,7 @@ describe("algorithms dev client", () => {
     h.client.enter();
     const stray = h.channel; // same channel, but the listener is torn down on stop
     h.client.stop();
-    stray.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 4 });
+    stray.emitChanged({ path: "/src/algorithms/engine.ts", version: 4 });
     expect(h.store.local).toBeNull();
     expect(h.runs()).toBe(0);
   });
@@ -218,16 +194,16 @@ describe("algorithms dev client", () => {
     h.client.stop();
     h.client.enter(); // epoch 2, a fresh subscribe over the same channel
     // The frame reaches BOTH the epoch-1 and epoch-2 listeners; only epoch 2 acts.
-    channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 7 });
+    channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 7 });
     expect(h.runs()).toBe(1);
-    expect(h.store.local).toEqual({ path: "/src/algorithms/kiosk-pin-attack.ts", version: 7 });
+    expect(h.store.local).toEqual({ path: "/src/algorithms/engine.ts", version: 7 });
   });
 
   it("restores the snapshot and unlocks on stop", () => {
     const h = harness();
     h.client.enter();
     // A local frame drives the run and stashes the override.
-    h.channel.emitChanged({ slug: SLUG, path: "/src/algorithms/kiosk-pin-attack.ts", version: 1 });
+    h.channel.emitChanged({ path: "/src/algorithms/engine.ts", version: 1 });
     // Simulate the editor being driven elsewhere while locked.
     h.store.setSource("// something else");
     h.client.stop();
@@ -243,7 +219,6 @@ describe("algorithms dev client", () => {
     const session = fakeSession();
     const store1 = fakeStore("// player's customized text");
     const client1 = createAlgorithmsDevClient({
-      slug: SLUG,
       channel: new FakeChannel(),
       store: store1,
       run: () => {},
@@ -259,7 +234,6 @@ describe("algorithms dev client", () => {
     const channel2 = new FakeChannel();
     const store2 = fakeStore("// the default text after reload");
     const client2 = createAlgorithmsDevClient({
-      slug: SLUG,
       channel: channel2,
       store: store2,
       run: () => {},
@@ -268,11 +242,11 @@ describe("algorithms dev client", () => {
 
     expect(client2.resume()).toBe(true);
     expect(store2.locked).toBe(true);
-    expect(channel2.lastHelloSlug()).toBe(SLUG); // re-subscribed after the reload
+    expect(channel2.sentHello()).toBe(true); // re-subscribed after the reload
 
     // The plugin re-resolves to the default engine (the override was deleted).
-    channel2.emitChanged({ slug: SLUG, path: "/src/sim/default-engine.ts", version: 5 });
-    expect(store2.local).toEqual({ path: "/src/sim/default-engine.ts", version: 5 });
+    channel2.emitChanged({ path: DEFAULT_ENGINE_PATH, version: 5 });
+    expect(store2.local).toEqual({ path: DEFAULT_ENGINE_PATH, version: 5 });
 
     // Stop restores the ORIGINAL customized text, not the post-reload default.
     client2.stop();
@@ -284,7 +258,7 @@ describe("algorithms dev client", () => {
     const h = harness();
     expect(h.client.resume()).toBe(false);
     expect(h.store.locked).toBe(false);
-    expect(h.channel.lastHelloSlug()).toBeNull();
+    expect(h.channel.sentHello()).toBe(false);
   });
 
   it("does not leak a listener across a stop and re-enter", () => {

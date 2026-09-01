@@ -26,7 +26,6 @@ import type { RunController } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
 
 export interface UseLocalIdeArgs {
-  slug: string;
   controllerRef: RefObject<RunController | null>;
   /** Test injection for the HMR-channel gate. Defaults to the real `devHotChannel`,
       which reads `import.meta.hot` and always returns null outside a live Vite dev
@@ -51,7 +50,6 @@ export interface LocalIdeState {
 }
 
 export function useLocalIde({
-  slug,
   controllerRef,
   getChannel,
   loadClient,
@@ -85,7 +83,6 @@ export function useLocalIde({
           return;
         }
         const client = mod.createAlgorithmsDevClient({
-          slug,
           channel,
           store: {
             getSource: () => useGameStore.getState().source,
@@ -108,7 +105,7 @@ export function useLocalIde({
       algoClientRef.current?.dispose();
       algoClientRef.current = null;
     };
-  }, [slug, getChannel, loadClient]);
+  }, [getChannel, loadClient]);
 
   const onEnterLocalMode = (): void => {
     algoClientRef.current?.enter();

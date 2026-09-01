@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { referenceSource } from "../../../game/engine-source";
 import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
 } from "../../../game/tuning";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
 import type { Finding } from "../../finding";
 import { resolveEntity } from "../../tasks";
-import { buildReferenceAlgorithm, type ReferenceAlgorithm, referenceSource } from "./reference";
-import { kioskPinAttack } from "./scenario";
+import { buildReferenceAlgorithm, type ReferenceAlgorithm } from "./reference";
+import { pinBruteForce } from "./scenario";
 
 /**
  * The live game loads the `referenceSource` STRING, not the typed twin, so its watch,
@@ -65,8 +65,12 @@ function raw(ev: PipeEvent): RawKioskV1 {
 describe("referenceSource (executed, seam 4 parity)", () => {
   it("imports lodash by absolute URL and exports the Rule, like a player would", () => {
     expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
-    expect(referenceSource).toContain("export function normalize");
-    expect(referenceSource).toContain("export function detect");
+    // Rolldown's ESM output hoists every export to one footer statement rather than
+    // keeping an inline `export function`, so the declaration and the export show up
+    // as two separate, deterministic substrings rather than one.
+    expect(referenceSource).toContain("function normalize(raw, endpoint)");
+    expect(referenceSource).toContain("function detect(e)");
+    expect(referenceSource).toContain("export { detect, normalize };");
   });
 
   it("runs the same watch-to-hit promotion as the typed twin when executed", () => {
@@ -131,9 +135,8 @@ describe("reference anchor stability over the real run (seam 9)", () => {
   it("never holds a watch and a hit for one account+reason at the same time", {
     timeout: 30_000,
   }, () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,

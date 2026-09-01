@@ -1,6 +1,6 @@
 /**
  * The shared kiosk cast: the seeded identity pools and the actor assembly, used by
- * the kiosk-pin-attack scenario and the calibration corpus. Both callers
+ * the pin-brute-force scenario and the calibration corpus. Both callers
  * keep their own timing policies; this module only mints identities, budgets benign
  * fumbles, and constructs the two actor kinds. No strategy pattern: a strategy
  * interface waits for a third caller (GH102 decision 7). Pure and seeded, no wall
@@ -14,7 +14,7 @@
  * are the attacker's. The clamp makes benign and attack traffic separable by
  * construction; the scenario's assertions are the double check.
  */
-import { SCAN_WINDOW_TICKS } from "../../../game/tuning";
+import { randomLcg } from "d3-random";
 import { type AccountRiderConfig, createAccountRider } from "../../actors/account-rider";
 import type { Actor } from "../../actors/actor";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
@@ -22,6 +22,7 @@ import { buildAccounts } from "../../entities/account";
 import type { World } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
 import { createPinAttacker, type PinAttackerConfig } from "./pin-attacker";
+import { SCAN_WINDOW_TICKS } from "./tuning";
 
 /**
  * The per-visit fumble probabilities (GH102 decision 2). P(0) = 0.90, P(1) = 0.07,
@@ -69,6 +70,86 @@ export function buildIdentityPools(
   accountCount: number,
 ): IdentityPools {
   const accounts = buildAccounts(accountCount, rng).map((account) => account.name);
+  const stations = world.stations.map((station) => station.id);
+  return { accounts, stations, terminals: KIOSK_TERMINALS };
+}
+
+/**
+ * A fixed seed for the shared partition namespace, independent of any run's own
+ * seed. `buildPartitionedIdentityPools` mints its account slices from this one
+ * constant source, never from a run's `rng`, so two runs generated from
+ * unrelated seeds still draw guaranteed-disjoint accounts as long as they use
+ * different partitions (GH42-PLAN.md "Composable streams: the merge seam"). A
+ * run's own `rng` still decides which of its partition's accounts become
+ * victims or patrons; only the namespace each partition draws from is fixed.
+ */
+const PARTITION_NAMESPACE_SEED = 0x9a1e5;
+
+/**
+ * How many disjoint partitions the shared namespace reserves. Each partition owns
+ * one equal, fixed-size block, so partition K always maps to the same block of
+ * accounts regardless of how many a run actually draws.
+ */
+const MAX_PARTITIONS = 8;
+
+/**
+ * The fixed block size each partition owns in the shared namespace. A partition's
+ * accounts always start at `partition * ACCOUNTS_PER_PARTITION`, so its range
+ * depends only on this block size, never on the caller's `accountCount`. That is
+ * what keeps partitions disjoint by construction even when their runs draw
+ * different counts.
+ */
+const ACCOUNTS_PER_PARTITION = 64;
+
+/**
+ * The one shared partition namespace, built ONCE at module load:
+ * `MAX_PARTITIONS * ACCOUNTS_PER_PARTITION` distinct account names minted from the
+ * fixed `PARTITION_NAMESPACE_SEED`, independent of any run's own seed.
+ * `buildAccounts` enforces its own name-supply ceiling at construction, so an
+ * over-large product fails here at module load rather than silently returning a
+ * short pool. `buildPartitionedIdentityPools` only slices this const; it never
+ * rebuilds it per call.
+ */
+const PARTITION_NAMESPACE = buildAccounts(
+  MAX_PARTITIONS * ACCOUNTS_PER_PARTITION,
+  randomLcg(PARTITION_NAMESPACE_SEED),
+).map((account) => account.name);
+
+/**
+ * The identity pools for one partition of a composed (merged) run. `accounts` is a
+ * fixed equal block of the shared `PARTITION_NAMESPACE`, chosen by `partition`, not
+ * from any run's own seed or count, so partition K always maps to the same accounts
+ * and two runs on different partitions never share one. Stations and terminals are
+ * already world-fixed, so they need no partitioning.
+ *
+ * Throws on a `partition` outside `[0, MAX_PARTITIONS)`: a caller asking for an
+ * unreserved partition would otherwise slice past the namespace and get an
+ * under-full pool, corrupting the disjointness guarantee this function exists to
+ * provide. Throws on an `accountCount` outside `[0, ACCOUNTS_PER_PARTITION]`: a
+ * wider slice would spill into the next partition's block, and a NaN, negative, or
+ * fractional count is a caller bug.
+ */
+export function buildPartitionedIdentityPools(
+  world: World,
+  accountCount: number,
+  partition: number,
+): IdentityPools {
+  if (!Number.isInteger(partition) || partition < 0 || partition >= MAX_PARTITIONS) {
+    throw new Error(
+      `buildPartitionedIdentityPools: partition must be an integer in [0, ${MAX_PARTITIONS}), got ${partition}.`,
+    );
+  }
+  if (
+    !Number.isInteger(accountCount) ||
+    accountCount < 0 ||
+    accountCount > ACCOUNTS_PER_PARTITION
+  ) {
+    throw new Error(
+      `buildPartitionedIdentityPools: accountCount must be an integer in [0, ${ACCOUNTS_PER_PARTITION}], got ${accountCount}.`,
+    );
+  }
+  const start = partition * ACCOUNTS_PER_PARTITION;
+  const accounts = PARTITION_NAMESPACE.slice(start, start + accountCount);
   const stations = world.stations.map((station) => station.id);
   return { accounts, stations, terminals: KIOSK_TERMINALS };
 }

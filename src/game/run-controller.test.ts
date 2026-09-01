@@ -15,7 +15,7 @@ import {
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
 const emptyRun: GeneratedRun = { events: [], attacks: [], checkpoints: [], waves: [] };
-const scenario: Scenario = { id: "test", briefing: "test briefing", generate: () => emptyRun };
+const scenario: Scenario = { id: "test", generate: () => emptyRun };
 
 const graph = { nodes: [], edges: [] };
 
@@ -247,7 +247,7 @@ describe("run controller", () => {
     const seen: StartOptions[] = [];
     const controller = createRunController(
       baseDeps({
-        scenario: { id: "waved", briefing: "b", generate: () => run },
+        scenario: { id: "waved", generate: () => run },
         start: (options) => {
           seen.push(options);
           return fakeHandle();
@@ -266,7 +266,7 @@ describe("run controller", () => {
     const seen: StartOptions[] = [];
     const controller = createRunController(
       baseDeps({
-        scenario: { id: "waved", briefing: "b", generate: () => run },
+        scenario: { id: "waved", generate: () => run },
         start: (options) => {
           seen.push(options);
           return fakeHandle();
@@ -484,7 +484,6 @@ describe("run controller", () => {
     let generateCall = 0;
     const throwingScenario: Scenario = {
       id: "test",
-      briefing: "b",
       generate: () => {
         if (generateCall++ === 1) {
           throw new Error("bad scenario build"); // the second run's commit setup throws
@@ -796,7 +795,6 @@ describe("run controller", () => {
     let generateCalls = 0;
     const throwingScenario: Scenario = {
       id: "test",
-      briefing: "b",
       generate: () => {
         generateCalls++;
         throw new Error("bad scenario build");

@@ -35,7 +35,7 @@ export interface TaskClock {
  * their return at this boundary before handing it to the scorer.
  */
 export interface TaskAlgorithm {
-  normalize: (raw: unknown) => unknown;
+  normalize: (raw: unknown, endpoint: string) => unknown;
   detect: (e: unknown) => unknown;
 }
 
@@ -197,7 +197,9 @@ export async function runNormalize(
     }
     let result: unknown;
     try {
-      result = normalize(message.payload);
+      // One engine over many wire formats: the normalizer needs to know which
+      // endpoint produced this payload, so it can dispatch to the right parser.
+      result = normalize(message.payload, message.endpoint);
     } catch (error) {
       throw new RuleError("normalize", messageOf(error));
     }

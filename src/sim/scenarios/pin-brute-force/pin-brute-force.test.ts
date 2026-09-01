@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  ATTACKS_PER_WAVE,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   GAME_SECONDS_PER_TICK,
   INTRO_TICKS,
   LEVEL_SEED,
-  PIN_BRUTE_FORCE_THRESHOLD,
-  PIN_BRUTE_FORCE_WINDOW_S,
   WAVE_COUNT,
   WAVE_RATES,
 } from "../../../game/tuning";
@@ -16,9 +13,11 @@ import { admitArrivals } from "../../actors/admission";
 import { createScorer } from "../../correctness";
 import { isRawKioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../../event";
+import type { GeneratedRun } from "../../scenario";
 import { buildSchedule } from "../../schedule";
-import { buildReferenceAlgorithm, referenceSource } from "./reference";
-import { kioskPinAttack } from "./scenario";
+import { buildReferenceAlgorithm } from "./reference";
+import { pinBruteForce } from "./scenario";
+import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, PIN_BRUTE_FORCE_WINDOW_S } from "./tuning";
 
 /** The total attackers across all waves; the globally distinct victim count. */
 const VICTIM_COUNT = ATTACKS_PER_WAVE.reduce((sum, n) => sum + n, 0);
@@ -66,22 +65,22 @@ function maxFailsInWindow(times: number[], windowSeconds: number): number {
   return worst;
 }
 
-describe("kioskPinAttack", () => {
+describe("pinBruteForce", () => {
   it("has the scenario id", () => {
-    expect(kioskPinAttack.id).toBe("kiosk-pin-attack");
+    expect(pinBruteForce.id).toBe("pin-brute-force");
   });
 });
 
-describe("kioskPinAttack.generate", () => {
+describe("pinBruteForce.generate", () => {
   it("is deterministic: the same seed gives the same stream and Attacks", () => {
-    const a = kioskPinAttack.generate(LEVEL_SEED);
-    const b = kioskPinAttack.generate(LEVEL_SEED);
+    const a = pinBruteForce.generate(LEVEL_SEED);
+    const b = pinBruteForce.generate(LEVEL_SEED);
     expect(a.events).toEqual(b.events);
     expect(a.attacks).toEqual(b.attacks);
   });
 
   it("assigns ids in sorted-time order with no gaps", () => {
-    const { events } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events } = pinBruteForce.generate(LEVEL_SEED);
     let prev = -1;
     events.forEach((ev, i) => {
       expect(ev.id).toBe(i);
@@ -92,7 +91,7 @@ describe("kioskPinAttack.generate", () => {
   });
 
   it("gives every Attack a valid window and enough evidence", () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const byId = new Map(events.map((ev) => [ev.id, ev]));
     const deadline = deadlineSeconds();
     expect(attacks.length).toBeGreaterThan(0);
@@ -116,7 +115,7 @@ describe("kioskPinAttack.generate", () => {
   });
 
   it("carries the multi-attacker count on globally distinct victims", () => {
-    const { attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { attacks } = pinBruteForce.generate(LEVEL_SEED);
     // 2 + 4 + 8 bursts, each on its own distinct victim account.
     expect(attacks.length).toBe(VICTIM_COUNT);
     const accounts = new Set(attacks.map((a) => a.entity));
@@ -130,7 +129,7 @@ describe("kioskPinAttack.generate", () => {
   });
 
   it("is fair: only victims cross the threshold, and only via their burst", () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const victimFails = new Map(attacks.map((a) => [a.entity, new Set(a.eventIds)]));
     const failTimes = failTimesByAccount(events);
 
@@ -157,9 +156,8 @@ describe("kioskPinAttack.generate", () => {
   });
 
   it("lets the in-process reference Algorithm score 100 via the scorer", () => {
-    const { events, attacks } = kioskPinAttack.generate(LEVEL_SEED);
+    const { events, attacks } = pinBruteForce.generate(LEVEL_SEED);
     const scorer = createScorer(attacks, {
-      threshold: PIN_BRUTE_FORCE_THRESHOLD,
       window: CORRECTNESS_WINDOW,
       wFn: CORRECTNESS_W_FN,
       wFp: CORRECTNESS_W_FP,
@@ -186,8 +184,8 @@ describe("kioskPinAttack.generate", () => {
   });
 });
 
-describe("kioskPinAttack.generate benign fumbles and sign-ins (GH102)", () => {
-  const run = kioskPinAttack.generate(LEVEL_SEED);
+describe("pinBruteForce.generate benign fumbles and sign-ins (GH102)", () => {
+  const run = pinBruteForce.generate(LEVEL_SEED);
   const successes = run.events.filter((ev) => raw(ev).res === "OK");
   const fails = run.events.filter((ev) => raw(ev).res === "WRONG_PIN");
   const attackFailIds = new Set(run.attacks.flatMap((a) => a.eventIds));
@@ -248,14 +246,14 @@ describe("buildSchedule (M2 schedule invariant)", () => {
   });
 
   it("carries the checkpoints through into the generated run unchanged", () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     expect(run.checkpoints).toEqual(buildSchedule().checkpoints);
     // The final deadline clears the last wave.
     expect(run.checkpoints[run.checkpoints.length - 1]?.clearsThroughWave).toBe(WAVE_COUNT - 1);
   });
 
   it("carries the waves through into the generated run unchanged (GH38+40-PLAN.md Part 1)", () => {
-    const run = kioskPinAttack.generate(LEVEL_SEED);
+    const run = pinBruteForce.generate(LEVEL_SEED);
     expect(run.waves).toEqual(buildSchedule().waves);
   });
 });
@@ -268,7 +266,7 @@ describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () =>
     // surface early and the tally would under-count. Lock the property here so the
     // seed stays hidden and the tally stays correct this slice.
     for (const seed of [LEVEL_SEED, 1, 42, 2026, 9999]) {
-      const { events } = kioskPinAttack.generate(seed);
+      const { events } = pinBruteForce.generate(seed);
       let prev = Number.NEGATIVE_INFINITY;
       for (const ev of events) {
         expect(ev.ts).toBeGreaterThanOrEqual(prev);
@@ -278,11 +276,42 @@ describe("in-order stream keeps the hidden #5 seed (GH3-PLAN.md 6.5, 11)", () =>
   });
 });
 
-describe("referenceSource", () => {
-  it("imports lodash by absolute URL and exports the Rule", () => {
-    expect(referenceSource).toContain('import _ from "https://esm.sh/lodash@4.17.21"');
-    expect(referenceSource).toContain("export function normalize");
-    expect(referenceSource).toContain("export function detect");
+// The Rolldown-codegen shape of `referenceSource` (the teaching import, the hoisted
+// `normalize`/`detect`/`export` footer) is already asserted in `reference.test.ts` and
+// `engine-assembler.test.ts`; a third copy here would only need updating in lockstep on
+// any Rolldown format change, so it is not repeated in this file.
+
+// GH42-PLAN.md's minimal merge seam: `partition` rides the PUBLIC `Scenario.generate`
+// contract, not a scenario-specific function only this module's own tests could reach.
+// Every case below drives it through `pinBruteForce.generate` (the `Scenario` object),
+// exactly as `mergeRuns`'s own caller (`game/merge-runs.test.ts`) does.
+describe("generate's partition parameter (GH42-PLAN.md's minimal merge seam)", () => {
+  it("with no partition, generates the same run as an explicit undefined partition", () => {
+    expect(pinBruteForce.generate(LEVEL_SEED)).toEqual(
+      pinBruteForce.generate(LEVEL_SEED, undefined),
+    );
+  });
+
+  it("draws disjoint accounts for two different partitions, even across different seeds", () => {
+    const a = pinBruteForce.generate(LEVEL_SEED, 0);
+    const b = pinBruteForce.generate(2026, 1);
+    const accountsOf = (run: GeneratedRun): Set<string> =>
+      new Set(run.attacks.map((attack) => attack.entity));
+    const aAccounts = accountsOf(a);
+    const bAccounts = accountsOf(b);
+    // Guards against a vacuous pass: an empty set would make the loop below check
+    // nothing and still report disjoint.
+    expect(aAccounts.size).toBeGreaterThan(0);
+    expect(bAccounts.size).toBeGreaterThan(0);
+    for (const account of aAccounts) {
+      expect(bAccounts.has(account)).toBe(false);
+    }
+  });
+
+  it("is deterministic for a given seed and partition", () => {
+    const a = pinBruteForce.generate(LEVEL_SEED, 1);
+    const b = pinBruteForce.generate(LEVEL_SEED, 1);
+    expect(a).toEqual(b);
   });
 });
 
@@ -292,7 +321,7 @@ describe("fairness invariants stay under the M2 wave data (M3 seam 15)", () => {
     // violation, so a clean generate across seeds proves the invariants still hold
     // with the wave schedule in place. See GH3-PLAN.md section 9 (M3 seam 15).
     for (const seed of [LEVEL_SEED, 1, 42, 2026, 9999]) {
-      const run = kioskPinAttack.generate(seed);
+      const run = pinBruteForce.generate(seed);
       expect(run.attacks.length).toBe(VICTIM_COUNT);
       for (const attack of run.attacks) {
         expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);

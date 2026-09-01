@@ -31,7 +31,7 @@ describe("adaptModule", () => {
         event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 }] : [],
     });
     expect(algo.detect instanceof Function).toBe(true);
-    expect(algo.normalize("passthrough")).toBe("passthrough"); // identity default
+    expect(algo.normalize("passthrough", "kiosk-v1")).toBe("passthrough"); // identity default
     expect(algo.detect({ flag: true })).toEqual([
       { alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 },
     ]);
@@ -43,7 +43,7 @@ describe("adaptModule", () => {
       normalize: (r: { x: number }) => ({ u: r.x }),
       detect: () => [],
     });
-    expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
+    expect(algo.normalize({ x: 5 }, "kiosk-v1")).toEqual({ u: 5 });
   });
 
   it("rejects a module that exports no detect function", () => {
@@ -85,7 +85,7 @@ describe("loadAlgorithm", () => {
           event.flag ? [{ alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 }] : [],
       });
     const algo = await loadAlgorithm(target, importSource);
-    expect(algo.normalize({ x: 5 })).toEqual({ u: 5 });
+    expect(algo.normalize({ x: 5 }, "kiosk-v1")).toEqual({ u: 5 });
     expect(algo.detect({ flag: true })).toEqual([
       { alert: { reason: "r", at: 1, eventIds: [1] }, eventId: 1 },
     ]);
