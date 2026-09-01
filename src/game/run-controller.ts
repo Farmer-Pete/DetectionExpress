@@ -26,6 +26,7 @@ import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { GeneratedRun, Scenario } from "../sim/scenario";
+import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldEnv } from "../sim/world-reading";
@@ -568,6 +569,17 @@ export function createRunController(deps: RunControllerDeps): RunController {
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
         const mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
+        // GH117 Part C: when a blueprint drives a live cast, score off the live stepped
+        // stream, not the pre-generated `generator`. The engine offers each scored
+        // reading into this ingress and closes it at `lastScoredTick`; `generator`
+        // stays wired as the no-blueprint fallback. Guard 2 proves the two agree.
+        const scoredIngest = blueprint
+          ? {
+              ingress: new ScoredIngress(),
+              toEvent: blueprint.toEvent,
+              lastScoredTick: blueprint.lastScoredTick,
+            }
+          : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
@@ -584,6 +596,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
           ...(mapCast
             ? { scenarioCast: mapCast.scenarioCast, ambientCast: mapCast.ambientCast }
             : {}),
+          ...(scoredIngest ? { scoredIngest } : {}),
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;

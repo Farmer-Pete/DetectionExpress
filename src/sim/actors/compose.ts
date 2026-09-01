@@ -12,14 +12,37 @@
  */
 import type { PipeEvent } from "../event";
 
-export interface ComposeInput<Reading> {
-  readonly readings: readonly Reading[];
+/**
+ * How to turn one reading into a wire event, minus its id: its scheduled time, its
+ * endpoint, and its payload. Shared by the batch composer and the live scored-ingress
+ * adapter (GH117-PLAN.md "Part C"), so a live-emitted event is byte-identical to the
+ * precomposed one the scorer's Attack evidence binds to. Parity guard 1 depends on it.
+ */
+export interface EventShape<Reading> {
   /** Reads the reading's scheduled time, in game seconds. */
   tsOf: (reading: Reading) => number;
   /** The endpoint's wire formatter. */
   format: (reading: Reading) => unknown;
   /** Per-reading endpoint id; return a constant for a single-endpoint run. */
   endpointIdOf: (reading: Reading) => string;
+}
+
+/** Build one wire event for a reading at a chosen id. The one place a PipeEvent is minted. */
+export function composeEvent<Reading>(
+  reading: Reading,
+  id: number,
+  shape: EventShape<Reading>,
+): PipeEvent {
+  return {
+    id,
+    ts: shape.tsOf(reading),
+    endpoint: shape.endpointIdOf(reading),
+    payload: shape.format(reading),
+  };
+}
+
+export interface ComposeInput<Reading> extends EventShape<Reading> {
+  readonly readings: readonly Reading[];
   /** Optional ground-truth label. Return null for a benign reading. */
   attackIdOf?: (reading: Reading) => number | null;
 }
@@ -47,12 +70,7 @@ export function composeRun<Reading>(input: ComposeInput<Reading>): ComposedRun {
   const events: PipeEvent[] = [];
   const eventIdsByAttack = new Map<number, number[]>();
   ordered.forEach((entry, id) => {
-    events.push({
-      id,
-      ts: entry.ts,
-      endpoint: endpointIdOf(entry.reading),
-      payload: format(entry.reading),
-    });
+    events.push(composeEvent(entry.reading, id, { tsOf, format, endpointIdOf }));
     if (attackIdOf !== undefined) {
       const attackId = attackIdOf(entry.reading);
       if (attackId !== null) {

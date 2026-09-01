@@ -31,7 +31,7 @@
 import { randomLcg } from "d3-random";
 import type { Actor, ActorDescriptor, TimedReading } from "./actors/actor";
 import { instantiateActors, runActors } from "./actors/actor";
-import { composeRun } from "./actors/compose";
+import { composeEvent, composeRun } from "./actors/compose";
 import type { Attack } from "./attack";
 import type { PipeEvent } from "./event";
 import type { Checkpoint, GeneratedRun, Wave } from "./scenario";
@@ -121,6 +121,19 @@ export interface ScenarioBlueprint<Plan extends { id: number }> {
   readonly format: (timed: TimedReading<WorldReading>) => unknown;
   /** This reading's endpoint id. */
   readonly endpointIdOf: (timed: TimedReading<WorldReading>) => string;
+  /**
+   * Mint one wire event for a scored reading at a chosen id (GH117-PLAN.md "Part C").
+   * The live engine calls this per scored-scenario kiosk reading, assigning the next
+   * dense id in emission order, so a live-emitted event is byte-identical to the
+   * precomposed one the scorer's Attack evidence binds to. Parity guard 1 proves it.
+   */
+  readonly toEvent: (timed: TimedReading<WorldReading>, id: number) => PipeEvent;
+  /**
+   * The last tick on which the scenario cast emits a scored reading (GH117-PLAN.md
+   * "Part C", "Scored horizon"). When the live tick loop passes it, the engine closes
+   * the scored ingress, so the pipeline drains and finalizes exactly once.
+   */
+  readonly lastScoredTick: number;
   readonly waves: readonly Wave[];
   readonly checkpoints: readonly Checkpoint[];
   /** The scorer's Attack manifest and the test parity oracle. Not a live source. */
@@ -206,6 +219,18 @@ export function buildScenarioBlueprint<
   const records = timed.map((t) => spec.toRecord(t, attacker.labels));
   spec.assertSeparable(records, attacks);
 
+  // The live scored-ingress adapter (GH117-PLAN.md "Part C"): mint one event per
+  // scored reading through the SAME construction the precompose used, so a live event
+  // equals its precomposed twin byte for byte. The engine supplies the id in emission
+  // order.
+  const toEvent = (t: TimedReading<WorldReading>, id: number): PipeEvent =>
+    composeEvent(t, id, { tsOf, format: spec.format, endpointIdOf: spec.endpointIdOf });
+  // The last tick the scenario cast emits on, read straight off the composed run: the
+  // horizon after which the live engine closes the ingress. Every reading here is a
+  // scored scenario reading (the batch precompose steps only the scenario cast), so the
+  // maximum emission tick is the last scored tick. Empty run: nothing to close past 0.
+  const lastScoredTick = timed.reduce((max, t) => Math.max(max, t.tick), 0);
+
   return {
     descriptors,
     labels: attacker.labels,
@@ -213,6 +238,8 @@ export function buildScenarioBlueprint<
     env,
     format: spec.format,
     endpointIdOf: spec.endpointIdOf,
+    toEvent,
+    lastScoredTick,
     waves,
     checkpoints,
     precomposed: { events, attacks },

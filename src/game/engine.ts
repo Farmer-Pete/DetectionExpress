@@ -23,6 +23,7 @@ import {
   type Admission,
   createSchedule,
   type StepResult,
+  type TimedReading,
 } from "../sim/actors/actor";
 import type { RiderSpawner } from "../sim/actors/rider-spawner";
 import type { StaffSpawner } from "../sim/actors/staff-spawner";
@@ -33,6 +34,7 @@ import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/grap
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
 import type { Checkpoint, Wave } from "../sim/scenario";
+import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
@@ -53,7 +55,7 @@ import type { MapNodeId, Presence } from "../sim/world/presence";
 import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent } from "../sim/world-snapshot";
 import { type CameraGrant, createCameraReducer } from "./camera-reducer";
-import { Clock, intervalDriver, type TickDriver } from "./clock";
+import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
 import { createDoorReducer } from "./door-reducer";
 import {
   CAMERA_WINDOW_TICKS,
@@ -127,6 +129,46 @@ export interface AmbientCast {
   readonly accountSpawner?: AccountRiderSpawner;
 }
 
+/**
+ * The live scored source (GH117-PLAN.md "Part C" and "Part D"). Present, it REPLACES
+ * the pre-generated `generator` as the pipeline's Ingest source: the cast-stepping tick
+ * listener formats each `scored-scenario` kiosk reading through `toEvent`, assigns the
+ * next dense id in emission order, and offers it into `ingress`; the Ingest node pumps
+ * it. When the tick loop passes `lastScoredTick` the engine closes `ingress`, so the
+ * pipeline drains and finalizes once. Takes effect only alongside `scenarioCast` (its
+ * offers come from the stepped cast). Omitted, scoring runs off `generator` exactly as
+ * before — the reference path parity guard 2 compares against.
+ */
+export interface ScoredIngestSource {
+  ingress: ScoredIngress;
+  toEvent: (timed: TimedReading<WorldReading>, id: number) => PipeEvent;
+  lastScoredTick: number;
+}
+
+/** The outcome the engine chose at one checkpoint, reported through `onCheckpoint`. */
+type CheckpointOutcome = "pass" | "queue" | "correctness" | "won";
+
+/**
+ * A TEST-ONLY observation of one checkpoint evaluation (GH117-PLAN.md "Parity guards",
+ * guard 2). Checkpoints are evaluated but not published in a normal run, so the paired
+ * engine-equivalence test needs this seam to compare the live and reference engines at
+ * each checkpoint tick. Inert in production: the run controller never passes a handler.
+ */
+export interface CheckpointObservation {
+  /** The checkpoint's tick. */
+  atTick: number;
+  /** Its index in the checkpoint list. */
+  index: number;
+  /** Outstanding Events (admitted minus completed) the checkpoint saw. */
+  queued: number;
+  admitted: number;
+  completed: number;
+  /** The scorer's rolling Correctness at the checkpoint boundary. */
+  correctness: number;
+  /** The outcome the engine chose from that state. */
+  outcome: CheckpointOutcome;
+}
+
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
 export interface StartOptions {
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
@@ -157,10 +199,22 @@ export interface StartOptions {
    * are visual and log-only: scoring always runs off `generator`, never this cast.
    */
   ambientCast?: AmbientCast;
+  /**
+   * The live scored source (GH117-PLAN.md "Part C"). Present, the pipeline scores off
+   * the stepped scenario cast instead of `generator`, and the engine closes it at the
+   * scored horizon. Takes effect only alongside `scenarioCast`. Omitted, scoring runs
+   * off `generator` exactly as before.
+   */
+  scoredIngest?: ScoredIngestSource;
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Reports an engine or Rule failure. */
   onError?: (error: unknown) => void;
+  /**
+   * TEST-ONLY: observe each checkpoint as the engine evaluates it (parity guard 2).
+   * Inert in production — the run controller never passes it.
+   */
+  onCheckpoint?: (observation: CheckpointObservation) => void;
 }
 
 /** A running engine. `stop` tears it down; `whenStopped` settles for tests. */
@@ -354,6 +408,13 @@ export function start(options: StartOptions): EngineHandle {
     }
     stopped = true;
     teardownStep("clock.stop", () => clock?.stop());
+    // Cancel any parked pump waiter through the same supervision as the clock and
+    // channel waiters (GH117-PLAN.md "Part C", teardown). A pump parked on `take()`
+    // (horizon not yet passed, an early checkpoint failure ended the run) unwinds only
+    // through fail(); one parked on the clock gate unwinds through clock.stop() above.
+    teardownStep("scoredIngest.fail", () =>
+      options.scoredIngest?.ingress.fail(new ClockStoppedError()),
+    );
     if (channels) {
       for (const channel of channels.values()) {
         teardownStep("channel.close", () => channel.close());
@@ -443,6 +504,12 @@ export function start(options: StartOptions): EngineHandle {
     // runs off `options.generator`; this only advances the cast for the map. Speed is
     // Clock.setSpeed pacing only, so the schedule advances one integer tick per game
     // tick regardless of speed, and the tick sequence never changes with speed.
+    // The live scored source (GH117-PLAN.md "Part C"/"Part D"). Present, the tick
+    // listener offers each scored-scenario kiosk reading into it (below) and the Ingest
+    // node pumps it, replacing `generator`. Its dense event id runs in emission order.
+    const scoredIngest = options.scoredIngest;
+    let nextScoredEventId = 0;
+
     const cast = options.scenarioCast;
     if (cast) {
       const ambient = options.ambientCast;
@@ -573,16 +640,25 @@ export function start(options: StartOptions): EngineHandle {
               atTick: timed.tick,
             });
           }
+          const provenance = provenanceById.get(timed.actorId) ?? "ambient";
           const entry: TimedWorldReading = {
             reading,
             tick: timed.tick,
             source: "actor",
-            provenance: provenanceById.get(timed.actorId) ?? "ambient",
+            provenance,
           };
           if (timed.actorId !== undefined) {
             entry.actorId = timed.actorId;
           }
           mapLog.push(entry);
+          // The scoring boundary (GH117-PLAN.md "Part D"): only a scored-scenario kiosk
+          // reading is formatted, dense-id-assigned, and offered to the pipeline. An
+          // ambient kiosk reading already raised its flash and log line above but never
+          // enters the channels, so it can never bump the dense id or `admitted`. The
+          // id runs in emission order, matching the precomposed run parity guard 1 pins.
+          if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
+            scoredIngest.ingress.offer(scoredIngest.toEvent(timed, nextScoredEventId++));
+          }
         }
         for (const [id, presence] of step.presences) {
           const view = views.get(id);
@@ -719,6 +795,15 @@ export function start(options: StartOptions): EngineHandle {
         spawnTransients(tick + 1);
         mapNowTick = tick;
         pruneFlashes();
+        // Scored horizon (GH117-PLAN.md "Part C"): once this tick reaches the last
+        // scored emission tick, every scored event for the run has been offered above,
+        // so close the ingress. The pipeline then drains, END_OF_STREAM fires
+        // scorer.finalize once, and the run concludes. Idempotent, so a later tick
+        // re-calling it is a no-op; no scored reading emits past the horizon, so no
+        // offer ever races an already-closed ingress.
+        if (scoredIngest && tick >= scoredIngest.lastScoredTick) {
+          scoredIngest.ingress.close();
+        }
       };
 
       // Tick zero: prime the schedule once at startup, before the clock loop, with
@@ -765,6 +850,13 @@ export function start(options: StartOptions): EngineHandle {
       scorer: options.scorer,
       inspector,
       nextEvent: options.generator,
+      // The live scored source replaces the pull schedule when injected (GH117 Part C).
+      ...(scoredIngest
+        ? {
+            pump: (out, tickClock, onAdmit): Promise<void> =>
+              scoredIngest.ingress.pump(out, tickClock, onAdmit),
+          }
+        : {}),
       serviceRate: options.serviceRate,
     };
     // Spawn one task per node, looked up by kind. A thrown Rule rejects its task
@@ -829,15 +921,36 @@ export function start(options: StartOptions): EngineHandle {
         options.scorer.advanceTo(cp.atTick * GAME_SECONDS_PER_TICK);
         const queued = admitted - completed;
         const isFinal = nextCheckpoint === checkpoints.length - 1;
-        if (queued !== 0) {
+        const rolling = options.scorer.reading().rolling;
+        // The outcome this checkpoint state implies, computed once so the test-only
+        // observation seam (parity guard 2) and the terminal transitions read the same
+        // decision. `pass` clears an interim checkpoint; the other three are terminal.
+        const outcome: CheckpointOutcome =
+          queued !== 0
+            ? "queue"
+            : rolling < CORRECTNESS_FLOOR
+              ? "correctness"
+              : isFinal
+                ? "won"
+                : "pass";
+        options.onCheckpoint?.({
+          atTick: cp.atTick,
+          index: nextCheckpoint,
+          queued,
+          admitted,
+          completed,
+          correctness: rolling,
+          outcome,
+        });
+        if (outcome === "queue") {
           finishOutcome("failed", "queue");
           return;
         }
-        if (options.scorer.reading().rolling < CORRECTNESS_FLOOR) {
+        if (outcome === "correctness") {
           finishOutcome("failed", "correctness");
           return;
         }
-        if (isFinal) {
+        if (outcome === "won") {
           finishOutcome("won", null);
           return;
         }
