@@ -86,6 +86,18 @@ export function trapTab(dialog: HTMLElement, event: TabKeyEvent): boolean {
  * test green without synthesized pointer events, while a real drag that
  * starts or ends inside the dialog still stays open.
  *
+ * "Outside" means the backdrop SCRIM wrapping the dialog — the dialog's parent, a
+ * full-viewport fixed overlay — NOT anywhere in the document. Scoping to the scrim is
+ * what stops the very click that OPENED the dialog from dismissing it: that opening
+ * click lands on shell content (e.g. the findings row that set the selection), which
+ * sits in a separate subtree from the scrim, yet still bubbles up to this document-level
+ * `click` listener in the SAME dispatch — because the open-effect adds the listener
+ * mid-bubble, below `document` in the tree. A document-wide "anywhere the dialog does not
+ * contain" test treated that opening click as an outside click and dismissed the dialog
+ * on the same gesture that opened it, so it never appeared. (Synthetic clicks —
+ * happy-dom `fireEvent`, headless drivers — fire fully before the effect installs the
+ * listener, so they never hit this; only a real user click did.)
+ *
  * Returns a cleanup that removes all three listeners.
  */
 export function installOutsidePointerDismiss(
@@ -98,7 +110,14 @@ export function installOutsidePointerDismiss(
 
   const isOutside = (target: EventTarget | null): boolean => {
     const dialog = dialogRef.current;
-    return dialog !== null && target instanceof Node && !dialog.contains(target);
+    if (dialog === null || !(target instanceof Node)) {
+      return false;
+    }
+    const scrim = dialog.parentElement;
+    if (scrim === null) {
+      return false;
+    }
+    return scrim.contains(target) && !dialog.contains(target);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
