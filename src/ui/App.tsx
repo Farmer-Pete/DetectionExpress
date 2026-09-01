@@ -14,9 +14,8 @@
  *   a controller factory through `createPipelineController`, so the app never loads
  *   the real loader or engine under test. The Apply button reloads the current
  *   Algorithm source. GH117 unified the metro map onto this same engine, so there is
- *   only one controller and one loop now — `useWorldController` and its own
- *   `WorldRunController` are retired from the app (their files stay on disk for a
- *   later deletion step; nothing here imports them).
+ *   only one controller and one loop now — the standalone `useWorldController` and
+ *   `WorldRunController` are retired.
  * - `useLocalIde` (dev/) wires the dev-only local-IDE (algorithms hot-reload) client.
  *   Its whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
  *   production build inlines the gate to `false` and strips both the client and its
@@ -130,7 +129,6 @@ export function App({ createPipelineController }: AppProps = {}) {
   // steps the scenario cast the embedded map draws, so there is no separate world
   // controller to build or tear down alongside it.
   const { controllerRef } = usePipelineController({
-    view: "pipeline",
     createController: createPipelineController,
   });
 

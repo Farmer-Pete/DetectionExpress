@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import type { Actor } from "../sim/actors/actor";
+import { createHost, initialHostPresence } from "../sim/actors/host";
+import { createOperator, initialOperatorPresence } from "../sim/actors/operator";
+import type { RiderTripConfig } from "../sim/actors/rider-core";
+import type { RiderSpawner } from "../sim/actors/rider-spawner";
+import { createWorldRider, initialRiderPresence } from "../sim/actors/world-rider";
 import type { Attack } from "../sim/attack";
 import {
   createScorer,
@@ -26,7 +31,8 @@ import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
 import { distanceTable } from "../sim/world/distance";
-import { kioskNodeId } from "../sim/world/layout";
+import { consoleNodeId, kioskNodeId, relayNodeId } from "../sim/world/layout";
+import type { Presence } from "../sim/world/presence";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
@@ -34,6 +40,7 @@ import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
 import { ManualDriver, type TickDriver } from "./clock";
 import {
   type AmbientCast,
+  type AmbientFixture,
   type ScenarioCast,
   type ScenarioCastMember,
   type StartOptions,
@@ -46,9 +53,14 @@ import {
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
+  FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
+  HOST_RELAY_TICKS,
   LEVEL_SEED,
+  OPERATOR_COMMAND_TICKS,
+  RIDER_GOHOME_DWELL_TICKS,
   WAVE_WARN_TICKS,
+  WORLD_LOG_RETENTION,
 } from "./tuning";
 
 const SCORER_CONFIG: ScorerConfig = {
@@ -1470,5 +1482,278 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
     expect(
       withAmbient.snapshots.some((snap) => snap.actors.some((a) => a.provenance === "ambient")),
     ).toBe(true);
+  });
+});
+
+// The next three describe blocks are ported from world-engine.test.ts and
+// world-control.test.ts ahead of GH117-PLAN.md deleting those files (and world-engine.ts
+// itself). Each proves a merged-engine behavior that no surviving test otherwise reaches:
+// the M6 control cast's flash folding, a real rider's full one-trip-then-evicted lifecycle,
+// and the map fields staying bounded over a long run. The camera reducer, the door
+// reducer, and the staff walk/rider-boarding-dwell math keep their own direct unit tests
+// (camera-reducer.test.ts, door-reducer.test.ts, staff-spawner.test.ts, world-rider.test.ts),
+// so those are not re-proven here.
+
+/** The M6 control cast's env: the ambient operator and host fixtures read `control`. */
+const CONTROL_ENV: WorldEnv = { ...CAST_ENV, control: controlReference };
+
+/** One operator at the OCC and one host at "dep", exactly as the legacy world run built them. */
+function controlFixtures(): AmbientFixture[] {
+  const occId = world.controlCenter.id;
+  return [
+    {
+      actor: createOperator({
+        id: "OP1",
+        node: occId,
+        console: controlReference.consoles[0] ?? { operator: "red.disp", host: "OCC-1" },
+        startTick: 0,
+        cadenceTicks: OPERATOR_COMMAND_TICKS,
+      }),
+      kind: "operator",
+      initialPresence: (firstTick) => initialOperatorPresence(occId, firstTick),
+    },
+    {
+      actor: createHost({
+        id: "H1",
+        site: "dep",
+        host: "YARD-NET-1",
+        startTick: 0,
+        cadenceTicks: HOST_RELAY_TICKS,
+      }),
+      kind: "host",
+      initialPresence: (firstTick) => initialHostPresence("dep", firstTick),
+    },
+  ];
+}
+
+describe("engine folds the M6 control cast onto the merged snapshot (ported from world-control.test.ts)", () => {
+  it("raises a command flash on the OCC console chip and logs the occ-console reading", async () => {
+    const occId = world.controlCenter.id;
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(200),
+    });
+    await step(h.driver, 40, 10);
+    h.handle.stop();
+
+    const commandFlash = h.snapshots
+      .flatMap((snap) => snap.flashes)
+      .find((f) => f.kind === "command");
+    expect(commandFlash?.node).toBe(consoleNodeId(occId));
+    expect(
+      h.snapshots
+        .flatMap((snap) => snap.mapLog)
+        .some((entry) => entry.reading.sensor === "occ-console"),
+    ).toBe(true);
+  });
+
+  it("raises a packet flash on the site relay chip and logs the network-relay reading", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(200),
+    });
+    await step(h.driver, 40, 10);
+    h.handle.stop();
+
+    const packetFlash = h.snapshots
+      .flatMap((snap) => snap.flashes)
+      .find((f) => f.kind === "packet");
+    expect(packetFlash?.node).toBe(relayNodeId("dep"));
+    expect(
+      h.snapshots
+        .flatMap((snap) => snap.mapLog)
+        .some((entry) => entry.reading.sensor === "network-relay"),
+    ).toBe(true);
+  });
+
+  it("keeps the operator and host present the whole run (never evicted)", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(700),
+    });
+    await step(h.driver, 600, 10);
+    h.handle.stop();
+
+    const kinds = h.last()?.actors.map((a) => a.kind) ?? [];
+    expect(kinds).toContain("operator");
+    expect(kinds).toContain("host");
+  });
+});
+
+/**
+ * A controlled rider spawner (GH116): admits one real `createWorldRider` whenever no
+ * rider is live, mirroring the real `rider-spawner`'s refill-toward-target behavior
+ * (target 1 here) without its randomness, so the test stays deterministic. Each
+ * admission mints a fresh, distinct id, so a later id proves a genuine replacement, not
+ * the same rider re-admitted.
+ */
+function controlledRiderSpawner(origin: string): RiderSpawner {
+  let births = 0;
+  return {
+    tick: (nowTick, liveRiders) => {
+      if (liveRiders > 0) {
+        return [];
+      }
+      const id = `E${births}`;
+      births += 1;
+      // A high balance so the trip is always affordable and no TVM top-up detour
+      // complicates the lifecycle this test is proving.
+      const tripConfig: RiderTripConfig = {
+        card: id,
+        origin,
+        balance: 1_000_000,
+        window: { startTick: nowTick, endTick: nowTick + 100_000 },
+        fare: { base: 10, perMinute: 5 },
+        jitterTicks: { min: 0, max: 4 },
+        dwellTicks: { min: 2, max: 6 },
+      };
+      return [
+        {
+          actor: createWorldRider(tripConfig),
+          kind: "rider",
+          initialPresence: (firstTick) => initialRiderPresence(origin, firstTick),
+        },
+      ];
+    },
+  };
+}
+
+describe("engine folds a real rider through one trip, a dwell, eviction, and a replacement (GH116, ported from world-engine.test.ts)", () => {
+  it("takes a real rider through one trip, a go-home dwell, eviction, and a replacement admission", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [], spawner: controlledRiderSpawner("cen") },
+      checkpoints: deadlineAt(2000),
+    });
+    await step(h.driver, 1000, 5);
+    h.handle.stop();
+
+    const ridersOf = (snap: SimSnapshot) => snap.actors.filter((view) => view.kind === "rider");
+
+    // The first rider is admitted and shows up in the view.
+    const firstSeen = h.snapshots.find((snap) => ridersOf(snap).length > 0);
+    expect(firstSeen).toBeDefined();
+    const firstId = firstSeen ? ridersOf(firstSeen)[0]?.id : undefined;
+    expect(firstId).toBeDefined();
+
+    // The first rider's own tap-out (its one trip's exit) appears in the log exactly
+    // once -- the bounded log ring republishes the same entry across several snapshots,
+    // so dedupe by reference before counting -- and it is followed by that rider
+    // remaining in the view, not evicted immediately, for the go-home dwell.
+    const tapOutSet = new Set(
+      h.snapshots
+        .flatMap((snap) => snap.mapLog)
+        .filter(
+          (entry) =>
+            entry.reading.sensor === "fare-gate" &&
+            entry.reading.reading.direction === "out" &&
+            entry.reading.reading.card === firstId,
+        ),
+    );
+    expect(tapOutSet.size).toBe(1);
+    const tapOutTick = [...tapOutSet][0]?.tick ?? Number.NaN;
+
+    // A snapshot taken shortly after the tap-out but before the go-home dwell elapses
+    // still shows the first rider present, standing `at` its destination.
+    const midDwell = h.snapshots.find(
+      (snap) =>
+        snap.nowTick > tapOutTick &&
+        snap.nowTick < tapOutTick + RIDER_GOHOME_DWELL_TICKS &&
+        ridersOf(snap).some((view) => view.id === firstId),
+    );
+    expect(midDwell).toBeDefined();
+    const stillAt = midDwell?.actors.find((view) => view.id === firstId)?.presence;
+    expect(stillAt?.kind).toBe("at");
+
+    // Eventually the first rider is evicted (gone from every later snapshot)...
+    const lastSeenIndex = h.snapshots.findLastIndex((snap) =>
+      ridersOf(snap).some((view) => view.id === firstId),
+    );
+    expect(lastSeenIndex).toBeGreaterThan(-1);
+    const afterFirstEvicted = h.snapshots.slice(lastSeenIndex + 1);
+    expect(
+      afterFirstEvicted.every((snap) => !ridersOf(snap).some((view) => view.id === firstId)),
+    ).toBe(true);
+
+    // ...and a genuinely distinct replacement rider is admitted afterward, proving the
+    // spawner refilled toward its target once the first rider's slot freed up.
+    const replacement = afterFirstEvicted.find((snap) => ridersOf(snap).length > 0);
+    expect(replacement).toBeDefined();
+    const replacementId = replacement ? ridersOf(replacement)[0]?.id : undefined;
+    expect(replacementId).toBeDefined();
+    expect(replacementId).not.toBe(firstId);
+  });
+});
+
+/** A fixture that taps a fare gate at `station` every tick, forever. */
+function tapperFixture(id: string, station: string): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      const reading: WorldReading = {
+        sensor: "fare-gate",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          card: id,
+          station,
+          line: "blue",
+          direction: "in",
+          result: "ok",
+          balance: 100,
+        },
+      };
+      const presence: Presence = { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 };
+      return { readings: [reading], nextTick: tick + 1, presence };
+    },
+  };
+  return {
+    actor,
+    kind: "rider",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: station,
+      fromTick: 0,
+      untilTick: firstTick,
+    }),
+  };
+}
+
+describe("engine bounded cost over a long run (ported from world-engine.test.ts)", () => {
+  it("keeps the map log bounded and newest-first", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [tapperFixture("C1", "cen")] },
+      checkpoints: deadlineAt(6000),
+    });
+    await step(h.driver, 5000, 3);
+    h.handle.stop();
+
+    const log = h.last()?.mapLog ?? [];
+    expect(log.length).toBeLessThanOrEqual(WORLD_LOG_RETENTION);
+    expect(log.length).toBeGreaterThan(1);
+    // Newest first: a tick's readings never regress to an earlier tick further down.
+    for (let i = 1; i < log.length; i++) {
+      expect(log[i - 1]?.tick ?? 0).toBeGreaterThanOrEqual(log[i]?.tick ?? 0);
+    }
+  });
+
+  it("keeps flashes bounded", async () => {
+    let maxFlashes = 0;
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [tapperFixture("C1", "cen")] },
+      checkpoints: deadlineAt(6000),
+      setSnapshot: (snap) => {
+        maxFlashes = Math.max(maxFlashes, snap.flashes.length);
+      },
+    });
+    await step(h.driver, 5000, 3);
+    h.handle.stop();
+    // One flash per tick, pruned to the window, so it never grows without bound.
+    expect(maxFlashes).toBeLessThanOrEqual(FLASH_WINDOW_TICKS + 1);
   });
 });

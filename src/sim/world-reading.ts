@@ -56,7 +56,7 @@ export interface DoorReaderReading {
  * traffic toggles `open`/`close`; the `forced`/`held` values are for a later attack
  * ticket. The engine's door reducer emits these, never a scheduler actor.
  */
-export interface DoorContactReading {
+interface DoorContactReading {
   /** Game seconds. */
   ts: number;
   site: string;
@@ -91,7 +91,7 @@ interface TvmReading {
  * scheduler actor. `ts` is in game seconds; `gate` is the gate id the reducer groups
  * by, derived from `station` via `gateIdForStation`.
  */
-export interface CameraReading {
+interface CameraReading {
   /** Game seconds. */
   ts: number;
   station: string;
