@@ -131,7 +131,7 @@ interface GroupCardProps {
 /** The entity chip and agreement badge shared by a card's finding(s). */
 function GroupHead({ group }: { group: FindingGroup }) {
   return (
-    <div className="findings-group-head">
+    <span className="findings-group-head">
       {group.entity !== null ? (
         <span className="findings-entity-chip">
           {group.entityKind !== undefined ? (
@@ -155,7 +155,7 @@ function GroupHead({ group }: { group: FindingGroup }) {
           <span className="visually-hidden"> — two hunts corroborate this entity</span>
         </span>
       ) : null}
-    </div>
+    </span>
   );
 }
 
