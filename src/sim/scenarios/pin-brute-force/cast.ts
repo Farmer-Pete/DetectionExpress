@@ -253,6 +253,7 @@ export function assemblePatron(spec: PatronSpec): ActorDescriptor<WorldReading, 
   };
   return {
     provenance: "scored-scenario",
+    kind: "account-rider",
     initialPresence: (firstTick) => initialAccountRiderPresence(config.station, firstTick),
     build: () => createAccountRider(config),
   };
@@ -287,6 +288,7 @@ export function assembleAttacker(spec: AttackerSpec): {
   };
   const descriptor: ActorDescriptor<WorldReading, WorldEnv> = {
     provenance: "scored-scenario",
+    kind: "pin-attacker",
     initialPresence: (firstTick) => initialPinAttackerPresence(config.station, firstTick),
     build: () => createPinAttacker(config),
   };

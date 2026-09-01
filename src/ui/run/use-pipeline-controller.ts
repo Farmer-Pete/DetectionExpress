@@ -17,6 +17,7 @@ import { localAlgorithmUrl } from "../../game/algorithms-resolve";
 import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
+import { buildBlueprint } from "../../sim/scenarios/pin-brute-force/scenario";
 import { emptySnapshot } from "../../sim/snapshot";
 import type { View } from "../view";
 
@@ -24,6 +25,9 @@ import type { View } from "../view";
 function buildController(): RunController {
   return createRunController({
     scenario: defaultScenario,
+    // The app's one scenario is pin-brute-force, so its blueprint drives the map cast
+    // (GH117 Part B). A later step collapses the pipeline and metro controllers into one.
+    buildBlueprint,
     getGraph,
     // The one discriminated input. A local override (set by the dev-only algorithms
     // client) drives url mode; otherwise the in-game editor drives source mode.

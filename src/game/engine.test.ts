@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
+import type { Actor } from "../sim/actors/actor";
 import type { Attack } from "../sim/attack";
 import {
   createScorer,
@@ -11,14 +13,23 @@ import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
+import {
+  createPinAttacker,
+  initialPinAttackerPresence,
+} from "../sim/scenarios/pin-brute-force/pin-attacker";
 import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
-import { pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
+import { buildBlueprint, pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
+import { distanceTable } from "../sim/world/distance";
+import { kioskNodeId } from "../sim/world/layout";
+import { buildTimetable } from "../sim/world/timetable";
+import { world } from "../sim/world/world";
+import type { WorldEnv, WorldReading } from "../sim/world-reading";
 import { ManualDriver, type TickDriver } from "./clock";
-import { type StartOptions, start } from "./engine";
+import { type ScenarioCast, type ScenarioCastMember, type StartOptions, start } from "./engine";
 import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
@@ -102,6 +113,7 @@ interface LaunchOpts {
   serviceRate?: ServiceRate;
   checkpoints?: Checkpoint[];
   waves?: Wave[];
+  scenarioCast?: ScenarioCast;
 }
 
 interface Harness {
@@ -124,6 +136,7 @@ function launch(opts: LaunchOpts): Harness {
     checkpoints: opts.checkpoints ?? [],
     waves: opts.waves ?? [],
     driver,
+    ...(opts.scenarioCast ? { scenarioCast: opts.scenarioCast } : {}),
     ...(opts.onError ? { onError: opts.onError } : {}),
   };
   const handle = start(options);
@@ -965,5 +978,245 @@ describe("engine carries a finalize decision through to the terminal snapshot", 
     if (!last) return;
     const missed = last.decisions.find((d) => d.outcome === "missed");
     expect(missed).toMatchObject({ attackId: 1, entity: "root" });
+  });
+});
+
+// GH117-PLAN.md "Part B": the engine ALSO steps the scenario cast on its one Clock and
+// publishes the cast's presence and wrong-PIN / sign-in flashes into the map fields.
+// Scoring is untouched — it always runs off `generator`, never the cast.
+const CAST_ENV: WorldEnv = {
+  world,
+  distances: distanceTable(world),
+  timetable: buildTimetable(world),
+};
+
+/** A PIN attacker cast member: kind "pin-attacker", one wrong-PIN fail per timestamp. */
+function attackerMember(id: string, station: string, failTimestamps: number[]): ScenarioCastMember {
+  const config = { id, account: "victim", station, terminal: "K1", failTimestamps };
+  return {
+    actor: createPinAttacker(config),
+    kind: "pin-attacker",
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialPinAttackerPresence(station, firstTick),
+  };
+}
+
+/** A benign patron cast member: kind "account-rider", `fumbleFails` fails then a sign-in. */
+function patronMember(
+  id: string,
+  station: string,
+  startTick: number,
+  fumbleFails: 0 | 1 | 2,
+): ScenarioCastMember {
+  const config = {
+    id,
+    account: "rider",
+    station,
+    terminal: "K1",
+    startTick,
+    dwellTicks: 4,
+    fumbleFails,
+  };
+  return {
+    actor: createAccountRider(config),
+    kind: "account-rider",
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialAccountRiderPresence(station, firstTick),
+  };
+}
+
+/** A test stub that acts every tick, recording the tick, to prove the step cadence. */
+function metronome(id: string, station: string, acted: number[]): Actor<WorldReading, WorldEnv> {
+  return {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      acted.push(tick);
+      const reading: WorldReading = {
+        sensor: "kiosk",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          account: "m",
+          station,
+          terminal: "K1",
+          outcome: "success",
+        },
+      };
+      return {
+        readings: [reading],
+        nextTick: tick + 1,
+        presence: { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 },
+      };
+    },
+  };
+}
+
+function castOf(members: ScenarioCastMember[], runSeed = 1): ScenarioCast {
+  return { members, env: CAST_ENV, runSeed };
+}
+
+describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
+  it("publishes ActorView presence, tagging an attacker pin-attacker and a patron its own kind", async () => {
+    const cast = castOf([
+      attackerMember("attack-0", "cen", [40]), // arrives at tick 0, fails at tick 20
+      patronMember("patron-0", "cen", 3, 0), // signs in at tick 3
+    ]);
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 4);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const byId = new Map(snap.actors.map((a) => [a.id, a]));
+    expect(byId.get("attack-0")?.kind).toBe("pin-attacker");
+    expect(byId.get("patron-0")?.kind).toBe("account-rider");
+    // The attacker has arrived and stands at its victim's station.
+    expect(byId.get("attack-0")?.presence).toMatchObject({ kind: "at", node: "cen" });
+    h.handle.stop();
+  });
+
+  it("advances exactly one integer tick per game tick, seeded by the priming advanceTo(1)", async () => {
+    const acted: number[] = [];
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: metronome("m", "cen", acted),
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: 1,
+    };
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 12);
+    h.handle.stop();
+    // Priming acts tick 0; each of the 12 clock ticks acts the next tick, in order.
+    expect(acted).toEqual(Array.from({ length: 13 }, (_, i) => i));
+  });
+
+  it("does not change the stepping tick order when Clock.setSpeed is called", async () => {
+    const acted: number[] = [];
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: metronome("m", "cen", acted),
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: 1,
+    };
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 5);
+    h.handle.setSpeed(2); // wall-clock pacing only; the tick sequence must not move
+    await step(h.driver, 5);
+    h.handle.setSpeed(0.5);
+    await step(h.driver, 5);
+    h.handle.stop();
+    // A contiguous 0..15 despite the speed changes: one integer tick per game tick.
+    expect(acted).toEqual(Array.from({ length: 16 }, (_, i) => i));
+  });
+
+  it("raises a pinfail flash for a wrong-PIN fail and a signin flash for a sign-in, on the kiosk chip", async () => {
+    const cast = castOf([
+      attackerMember("attack-0", "cen", [40]), // wrong-PIN fail at tick 20
+      patronMember("patron-0", "cen", 3, 1), // one fumble fail then a success, at tick 3
+    ]);
+    const h = launch({ scenarioCast: cast, checkpoints: deadlineAt(100) });
+    await step(h.driver, 21);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const kiosk = kioskNodeId("cen");
+    const pinfails = snap.flashes.filter((f) => f.kind === "pinfail");
+    const signins = snap.flashes.filter((f) => f.kind === "signin");
+    // Two wrong-PIN fails (the patron's fumble at tick 3, the attacker's at tick 20) and
+    // one sign-in (the patron's success at tick 3), all on the station's kiosk chip.
+    expect(pinfails.map((f) => f.atTick).sort((a, b) => a - b)).toEqual([3, 20]);
+    expect(signins).toHaveLength(1);
+    expect(signins[0]?.atTick).toBe(3);
+    for (const flash of [...pinfails, ...signins]) {
+      expect(flash.node).toBe(kiosk);
+    }
+    h.handle.stop();
+  });
+
+  it("carries the real blueprint's cast, mapping attackers to pin-attacker and patrons to account-rider", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const actors = blueprint.instantiate();
+    const members: ScenarioCastMember[] = actors.map((actor, i) => {
+      const d = blueprint.descriptors[i];
+      if (!d) throw new Error("descriptor/actor misalignment");
+      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
+    });
+    const h = launch({
+      scenarioCast: { members, env: blueprint.env, runSeed: LEVEL_SEED },
+      checkpoints: deadlineAt(100),
+    });
+    await step(h.driver, 3);
+    const snap = h.last();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+    const kinds = new Set(snap.actors.map((a) => a.kind));
+    expect(kinds.has("pin-attacker")).toBe(true);
+    expect(kinds.has("account-rider")).toBe(true);
+    h.handle.stop();
+  });
+
+  it("keeps scoring byte-identical whether or not a scenario cast is attached", async () => {
+    const run = pinBruteForce.generate(LEVEL_SEED);
+    const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+    const scoringFields = (snap: SimSnapshot) => ({
+      status: snap.status,
+      failureReason: snap.failureReason,
+      admitted: snap.admitted,
+      completed: snap.completed,
+      correctness: snap.correctness,
+      decisions: snap.decisions,
+      findings: snap.findings,
+      queued: snap.queued,
+    });
+
+    const bare = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+    });
+    await step(bare.driver, finalTick + 2, 300);
+    await bare.handle.whenStopped;
+
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const actors = blueprint.instantiate();
+    const members: ScenarioCastMember[] = actors.map((actor, i) => {
+      const d = blueprint.descriptors[i];
+      if (!d) throw new Error("descriptor/actor misalignment");
+      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
+    });
+    const withCast = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+      scenarioCast: { members, env: blueprint.env, runSeed: LEVEL_SEED },
+    });
+    await step(withCast.driver, finalTick + 2, 300);
+    await withCast.handle.whenStopped;
+
+    const bareLast = bare.last();
+    const castLast = withCast.last();
+    expect(bareLast).toBeDefined();
+    expect(castLast).toBeDefined();
+    if (!bareLast || !castLast) return;
+    // Scoring is identical; only the map fields (actors/flashes/nowTick) differ.
+    expect(scoringFields(castLast)).toEqual(scoringFields(bareLast));
+    // The cast really ran (some publish carried live actors), while the bare run never
+    // stepped one: its map fields stay empty and nowTick stays 0, exactly as before.
+    expect(withCast.snapshots.some((snap) => snap.actors.length > 0)).toBe(true);
+    expect(bareLast.actors).toHaveLength(0);
+    expect(bareLast.nowTick).toBe(0);
   });
 });

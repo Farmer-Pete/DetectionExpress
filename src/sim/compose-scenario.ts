@@ -110,6 +110,13 @@ export interface ScenarioBlueprint<Plan extends { id: number }> {
   readonly descriptors: readonly ActorDescriptor<WorldReading, WorldEnv>[];
   readonly labels: ReadonlyMap<string, number>;
   readonly plans: readonly Plan[];
+  /**
+   * The read-only environment the cast reads on each transition (GH117-PLAN.md
+   * "Part B"). The blueprint composed its precomposed run over exactly this env, so a
+   * live consumer steps the instantiated cast over the same one rather than rebuilding
+   * it and risking a drift from the batch path.
+   */
+  readonly env: WorldEnv;
   /** The endpoint's wire formatter, over one timed reading. */
   readonly format: (timed: TimedReading<WorldReading>) => unknown;
   /** This reading's endpoint id. */
@@ -203,6 +210,7 @@ export function buildScenarioBlueprint<
     descriptors,
     labels: attacker.labels,
     plans: attacker.plans,
+    env,
     format: spec.format,
     endpointIdOf: spec.endpointIdOf,
     waves,

@@ -19,11 +19,12 @@
  * the scorer, generator, service rate, and checkpoints into the engine. The engine
  * never builds them.
  */
+import type { ScenarioBlueprint } from "../sim/compose-scenario";
 import { createScorer, type ScorerConfig } from "../sim/correctness";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
-import type { Scenario } from "../sim/scenario";
+import type { GeneratedRun, Scenario } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import {
@@ -33,7 +34,12 @@ import {
   loadAlgorithm as loadAlgorithmDefault,
   toLoadTarget,
 } from "./algorithm";
-import { type EngineHandle, type StartOptions, start as startDefault } from "./engine";
+import {
+  type EngineHandle,
+  type ScenarioCast,
+  type StartOptions,
+  start as startDefault,
+} from "./engine";
 import { tabHidden } from "./profiler/guard";
 import { profile, spawnProfilerWorker } from "./profiler/profile";
 import { serviceRateForCode } from "./profiler/quantize";
@@ -108,6 +114,16 @@ export interface RunController {
 
 export interface RunControllerDeps {
   scenario: Scenario;
+  /**
+   * Build the scenario's immutable blueprint for a seed (GH117-PLAN.md "Part B").
+   * Injected, not read off `scenario`, so a test scenario that has none simply omits
+   * it. When present, the controller builds the blueprint once: the scorer and the
+   * pre-generated generator come from its precomposed run (byte for byte what
+   * `scenario.generate(seed)` returns), and the SAME blueprint yields the instantiated
+   * live cast plus env the engine steps for the map. Omitted, the controller falls back
+   * to `generate` and runs with no cast — scoring is identical either way.
+   */
+  buildBlueprint?: (seed: number) => ScenarioBlueprint<{ id: number }>;
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
   /**
    * The one discriminated input (86-PLAN.md). The controller derives the loader,
@@ -384,6 +400,36 @@ function makeWorkerResolveServiceRate(
   };
 }
 
+/**
+ * Instantiate the scenario cast the engine steps for the map (GH117-PLAN.md "Part B").
+ * The blueprint's `instantiate()` builds fresh actors in descriptor order, so each
+ * actor pairs by index with its descriptor's `kind`, `provenance`, and `initialPresence`.
+ * The env comes from the blueprint, so the live cast steps over exactly the env the
+ * precompose ran on. `runSeed` seeds the schedule, matching the batch path's seeding.
+ */
+function buildScenarioCast(
+  blueprint: ScenarioBlueprint<{ id: number }>,
+  runSeed: number,
+): ScenarioCast {
+  const actors = blueprint.instantiate();
+  const members = actors.map((actor, i) => {
+    const descriptor = blueprint.descriptors[i];
+    if (descriptor === undefined) {
+      throw new Error(
+        `run-controller: instantiate() returned ${actors.length} actors but the blueprint has ` +
+          `${blueprint.descriptors.length} descriptors; they must align by index.`,
+      );
+    }
+    return {
+      actor,
+      kind: descriptor.kind,
+      provenance: descriptor.provenance,
+      initialPresence: descriptor.initialPresence,
+    };
+  });
+  return { members, env: blueprint.env, runSeed };
+}
+
 export function createRunController(deps: RunControllerDeps): RunController {
   const load = deps.loadAlgorithm ?? loadAlgorithmDefault;
   const spawn = deps.spawnProfilerWorker ?? spawnProfilerWorker;
@@ -487,11 +533,24 @@ export function createRunController(deps: RunControllerDeps): RunController {
       // or replaced, so a failed dry-run never orphans the running engine.
       let phase = "setup";
       try {
-        const generated = deps.scenario.generate(seed); // fresh per run
+        // Build the blueprint once when the scenario provides one (GH117 Part B). The
+        // scorer and generator come from its precomposed run — byte for byte what
+        // `generate(seed)` returns — and the same blueprint yields the live cast + env.
+        // A scenario without a blueprint falls back to `generate` and runs with no cast.
+        const blueprint = deps.buildBlueprint?.(seed) ?? null;
+        const generated: GeneratedRun = blueprint
+          ? {
+              events: [...blueprint.precomposed.events],
+              attacks: [...blueprint.precomposed.attacks],
+              checkpoints: [...blueprint.checkpoints],
+              waves: [...blueprint.waves],
+            }
+          : deps.scenario.generate(seed); // fresh per run
         const scorer = createScorer(generated.attacks, SCORER_CONFIG);
         let index = 0;
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
+        const scenarioCast = blueprint ? buildScenarioCast(blueprint, seed) : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
@@ -505,6 +564,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
           serviceRate,
           checkpoints: generated.checkpoints,
           waves: generated.waves,
+          ...(scenarioCast ? { scenarioCast } : {}),
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;

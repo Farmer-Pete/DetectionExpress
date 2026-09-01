@@ -16,6 +16,12 @@
  * rate, and the checkpoints are all injected by the run controller, so `sim/` stays
  * pure and the engine never builds them or reads a sensor field itself.
  */
+import {
+  type Actor,
+  type ActorProvenance,
+  createSchedule,
+  type StepResult,
+} from "../sim/actors/actor";
 import { Channel } from "../sim/channel";
 import type { Scorer } from "../sim/correctness";
 import type { PipeEvent, PipeMessage } from "../sim/event";
@@ -28,17 +34,49 @@ import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
 import { waveStateAt } from "../sim/wave-state";
+import { kioskNodeId } from "../sim/world/layout";
+import type { Presence } from "../sim/world/presence";
+import type { WorldEnv, WorldReading } from "../sim/world-reading";
+import type { ActorView, FlashEvent } from "../sim/world-snapshot";
 import { Clock, intervalDriver, type TickDriver } from "./clock";
 import {
   CHANNEL_CAP,
   CLOCK_HZ,
   CORRECTNESS_FLOOR,
+  FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
   WAVE_WARN_TICKS,
 } from "./tuning";
+
+/**
+ * One member of the instantiated scenario cast the engine steps for the map
+ * (GH117-PLAN.md "Part B"). It pairs a fresh actor (from `blueprint.instantiate()`)
+ * with the three things the blueprint descriptor carries that the engine needs at
+ * runtime: the view `kind` it draws as, its `provenance` (all `scored-scenario`
+ * today; the admission filter reads it in a later step), and the `initialPresence`
+ * to seed its `ActorView` with before its first `act()`. Mirrors `WorldFixture`.
+ */
+export interface ScenarioCastMember {
+  actor: Actor<WorldReading, WorldEnv>;
+  kind: ActorView["kind"];
+  provenance: ActorProvenance;
+  initialPresence: (firstTick: number) => Presence;
+}
+
+/**
+ * The scenario cast plus the two run inputs a schedule needs to step it: the shared
+ * read-only `env` and the `runSeed` that seeds each actor. Passed as one all-or-nothing
+ * object so the existing scored-engine tests, which inject none, run byte-identically:
+ * no schedule, no stepping listener, `nowTick` stays 0 and the map fields stay empty.
+ */
+export interface ScenarioCast {
+  readonly members: readonly ScenarioCastMember[];
+  readonly env: WorldEnv;
+  readonly runSeed: number;
+}
 
 /** Everything the engine reads from the outside. Injected so tests stay pure. */
 export interface StartOptions {
@@ -56,6 +94,13 @@ export interface StartOptions {
   checkpoints: Checkpoint[];
   /** The wave boundaries the sampler reads to publish `snapshot.wave` each tick. */
   waves: Wave[];
+  /**
+   * The instantiated scenario cast the engine steps on its own single Clock to
+   * publish map presence and wrong-PIN / sign-in flashes (GH117-PLAN.md "Part B").
+   * Optional: omitted, the engine runs exactly as before — scoring always runs off
+   * `generator`, never this cast, so it is untouched whether a cast is present or not.
+   */
+  scenarioCast?: ScenarioCast;
   /** Defaults to a real setInterval driver; tests pass a manual one. */
   driver?: TickDriver;
   /** Reports an engine or Rule failure. */
@@ -121,6 +166,18 @@ interface RunState {
  * with no ticks elapsed keeps the prior throughput, but always refreshes Queue,
  * Correctness, and the run counters, so the terminal reading cannot drift.
  */
+/**
+ * The map view the sampler folds into each snapshot (GH117-PLAN.md "Part B"). The
+ * cast stepper owns the authoritative state and exposes it through these getters, so
+ * the sampler reads one consistent view per publish. With no scenario cast, the
+ * defaults keep the map fields empty and `nowTick` at 0, exactly as before.
+ */
+interface MapView {
+  getActors: () => readonly ActorView[];
+  getFlashes: () => readonly FlashEvent[];
+  getNowTick: () => number;
+}
+
 function makeSampler(
   clock: Clock,
   channels: Map<string, Channel<PipeMessage>>,
@@ -129,6 +186,7 @@ function makeSampler(
   setSnapshot: (snapshot: SimSnapshot) => void,
   run: RunState,
   waves: readonly Wave[],
+  map: MapView,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
@@ -187,13 +245,14 @@ function makeSampler(
       events: ring.events,
       processed: ring.processed,
       wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
-      // GH117 Part E: the merged snapshot's map fields. The pipeline engine does not
-      // step the cast yet, so it publishes them empty; Part B wires a real producer.
-      actors: [],
-      flashes: [],
+      // GH117 Part B: the merged snapshot's map fields. The scenario-cast stepper folds
+      // presence and wrong-PIN / sign-in flashes into an authoritative view the sampler
+      // reads here; `doors`, `crowds`, and `mapLog` stay empty until their reducers land.
+      actors: map.getActors(),
+      flashes: map.getFlashes(),
       doors: [],
       crowds: [],
-      nowTick: 0,
+      nowTick: map.getNowTick(),
       mapLog: [],
     });
   };
@@ -299,6 +358,114 @@ export function start(options: StartOptions): EngineHandle {
     }
     channels = channelMap; // publish to the outer scope so stop() can close each
 
+    // GH117 Part B: the scenario-cast stepper's authoritative map view. It holds the
+    // ActorView presence map and the windowed flash list; the sampler folds them into
+    // every snapshot through `mapView`. Declared unconditionally so the getters read a
+    // consistent empty view when no cast is injected (the existing scored-engine tests):
+    // `nowTick` stays 0 and the map fields stay empty, exactly as before.
+    const views = new Map<string, ActorView>();
+    const mapFlashes: FlashEvent[] = [];
+    let mapNowTick = 0;
+    const mapView: MapView = {
+      getActors: () => [...views.values()],
+      getFlashes: () => [...mapFlashes],
+      getNowTick: () => mapNowTick,
+    };
+
+    // The cast stepper, on this same single Clock. Scoring is untouched — it always
+    // runs off `options.generator`; this only advances the cast for the map. Speed is
+    // Clock.setSpeed pacing only, so the schedule advances one integer tick per game
+    // tick regardless of speed, and the tick sequence never changes with speed.
+    const cast = options.scenarioCast;
+    if (cast) {
+      const schedule = createSchedule({
+        actors: cast.members.map((member) => member.actor),
+        env: cast.env,
+        runSeed: cast.runSeed,
+      });
+      // Seed each non-dormant member's view from its first tick, as the world engine
+      // seeds its fixtures (world-engine.ts). A member that starts dormant is omitted.
+      const initial = schedule.initialTicks();
+      for (const member of cast.members) {
+        const firstTick = initial.get(member.actor.id);
+        if (firstTick === undefined) {
+          continue;
+        }
+        views.set(member.actor.id, {
+          id: member.actor.id,
+          kind: member.kind,
+          presence: member.initialPresence(firstTick),
+        });
+      }
+
+      let nextFlashId = 0;
+      // Fold one step: raise a kiosk flash per reading (a sign-in success -> "signin",
+      // a wrong-PIN fail -> "pinfail", both on the station's kiosk chip), overlay the
+      // presence deltas, then evict the actors that went dormant this step. The scenario
+      // cast is kiosk-only, so this is the one sensor branch it needs.
+      const applyStep = (step: StepResult<WorldReading>): void => {
+        for (const timed of step.readings) {
+          if (timed.reading.sensor !== "kiosk") {
+            continue;
+          }
+          mapFlashes.push({
+            id: nextFlashId,
+            kind: timed.reading.reading.outcome === "fail" ? "pinfail" : "signin",
+            node: kioskNodeId(timed.reading.reading.station),
+            atTick: timed.tick,
+          });
+          nextFlashId += 1;
+        }
+        for (const [id, presence] of step.presences) {
+          const view = views.get(id);
+          if (view !== undefined) {
+            views.set(id, { id: view.id, kind: view.kind, presence });
+          }
+        }
+        for (const id of step.dormant) {
+          views.delete(id);
+        }
+      };
+
+      // Drop flashes older than the window behind the current tick, so the list stays
+      // bounded on a perpetual run (world-engine.ts).
+      const pruneFlashes = (): void => {
+        const cutoff = mapNowTick - FLASH_WINDOW_TICKS;
+        let drop = 0;
+        while (drop < mapFlashes.length && (mapFlashes[drop]?.atTick ?? mapNowTick) < cutoff) {
+          drop += 1;
+        }
+        if (drop > 0) {
+          mapFlashes.splice(0, drop);
+        }
+      };
+
+      // Tick zero: prime the schedule once at startup, before the clock loop, with
+      // advanceTo(1) (NOT advanceTo(0), which emits nothing under the half-open rule).
+      // Any ts=0 reading is folded now, matching Part C's note; now() is still 0 here.
+      applyStep(schedule.advanceTo(1));
+      pruneFlashes();
+
+      // The actor-stepping tick listener, registered FIRST — before the sampler and the
+      // checkpoint listener — so this tick's presence is already folded when the sampler
+      // publishes and the enqueue would sit ahead of admission (Part C). Each game tick
+      // advances the schedule to now()+1 (one integer tick), so a reading emitted on tick
+      // T carries atTick T <= nowTick. A throwing actor is a failed outcome, like a task.
+      clock.onTick(() => {
+        if (stopped) {
+          return;
+        }
+        try {
+          const horizon = (clock?.now() ?? 0) + 1;
+          applyStep(schedule.advanceTo(horizon));
+          mapNowTick = horizon - 1;
+          pruneFlashes();
+        } catch (error) {
+          fail(error);
+        }
+      });
+    }
+
     // The inspector needs no ground truth, so the engine builds it directly. This
     // is a deliberate asymmetry with the scorer, which the run controller injects.
     const inspector = createInspector({ ringSize: RING_SIZE });
@@ -350,6 +517,7 @@ export function start(options: StartOptions): EngineHandle {
         getFailureReason: () => failureReason,
       },
       options.waves,
+      mapView,
     );
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it

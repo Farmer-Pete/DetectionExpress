@@ -94,7 +94,7 @@ export interface Admission<Reading, Env> {
  * ambient id existed, then seeds the ambient ids against what is already taken, so
  * adding ambient actors can never perturb a scenario actor's seed.
  */
-type ActorProvenance = "scored-scenario" | "ambient";
+export type ActorProvenance = "scored-scenario" | "ambient";
 
 /**
  * An immutable recipe for one live actor: enough to build a fresh instance on
@@ -108,6 +108,12 @@ type ActorProvenance = "scored-scenario" | "ambient";
  */
 export interface ActorDescriptor<Reading, Env> {
   readonly provenance: ActorProvenance;
+  /**
+   * The view kind the engine records for this actor's `ActorView`, mirroring
+   * `Admission.kind` and `WorldFixture.kind`. The live engine reads it when it steps
+   * the cast for the map (GH117-PLAN.md "Part B"); the batch precompose ignores it.
+   */
+  readonly kind: ActorView["kind"];
   readonly initialPresence: (firstTick: number) => Presence;
   build(): Actor<Reading, Env>;
 }
