@@ -378,6 +378,141 @@ describe("runActors heap parity", () => {
   });
 });
 
+/**
+ * Seed-domain isolation (GH117-PLAN.md "Scheduler seed isolation"): adding an
+ * ambient-domain actor to a schedule must never move a scored-scenario actor's
+ * assigned seed or its first-draw `seededPriority`, even when the two collide on
+ * their base hash. A random seed sweep is very unlikely to ever hit that collision
+ * branch, so this forces it with a known-colliding pair (found offline, same
+ * technique as "runActors forced seed collision" above).
+ */
+describe("runActors seed-domain isolation", () => {
+  interface Draw {
+    id: string;
+    draw: number;
+  }
+  const RUN = 1;
+  // AMBIENT sorts alphabetically BEFORE SCENARIO. Under the old, domain-blind sort,
+  // that means AMBIENT would keep the shared base seed and SCENARIO would be the
+  // one rehashed — the exact outcome domain isolation exists to prevent. Domain,
+  // not alphabetical order, must decide who yields.
+  const AMBIENT = "a1649037";
+  const SCENARIO = "a1997380";
+  // Ties with SCENARIO at tick 0 but collides with neither id's base or rehashed
+  // seed (verified offline), so it is a clean control for the tie-break order.
+  const COMPANION = "c-companion";
+
+  /** Fires once at `tick`, recording its `rng()` draw (the stream's 2nd value). */
+  function sampler(id: string, tick = 0): Actor<Draw, null> {
+    return {
+      id,
+      start: () => tick,
+      act: ({ rng }) => ({ readings: [{ id, draw: rng() }], nextTick: "dormant" }),
+    };
+  }
+
+  /** Fires `count` times, one tick apart, recording each `rng()` draw in order. */
+  function multiSampler(id: string, count: number): Actor<Draw, null> {
+    let fired = 0;
+    return {
+      id,
+      start: () => 0,
+      act: ({ rng, tick }) => {
+        fired += 1;
+        return {
+          readings: [{ id, draw: rng() }],
+          nextTick: fired < count ? tick + 1 : "dormant",
+        };
+      },
+    };
+  }
+
+  it("confirms AMBIENT and SCENARIO collide on their base seed", () => {
+    expect(actorSeedHash(RUN, AMBIENT)).toBe(actorSeedHash(RUN, SCENARIO));
+  });
+
+  it("keeps the scenario actor's draw sequence identical with or without the colliding ambient actor", () => {
+    const legacy = runActors({
+      actors: [multiSampler(SCENARIO, 4)],
+      env: null,
+      runSeed: RUN,
+      horizon: 10,
+    });
+    const withAmbient = runActors({
+      actors: [multiSampler(SCENARIO, 4), sampler(AMBIENT)],
+      env: null,
+      runSeed: RUN,
+      horizon: 10,
+      ambientIds: new Set([AMBIENT]),
+    });
+    const legacyDraws = legacy.map((r) => r.reading.draw);
+    const withAmbientDraws = withAmbient
+      .filter((r) => r.actorId === SCENARIO)
+      .map((r) => r.reading.draw);
+    expect(withAmbientDraws).toEqual(legacyDraws);
+  });
+
+  it("keeps the scenario actor's first-draw seededPriority and its tie-break order against another scenario actor", () => {
+    // Independent oracle: each id's seededPriority is the first draw of the stream
+    // seeded by its OWN base hash — never rehashed, since with no ambient id in the
+    // mix (and SCENARIO/COMPANION not colliding with each other) neither ever moves.
+    const priorityOf = (id: string) => randomLcg(actorSeedHash(RUN, id))();
+    const legacyOrder = [SCENARIO, COMPANION].sort((a, b) => {
+      const diff = priorityOf(a) - priorityOf(b);
+      return diff !== 0 ? diff : a < b ? -1 : 1;
+    });
+
+    const out = runActors({
+      actors: [sampler(SCENARIO), sampler(COMPANION), sampler(AMBIENT)],
+      env: null,
+      runSeed: RUN,
+      horizon: 3,
+      ambientIds: new Set([AMBIENT]),
+    });
+    const order = out.map((r) => r.actorId).filter((id) => id === SCENARIO || id === COMPANION);
+    expect(order).toEqual(legacyOrder);
+  });
+
+  it("rehashes the colliding AMBIENT actor to the documented #1 stream, never touching SCENARIO", () => {
+    // The internal rehash is `xmur3("${runSeed}:${id}#${attempt}")`, which is exactly
+    // what `actorSeedHash(runSeed, "${id}#${attempt}")` computes.
+    const rehashedSeed = actorSeedHash(RUN, `${AMBIENT}#1`);
+    const oracle = randomLcg(rehashedSeed);
+    oracle(); // consume the seededPriority draw, so the next draw matches act()'s
+    const expectedDraw = oracle();
+
+    const out = runActors({
+      actors: [sampler(SCENARIO), sampler(AMBIENT)],
+      env: null,
+      runSeed: RUN,
+      horizon: 3,
+      ambientIds: new Set([AMBIENT]),
+    });
+    const draw = out.find((r) => r.actorId === AMBIENT)?.reading.draw;
+    expect(draw).toBe(expectedDraw);
+  });
+
+  it("reproduces today's single-domain seeding when ambientIds is omitted", () => {
+    // AMBIENT sorts before SCENARIO, so with no domain split the legacy merged sort
+    // keeps AMBIENT's base seed and rehashes SCENARIO instead — the opposite of the
+    // domain-isolated outcome above. This pins that the omitted-ambientIds path is
+    // untouched, not just that it "does something".
+    const rehashedScenario = actorSeedHash(RUN, `${SCENARIO}#1`);
+    const oracle = randomLcg(rehashedScenario);
+    oracle();
+    const expectedDraw = oracle();
+
+    const out = runActors({
+      actors: [sampler(SCENARIO), sampler(AMBIENT)],
+      env: null,
+      runSeed: RUN,
+      horizon: 3,
+    });
+    const draw = out.find((r) => r.actorId === SCENARIO)?.reading.draw;
+    expect(draw).toBe(expectedDraw);
+  });
+});
+
 describe("minutesToTicks", () => {
   it("matches a hand-checked table (2 game seconds per tick)", () => {
     expect(minutesToTicks(1)).toBe(30);

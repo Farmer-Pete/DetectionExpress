@@ -17,13 +17,16 @@
  * the rule's fixed service rate, so a slow rule's Queue outgrows a checkpoint. The
  * attack fails and benign fumbles ride on top of that benign baseline.
  */
-import type { Actor, TimedReading } from "../../actors/actor";
+import type { ActorDescriptor, TimedReading } from "../../actors/actor";
 import { admitArrivals } from "../../actors/admission";
 import type { Attack } from "../../attack";
 import {
+  buildScenarioBlueprint,
   composeScenario,
   type ScenarioAttackerCast,
+  type ScenarioBlueprint,
   type ScenarioCastContext,
+  type ScenarioSpec,
 } from "../../compose-scenario";
 import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
 import type { GeneratedRun, Scenario } from "../../scenario";
@@ -67,10 +70,10 @@ interface PinAttackerCast extends ScenarioAttackerCast<AttackPlan> {
 }
 
 /**
- * Plan every wave's bursts and assemble one PIN attacker actor per burst. Draws
- * the identity pool first (partitioned when `ctx.partition` is set, else from the
+ * Plan every wave's bursts and describe one PIN attacker per burst. Draws the
+ * identity pool first (partitioned when `ctx.partition` is set, else from the
  * run's own seeded rng), so its accounts and stations are available for the
- * benign cast, which composeScenario builds next.
+ * benign cast, which the blueprint builds next.
  */
 function attackerCast(ctx: ScenarioCastContext): PinAttackerCast {
   const pools =
@@ -82,8 +85,8 @@ function attackerCast(ctx: ScenarioCastContext): PinAttackerCast {
 
   // Collect the actor-id -> attack-id label the scaffold reads back as ground truth.
   const labels = new Map<string, number>();
-  const actors: Actor<WorldReading, WorldEnv>[] = plans.map((plan) => {
-    const { actor, label } = assembleAttacker({
+  const descriptors: ActorDescriptor<WorldReading, WorldEnv>[] = plans.map((plan) => {
+    const { descriptor, label } = assembleAttacker({
       id: `attack-${plan.id}`,
       attackId: plan.id,
       account: plan.account,
@@ -92,10 +95,10 @@ function attackerCast(ctx: ScenarioCastContext): PinAttackerCast {
       failTimestamps: plan.failTimestamps,
     });
     labels.set(label[0], label[1]);
-    return actor;
+    return descriptor;
   });
 
-  return { actors, labels, plans, pools };
+  return { descriptors, labels, plans, pools };
 }
 
 /**
@@ -106,7 +109,7 @@ function attackerCast(ctx: ScenarioCastContext): PinAttackerCast {
 function benignCast(
   ctx: ScenarioCastContext,
   attacker: PinAttackerCast,
-): Actor<WorldReading, WorldEnv>[] {
+): ActorDescriptor<WorldReading, WorldEnv>[] {
   const victims = new Set(attacker.plans.map((plan) => plan.account));
   const slotTicks = admitArrivals(ctx.waves);
   const visits = slotTicks.map((tick) => ({
@@ -197,12 +200,29 @@ function assertSeparable(records: FairRecord[], attacks: Attack[]): void {
 }
 
 /**
+ * The one `ScenarioSpec`, shared by `generate` and `buildBlueprint` below, so both
+ * read off the SAME cast builders — one seeded traversal, two ways to reach it
+ * (GH117-PLAN.md "Part A"). Module-private: every caller, in and out of this
+ * package, reaches it through `pinBruteForce.generate` or `buildBlueprint`, the
+ * public seams, not by importing this object directly.
+ */
+const spec: ScenarioSpec<FairRecord, AttackPlan, PinAttackerCast> = {
+  id: "pin-brute-force",
+  attackerCast,
+  benignCast,
+  format,
+  endpointIdOf,
+  toRecord,
+  attackIdOf,
+  attackFromPlan,
+  assertSeparable,
+};
+
+/**
  * Plan the whole run from a seed. Deterministic: the same seed (and, when given,
  * the same partition) always returns the same run. `pinBruteForce.generate` below
  * IS this function, so `partition` rides the public `Scenario.generate` contract
- * (GH42-PLAN.md "the merge seam"), not a scenario-specific side channel. Module-
- * private: every caller, in and out of this package, reaches it through
- * `pinBruteForce.generate`, the public seam, not by importing this name directly.
+ * (GH42-PLAN.md "the merge seam"), not a scenario-specific side channel.
  *
  * Omitted, the account pool is drawn from this run's own seeded `rng`, exactly as
  * a solo run always has. Given an explicit partition, the account pool comes
@@ -212,21 +232,16 @@ function assertSeparable(records: FairRecord[], attacks: Attack[]): void {
  * `mergeRuns`'s entity-disjointness invariant depends on this.
  */
 function generate(seed: number, partition?: number): GeneratedRun {
-  return composeScenario(
-    {
-      id: "pin-brute-force",
-      attackerCast,
-      benignCast,
-      format,
-      endpointIdOf,
-      toRecord,
-      attackIdOf,
-      attackFromPlan,
-      assertSeparable,
-    },
-    seed,
-    partition,
-  );
+  return composeScenario(spec, seed, partition);
+}
+
+/**
+ * Build this scenario's immutable blueprint from a seed (GH117-PLAN.md "Part A").
+ * Not part of the public `Scenario` interface: it is read by the test parity sweep
+ * today, and by a live consumer in a later step, not by `generate`'s callers.
+ */
+export function buildBlueprint(seed: number, partition?: number): ScenarioBlueprint<AttackPlan> {
+  return buildScenarioBlueprint(spec, seed, partition);
 }
 
 export const pinBruteForce: Scenario = {

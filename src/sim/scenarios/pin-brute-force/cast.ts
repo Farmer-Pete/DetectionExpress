@@ -15,13 +15,21 @@
  * construction; the scenario's assertions are the double check.
  */
 import { randomLcg } from "d3-random";
-import { type AccountRiderConfig, createAccountRider } from "../../actors/account-rider";
-import type { Actor } from "../../actors/actor";
+import {
+  type AccountRiderConfig,
+  createAccountRider,
+  initialAccountRiderPresence,
+} from "../../actors/account-rider";
+import type { ActorDescriptor } from "../../actors/actor";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
 import { buildAccounts } from "../../entities/account";
 import type { World } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
-import { createPinAttacker, type PinAttackerConfig } from "./pin-attacker";
+import {
+  createPinAttacker,
+  initialPinAttackerPresence,
+  type PinAttackerConfig,
+} from "./pin-attacker";
 import { SCAN_WINDOW_TICKS } from "./tuning";
 
 /**
@@ -227,8 +235,13 @@ export interface PatronSpec {
   fumbleFails: 0 | 1 | 2;
 }
 
-/** Construct one benign patron actor over the account-rider factory. */
-export function assemblePatron(spec: PatronSpec): Actor<WorldReading, WorldEnv> {
+/**
+ * Describe one benign patron over the account-rider factory: an immutable
+ * `AccountRiderConfig` plus a pure `build()` that constructs a fresh actor from it,
+ * so the same descriptor can be instantiated more than once with no shared state
+ * (GH117-PLAN.md "the immutable blueprint seam").
+ */
+export function assemblePatron(spec: PatronSpec): ActorDescriptor<WorldReading, WorldEnv> {
   const config: AccountRiderConfig = {
     id: spec.id,
     account: spec.account,
@@ -238,7 +251,11 @@ export function assemblePatron(spec: PatronSpec): Actor<WorldReading, WorldEnv> 
     dwellTicks: spec.dwellTicks,
     fumbleFails: spec.fumbleFails,
   };
-  return createAccountRider(config);
+  return {
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialAccountRiderPresence(config.station, firstTick),
+    build: () => createAccountRider(config),
+  };
 }
 
 /** One PIN attacker to assemble, carrying the attack id its fails belong to. */
@@ -252,12 +269,13 @@ export interface AttackerSpec {
 }
 
 /**
- * Construct one PIN attacker actor and its ground-truth label. The label is the
+ * Describe one PIN attacker and its ground-truth label. The label is the
  * `(actorId, attackId)` entry the composer's `attackIdOf` reads back: every fail
- * reading from this actor belongs to `attackId`.
+ * reading from this actor belongs to `attackId`. The descriptor mirrors
+ * `assemblePatron`: an immutable `PinAttackerConfig` plus a pure `build()`.
  */
 export function assembleAttacker(spec: AttackerSpec): {
-  actor: Actor<WorldReading, WorldEnv>;
+  descriptor: ActorDescriptor<WorldReading, WorldEnv>;
   label: [string, number];
 } {
   const config: PinAttackerConfig = {
@@ -267,5 +285,10 @@ export function assembleAttacker(spec: AttackerSpec): {
     terminal: spec.terminal,
     failTimestamps: spec.failTimestamps,
   };
-  return { actor: createPinAttacker(config), label: [spec.id, spec.attackId] };
+  const descriptor: ActorDescriptor<WorldReading, WorldEnv> = {
+    provenance: "scored-scenario",
+    initialPresence: (firstTick) => initialPinAttackerPresence(config.station, firstTick),
+    build: () => createPinAttacker(config),
+  };
+  return { descriptor, label: [spec.id, spec.attackId] };
 }
