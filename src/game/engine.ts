@@ -52,7 +52,7 @@ import {
   tvmNodeId,
 } from "../sim/world/layout";
 import type { MapNodeId, Presence } from "../sim/world/presence";
-import type { TimedWorldReading, WorldEnv, WorldReading } from "../sim/world-reading";
+import type { WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, FlashEvent } from "../sim/world-snapshot";
 import { type CameraGrant, createCameraReducer } from "./camera-reducer";
 import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
@@ -69,7 +69,6 @@ import {
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
   WAVE_WARN_TICKS,
-  WORLD_LOG_RETENTION,
 } from "./tuning";
 
 /**
@@ -288,7 +287,6 @@ interface MapView {
   getNowTick: () => number;
   getDoors: () => readonly { node: MapNodeId; open: boolean }[];
   getCrowds: () => readonly { node: MapNodeId; persons: number; grants: number }[];
-  getMapLog: () => readonly TimedWorldReading[];
 }
 
 function makeSampler(
@@ -367,7 +365,6 @@ function makeSampler(
       doors: map.getDoors(),
       crowds: map.getCrowds(),
       nowTick: map.getNowTick(),
-      mapLog: map.getMapLog(),
     });
   };
 }
@@ -486,7 +483,6 @@ export function start(options: StartOptions): EngineHandle {
     // `nowTick` stays 0 and the map fields stay empty, exactly as before.
     const views = new Map<string, ActorView>();
     const mapFlashes: FlashEvent[] = [];
-    const mapLog: TimedWorldReading[] = [];
     let latestDoors: readonly { node: MapNodeId; open: boolean }[] = [];
     let latestCrowds: readonly { node: MapNodeId; persons: number; grants: number }[] = [];
     let mapNowTick = 0;
@@ -496,8 +492,6 @@ export function start(options: StartOptions): EngineHandle {
       getNowTick: () => mapNowTick,
       getDoors: () => latestDoors.map((door) => ({ ...door })),
       getCrowds: () => latestCrowds.map((crowd) => ({ ...crowd })),
-      // Newest first, so the embedded log panel reads top to bottom as most-recent first.
-      getMapLog: () => [...mapLog].reverse(),
     };
 
     // The cast stepper, on this same single Clock. Scoring is untouched — it always
@@ -583,10 +577,10 @@ export function start(options: StartOptions): EngineHandle {
         [...views.values()].filter((view) => view.kind === kind).length;
 
       let nextFlashId = 0;
-      // Fold one step: raise a flash per reading on its sensor's chip, append each actor
-      // reading to the map log tagged with its provenance, overlay the presence deltas,
-      // then evict the actors that went dormant. A kiosk fail is a wrong-PIN "pinfail", a
-      // success a "signin"; the other sensor arms belong to the ambient cast.
+      // Fold one step: raise a flash per reading on its sensor's chip, overlay the
+      // presence deltas, then evict the actors that went dormant. A kiosk fail is a
+      // wrong-PIN "pinfail", a success a "signin"; the other sensor arms belong to the
+      // ambient cast.
       const applyStep = (step: StepResult<WorldReading>): void => {
         for (const timed of step.readings) {
           const reading = timed.reading;
@@ -641,21 +635,11 @@ export function start(options: StartOptions): EngineHandle {
             });
           }
           const provenance = provenanceById.get(timed.actorId) ?? "ambient";
-          const entry: TimedWorldReading = {
-            reading,
-            tick: timed.tick,
-            source: "actor",
-            provenance,
-          };
-          if (timed.actorId !== undefined) {
-            entry.actorId = timed.actorId;
-          }
-          mapLog.push(entry);
           // The scoring boundary (GH117-PLAN.md "Part D"): only a scored-scenario kiosk
           // reading is formatted, dense-id-assigned, and offered to the pipeline. An
-          // ambient kiosk reading already raised its flash and log line above but never
-          // enters the channels, so it can never bump the dense id or `admitted`. The
-          // id runs in emission order, matching the precomposed run parity guard 1 pins.
+          // ambient kiosk reading already raised its flash above but never enters the
+          // channels, so it can never bump the dense id or `admitted`. The id runs in
+          // emission order, matching the precomposed run parity guard 1 pins.
           if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
             scoredIngest.ingress.offer(scoredIngest.toEvent(timed, nextScoredEventId++));
           }
@@ -673,8 +657,8 @@ export function start(options: StartOptions): EngineHandle {
 
       // Run the door reducer for one tick over that tick's staff grants, AFTER the actor
       // readings are logged. It closes doors past their dwell and opens the tick's grants;
-      // each open/close becomes a `door-contact` reading (source "door", provenance
-      // ambient) and a flash on the door-contact chip. Refresh the open-door marks too.
+      // each open/close raises a flash on the door-contact chip. Refresh the open-door
+      // marks too.
       const reduceDoors = (step: StepResult<WorldReading>, tick: number): void => {
         const grants: { location: string; door: string }[] = [];
         for (const timed of step.readings) {
@@ -683,16 +667,6 @@ export function start(options: StartOptions): EngineHandle {
           }
         }
         for (const event of doorReducer.step(grants, tick)) {
-          const reading: WorldReading = {
-            sensor: "door-contact",
-            reading: {
-              ts: tick * GAME_SECONDS_PER_TICK,
-              site: event.location,
-              door: event.door,
-              event: event.event,
-            },
-          };
-          mapLog.push({ reading, tick, source: "door", provenance: "ambient" });
           mapFlashes.push({
             id: nextFlashId++,
             kind: "door",
@@ -708,18 +682,14 @@ export function start(options: StartOptions): EngineHandle {
 
       // Run the camera reducer for one tick over that tick's fare-gate grants, AFTER the
       // door reducer, so the fixed source order (actor, door, camera) holds. It counts the
-      // grants per gate over a rolling window and refreshes the crowd marks, then emits one
-      // `platform-camera` reading (source "camera", provenance ambient) per gate that saw a
-      // tap this tick. It trims the log last, once all three sources are appended.
+      // grants per gate over a rolling window and refreshes the crowd marks.
       const reduceCamera = (step: StepResult<WorldReading>, tick: number): void => {
         const grants: CameraGrant[] = [];
-        const tappedGates = new Set<string>();
         for (const timed of step.readings) {
           if (timed.reading.sensor === "fare-gate" && timed.reading.reading.result === "ok") {
             const station = timed.reading.reading.station;
             const gate = gateIdForStation(station);
             grants.push({ station, gate });
-            tappedGates.add(gate);
           }
         }
         const counts = cameraReducer.step(grants, tick);
@@ -728,25 +698,6 @@ export function start(options: StartOptions): EngineHandle {
           persons: count.persons,
           grants: count.grants,
         }));
-        for (const count of counts) {
-          if (!tappedGates.has(count.gate)) {
-            continue;
-          }
-          const reading: WorldReading = {
-            sensor: "platform-camera",
-            reading: {
-              ts: tick * GAME_SECONDS_PER_TICK,
-              station: count.station,
-              gate: count.gate,
-              grants: count.grants,
-              persons: count.persons,
-            },
-          };
-          mapLog.push({ reading, tick, source: "camera", provenance: "ambient" });
-        }
-        if (mapLog.length > WORLD_LOG_RETENTION) {
-          mapLog.splice(0, mapLog.length - WORLD_LOG_RETENTION);
-        }
       };
 
       // Admit each ambient spawner's due births at the frontier and seed each view,

@@ -1039,18 +1039,17 @@ body {
 
 /* ---- Embedded metro map region (GH117 Part F) ---- */
 /* The map embeds inline in the page flow, between the HUD and the inspector shell,
-   sized to a bounded box rather than filling the viewport. The legend is the left
-   column (full height); the map fills the top-right; the log is the bottom-right
-   region. No panel overlays the map, so the whole network stays visible. The scored
+   sized to a bounded box rather than filling the viewport. The map spans the full
+   width on top; the key (Lines, Actors, Sensors) sits below it as a row of three
+   columns. No panel overlays the map, so the whole network stays visible. The scored
    pipeline transport (freeze, 0.5x/1x/2x) is the one clock now, so this region carries
    no header, counts, or speed control of its own — those retired with the standalone
    metro view. */
 .metro-view {
-  display: grid;
-  grid-template-columns: clamp(180px, 24%, 260px) 1fr;
-  grid-template-rows: 1fr clamp(120px, 24%, 220px);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  height: clamp(320px, 48vh, 440px);
+  height: clamp(360px, 56vh, 520px);
   margin: 0 1.5rem 1rem;
   padding: 10px;
   border: 1px solid var(--line);
@@ -1059,8 +1058,7 @@ body {
 }
 
 .metro-map-region {
-  grid-column: 2;
-  grid-row: 1;
+  flex: 1 1 auto;
   position: relative;
   min-height: 0;
   min-width: 0;
@@ -1160,11 +1158,14 @@ body {
   opacity: 0.9;
 }
 
-/* Legend: the left column, spanning both rows, with its own scroll. */
-.metro-legend {
-  grid-column: 1;
-  grid-row: 1 / 3;
-  min-height: 0;
+/* Key: the row below the map, a 3-column grid (Lines, Actors, Sensors), with its own
+   scroll if the content ever outgrows the bounded height. */
+.metro-key {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 16px;
+  max-height: clamp(120px, 26%, 190px);
   overflow-y: auto;
   padding: 10px 12px;
   border-radius: 8px;
@@ -1176,19 +1177,22 @@ body {
   line-height: 1.55;
 }
 
-.metro-legend-head {
-  margin-top: 0.4rem;
+.metro-key-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metro-key-head {
   color: var(--ink);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
+  margin-bottom: 0.15rem;
 }
 
-.metro-legend-head:first-child {
-  margin-top: 0;
-}
-
-.metro-legend-row {
+.metro-key-row {
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -1235,57 +1239,6 @@ body {
   font:
     700 8px ui-monospace,
     monospace;
-}
-
-/* Event log: the bottom-right region, below the map. */
-.metro-log {
-  grid-column: 2;
-  grid-row: 2;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: rgba(15, 48, 61, 0.92);
-  backdrop-filter: blur(3px);
-}
-
-.metro-log-head {
-  color: var(--ink);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 0.3rem;
-}
-
-.metro-log-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.metro-log-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.metro-log-time {
-  color: var(--dim);
-  font-variant-numeric: tabular-nums;
-  min-width: 5ch;
-}
-
-.metro-log-msg {
-  color: #cfe0e6;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Topbar actions: the reopen control and the Hire Me surface, pushed to the right. */

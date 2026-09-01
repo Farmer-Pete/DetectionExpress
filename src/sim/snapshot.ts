@@ -7,7 +7,6 @@ import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 import type { WaveReading } from "./wave-state";
 import type { MapNodeId } from "./world/presence";
-import type { TimedWorldReading } from "./world-reading";
 // `ActorView` and `FlashEvent` stay defined in `world-snapshot.ts` for now (GH117
 // Part E, to minimize churn); import them from there directly.
 import type { ActorView, FlashEvent } from "./world-snapshot";
@@ -76,11 +75,6 @@ export interface SimSnapshot {
    * engine wires it.
    */
   nowTick: number;
-  /**
-   * A bounded, newest-first log of recent metro sensor readings, feeding the
-   * embedded event-log panel. Empty until the engine wires it.
-   */
-  mapLog: readonly TimedWorldReading[];
 }
 
 /** The reading before the first sample: empty, calm, and perfectly correct. */
@@ -104,6 +98,5 @@ export function emptySnapshot(): SimSnapshot {
     doors: Object.freeze([]),
     crowds: Object.freeze([]),
     nowTick: 0,
-    mapLog: Object.freeze([]),
   };
 }

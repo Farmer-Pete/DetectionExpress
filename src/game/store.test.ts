@@ -124,16 +124,6 @@ describe("store", () => {
       doors: [{ node: "d1", open: true }],
       crowds: [{ node: "c1", persons: 3, grants: 2 }],
       nowTick: 42,
-      mapLog: [
-        {
-          reading: {
-            sensor: "kiosk",
-            reading: { ts: 5, account: "a1", station: "cen", terminal: "K1", outcome: "fail" },
-          },
-          tick: 5,
-          source: "actor",
-        },
-      ],
     };
     useGameStore.getState().setSnapshot(snapshot);
     expect(useGameStore.getState().snapshot).toEqual(snapshot);

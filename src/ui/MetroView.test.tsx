@@ -5,8 +5,8 @@ import { emptySnapshot } from "../sim/snapshot";
 import { MetroView } from "./MetroView";
 
 beforeEach(() => {
-  // Seed a snapshot carrying a live train and a train-tracker map-log entry, so the
-  // legend and the event log both have real train content to render.
+  // Seed a snapshot carrying a live train, so the Actors key column has real train
+  // content to render.
   useGameStore.setState({
     snapshot: {
       ...emptySnapshot(),
@@ -25,42 +25,31 @@ beforeEach(() => {
           },
         },
       ],
-      mapLog: [
-        {
-          reading: {
-            sensor: "train-tracker",
-            reading: {
-              ts: 180,
-              train: "T1",
-              line: "red",
-              station: "mkt",
-              event: "arr",
-              track: "red:har-mkt",
-            },
-          },
-          tick: 90,
-          source: "actor",
-          actorId: "T1",
-        },
-      ],
     },
   });
 });
 
 describe("MetroView", () => {
-  it("lists a train row in the Actors legend", () => {
+  it("renders the Lines, Actors, and Sensors key columns below the map", () => {
+    render(<MetroView />);
+    expect(screen.getByText("Lines")).toBeDefined();
+    expect(screen.getByText("Actors")).toBeDefined();
+    expect(screen.getByText("Sensors")).toBeDefined();
+  });
+
+  it("lists a train row in the Actors key column", () => {
     render(<MetroView />);
     expect(screen.getByText("train")).toBeDefined();
   });
 
-  it("lists a pin attacker row in the Actors legend", () => {
+  it("lists a pin attacker row in the Actors key column", () => {
     render(<MetroView />);
     expect(screen.getByText("pin attacker")).toBeDefined();
   });
 
-  it("renders a train-tracker reading as an event-log row", () => {
+  it("renders no event log (retired: it duplicated the pipeline log and findings)", () => {
     render(<MetroView />);
-    expect(screen.getByText(/T1 arrive \(red\)/)).toBeDefined();
+    expect(screen.queryByText("Event log")).toBeNull();
   });
 
   it("renders no header, counts, or speed control (retired to the pipeline transport)", () => {

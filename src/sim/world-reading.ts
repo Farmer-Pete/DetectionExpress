@@ -10,7 +10,6 @@
  * reading and the `{ world, distances }` env.
  */
 
-import type { ActorProvenance } from "./actors/actor";
 import type { FareGateReading } from "./endpoints/fare-gate/gatekeep";
 import type { AccountKioskReading } from "./endpoints/kiosk/internal";
 import type { ControlReference } from "./entities/control";
@@ -166,27 +165,4 @@ export interface WorldEnv {
    * pre-M6 tests build a valid env without it; the world controller always sets it.
    */
   control?: ControlReference;
-}
-
-/**
- * The engine's unified per-tick log entry. Every reading, whatever produced it, is
- * wrapped into this one type so a reducer always knows which tick a reading came
- * from. The source order is fixed each tick — actor readings first, then the door
- * reducer, then the camera reducer — so the combined stream is deterministic. M0
- * only produces `"actor"` entries; the reducer sources land in M3 and M5.
- */
-export interface TimedWorldReading {
-  reading: WorldReading;
-  tick: number;
-  source: "actor" | "door" | "camera";
-  /** Set for source `"actor"`: the actor that emitted the reading. */
-  actorId?: string;
-  /**
-   * Which run produced this reading (GH117-PLAN.md "Part D"): `"scored-scenario"` for a
-   * scenario-cast reading, `"ambient"` for the metro's ambient life (including every
-   * door and camera reading, which the ambient grants drive). The merged engine tags
-   * each log entry so the next step can enforce the scoring boundary. Optional: the
-   * legacy world engine never sets it.
-   */
-  provenance?: ActorProvenance;
 }

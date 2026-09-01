@@ -60,7 +60,6 @@ import {
   OPERATOR_COMMAND_TICKS,
   RIDER_GOHOME_DWELL_TICKS,
   WAVE_WARN_TICKS,
-  WORLD_LOG_RETENTION,
 } from "./tuning";
 
 const SCORER_CONFIG: ScorerConfig = {
@@ -734,7 +733,6 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.doors).toEqual([]);
     expect(snap.crowds).toEqual([]);
     expect(snap.nowTick).toBe(0);
-    expect(snap.mapLog).toEqual([]);
   });
 });
 
@@ -1333,7 +1331,7 @@ function oneAmbientAccountRider(id: string, station: string, atTick: number): Ac
 }
 
 describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Part B ambient)", () => {
-  it("publishes ambient trains, riders, and staff with the right kinds and fills doors, crowds, and the map log", async () => {
+  it("publishes ambient trains, riders, and staff with the right kinds and fills doors and crowds", async () => {
     const cast: ScenarioCast = {
       members: [attackerMember("attack-0", "cen", [400])],
       env: AMBIENT_ENV,
@@ -1353,10 +1351,9 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
     expect(kinds.has("train")).toBe(true);
     expect(kinds.has("rider")).toBe(true);
     expect(kinds.has("staff")).toBe(true);
-    // The reducers ran over the ambient grants: doors opened, crowds counted, the log filled.
+    // The reducers ran over the ambient grants: doors opened, crowds counted.
     expect(h.snapshots.some((snap) => snap.doors.length > 0)).toBe(true);
     expect(h.snapshots.some((snap) => snap.crowds.length > 0)).toBe(true);
-    expect(h.snapshots.some((snap) => snap.mapLog.length > 0)).toBe(true);
     // nowTick advanced with the run.
     expect(h.last()?.nowTick).toBeGreaterThan(0);
   });
@@ -1397,7 +1394,7 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
     ).toBe(true);
   });
 
-  it("tags scenario kiosk readings scored-scenario and ambient kiosk readings ambient", async () => {
+  it("tags the scenario actor scored-scenario and the ambient actor ambient", async () => {
     const cast: ScenarioCast = {
       members: [patronMember("patron-0", "cen", 3, 0)], // a scored sign-in at tick 3
       env: CAST_ENV,
@@ -1411,19 +1408,15 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
     await step(h.driver, 20, 10);
     h.handle.stop();
 
-    // Union every published log so a trimmed-out entry cannot hide.
+    // Union every published snapshot's actors so a not-yet-admitted actor cannot hide.
     const seen = new Map<string, string | undefined>();
     for (const snap of h.snapshots) {
-      for (const entry of snap.mapLog) {
-        if (entry.reading.sensor === "kiosk") {
-          seen.set(`${entry.actorId}@${entry.tick}`, entry.provenance);
-        }
+      for (const actor of snap.actors) {
+        seen.set(actor.id, actor.provenance);
       }
     }
-    const scenarioTag = [...seen.entries()].find(([key]) => key.startsWith("patron-0@"))?.[1];
-    const ambientTag = [...seen.entries()].find(([key]) => key.startsWith("A-amb@"))?.[1];
-    expect(scenarioTag).toBe("scored-scenario");
-    expect(ambientTag).toBe("ambient");
+    expect(seen.get("patron-0")).toBe("scored-scenario");
+    expect(seen.get("A-amb")).toBe("ambient");
   });
 
   it("keeps scoring byte-identical with the ambient cast attached (CRITICAL parity)", async () => {
@@ -1527,7 +1520,7 @@ function controlFixtures(): AmbientFixture[] {
 }
 
 describe("engine folds the M6 control cast onto the merged snapshot (ported from world-control.test.ts)", () => {
-  it("raises a command flash on the OCC console chip and logs the occ-console reading", async () => {
+  it("raises a command flash on the OCC console chip", async () => {
     const occId = world.controlCenter.id;
     const h = launch({
       scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
@@ -1541,14 +1534,9 @@ describe("engine folds the M6 control cast onto the merged snapshot (ported from
       .flatMap((snap) => snap.flashes)
       .find((f) => f.kind === "command");
     expect(commandFlash?.node).toBe(consoleNodeId(occId));
-    expect(
-      h.snapshots
-        .flatMap((snap) => snap.mapLog)
-        .some((entry) => entry.reading.sensor === "occ-console"),
-    ).toBe(true);
   });
 
-  it("raises a packet flash on the site relay chip and logs the network-relay reading", async () => {
+  it("raises a packet flash on the site relay chip", async () => {
     const h = launch({
       scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
       ambientCast: { fixtures: controlFixtures() },
@@ -1561,11 +1549,6 @@ describe("engine folds the M6 control cast onto the merged snapshot (ported from
       .flatMap((snap) => snap.flashes)
       .find((f) => f.kind === "packet");
     expect(packetFlash?.node).toBe(relayNodeId("dep"));
-    expect(
-      h.snapshots
-        .flatMap((snap) => snap.mapLog)
-        .some((entry) => entry.reading.sensor === "network-relay"),
-    ).toBe(true);
   });
 
   it("keeps the operator and host present the whole run (never evicted)", async () => {
@@ -1639,22 +1622,16 @@ describe("engine folds a real rider through one trip, a dwell, eviction, and a r
     const firstId = firstSeen ? ridersOf(firstSeen)[0]?.id : undefined;
     expect(firstId).toBeDefined();
 
-    // The first rider's own tap-out (its one trip's exit) appears in the log exactly
-    // once -- the bounded log ring republishes the same entry across several snapshots,
-    // so dedupe by reference before counting -- and it is followed by that rider
-    // remaining in the view, not evicted immediately, for the go-home dwell.
-    const tapOutSet = new Set(
-      h.snapshots
-        .flatMap((snap) => snap.mapLog)
-        .filter(
-          (entry) =>
-            entry.reading.sensor === "fare-gate" &&
-            entry.reading.reading.direction === "out" &&
-            entry.reading.reading.card === firstId,
-        ),
+    // The first rider's own tap-out (its one trip's exit) is the moment its presence
+    // transitions to standing `at` its destination -- the go-home dwell's start.
+    const arrivedSnap = h.snapshots.find((snap) =>
+      ridersOf(snap).some((view) => view.id === firstId && view.presence.kind === "at"),
     );
-    expect(tapOutSet.size).toBe(1);
-    const tapOutTick = [...tapOutSet][0]?.tick ?? Number.NaN;
+    expect(arrivedSnap).toBeDefined();
+    const arrivedPresence = arrivedSnap
+      ? ridersOf(arrivedSnap).find((view) => view.id === firstId)?.presence
+      : undefined;
+    const tapOutTick = arrivedPresence?.kind === "at" ? arrivedPresence.fromTick : Number.NaN;
 
     // A snapshot taken shortly after the tap-out but before the go-home dwell elapses
     // still shows the first rider present, standing `at` its destination.
@@ -1723,24 +1700,6 @@ function tapperFixture(id: string, station: string): AmbientFixture {
 }
 
 describe("engine bounded cost over a long run (ported from world-engine.test.ts)", () => {
-  it("keeps the map log bounded and newest-first", async () => {
-    const h = launch({
-      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
-      ambientCast: { fixtures: [tapperFixture("C1", "cen")] },
-      checkpoints: deadlineAt(6000),
-    });
-    await step(h.driver, 5000, 3);
-    h.handle.stop();
-
-    const log = h.last()?.mapLog ?? [];
-    expect(log.length).toBeLessThanOrEqual(WORLD_LOG_RETENTION);
-    expect(log.length).toBeGreaterThan(1);
-    // Newest first: a tick's readings never regress to an earlier tick further down.
-    for (let i = 1; i < log.length; i++) {
-      expect(log[i - 1]?.tick ?? 0).toBeGreaterThanOrEqual(log[i]?.tick ?? 0);
-    }
-  });
-
   it("keeps flashes bounded", async () => {
     let maxFlashes = 0;
     const h = launch({

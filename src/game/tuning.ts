@@ -258,12 +258,6 @@ export const RIDER_BALANCE_MIN = 10;
 export const RIDER_BALANCE_MAX = 200;
 
 /**
- * How many recent normalized readings the world snapshot carries for the event log.
- * Older readings are dropped, so the log stays bounded on a perpetual run.
- */
-export const WORLD_LOG_RETENTION = 120;
-
-/**
  * M3 (living metro, #87) staff and doors. A seeded spawner keeps a small transient
  * staff cast: each walks from a location's nearest station to the location, crosses
  * its zones low to high tapping the door readers within its badge grade, then walks

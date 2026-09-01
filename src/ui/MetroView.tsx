@@ -1,9 +1,9 @@
 /**
- * The embedded metro map region (GH117 Part F): the legend pinned to the left, the
- * compact event log pinned bottom-right, the map itself filling the rest, and a
- * "simulation ended" overlay over the map once the run concludes. It sits inline in
- * `App`'s page flow between `Hud` and `InspectorShell`, sized to a bounded box rather
- * than filling the viewport — the pipeline transport (freeze, 0.5x/1x/2x) is the one
+ * The embedded metro map region (GH117 Part F): the map on top spanning the full
+ * width, a "simulation ended" overlay over it once the run concludes, and the key
+ * (Lines, Actors, Sensors) below it as a row of columns. It sits inline in `App`'s
+ * page flow between `Hud` and `InspectorShell`, sized to a bounded box rather than
+ * filling the viewport — the pipeline transport (freeze, 0.5x/1x/2x) is the one
  * clock now, so this component owns no header, no counts, and no speed control.
  *
  * Every live value is read through a per-field `useGameStore` selector, so a snapshot
@@ -13,21 +13,9 @@
  */
 
 import { useGameStore } from "../game/store";
-import { GAME_SECONDS_PER_TICK } from "../game/tuning";
 import type { FailureReason, RunStatus } from "../sim/snapshot";
 import { world } from "../sim/world/world";
-import type { TimedWorldReading } from "../sim/world-reading";
 import { MetroMap } from "./MetroMap";
-
-/** How many of the retained log entries the panel shows. */
-const LOG_ROWS = 70;
-
-/** Every named place a reading can cite: the nine stations, the sites, and the OCC. */
-const placeName = new Map<string, string>([
-  ...world.stations.map((station): [string, string] => [station.id, station.name]),
-  ...world.sites.map((site): [string, string] => [site.id, site.name]),
-  [world.controlCenter.id, world.controlCenter.name],
-]);
 
 /** The map's line draw order; any line not listed sorts last. */
 const LINE_ORDER: readonly string[] = ["red", "blue", "green", "circle"];
@@ -54,114 +42,46 @@ const LEGEND_SENSORS: readonly { code: string; color: string; name: string }[] =
   { code: "O", color: "var(--s-console)", name: "control console (Z4)" },
 ];
 
-/** One event-log row: its sensor chip code and color, and its human-readable message. */
-function logRow(entry: TimedWorldReading): { code: string; color: string; text: string } {
-  const reading = entry.reading;
-  if (reading.sensor === "train-tracker") {
-    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
-    const detail = reading.reading.event === "arr" ? "arrive" : "depart";
-    return {
-      code: "T",
-      color: "var(--s-train)",
-      text: `train tracker, ${place}, ${reading.reading.train} ${detail} (${reading.reading.line})`,
-    };
-  }
-  if (reading.sensor === "door-reader") {
-    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
-    return {
-      code: "R",
-      color: "var(--s-reader)",
-      text: `door reader, ${place}, ${reading.reading.badge} grant ${reading.reading.door} (${reading.reading.zone})`,
-    };
-  }
-  if (reading.sensor === "door-contact") {
-    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
-    return {
-      code: "D",
-      color: "var(--s-contact)",
-      text: `door contact, ${place}, ${reading.reading.door} ${reading.reading.event}`,
-    };
-  }
-  if (reading.sensor === "kiosk") {
-    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
-    return {
-      code: "K",
-      color: "var(--s-kiosk)",
-      text: `account kiosk, ${place}, ${reading.reading.account} sign-in (${reading.reading.terminal})`,
-    };
-  }
-  if (reading.sensor === "tvm") {
-    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
-    return {
-      code: "V",
-      color: "var(--s-tvm)",
-      text: `ticket machine, ${place}, ${reading.reading.card} top-up +${reading.reading.amount} (${reading.reading.machine})`,
-    };
-  }
-  if (reading.sensor === "platform-camera") {
-    const place = placeName.get(reading.reading.station) ?? reading.reading.station;
-    return {
-      code: "C",
-      color: "var(--s-cam)",
-      text: `platform camera, ${place}, ${reading.reading.persons} people / ${reading.reading.grants} grants`,
-    };
-  }
-  if (reading.sensor === "occ-console") {
-    // The console reading is OCC-only and carries no location, so the place is the OCC.
-    return {
-      code: "O",
-      color: "var(--s-console)",
-      text: `control console, ${world.controlCenter.name}, ${reading.reading.operator} ${reading.reading.command} ${reading.reading.target} (${reading.reading.host})`,
-    };
-  }
-  if (reading.sensor === "network-relay") {
-    const place = placeName.get(reading.reading.site) ?? reading.reading.site;
-    return {
-      code: "N",
-      color: "var(--s-relay)",
-      text: `network relay, ${place}, ${reading.reading.host} -> ${reading.reading.dest} ${reading.reading.bytes}B`,
-    };
-  }
-  const place = placeName.get(reading.reading.station) ?? reading.reading.station;
-  const detail = reading.reading.direction === "in" ? "tap in" : "tap out";
-  return {
-    code: "G",
-    color: "var(--s-gate)",
-    text: `fare gate, ${place}, ${detail} (bal ${reading.reading.balance})`,
-  };
-}
-
-function Legend() {
+/** The Lines column: one swatch-and-name row per line, in the map's draw order. */
+function LinesColumn() {
   return (
-    <aside className="metro-legend">
-      <div className="metro-legend-head">Lines</div>
+    <div className="metro-key-col">
+      <div className="metro-key-head">Lines</div>
       {LEGEND_LINES.map((line) => (
-        <div className="metro-legend-row" key={line.id}>
+        <div className="metro-key-row" key={line.id}>
           <span className="metro-swatch" style={{ background: line.color }} />
           {line.name}
         </div>
       ))}
-      <div className="metro-legend-head">Actors</div>
-      <div className="metro-legend-row">
+    </div>
+  );
+}
+
+/** The Actors column: rider, account rider, pin attacker, staff, and train. */
+function ActorsColumn() {
+  return (
+    <div className="metro-key-col">
+      <div className="metro-key-head">Actors</div>
+      <div className="metro-key-row">
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--ink)" }} />
         rider
       </div>
-      <div className="metro-legend-row">
+      <div className="metro-key-row">
         {/* A kiosk-colored dot matching the account rider's real glyph (--s-kiosk). */}
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--s-kiosk)" }} />
         account rider
       </div>
-      <div className="metro-legend-row">
+      <div className="metro-key-row">
         {/* A red-ringed dot matching the pin attacker's real glyph (GH117 Part F). */}
         <span className="metro-swatch metro-swatch-attacker" />
         pin attacker
       </div>
-      <div className="metro-legend-row">
+      <div className="metro-key-row">
         {/* A square swatch matching the staff's real 7x7 green square glyph (--ok). */}
         <span className="metro-swatch metro-swatch-staff" style={{ background: "var(--ok)" }} />
         staff
       </div>
-      <div className="metro-legend-row">
+      <div className="metro-key-row">
         {/* A rounded-rect swatch matching the train's real pill glyph (#cfe3ea). */}
         <span
           className="metro-swatch metro-swatch-train"
@@ -169,43 +89,35 @@ function Legend() {
         />
         train
       </div>
-      <div className="metro-legend-head">Sensors</div>
+    </div>
+  );
+}
+
+/** The Sensors column: one chip-and-name row per sensor. */
+function SensorsColumn() {
+  return (
+    <div className="metro-key-col">
+      <div className="metro-key-head">Sensors</div>
       {LEGEND_SENSORS.map((sensor) => (
-        <div className="metro-legend-row" key={sensor.code}>
+        <div className="metro-key-row" key={sensor.code}>
           <span className="metro-chip-swatch" style={{ background: sensor.color }}>
             {sensor.code}
           </span>
           {sensor.name}
         </div>
       ))}
-    </aside>
+    </div>
   );
 }
 
-function EventLog() {
-  const log = useGameStore((state) => state.snapshot.mapLog);
-  const rows = log.slice(0, LOG_ROWS);
+/** The key: Lines, Actors, and Sensors as three columns below the map. */
+function MetroKey() {
   return (
-    <aside className="metro-log">
-      <div className="metro-log-head">Event log</div>
-      <div className="metro-log-body">
-        {rows.map((entry, index) => {
-          const row = logRow(entry);
-          return (
-            // biome-ignore lint/suspicious/noArrayIndexKey: two readings from one actor on one tick share (tick, actorId); the row index is the only field that disambiguates them, and these rows hold no state, so a shifting index is harmless.
-            <div className="metro-log-row" key={`${entry.tick}-${entry.actorId ?? "?"}-${index}`}>
-              <span className="metro-log-time">
-                {(entry.tick * GAME_SECONDS_PER_TICK).toFixed(1)}s
-              </span>
-              <span className="metro-chip-swatch" style={{ background: row.color }}>
-                {row.code}
-              </span>
-              <span className="metro-log-msg">{row.text}</span>
-            </div>
-          );
-        })}
-      </div>
-    </aside>
+    <div className="metro-key">
+      <LinesColumn />
+      <ActorsColumn />
+      <SensorsColumn />
+    </div>
   );
 }
 
@@ -243,15 +155,14 @@ function EndedOverlay() {
 export function MetroView() {
   return (
     <div className="metro-view">
-      {/* Layout children, not overlays: the legend is a left column, the log a
-          bottom-right region, and the map fills the remainder, so the full map (Harbor
-          to World's End, and every site) is never hidden under a panel. */}
-      <Legend />
+      {/* Layout children, not overlays: the map fills the full width on top (so the
+          full map, Harbor to World's End, and every site, is never hidden under a
+          panel), and the key sits below it as a row of columns. */}
       <div className="metro-map-region">
         <MetroMap />
         <EndedOverlay />
       </div>
-      <EventLog />
+      <MetroKey />
     </div>
   );
 }
