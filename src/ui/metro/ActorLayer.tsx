@@ -14,7 +14,9 @@
  * `SimSnapshot` in `useGameStore`, so this layer reads that store now, not the
  * retired `useWorldStore`. The render-estimate speed comes from the one pipeline
  * transport (`snapshot` state's `transport.frozen`/`transport.speed`), not a metro-only
- * pause/speed pair.
+ * pause/speed pair — and drops to zero once `snapshot.status` leaves `"running"`, so
+ * the map holds its last frame under the terminal overlay instead of sliding on
+ * (`renderSpeed`, `interpolate.ts`).
  */
 import { useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
@@ -26,7 +28,7 @@ import { trainIdForLine } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
 import type { ActorView, FlashEvent } from "../../sim/world-snapshot";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./design";
-import { presencePoint, stepBetween } from "./interpolate";
+import { presencePoint, renderSpeed, stepBetween } from "./interpolate";
 
 /** The rider dot color (`--ink`) and the flash token per firing sensor kind. */
 const INK = "#fbd57b";
@@ -624,7 +626,10 @@ export function ActorLayer() {
     const frame = (): void => {
       const state = useGameStore.getState();
       const snapshot = state.snapshot;
-      const speed = state.transport.frozen ? 0 : state.transport.speed;
+      // Zero once the run concludes (not just while frozen), so the map holds its last
+      // frame under the "simulation ended" overlay instead of sliding actors on toward
+      // positions the sim never reached.
+      const speed = renderSpeed(state.transport.frozen, state.transport.speed, snapshot.status);
       const wall = performance.now();
       if (snapshot.nowTick !== lastNowTick) {
         lastNowTick = snapshot.nowTick;

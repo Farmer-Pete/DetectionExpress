@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Point } from "../../sim/world/layout";
 import type { Presence } from "../../sim/world/presence";
-import { presencePoint, stepBetween } from "./interpolate";
+import { presencePoint, renderSpeed, stepBetween } from "./interpolate";
 
 const layout = new Map<string, Point>([
   ["cen", { x: 470, y: 300 }],
@@ -72,5 +72,28 @@ describe("stepBetween (board / alight)", () => {
   it("snaps to the end point for a non-positive duration", () => {
     // A zero (or negative) window has no span to blend across, so it lands on the end.
     expect(stepBetween(platform, train, 100, 0, 100)).toEqual(train);
+  });
+});
+
+describe("renderSpeed", () => {
+  it("runs at the transport speed while the run is running and unfrozen", () => {
+    expect(renderSpeed(false, 1, "running")).toBe(1);
+    expect(renderSpeed(false, 4, "running")).toBe(4);
+  });
+
+  it("is zero while the transport is frozen, even mid-run", () => {
+    expect(renderSpeed(true, 1, "running")).toBe(0);
+  });
+
+  it("is zero once the run has concluded, even if the transport itself is not frozen", () => {
+    // Regression: the render clock kept advancing past a terminal snapshot, sliding
+    // actors to positions the sim never reached and fading the terminal flash beneath
+    // the "simulation ended" overlay.
+    expect(renderSpeed(false, 1, "won")).toBe(0);
+    expect(renderSpeed(false, 1, "failed")).toBe(0);
+  });
+
+  it("stays zero when both frozen and terminal", () => {
+    expect(renderSpeed(true, 2, "failed")).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 /**
  * The GH117 parity guards (GH117-PLAN.md "Parity guards"): the acceptance gate before
- * the legacy world engine and store may be removed. Two guards plus the scoring-boundary
+ * the legacy world engine and store may be removed. Three guards plus the scoring-boundary
  * guard prove the merged engine, scoring off the LIVE stepped scenario stream, is
  * byte-for-byte what the pre-generated pipeline produced.
  *
@@ -10,10 +10,17 @@
  *   Run with the whole ambient cast attached, so a seed collision that perturbed a
  *   scenario actor's stream would surface as a divergence.
  *
- *   Guard 2 — paired engine equivalence. For a fixed algorithm and service rate, the
- *   engine scoring off the LIVE stream and the engine scoring off the pre-generated
- *   stream agree on decisions, correctness, admitted/completed, terminal status and
- *   failure reason, and the checkpoint observations at each checkpoint tick.
+ *   Guard 2 — paired engine equivalence at a fast rate. For a fixed algorithm and a
+ *   service rate so fast the governor never sleeps, the engine scoring off the LIVE
+ *   stream and the engine scoring off the pre-generated stream agree on decisions,
+ *   correctness, admitted/completed, terminal status and failure reason, and the
+ *   checkpoint observations at each checkpoint tick.
+ *
+ *   Guard 2b — the same paired equivalence at REFERENCE_SLOW_RATE, the naive rule's real
+ *   quantized rate at the shipped OMEGA. Slow enough that Detect's governor sleeps and
+ *   Channel backpressure builds behind it, forcing the run through ScoredIngress
+ *   buffering and a Queue checkpoint failure on BOTH sides — the highest-risk integrated
+ *   path guard 2's never-sleeps rate cannot reach.
  *
  *   Boundary guard — an ambient kiosk fail flashes and logs but never enters the
  *   channels: it never bumps the dense event id or `admitted`; a scored-scenario fail
@@ -46,6 +53,7 @@ import {
   type StartOptions,
   start,
 } from "./engine";
+import { REFERENCE_SLOW_RATE } from "./profiler/kiosk-band-calibration";
 import { getGraph } from "./store";
 import { CORRECTNESS_W_FN, CORRECTNESS_W_FP, CORRECTNESS_WINDOW, LEVEL_SEED } from "./tuning";
 
@@ -273,6 +281,87 @@ describe("GH117 parity guard 2: paired engine equivalence (live vs pre-generated
       expect(reference.observations.length).toBeGreaterThan(0);
       // The live run really did win (a meaningful, concluding run, not an early bail).
       expect(live.last.status).toBe("won");
+    },
+  );
+});
+
+describe("GH117 parity guard 2b: paired engine equivalence under backpressure (slow service, queue failure)", () => {
+  it.each([LEVEL_SEED, 7, 2026])(
+    "the engine off the live stream agrees with the pre-generated reference under backpressure for seed %i",
+    async (seed) => {
+      const run = pinBruteForce.generate(seed);
+      const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+
+      // Reference: the pre-generated generator, no cast, no live ingress. REFERENCE_SLOW_RATE
+      // is the naive rule's real quantized rate at the shipped OMEGA (kiosk-band-calibration.ts):
+      // slow enough that the abstract band model fails a checkpoint with margin against this
+      // same LEVEL_SEED corpus. Here it drives the two REAL engines (live and pre-generated)
+      // through the real Channel/ScoredIngress backpressure, not the abstract model.
+      let refIndex = 0;
+      const reference = await runToConclusion(
+        (onCheckpoint, driver) => ({
+          getGraph,
+          setSnapshot: () => undefined,
+          algorithm: referenceTaskAlgorithm(),
+          scorer: createScorer(run.attacks, SCORER_CONFIG),
+          generator: () => (refIndex < run.events.length ? (run.events[refIndex++] ?? null) : null),
+          serviceRate: REFERENCE_SLOW_RATE,
+          checkpoints: run.checkpoints,
+          waves: run.waves,
+          driver,
+          onCheckpoint,
+        }),
+        finalTick,
+      );
+
+      // Live: score off the stepped cast through the scored ingress, no generator. Same
+      // slow rate, so ScoredIngress buffers behind the same governed Detect pace.
+      const blueprint = buildBlueprint(seed);
+      const env: WorldEnv = { ...blueprint.env, control: controlReference };
+      const live = await runToConclusion(
+        (onCheckpoint, driver) => ({
+          getGraph,
+          setSnapshot: () => undefined,
+          algorithm: referenceTaskAlgorithm(),
+          scorer: createScorer(blueprint.precomposed.attacks, SCORER_CONFIG),
+          generator: () => null,
+          serviceRate: REFERENCE_SLOW_RATE,
+          checkpoints: [...blueprint.checkpoints],
+          waves: [...blueprint.waves],
+          scenarioCast: { members: membersOf(blueprint), env, runSeed: seed },
+          ambientCast: {
+            fixtures: buildAmbientFixtures(world, env.timetable),
+            ...buildAmbientSpawners(world, seed),
+          },
+          scoredIngest: {
+            ingress: new ScoredIngress(),
+            toEvent: blueprint.toEvent,
+            lastScoredTick: blueprint.lastScoredTick,
+          },
+          driver,
+          onCheckpoint,
+        }),
+        finalTick,
+      );
+
+      expect(reference.last).toBeDefined();
+      expect(live.last).toBeDefined();
+      if (!reference.last || !live.last) return;
+
+      // The scored outcome is identical: decisions, correctness, counts, terminal state.
+      expect(scoringFields(live.last)).toEqual(scoringFields(reference.last));
+      // And both engines saw the same state at every checkpoint tick.
+      expect(live.observations).toEqual(reference.observations);
+      expect(reference.observations.length).toBeGreaterThan(0);
+
+      // This guard only proves something at a slow rate if the slow rate actually bit:
+      // some checkpoint must have failed on a Queue margin, and the run must have ended
+      // there, with the typed "queue" failure reason (not a correctness fail, and not a
+      // win the fast-rate guard already covers).
+      expect(reference.observations.some((o) => o.outcome === "queue")).toBe(true);
+      expect(reference.observations.some((o) => o.queued > 0)).toBe(true);
+      expect(live.last.status).toBe("failed");
+      expect(live.last.failureReason).toBe("queue");
     },
   );
 });
