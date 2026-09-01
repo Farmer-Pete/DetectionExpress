@@ -30,11 +30,16 @@ beforeEach(() => {
 });
 
 describe("MetroView", () => {
-  it("renders the Lines, Actors, and Sensors key columns below the map", () => {
+  it("renders the Lines, Actors, and Sensors key sections", () => {
     render(<MetroView />);
     expect(screen.getByText("Lines")).toBeDefined();
     expect(screen.getByText("Actors")).toBeDefined();
     expect(screen.getByText("Sensors")).toBeDefined();
+  });
+
+  it("renders the key markup exactly once (CSS repositions it, JS never duplicates it)", () => {
+    render(<MetroView />);
+    expect(screen.getAllByText("Lines")).toHaveLength(1);
   });
 
   it("lists a train row in the Actors key column", () => {

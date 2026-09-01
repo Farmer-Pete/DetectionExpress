@@ -1,10 +1,13 @@
 /**
- * The embedded metro map region (GH117 Part F): the map on top spanning the full
- * width, a "simulation ended" overlay over it once the run concludes, and the key
- * (Lines, Actors, Sensors) below it as a row of columns. It sits inline in `App`'s
- * page flow between `Hud` and `InspectorShell`, sized to a bounded box rather than
- * filling the viewport — the pipeline transport (freeze, 0.5x/1x/2x) is the one
- * clock now, so this component owns no header, no counts, and no speed control.
+ * The embedded metro map region (GH117 Part F): the map, a "simulation ended"
+ * overlay over it once the run concludes, and the key (Lines, Actors, Sensors) as a
+ * sibling of the map inside `.metro-view`. `MetroKey` renders once; `.metro-view`'s
+ * CSS grid (src/index.css) is what moves it — below the map as a row of columns on
+ * narrow screens, a left rail of stacked sections at or above the 720px breakpoint.
+ * It sits inline in `App`'s page flow between `Hud` and `InspectorShell`, sized to a
+ * bounded box rather than filling the viewport — the pipeline transport (freeze,
+ * 0.5x/1x/2x) is the one clock now, so this component owns no header, no counts, and
+ * no speed control.
  *
  * Every live value is read through a per-field `useGameStore` selector, so a snapshot
  * update re-renders only the panel that reads the changed field, not the whole view
@@ -110,7 +113,11 @@ function SensorsColumn() {
   );
 }
 
-/** The key: Lines, Actors, and Sensors as three columns below the map. */
+/**
+ * The key: Lines, Actors, and Sensors. Rendered once, as a sibling of the map region
+ * — `.metro-key`'s CSS (not a JS width check) decides whether it lays out as columns
+ * below the map or as a stacked rail to its left.
+ */
 function MetroKey() {
   return (
     <div className="metro-key">
@@ -155,9 +162,9 @@ function EndedOverlay() {
 export function MetroView() {
   return (
     <div className="metro-view">
-      {/* Layout children, not overlays: the map fills the full width on top (so the
-          full map, Harbor to World's End, and every site, is never hidden under a
-          panel), and the key sits below it as a row of columns. */}
+      {/* Two grid children, not overlays: the map region (so the full map, Harbor to
+          World's End, and every site, is never hidden under a panel) and the key,
+          each placed by `.metro-view`'s CSS grid areas — no width check here. */}
       <div className="metro-map-region">
         <MetroMap />
         <EndedOverlay />

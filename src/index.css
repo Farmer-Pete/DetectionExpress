@@ -1015,15 +1015,19 @@ body {
 
 /* ---- Embedded metro map region (GH117 Part F) ---- */
 /* The map embeds inline in the page flow, between the HUD and the inspector shell,
-   sized to a bounded box rather than filling the viewport. The map spans the full
-   width on top; the key (Lines, Actors, Sensors) sits below it as a row of three
-   columns. No panel overlays the map, so the whole network stays visible. The scored
-   pipeline transport (freeze, 0.5x/1x/2x) is the one clock now, so this region carries
-   no header, counts, or speed control of its own — those retired with the standalone
-   metro view. */
+   sized to a bounded box rather than filling the viewport. No panel overlays the map,
+   so the whole network stays visible. The scored pipeline transport (freeze,
+   0.5x/1x/2x) is the one clock now, so this region carries no header, counts, or
+   speed control of its own — those retired with the standalone metro view.
+   The key (Lines, Actors, Sensors) is a single element, `MetroKey`, that this grid
+   repositions by breakpoint alone: below the map (as a row of three columns) under
+   the breakpoint, on the left as a stacked vertical rail at or above it. See the
+   @media block near `.metro-key` for the desktop rule. */
 .metro-view {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-areas: "map" "key";
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr auto;
   gap: 10px;
   height: clamp(360px, 56vh, 520px);
   margin: 0 1.5rem 1rem;
@@ -1033,8 +1037,20 @@ body {
   background: var(--bg);
 }
 
+/* Desktop / wide screens: the key becomes a left rail, map fills the rest.
+   720px reuses `.inspector-shell`'s existing 2-col/1-col breakpoint (max-width: 720px
+   there collapses to one column below 720px; this is the same threshold read as a
+   min-width, so both layouts fold to a single column at the same width). */
+@media (min-width: 720px) {
+  .metro-view {
+    grid-template-areas: "key map";
+    grid-template-columns: 200px 1fr;
+    grid-template-rows: 1fr;
+  }
+}
+
 .metro-map-region {
-  flex: 1 1 auto;
+  grid-area: map;
   position: relative;
   min-height: 0;
   min-width: 0;
@@ -1134,10 +1150,12 @@ body {
   opacity: 0.9;
 }
 
-/* Key: the row below the map, a 3-column grid (Lines, Actors, Sensors), with its own
-   scroll if the content ever outgrows the bounded height. */
+/* Key: one element (`MetroKey`, rendered once) holding the Lines/Actors/Sensors
+   sections, with its own scroll if the content ever outgrows the bounded height.
+   Below the map as a 3-column row by default; the @media rule above turns this into
+   a single-column left rail (sections stacked top to bottom) at the same breakpoint. */
 .metro-key {
-  flex: 0 0 auto;
+  grid-area: key;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 10px 16px;
@@ -1151,6 +1169,14 @@ body {
   color: var(--dim);
   font-size: 11px;
   line-height: 1.55;
+}
+
+@media (min-width: 720px) {
+  .metro-key {
+    grid-template-columns: 1fr;
+    max-height: none;
+    height: 100%;
+  }
 }
 
 .metro-key-col {
