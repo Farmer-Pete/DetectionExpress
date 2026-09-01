@@ -308,7 +308,7 @@ describe("site placement geometry (GH116)", () => {
           if (a === undefined || b === undefined) {
             continue;
           }
-          expect(segHitsRect(a, b, label, 0)).toBe(false);
+          expect(segHitsRect(a, b, label, TRACK_HALF)).toBe(false);
         }
       }
     });
