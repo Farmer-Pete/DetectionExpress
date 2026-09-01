@@ -133,6 +133,18 @@ describe("usePipelineController", () => {
     expect(clearSelectionSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back to the real buildController when createController is omitted", () => {
+    // Every other test injects a stub factory. `App` can call this hook with no
+    // `createPipelineController` prop, which leaves `createController` undefined and
+    // exercises the module's own `buildController` (the real `createRunController`
+    // wiring). Assert only the synchronous mount contract: `run()` builds and installs
+    // the controller into the ref before this effect returns, well before its async
+    // load/profile settles, so this needs no mocking of the loader or the profiler.
+    const { result, unmount } = renderHook(() => usePipelineController({}));
+    expect(result.current.controllerRef.current).not.toBeNull();
+    unmount(); // dispose the real controller so its async load/profile cannot outlive the test
+  });
+
   it("leaves a newer controller in the ref on teardown (the identity guard)", () => {
     // The teardown clears the ref only when it still holds THIS epoch's controller
     // (`if (controllerRef.current === active)`). An Apply or hot-reload can swap a newer

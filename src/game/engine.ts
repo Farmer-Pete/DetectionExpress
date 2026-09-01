@@ -51,9 +51,9 @@ import {
   relayNodeId,
   tvmNodeId,
 } from "../sim/world/layout";
-import type { MapNodeId, Presence } from "../sim/world/presence";
+import type { Presence } from "../sim/world/presence";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
-import type { ActorView, FlashEvent } from "../sim/world-snapshot";
+import type { ActorView, CrowdView, DoorView, FlashEvent } from "../sim/world-snapshot";
 import { type CameraGrant, createCameraReducer } from "./camera-reducer";
 import { Clock, ClockStoppedError, intervalDriver, type TickDriver } from "./clock";
 import { createDoorReducer } from "./door-reducer";
@@ -285,8 +285,8 @@ interface MapView {
   getActors: () => readonly ActorView[];
   getFlashes: () => readonly FlashEvent[];
   getNowTick: () => number;
-  getDoors: () => readonly { node: MapNodeId; open: boolean }[];
-  getCrowds: () => readonly { node: MapNodeId; persons: number; grants: number }[];
+  getDoors: () => readonly DoorView[];
+  getCrowds: () => readonly CrowdView[];
 }
 
 function makeSampler(
@@ -483,8 +483,8 @@ export function start(options: StartOptions): EngineHandle {
     // `nowTick` stays 0 and the map fields stay empty, exactly as before.
     const views = new Map<string, ActorView>();
     const mapFlashes: FlashEvent[] = [];
-    let latestDoors: readonly { node: MapNodeId; open: boolean }[] = [];
-    let latestCrowds: readonly { node: MapNodeId; persons: number; grants: number }[] = [];
+    let latestDoors: readonly DoorView[] = [];
+    let latestCrowds: readonly CrowdView[] = [];
     let mapNowTick = 0;
     const mapView: MapView = {
       getActors: () => [...views.values()],

@@ -1,11 +1,10 @@
 /**
- * The metro's ambient cast, assembled once and shared by both the legacy world run
- * controller and the merged pipeline run controller (GH117-PLAN.md "Part B"). It owns
- * the two things every ambient run needs: the persistent startup fixtures (one train
- * per line, one operator per OCC console, one host per site) and the three seeded
- * runtime spawners (riders, staff, account riders). Extracted so the two controllers
- * build the identical cast rather than duplicating the builders; a later step collapses
- * the two controllers into one.
+ * The metro's ambient cast, assembled once for the merged run controller
+ * (`run-controller.ts`, GH117-PLAN.md "Part B"). It owns the two things every ambient
+ * run needs: the persistent startup fixtures (one train per line, one operator per OCC
+ * console, one host per site) and the three seeded runtime spawners (riders, staff,
+ * account riders). Extracted from the controller so the builders stay pure and
+ * directly testable.
  *
  * It is pure over its inputs: given the same world, timetable, and seed it returns an
  * equivalent cast. It reads no wall clock and no React (ARCHITECTURE rule 8, ADR-0007).

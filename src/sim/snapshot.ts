@@ -6,10 +6,10 @@
 import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
 import type { WaveReading } from "./wave-state";
-import type { MapNodeId } from "./world/presence";
-// `ActorView` and `FlashEvent` stay defined in `world-snapshot.ts` for now (GH117
-// Part E, to minimize churn); import them from there directly.
-import type { ActorView, FlashEvent } from "./world-snapshot";
+// `ActorView`, `FlashEvent`, `DoorView`, and `CrowdView` stay defined in
+// `world-snapshot.ts` for now (GH117 Part E, to minimize churn); import them from
+// there directly.
+import type { ActorView, CrowdView, DoorView, FlashEvent } from "./world-snapshot";
 
 /** The run lifecycle, as the HUD reads it. */
 export type RunStatus = "running" | "won" | "failed";
@@ -66,9 +66,9 @@ export interface SimSnapshot {
   /** Short, fading sensor-fire marks the map draws. Empty until the engine wires it. */
   flashes: readonly FlashEvent[];
   /** Door projection (reducer output). Empty until the engine wires it. */
-  doors: readonly { node: MapNodeId; open: boolean }[];
+  doors: readonly DoorView[];
   /** Camera reducer output: per-node crowd counts. Empty until the engine wires it. */
-  crowds: readonly { node: MapNodeId; persons: number; grants: number }[];
+  crowds: readonly CrowdView[];
   /**
    * The authoritative integer game tick for the map, distinct from any UI-only
    * fractional render estimate (which stays inside `ActorLayer.tsx`). 0 until the

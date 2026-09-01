@@ -44,3 +44,16 @@ export interface FlashEvent {
   node: MapNodeId;
   atTick: number;
 }
+
+/** One open door the map draws, projected from `door-reducer.ts`'s open-door state. */
+export interface DoorView {
+  node: MapNodeId;
+  open: boolean;
+}
+
+/** One node's crowd density the map draws, projected from `camera-reducer.ts`'s counts. */
+export interface CrowdView {
+  node: MapNodeId;
+  persons: number;
+  grants: number;
+}

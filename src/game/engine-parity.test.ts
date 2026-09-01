@@ -40,6 +40,7 @@ import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
 import { distanceTable } from "../sim/world/distance";
+import { kioskNodeId } from "../sim/world/layout";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
@@ -53,6 +54,7 @@ import {
   type StartOptions,
   start,
 } from "./engine";
+import { membersOf, scoringFields } from "./parity-test-helpers";
 import { REFERENCE_SLOW_RATE } from "./profiler/kiosk-band-calibration";
 import { getGraph } from "./store";
 import { CORRECTNESS_W_FN, CORRECTNESS_W_FP, CORRECTNESS_WINDOW, LEVEL_SEED } from "./tuning";
@@ -107,16 +109,6 @@ async function step(driver: ManualDriver, ticks: number, flushRounds = 50): Prom
     driver.tick();
     await flush(flushRounds);
   }
-}
-
-/** Build the live scenario cast (members) from a seed's blueprint, aligned by index. */
-function membersOf(blueprint: ReturnType<typeof buildBlueprint>): ScenarioCastMember[] {
-  const actors = blueprint.instantiate();
-  return actors.map((actor, i) => {
-    const d = blueprint.descriptors[i];
-    if (!d) throw new Error("descriptor/actor misalignment");
-    return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
-  });
 }
 
 /** A ScoredIngress whose every offered event is captured, in emission order. */
@@ -186,20 +178,6 @@ describe("GH117 parity guard 1: live event-stream equivalence across a seed swee
     },
   );
 });
-
-/** The scoring fields two runs must agree on, read off the terminal snapshot. */
-function scoringFields(snap: SimSnapshot) {
-  return {
-    status: snap.status,
-    failureReason: snap.failureReason,
-    admitted: snap.admitted,
-    completed: snap.completed,
-    correctness: snap.correctness,
-    decisions: snap.decisions,
-    findings: snap.findings,
-    queued: snap.queued,
-  };
-}
 
 /** Run one full engine to conclusion, capturing checkpoint observations. */
 async function runToConclusion(
@@ -436,7 +414,11 @@ describe("GH117 boundary guard: ambient kiosk fails flash and log but never scor
       scenarioCast: { members, env, runSeed: LEVEL_SEED },
       ambientCast: {
         fixtures: [],
-        accountSpawner: oneFumblingAmbientRider("A-amb", "cen", 6), // an ambient fail near tick 6
+        // At a DIFFERENT station and AT OR BEFORE lastScoredTick (3), inside the scored
+        // horizon: the ingress is still open at this tick, so a provenance-check
+        // regression would genuinely offer this reading (and the assertions below would
+        // catch it), not merely trip `ScoredIngress.offer`'s post-close throw.
+        accountSpawner: oneFumblingAmbientRider("A-amb", "riv", 2),
       },
       scoredIngest: { ingress, toEvent: blueprint.toEvent, lastScoredTick: 3 },
       driver,
@@ -451,10 +433,14 @@ describe("GH117 boundary guard: ambient kiosk fails flash and log but never scor
     // Admission counts only the two scored events; the ambient fail never admits.
     expect(snapshots.at(-1)?.admitted).toBe(2);
 
-    // Yet the ambient wrong-PIN fail still raised a pinfail flash, and the ambient actor
+    // Yet the ambient wrong-PIN fail still raised a pinfail flash, on the AMBIENT
+    // actor's own node ("riv:K", distinct from the patron's "cen:K"): this isolates the
+    // flash the boundary must prove from the patron's own fumble-fail flash, which would
+    // otherwise satisfy a bare `kind === "pinfail"` check on its own. The ambient actor
     // stays tagged "ambient" in the actor view (never "scored-scenario").
+    const ambientKioskNode = kioskNodeId("riv");
     const flashes = snapshots.flatMap((s) => s.flashes);
-    expect(flashes.some((f) => f.kind === "pinfail")).toBe(true);
+    expect(flashes.some((f) => f.kind === "pinfail" && f.node === ambientKioskNode)).toBe(true);
     const ambientActor = snapshots.flatMap((s) => s.actors).find((actor) => actor.id === "A-amb");
     expect(ambientActor?.provenance).toBe("ambient");
   });

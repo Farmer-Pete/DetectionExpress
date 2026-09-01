@@ -46,6 +46,7 @@ import {
   type StartOptions,
   start,
 } from "./engine";
+import { membersOf, scoringFields } from "./parity-test-helpers";
 import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
@@ -1167,12 +1168,7 @@ describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
 
   it("carries the real blueprint's cast, mapping attackers to pin-attacker and patrons to account-rider", async () => {
     const blueprint = buildBlueprint(LEVEL_SEED);
-    const actors = blueprint.instantiate();
-    const members: ScenarioCastMember[] = actors.map((actor, i) => {
-      const d = blueprint.descriptors[i];
-      if (!d) throw new Error("descriptor/actor misalignment");
-      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
-    });
+    const members: ScenarioCastMember[] = membersOf(blueprint);
     const h = launch({
       scenarioCast: { members, env: blueprint.env, runSeed: LEVEL_SEED },
       checkpoints: deadlineAt(100),
@@ -1190,17 +1186,6 @@ describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
   it("keeps scoring byte-identical whether or not a scenario cast is attached", async () => {
     const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
-    const scoringFields = (snap: SimSnapshot) => ({
-      status: snap.status,
-      failureReason: snap.failureReason,
-      admitted: snap.admitted,
-      completed: snap.completed,
-      correctness: snap.correctness,
-      decisions: snap.decisions,
-      findings: snap.findings,
-      queued: snap.queued,
-    });
-
     const bare = launch({
       generator: scheduleOf(run.events),
       algorithm: referenceTaskAlgorithm(),
@@ -1211,12 +1196,7 @@ describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
     await bare.handle.whenStopped;
 
     const blueprint = buildBlueprint(LEVEL_SEED);
-    const actors = blueprint.instantiate();
-    const members: ScenarioCastMember[] = actors.map((actor, i) => {
-      const d = blueprint.descriptors[i];
-      if (!d) throw new Error("descriptor/actor misalignment");
-      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
-    });
+    const members: ScenarioCastMember[] = membersOf(blueprint);
     const withCast = launch({
       generator: scheduleOf(run.events),
       algorithm: referenceTaskAlgorithm(),
@@ -1422,17 +1402,6 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
   it("keeps scoring byte-identical with the ambient cast attached (CRITICAL parity)", async () => {
     const run = pinBruteForce.generate(LEVEL_SEED);
     const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
-    const scoringFields = (snap: SimSnapshot) => ({
-      status: snap.status,
-      failureReason: snap.failureReason,
-      admitted: snap.admitted,
-      completed: snap.completed,
-      correctness: snap.correctness,
-      decisions: snap.decisions,
-      findings: snap.findings,
-      queued: snap.queued,
-    });
-
     const bare = launch({
       generator: scheduleOf(run.events),
       algorithm: referenceTaskAlgorithm(),
@@ -1443,12 +1412,7 @@ describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Pa
     await bare.handle.whenStopped;
 
     const blueprint = buildBlueprint(LEVEL_SEED);
-    const actors = blueprint.instantiate();
-    const members: ScenarioCastMember[] = actors.map((actor, i) => {
-      const d = blueprint.descriptors[i];
-      if (!d) throw new Error("descriptor/actor misalignment");
-      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
-    });
+    const members: ScenarioCastMember[] = membersOf(blueprint);
     const env: WorldEnv = { ...blueprint.env, control: controlReference };
     const withAmbient = launch({
       generator: scheduleOf(run.events),
