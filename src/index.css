@@ -1294,10 +1294,14 @@ body {
   text-overflow: ellipsis;
 }
 
-/* Topbar actions: the reopen control and the Hire Me surface, pushed to the right. */
+/* Topbar actions: the reopen control and the Hire Me surface, pushed to the right.
+   flex-wrap so the row (now up to five controls, with the two side-panel openers)
+   drops to a second line instead of overflowing at narrow widths; .topbar's own
+   flex-wrap only breaks BETWEEN top-level children, not within this nested row. */
 .topbar-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.6rem;
   margin-left: auto;
 }
@@ -1592,7 +1596,9 @@ body {
   border-radius: 8px;
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--dim);
+  /* Brightened from --dim (~3.09:1 on --panel) to clear WCAG AA, the same mix the
+     rest of the sheet uses for de-emphasized-but-legible text (e.g. line 685). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-weight: 700;
   font-size: 0.85rem;
   cursor: pointer;

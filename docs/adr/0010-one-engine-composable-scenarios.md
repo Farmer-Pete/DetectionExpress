@@ -75,8 +75,10 @@ bonus.
   score correctly under one engine.
 - The normalize seam changes: `normalize` gains the endpoint. This touches
   `src/sim/tasks.ts` and the algorithm contract.
-- ADR 0008's per-slug model was revised here, then retired entirely in GH118: the
-  resolver and the HMR plugin were removed with the rest of the local-IDE path.
+- ADR 0008's per-slug model was already revised here, to the single fixed-override
+  authoring this ADR's decision describes. GH118 later removed that local-IDE
+  implementation outright: the resolver and the HMR plugin are gone with the rest
+  of the local-IDE path.
 - A drift guard test binds `docs/world/scenarios.json`, the registered scenarios,
   and the engine rules together, so the names cannot drift again.
 

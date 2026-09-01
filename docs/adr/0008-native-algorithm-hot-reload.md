@@ -17,6 +17,11 @@
   target was `0007`, but ADR `0007-actor-based-world-simulation` (#88) landed on `main`
   first and took that number, so this ADR is `0008`.
 
+> Everything from here to the end of this ADR is historical. It describes the native
+> hot-reload dev server and the local-IDE authoring path GH118 removed; where a
+> section below says a decision "still holds" or gives reversal instructions, read
+> that as a record of what was true before GH118, not current guidance.
+
 ## Context
 
 A player writes the Algorithm two ways. They type it in the in-game editor, or they install

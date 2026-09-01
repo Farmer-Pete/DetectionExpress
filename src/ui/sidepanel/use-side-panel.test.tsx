@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { createRef, StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunController } from "../../game/run-controller";
@@ -24,7 +24,10 @@ function stubController(run: () => void = () => {}): RunController {
  * A controller whose run() flips the store's runPending true, then resolves it false
  * (with the given error) on a later microtask — mirroring the real controller's
  * `await load(source)` gap, so a real intermediate render carries `runPending: true`
- * for the hook's falling-edge watch to observe.
+ * for the hook's falling-edge watch to observe. Tests drive this with `waitFor`
+ * rather than a fixed count of `await Promise.resolve()` ticks: the number of
+ * microtask hops between `run()` and the settle is an implementation detail of
+ * this stub, not a contract the test should pin.
  */
 function asyncRunController(error: { phase: string; message: string } | null): RunController {
   return {
@@ -125,12 +128,8 @@ describe("useSidePanel", () => {
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openAlgorithm());
     expect(useGameStore.getState().transport.frozen).toBe(true);
-    await act(async () => {
-      result.current.onApply();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(result.current.open).toBe(false);
+    act(() => result.current.onApply());
+    await waitFor(() => expect(result.current.open).toBe(false));
     expect(useGameStore.getState().transport.frozen).toBe(false);
   });
 
@@ -139,14 +138,12 @@ describe("useSidePanel", () => {
     controllerRef.current = asyncRunController({ phase: "load", message: "boom" });
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openAlgorithm());
-    await act(async () => {
-      result.current.onApply();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    act(() => result.current.onApply());
+    await waitFor(() =>
+      expect(useGameStore.getState().error).toEqual({ phase: "load", message: "boom" }),
+    );
     expect(result.current.open).toBe(true);
     expect(useGameStore.getState().transport.frozen).toBe(true);
-    expect(useGameStore.getState().error).toEqual({ phase: "load", message: "boom" });
   });
 
   it("onApply does nothing when the controllerRef is null", () => {
