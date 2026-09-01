@@ -21,12 +21,14 @@
  */
 import type { ScenarioBlueprint } from "../sim/compose-scenario";
 import { createScorer, type ScorerConfig } from "../sim/correctness";
+import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { GeneratedRun, Scenario } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import type { WorldEnv } from "../sim/world-reading";
 import {
   type AlgorithmSource,
   type LoadedAlgorithm,
@@ -34,7 +36,9 @@ import {
   loadAlgorithm as loadAlgorithmDefault,
   toLoadTarget,
 } from "./algorithm";
+import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
 import {
+  type AmbientCast,
   type EngineHandle,
   type ScenarioCast,
   type StartOptions,
@@ -401,16 +405,21 @@ function makeWorkerResolveServiceRate(
 }
 
 /**
- * Instantiate the scenario cast the engine steps for the map (GH117-PLAN.md "Part B").
- * The blueprint's `instantiate()` builds fresh actors in descriptor order, so each
- * actor pairs by index with its descriptor's `kind`, `provenance`, and `initialPresence`.
- * The env comes from the blueprint, so the live cast steps over exactly the env the
- * precompose ran on. `runSeed` seeds the schedule, matching the batch path's seeding.
+ * Assemble the whole living metro the engine steps for the map (GH117-PLAN.md "Part B"):
+ * the scored scenario cast plus the ambient life, over ONE shared env and seed.
+ *
+ * The scenario cast comes from the blueprint: `instantiate()` builds fresh actors in
+ * descriptor order, each pairing by index with its descriptor's `kind`, `provenance`, and
+ * `initialPresence`. The ambient cast (trains, operators, hosts, and the three spawners)
+ * is built from the same world and seed. Both step over one env: the blueprint's env,
+ * augmented with `control`, which the ambient operators and hosts read. Adding `control`
+ * cannot move a scenario reading — the scenario actors read no env — so the precompose's
+ * parity holds. `runSeed` seeds the shared schedule, matching the batch path's seeding.
  */
-function buildScenarioCast(
+function buildMapCast(
   blueprint: ScenarioBlueprint<{ id: number }>,
   runSeed: number,
-): ScenarioCast {
+): { scenarioCast: ScenarioCast; ambientCast: AmbientCast } {
   const actors = blueprint.instantiate();
   const members = actors.map((actor, i) => {
     const descriptor = blueprint.descriptors[i];
@@ -427,7 +436,15 @@ function buildScenarioCast(
       initialPresence: descriptor.initialPresence,
     };
   });
-  return { members, env: blueprint.env, runSeed };
+  // One env for the whole cast: the blueprint's, plus the control-room reference the
+  // ambient operator and host fixtures read. Scenario actors ignore it, so parity holds.
+  const env: WorldEnv = { ...blueprint.env, control: controlReference };
+  const world = env.world;
+  const ambientCast: AmbientCast = {
+    fixtures: buildAmbientFixtures(world, env.timetable),
+    ...buildAmbientSpawners(world, runSeed),
+  };
+  return { scenarioCast: { members, env, runSeed }, ambientCast };
 }
 
 export function createRunController(deps: RunControllerDeps): RunController {
@@ -550,7 +567,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
         let index = 0;
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
-        const scenarioCast = blueprint ? buildScenarioCast(blueprint, seed) : undefined;
+        const mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
@@ -564,7 +581,9 @@ export function createRunController(deps: RunControllerDeps): RunController {
           serviceRate,
           checkpoints: generated.checkpoints,
           waves: generated.waves,
-          ...(scenarioCast ? { scenarioCast } : {}),
+          ...(mapCast
+            ? { scenarioCast: mapCast.scenarioCast, ambientCast: mapCast.ambientCast }
+            : {}),
           onError: (error) => deps.setError(toErrorInfo("run", error)),
         });
         engine = handle;

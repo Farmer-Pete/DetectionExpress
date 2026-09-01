@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
+import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import type { Actor } from "../sim/actors/actor";
 import type { Attack } from "../sim/attack";
 import {
@@ -10,6 +11,7 @@ import {
   type ScorerConfig,
 } from "../sim/correctness";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
+import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, Wave } from "../sim/scenario";
@@ -28,8 +30,15 @@ import { kioskNodeId } from "../sim/world/layout";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
+import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
 import { ManualDriver, type TickDriver } from "./clock";
-import { type ScenarioCast, type ScenarioCastMember, type StartOptions, start } from "./engine";
+import {
+  type AmbientCast,
+  type ScenarioCast,
+  type ScenarioCastMember,
+  type StartOptions,
+  start,
+} from "./engine";
 import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
@@ -114,6 +123,7 @@ interface LaunchOpts {
   checkpoints?: Checkpoint[];
   waves?: Wave[];
   scenarioCast?: ScenarioCast;
+  ambientCast?: AmbientCast;
 }
 
 interface Harness {
@@ -137,6 +147,7 @@ function launch(opts: LaunchOpts): Harness {
     waves: opts.waves ?? [],
     driver,
     ...(opts.scenarioCast ? { scenarioCast: opts.scenarioCast } : {}),
+    ...(opts.ambientCast ? { ambientCast: opts.ambientCast } : {}),
     ...(opts.onError ? { onError: opts.onError } : {}),
   };
   const handle = start(options);
@@ -1218,5 +1229,246 @@ describe("engine steps the scenario cast for the map (GH117 Part B)", () => {
     expect(withCast.snapshots.some((snap) => snap.actors.length > 0)).toBe(true);
     expect(bareLast.actors).toHaveLength(0);
     expect(bareLast.nowTick).toBe(0);
+  });
+});
+
+// GH117-PLAN.md "Part B" (ambient): the merged engine ALSO folds the metro's ambient life
+// (trains, operators, hosts, and the seeded rider/staff/account spawners) onto the SAME
+// Clock and schedule as the scenario cast, populating every map field. Scoring is still
+// the pre-generated generator's, never the ambient cast (decision 8).
+const AMBIENT_TIMETABLE = buildTimetable(world);
+const AMBIENT_ENV: WorldEnv = {
+  world,
+  distances: distanceTable(world),
+  timetable: AMBIENT_TIMETABLE,
+  // The ambient operators and hosts read the control reference; the scenario cast ignores it.
+  control: controlReference,
+};
+
+/** The full ambient cast (trains/operators/hosts + the three seeded spawners) for a seed. */
+function fullAmbient(seed: number): AmbientCast {
+  return {
+    fixtures: buildAmbientFixtures(world, AMBIENT_TIMETABLE),
+    ...buildAmbientSpawners(world, seed),
+  };
+}
+
+/**
+ * A scenario cast member whose `act` records each tick's seeded rng draw. Two runs with an
+ * identical assigned seed record an identical draw sequence; an ambient collision that
+ * perturbed the scenario seed would change it. This is the load-bearing seed-isolation probe.
+ */
+function seedRecorder(
+  id: string,
+  station: string,
+  draws: { tick: number; value: number }[],
+): ScenarioCastMember {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick, rng }) => {
+      draws.push({ tick, value: rng() });
+      const reading: WorldReading = {
+        sensor: "kiosk",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          account: "sr",
+          station,
+          terminal: "K1",
+          outcome: "success",
+        },
+      };
+      return {
+        readings: [reading],
+        nextTick: tick + 1,
+        presence: { kind: "at", node: station, fromTick: tick, untilTick: tick + 1 },
+      };
+    },
+  };
+  return {
+    actor,
+    kind: "account-rider",
+    provenance: "scored-scenario",
+    initialPresence: (t) => initialAccountRiderPresence(station, t),
+  };
+}
+
+/** An ambient account-rider spawner that admits exactly one rider at `atTick`, then stops. */
+function oneAmbientAccountRider(id: string, station: string, atTick: number): AccountRiderSpawner {
+  let done = false;
+  return {
+    tick: (nowTick) => {
+      if (done || nowTick < atTick) {
+        return [];
+      }
+      done = true;
+      return [
+        {
+          actor: createAccountRider({
+            id,
+            account: "ambient",
+            station,
+            terminal: "K1",
+            startTick: nowTick,
+            dwellTicks: 4,
+          }),
+          kind: "account-rider",
+          initialPresence: (t) => initialAccountRiderPresence(station, t),
+        },
+      ];
+    },
+  };
+}
+
+describe("engine folds the ambient metro cast onto the merged snapshot (GH117 Part B ambient)", () => {
+  it("publishes ambient trains, riders, and staff with the right kinds and fills doors, crowds, and the map log", async () => {
+    const cast: ScenarioCast = {
+      members: [attackerMember("attack-0", "cen", [400])],
+      env: AMBIENT_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const h = launch({
+      scenarioCast: cast,
+      ambientCast: fullAmbient(LEVEL_SEED),
+      checkpoints: deadlineAt(600),
+    });
+    await step(h.driver, 240, 10);
+    h.handle.stop();
+
+    const kinds = new Set(h.snapshots.flatMap((snap) => snap.actors.map((a) => a.kind)));
+    // The scenario attacker rode the same schedule as the ambient trains, riders, and staff.
+    expect(kinds.has("pin-attacker")).toBe(true);
+    expect(kinds.has("train")).toBe(true);
+    expect(kinds.has("rider")).toBe(true);
+    expect(kinds.has("staff")).toBe(true);
+    // The reducers ran over the ambient grants: doors opened, crowds counted, the log filled.
+    expect(h.snapshots.some((snap) => snap.doors.length > 0)).toBe(true);
+    expect(h.snapshots.some((snap) => snap.crowds.length > 0)).toBe(true);
+    expect(h.snapshots.some((snap) => snap.mapLog.length > 0)).toBe(true);
+    // nowTick advanced with the run.
+    expect(h.last()?.nowTick).toBeGreaterThan(0);
+  });
+
+  it("steps the scenario cast identically whether or not the ambient cast is present (seed isolation)", async () => {
+    const bareDraws: { tick: number; value: number }[] = [];
+    const bare = launch({
+      scenarioCast: {
+        members: [seedRecorder("sr-0", "cen", bareDraws)],
+        env: AMBIENT_ENV,
+        runSeed: LEVEL_SEED,
+      },
+      checkpoints: deadlineAt(200),
+    });
+    await step(bare.driver, 40, 10);
+    bare.handle.stop();
+
+    const ambientDraws: { tick: number; value: number }[] = [];
+    const withAmbient = launch({
+      scenarioCast: {
+        members: [seedRecorder("sr-0", "cen", ambientDraws)],
+        env: AMBIENT_ENV,
+        runSeed: LEVEL_SEED,
+      },
+      ambientCast: fullAmbient(LEVEL_SEED),
+      checkpoints: deadlineAt(200),
+    });
+    await step(withAmbient.driver, 40, 10);
+    withAmbient.handle.stop();
+
+    // The scenario actor's seeded rng stream is byte-identical: same ticks, same draws, so
+    // the ambient cast never perturbed its assigned seed or same-tick priority.
+    expect(ambientDraws.length).toBeGreaterThan(0);
+    expect(ambientDraws).toEqual(bareDraws);
+    // And the ambient run really did carry ambient actors, so the comparison is meaningful.
+    expect(
+      withAmbient.snapshots.some((snap) => snap.actors.some((a) => a.provenance === "ambient")),
+    ).toBe(true);
+  });
+
+  it("tags scenario kiosk readings scored-scenario and ambient kiosk readings ambient", async () => {
+    const cast: ScenarioCast = {
+      members: [patronMember("patron-0", "cen", 3, 0)], // a scored sign-in at tick 3
+      env: CAST_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const ambient: AmbientCast = {
+      fixtures: [],
+      accountSpawner: oneAmbientAccountRider("A-amb", "cen", 6), // an ambient sign-in near tick 6
+    };
+    const h = launch({ scenarioCast: cast, ambientCast: ambient, checkpoints: deadlineAt(60) });
+    await step(h.driver, 20, 10);
+    h.handle.stop();
+
+    // Union every published log so a trimmed-out entry cannot hide.
+    const seen = new Map<string, string | undefined>();
+    for (const snap of h.snapshots) {
+      for (const entry of snap.mapLog) {
+        if (entry.reading.sensor === "kiosk") {
+          seen.set(`${entry.actorId}@${entry.tick}`, entry.provenance);
+        }
+      }
+    }
+    const scenarioTag = [...seen.entries()].find(([key]) => key.startsWith("patron-0@"))?.[1];
+    const ambientTag = [...seen.entries()].find(([key]) => key.startsWith("A-amb@"))?.[1];
+    expect(scenarioTag).toBe("scored-scenario");
+    expect(ambientTag).toBe("ambient");
+  });
+
+  it("keeps scoring byte-identical with the ambient cast attached (CRITICAL parity)", async () => {
+    const run = pinBruteForce.generate(LEVEL_SEED);
+    const finalTick = run.checkpoints[run.checkpoints.length - 1]?.atTick ?? 0;
+    const scoringFields = (snap: SimSnapshot) => ({
+      status: snap.status,
+      failureReason: snap.failureReason,
+      admitted: snap.admitted,
+      completed: snap.completed,
+      correctness: snap.correctness,
+      decisions: snap.decisions,
+      findings: snap.findings,
+      queued: snap.queued,
+    });
+
+    const bare = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+    });
+    await step(bare.driver, finalTick + 2, 300);
+    await bare.handle.whenStopped;
+
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const actors = blueprint.instantiate();
+    const members: ScenarioCastMember[] = actors.map((actor, i) => {
+      const d = blueprint.descriptors[i];
+      if (!d) throw new Error("descriptor/actor misalignment");
+      return { actor, kind: d.kind, provenance: d.provenance, initialPresence: d.initialPresence };
+    });
+    const env: WorldEnv = { ...blueprint.env, control: controlReference };
+    const withAmbient = launch({
+      generator: scheduleOf(run.events),
+      algorithm: referenceTaskAlgorithm(),
+      scorer: createScorer(run.attacks, SCORER_CONFIG),
+      checkpoints: run.checkpoints,
+      scenarioCast: { members, env, runSeed: LEVEL_SEED },
+      ambientCast: {
+        fixtures: buildAmbientFixtures(world, env.timetable),
+        ...buildAmbientSpawners(world, LEVEL_SEED),
+      },
+    });
+    await step(withAmbient.driver, finalTick + 2, 300);
+    await withAmbient.handle.whenStopped;
+
+    const bareLast = bare.last();
+    const castLast = withAmbient.last();
+    expect(bareLast).toBeDefined();
+    expect(castLast).toBeDefined();
+    if (!bareLast || !castLast) return;
+    // Scoring runs off the pre-generated generator, so it is identical with the whole living
+    // metro attached; only the map fields differ.
+    expect(scoringFields(castLast)).toEqual(scoringFields(bareLast));
+    expect(
+      withAmbient.snapshots.some((snap) => snap.actors.some((a) => a.provenance === "ambient")),
+    ).toBe(true);
   });
 });

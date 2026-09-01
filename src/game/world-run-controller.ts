@@ -10,26 +10,13 @@
  * real clock.
  */
 
-import { createAccountRiderSpawner } from "../sim/actors/account-rider-spawner";
-import { createHost, initialHostPresence } from "../sim/actors/host";
-import { createOperator, initialOperatorPresence } from "../sim/actors/operator";
-import { createRiderSpawner } from "../sim/actors/rider-spawner";
-import { createStaffSpawner } from "../sim/actors/staff-spawner";
-import { createTrain, initialTrainPresence } from "../sim/actors/train";
 import { controlReference } from "../sim/entities/control";
 import type { DistanceTable } from "../sim/world/distance";
-import { buildTimetable, trainIdForLine } from "../sim/world/timetable";
+import { buildTimetable } from "../sim/world/timetable";
 import type { World } from "../sim/world/world";
 import type { WorldEnv } from "../sim/world-reading";
 import { emptyWorldSnapshot, type WorldSnapshot } from "../sim/world-snapshot";
-import {
-  ACCOUNT_RIDER_TARGET,
-  CONTROL_LAUNCH_PHASE_TICKS,
-  HOST_RELAY_TICKS,
-  OPERATOR_COMMAND_TICKS,
-  STAFF_TARGET,
-  TARGET_RIDERS,
-} from "./tuning";
+import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
 import {
   startWorld as startWorldDefault,
   type WorldEngineHandle,
@@ -80,58 +67,9 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
     control: controlReference,
   };
 
-  // One persistent train per line, ids T1..T4 in world-line order. Fresh per run so a
-  // re-run starts every train at its origin rather than mid-ride (they hold ride state).
-  const buildTrains = (): readonly WorldFixture[] =>
-    deps.world.lines.map((line): WorldFixture => {
-      const schedule = timetable.line(line.id);
-      const origin = schedule.stops[0] ?? line.id;
-      // The same deterministic line -> train id the live rider names when it boards,
-      // so a rider's onTrain presence references this exact train fixture.
-      const id = trainIdForLine(deps.world, line.id);
-      return {
-        actor: createTrain({ id, line: line.id, startTick: schedule.startTick }),
-        kind: "train",
-        initialPresence: (firstTick) => initialTrainPresence(origin, firstTick, line.id),
-      };
-    });
-
-  // One persistent operator per authorized OCC console, seated at the control center for
-  // the whole run (never spawned, never evicted). Staggered launch phases keep them from
-  // issuing commands in lockstep.
-  const occId = deps.world.controlCenter.id;
-  const buildOperators = (): readonly WorldFixture[] =>
-    controlReference.consoles.map((consoleRef, index): WorldFixture => {
-      const id = `OP${index + 1}`;
-      return {
-        actor: createOperator({
-          id,
-          node: occId,
-          console: consoleRef,
-          startTick: index * CONTROL_LAUNCH_PHASE_TICKS,
-          cadenceTicks: OPERATOR_COMMAND_TICKS,
-        }),
-        kind: "operator",
-        initialPresence: (firstTick) => initialOperatorPresence(occId, firstTick),
-      };
-    });
-
-  // One persistent host per site network host, sitting at its site for the whole run.
-  const buildHosts = (): readonly WorldFixture[] =>
-    controlReference.hosts.map((siteHost, index): WorldFixture => {
-      const id = `H${index + 1}`;
-      return {
-        actor: createHost({
-          id,
-          site: siteHost.site,
-          host: siteHost.host,
-          startTick: index * CONTROL_LAUNCH_PHASE_TICKS,
-          cadenceTicks: HOST_RELAY_TICKS,
-        }),
-        kind: "host",
-        initialPresence: (firstTick) => initialHostPresence(siteHost.site, firstTick),
-      };
-    });
+  // The persistent ambient fixtures (trains, operators, hosts). Built fresh per run from
+  // the shared builder, so a re-run starts every train at its origin rather than mid-ride.
+  const buildFixtures = (): readonly WorldFixture[] => buildAmbientFixtures(deps.world, timetable);
 
   let engine: WorldEngineHandle | null = null;
   let disposed = false;
@@ -144,23 +82,9 @@ export function createWorldRunController(deps: WorldRunControllerDeps): WorldRun
     deps.setWorldSnapshot(emptyWorldSnapshot());
     const runSeed = deps.getSeed();
     // Fresh, seeded spawners per run, so the population replays for a seed.
-    const spawner = createRiderSpawner({
-      seed: runSeed,
-      world: deps.world,
-      target: TARGET_RIDERS,
-    });
-    const staffSpawner = createStaffSpawner({
-      seed: runSeed,
-      world: deps.world,
-      target: STAFF_TARGET,
-    });
-    const accountSpawner = createAccountRiderSpawner({
-      seed: runSeed,
-      world: deps.world,
-      target: ACCOUNT_RIDER_TARGET,
-    });
+    const { spawner, staffSpawner, accountSpawner } = buildAmbientSpawners(deps.world, runSeed);
     const startOptions: WorldStartOptions = {
-      fixtures: [...buildTrains(), ...buildOperators(), ...buildHosts(), ...deps.getFixtures()],
+      fixtures: [...buildFixtures(), ...deps.getFixtures()],
       env,
       runSeed,
       setWorldSnapshot: deps.setWorldSnapshot,

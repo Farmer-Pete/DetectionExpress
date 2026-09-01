@@ -15,6 +15,14 @@ export interface ActorView {
   id: string;
   kind: "rider" | "account-rider" | "train" | "staff" | "operator" | "host" | "pin-attacker";
   presence: Presence;
+  /**
+   * Which run this actor belongs to (GH117-PLAN.md "Part D"): `"scored-scenario"` for
+   * the scenario cast whose kiosk readings the scorer reads, `"ambient"` for the metro's
+   * ambient life. The merged engine tags every actor so the next step can enforce the
+   * scoring boundary (only scored-scenario kiosk readings are admitted). Optional: the
+   * legacy world engine never sets it, and it is drawn by `kind`, not by provenance.
+   */
+  provenance?: "scored-scenario" | "ambient";
 }
 
 /**
