@@ -1,7 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { STAFF_TARGET } from "../../game/tuning";
+import { distanceTable } from "../world/distance";
+import { metroLayout } from "../world/layout";
+import { buildTimetable } from "../world/timetable";
 import { world } from "../world/world";
-import { createStaffSpawner } from "./staff-spawner";
+import type { WorldEnv } from "../world-reading";
+import { createSchedule } from "./actor";
+import { createStaffSpawner, staffWalkTicks } from "./staff-spawner";
+
+describe("staffWalkTicks", () => {
+  it("floors to STAFF_WALK_MIN_TICKS (6) at zero distance", () => {
+    expect(staffWalkTicks(0)).toBe(6);
+  });
+
+  it("rounds distance / STAFF_WALK_SPEED (5) to the nearest whole tick", () => {
+    expect(staffWalkTicks(48)).toBe(10); // 48 / 5 = 9.6 -> 10
+    expect(staffWalkTicks(71)).toBe(14); // 71 / 5 = 14.2 -> 14
+    expect(staffWalkTicks(60)).toBe(12); // 60 / 5 = 12 exactly
+    expect(staffWalkTicks(389)).toBe(78); // 389 / 5 = 77.8 -> 78
+  });
+
+  it("rounds a half-tick distance up (Math.round convention)", () => {
+    expect(staffWalkTicks(52.5)).toBe(11); // 52.5 / 5 = 10.5 -> 11
+  });
+
+  it("still floors at STAFF_WALK_MIN_TICKS for a short distance under the floor", () => {
+    expect(staffWalkTicks(20)).toBe(6); // 20 / 5 = 4, floored to 6
+  });
+});
 
 /**
  * Drive a staff spawner over many ticks against a live count and record every admitted
@@ -53,6 +79,44 @@ describe("createStaffSpawner", () => {
   it("never exceeds the cap, even when the population is already full", () => {
     const { ids } = run(9, () => STAFF_TARGET, 2000);
     expect(ids).toHaveLength(0);
+  });
+
+  it("gives each staff a distance-coupled walkTicks, matching staffWalkTicks(station->site distance)", () => {
+    const layout = metroLayout(world);
+    const distanceOf = (nearestStation: string, location: string): number => {
+      const from = layout.get(nearestStation);
+      const to = layout.get(location);
+      if (from === undefined || to === undefined) {
+        throw new Error(`missing layout point for "${nearestStation}" or "${location}".`);
+      }
+      return Math.hypot(to.x - from.x, to.y - from.y);
+    };
+    const env: WorldEnv = {
+      world,
+      distances: distanceTable(world),
+      timetable: buildTimetable(world),
+    };
+    const doorLocations = [...world.sites.map((site) => site.id), world.controlCenter.id];
+    const seenLocations = new Set<string>();
+    const spawner = createStaffSpawner({ seed: 11, world, target: STAFF_TARGET });
+
+    for (let tick = 1; tick <= 3000 && seenLocations.size < doorLocations.length; tick++) {
+      for (const admission of spawner.tick(tick, 0)) {
+        // Run just this one staff to its first walk-in presence, which reports the
+        // station->site walk as a "moving" span whose length is its walkTicks.
+        const schedule = createSchedule({ actors: [], env, runSeed: 1 });
+        const firstTick = schedule.admit(admission);
+        const step = schedule.advanceTo(firstTick + 1);
+        const presence = step.presences.get(admission.actor.id);
+        if (presence?.kind !== "moving") {
+          continue;
+        }
+        seenLocations.add(presence.to);
+        const expected = staffWalkTicks(distanceOf(presence.from, presence.to));
+        expect(presence.untilTick - presence.fromTick).toBe(expected);
+      }
+    }
+    expect(seenLocations).toEqual(new Set(doorLocations));
   });
 
   it("walks staff in from the nearest station of a door-bearing location", () => {

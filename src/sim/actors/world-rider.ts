@@ -2,18 +2,25 @@
  * The live metro rider: an `Actor<WorldReading, WorldEnv>` over the shared trip core,
  * COUPLED to real trains. It picks its destination, line, fare, and balance through the
  * same pure `rider-core` the batch `createRider` uses (single-sourced), but its ride
- * EXECUTION reads the timetable: it waits `at` its origin until the line's train departs
- * (its tap-in), rides `onTrain` until that train arrives at the destination (its
- * tap-out), then dwells at the destination before planning the next trip.
+ * EXECUTION reads the timetable: it waits `at` its origin until the line's train arrives
+ * and boards during that train's platform dwell (its tap-in), rides `onTrain` until that
+ * train arrives at the destination (its tap-out), then dwells at the destination for a
+ * short go-home window before going dormant for good. One rider, one trip (GH116): it
+ * never plans a second one. The engine evicts it once dormant, and the spawner admits a
+ * fresh rider in its place.
  *
  * The coupling reads the timetable's `nextService`, not a live train, so it stays
  * deterministic and the taps stay separable from the trains. `nextService` shares the
- * exact ping-pong/loop stepping with `createTrain`, so a rider boards the real train's
- * departure and alights on its real arrival, never a phantom. `createRider`, the batch
+ * exact ping-pong/loop stepping with `createTrain`, so a rider boards inside the real
+ * train's dwell and alights on its real arrival, never a phantom. `createRider`, the batch
  * actor, keeps its abstract-duration model and its byte-identical readings; only the
  * ride execution differs here. No wall clock, no React (ADR-0007, ARCHITECTURE rule 8).
  */
-import { GAME_SECONDS_PER_TICK, TVM_TOPUP_AMOUNT } from "../../game/tuning";
+import {
+  GAME_SECONDS_PER_TICK,
+  RIDER_GOHOME_DWELL_TICKS,
+  TVM_TOPUP_AMOUNT,
+} from "../../game/tuning";
 import type { Presence } from "../world/presence";
 import { nextService, trainIdForLine } from "../world/timetable";
 import type { WorldEnv, WorldReading } from "../world-reading";
@@ -29,7 +36,11 @@ export function initialRiderPresence(origin: string, firstTick: number): Presenc
   return { kind: "at", node: origin, fromTick: firstTick, untilTick: firstTick };
 }
 
-/** The live rider's ride phase: planning a trip, waiting to board, or riding a train. */
+/**
+ * The live rider's ride phase: planning its one trip, waiting to board, riding a
+ * train, or (GH116) standing at its destination for the go-home dwell before it goes
+ * dormant. `leaving` is terminal: the rider never returns to `planning` from it.
+ */
 type RidePhase =
   | { kind: "planning"; station: string }
   | {
@@ -41,12 +52,13 @@ type RidePhase =
       alightTick: number;
       train: string;
     }
-  | { kind: "riding"; alightTick: number };
+  | { kind: "riding"; alightTick: number }
+  | { kind: "leaving" };
 
 /**
  * Build one live rider over a trip config. The returned actor holds its own FSM state;
- * the scheduler owns its rng and next tick. It taps in at its origin's fare gate when
- * its train departs, taps out at the destination's gate when it arrives, and reports a
+ * the scheduler owns its rng and next tick. It taps in at its origin's fare gate while
+ * its train is dwelling, taps out at the destination's gate when it arrives, and reports a
  * presence the view interpolates (`at` while waiting or dwelling, `onTrain` while riding).
  */
 export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, WorldEnv> {
@@ -94,7 +106,8 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
     start: ({ rng }) => core.startTick(rng),
     act: ({ env, rng, tick }) => {
       if (phase.kind === "boarding") {
-        // The train departs now (tick === boardTick): tap in and ride to the arrival.
+        // The boarding window is open now (tick === boardTick): the train is dwelling at
+        // the platform. Tap in and ride to the arrival.
         const board = phase;
         phase = { kind: "riding", alightTick: board.alightTick };
         return {
@@ -110,24 +123,35 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
       }
 
       if (phase.kind === "riding") {
-        // The train has arrived (tick === alightTick): tap out, then let the core draw
-        // the post-alight dwell and hand back the destination it is now `at`.
+        // The train has arrived (tick === alightTick): tap out. Still call `core.step`
+        // to draw its post-alight dwell sample, so the shared rng draw order is
+        // preserved exactly as it is for the batch `createRider`; the sampled dwell
+        // itself is unused here (GH116: one trip, then go home, not another dwell
+        // before re-planning).
         const transition = core.step(env, rng, tick);
         if (transition.kind !== "exit") {
           // The core must be mid-ride here; a non-exit is unreachable, so end cleanly.
           return { readings: [], nextTick: "dormant" };
         }
-        phase = { kind: "planning", station: transition.station };
+        const gohomeUntil = tick + RIDER_GOHOME_DWELL_TICKS;
+        phase = { kind: "leaving" };
         return {
           readings: [tap(transition.station, transition.line, "out", transition.balance, tick)],
-          nextTick: transition.nextTick,
+          nextTick: gohomeUntil,
           presence: {
             kind: "at",
             node: transition.station,
             fromTick: tick,
-            untilTick: transition.nextTick,
+            untilTick: gohomeUntil,
           },
         };
+      }
+
+      if (phase.kind === "leaving") {
+        // The go-home dwell has elapsed: the rider's one trip is over. It goes
+        // dormant for good, never returning to `planning`. The engine evicts it and
+        // the spawner admits a replacement toward `TARGET_RIDERS`.
+        return { readings: [], nextTick: "dormant" };
       }
 
       // PLANNING: decide the next trip through the shared core, then couple to the train.
@@ -177,7 +201,7 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
       }
 
       if (service.boardTick <= tick) {
-        // The train departs on this very tick: board and ride now, no separate wait.
+        // The train is already dwelling (boardTick <= tick): board and ride now, no wait.
         phase = { kind: "riding", alightTick: service.alightTick };
         return {
           readings: [tap(station, line, "in", balance, tick)],
@@ -186,7 +210,8 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
         };
       }
 
-      // Wait `at` the origin until the train departs; no tap yet.
+      // Wait `at` the origin until the train arrives and the boarding window opens
+      // (boardTick); no tap yet.
       phase = {
         kind: "boarding",
         station,

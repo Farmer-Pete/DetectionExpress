@@ -94,7 +94,11 @@ const WAIT_DY_MIN = 10;
 const WAIT_DY_MAX = 24;
 
 /** The short render windows, in render ticks, for the visible board and alight steps. */
-const BOARD_TICKS = 14;
+// At 4x speed the publish stride is 12 sim ticks, and the 15-tick dwell exposes only
+// ~12 stationary render ticks; 11 fits fully at 1x and 2x (see GH116-PLAN.md, "Board
+// animation length"). A perfectly completed board frame at 4x is a deliberate,
+// documented trade-off, not guaranteed.
+const BOARD_TICKS = 11;
 const ALIGHT_TICKS = 12;
 
 /** A deterministic 32-bit hash of an actor id, for stable per-rider offsets. */
