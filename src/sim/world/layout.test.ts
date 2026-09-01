@@ -15,10 +15,10 @@ describe("metroLayout", () => {
   it("places every site and the OCC at its GH116 side-placement coordinate", () => {
     // GH116: sites moved beside their station, clear of the chip band. See
     // GH116-PLAN.md "Commit 1" for the verified coordinate table.
-    expect(layout.get("dep")).toEqual({ x: 528, y: 455 });
-    expect(layout.get("sig")).toEqual({ x: 415, y: 443 });
+    expect(layout.get("dep")).toEqual({ x: 545, y: 455 });
+    expect(layout.get("sig")).toEqual({ x: 375, y: 455 });
     expect(layout.get("sub")).toEqual({ x: 735, y: 345 });
-    expect(layout.get("occ")).toEqual({ x: 528, y: 340 });
+    expect(layout.get("occ")).toEqual({ x: 575, y: 345 });
   });
 
   it("places every node at a distinct point", () => {
@@ -115,7 +115,18 @@ describe("site placement geometry (GH116)", () => {
   const BOX_HALF_X = 29; // site badge is 58 wide
   const BOX_HALF_Y = 15; // site badge is 30 tall
   const TRACK_HALF = 2.75; // rail stroke is 5.5
-  const MAX_STATION_GAP = 40; // the site must stay near its station, not far
+  // The site must stay near its station, not far. A few sites carry a long name label
+  // (e.g. "Operations Control Center") whose width forces them a touch further out so
+  // the label clears the rail and its neighbours; 80 admits that while still meaning near.
+  const MAX_STATION_GAP = 80;
+  // Approximate label geometry (a render concern, mirrored here to guard against a
+  // future close-placement that overlaps labels the way GH116's first pass did). Widths
+  // are measured from the rendered SVG: site name ~5.6 u/char (11px), station name
+  // ~6.8 u/char (13px). A site name sits centered at y in [point.y - 11, point.y]; a
+  // station name at y in [point.y - 24, point.y - 13].
+  const SITE_CHAR_W = 5.6;
+  const STATION_CHAR_W = 6.8;
+  const LABEL_GAP = 5; // required whitespace between two labels
 
   interface Rect {
     x0: number;
@@ -192,6 +203,34 @@ describe("site placement geometry (GH116)", () => {
     return Math.hypot(station.x - nx, station.y - ny) - STATION_R;
   }
 
+  function siteLabelRect(name: string, point: Point): Rect {
+    const half = (name.length * SITE_CHAR_W) / 2 + LABEL_GAP;
+    return {
+      x0: point.x - half,
+      y0: point.y - 11,
+      x1: point.x + half,
+      y1: point.y,
+      tag: `${name}-label`,
+    };
+  }
+
+  function stationLabelRect(name: string, point: Point): Rect {
+    const half = (name.length * STATION_CHAR_W) / 2;
+    return {
+      x0: point.x - half,
+      y0: point.y - 24,
+      x1: point.x + half,
+      y1: point.y - 13,
+      tag: `${name}-stnlabel`,
+    };
+  }
+
+  const stationLabels = stations.map((station) => stationLabelRect(station.name, station.point));
+  const siteLabels = sites.map((site) => ({
+    id: site.id,
+    rect: siteLabelRect(site.name, site.point),
+  }));
+
   for (const site of sites) {
     const box = boxRect(site.id, site.point);
     const rects = [box, ...site.chips.map(chipRect)];
@@ -239,12 +278,38 @@ describe("site placement geometry (GH116)", () => {
       }
     });
 
-    it(`${site.id}: its box clears every other site's box`, () => {
+    it(`${site.id}: its box and chip row clear every other site's box`, () => {
       for (const other of sites) {
         if (other.id === site.id) {
           continue;
         }
-        expect(rectsOverlap(box, boxRect(other.id, other.point))).toBe(false);
+        const otherBox = boxRect(other.id, other.point);
+        for (const rect of rects) {
+          expect(rectsOverlap(rect, otherBox)).toBe(false);
+        }
+      }
+    });
+
+    it(`${site.id}: its name label clears every station label, other site label, and the rail`, () => {
+      const label = siteLabelRect(site.name, site.point);
+      for (const stationLabel of stationLabels) {
+        expect(rectsOverlap(label, stationLabel)).toBe(false);
+      }
+      for (const other of siteLabels) {
+        if (other.id === site.id) {
+          continue;
+        }
+        expect(rectsOverlap(label, other.rect)).toBe(false);
+      }
+      for (const line of lines) {
+        for (let i = 0; i + 1 < line.points.length; i++) {
+          const a = line.points[i];
+          const b = line.points[i + 1];
+          if (a === undefined || b === undefined) {
+            continue;
+          }
+          expect(segHitsRect(a, b, label, 0)).toBe(false);
+        }
       }
     });
 

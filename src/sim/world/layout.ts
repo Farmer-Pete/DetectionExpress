@@ -66,16 +66,18 @@ const STATION_XY: Record<string, Point> = {
 /**
  * The site and OCC coordinate table. GH116 moved every site beside its station
  * (not straight below it, which collides with the station's chip row) and moved
- * the OCC next to Central. Verified clear of every station circle, station chip,
- * rail segment, and other site box by the geometry invariant in `layout.test.ts`
- * (see GH116-PLAN.md "Commit 1").
+ * the OCC near Central. Sites are spread enough that each wide name label clears
+ * its neighbours and the rail, not just the badge box. Verified clear of every
+ * station circle, station chip, rail segment, other site box, and (approximately)
+ * neighbouring labels by the geometry invariant in `layout.test.ts` (see
+ * GH116-PLAN.md "Commit 1").
  */
 const SITE_XY: Record<string, Point> = {
-  dep: { x: 528, y: 455 },
-  sig: { x: 415, y: 443 },
+  dep: { x: 545, y: 455 },
+  sig: { x: 375, y: 455 },
   sub: { x: 735, y: 345 },
 };
-const OCC_XY: Point = { x: 528, y: 340 };
+const OCC_XY: Point = { x: 575, y: 345 };
 const OCC_ID = "occ";
 
 /** Every station draws the same four public sensor chips, in this order. */

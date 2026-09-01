@@ -2,16 +2,17 @@
  * The live metro rider: an `Actor<WorldReading, WorldEnv>` over the shared trip core,
  * COUPLED to real trains. It picks its destination, line, fare, and balance through the
  * same pure `rider-core` the batch `createRider` uses (single-sourced), but its ride
- * EXECUTION reads the timetable: it waits `at` its origin until the line's train departs
- * (its tap-in), rides `onTrain` until that train arrives at the destination (its
- * tap-out), then dwells at the destination for a short go-home window before going
- * dormant for good. One rider, one trip (GH116): it never plans a second one. The
- * engine evicts it once dormant, and the spawner admits a fresh rider in its place.
+ * EXECUTION reads the timetable: it waits `at` its origin until the line's train arrives
+ * and boards during that train's platform dwell (its tap-in), rides `onTrain` until that
+ * train arrives at the destination (its tap-out), then dwells at the destination for a
+ * short go-home window before going dormant for good. One rider, one trip (GH116): it
+ * never plans a second one. The engine evicts it once dormant, and the spawner admits a
+ * fresh rider in its place.
  *
  * The coupling reads the timetable's `nextService`, not a live train, so it stays
  * deterministic and the taps stay separable from the trains. `nextService` shares the
- * exact ping-pong/loop stepping with `createTrain`, so a rider boards the real train's
- * departure and alights on its real arrival, never a phantom. `createRider`, the batch
+ * exact ping-pong/loop stepping with `createTrain`, so a rider boards inside the real
+ * train's dwell and alights on its real arrival, never a phantom. `createRider`, the batch
  * actor, keeps its abstract-duration model and its byte-identical readings; only the
  * ride execution differs here. No wall clock, no React (ADR-0007, ARCHITECTURE rule 8).
  */
@@ -56,8 +57,8 @@ type RidePhase =
 
 /**
  * Build one live rider over a trip config. The returned actor holds its own FSM state;
- * the scheduler owns its rng and next tick. It taps in at its origin's fare gate when
- * its train departs, taps out at the destination's gate when it arrives, and reports a
+ * the scheduler owns its rng and next tick. It taps in at its origin's fare gate while
+ * its train is dwelling, taps out at the destination's gate when it arrives, and reports a
  * presence the view interpolates (`at` while waiting or dwelling, `onTrain` while riding).
  */
 export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, WorldEnv> {
@@ -105,7 +106,8 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
     start: ({ rng }) => core.startTick(rng),
     act: ({ env, rng, tick }) => {
       if (phase.kind === "boarding") {
-        // The train departs now (tick === boardTick): tap in and ride to the arrival.
+        // The boarding window is open now (tick === boardTick): the train is dwelling at
+        // the platform. Tap in and ride to the arrival.
         const board = phase;
         phase = { kind: "riding", alightTick: board.alightTick };
         return {
@@ -199,7 +201,7 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
       }
 
       if (service.boardTick <= tick) {
-        // The train departs on this very tick: board and ride now, no separate wait.
+        // The train is already dwelling (boardTick <= tick): board and ride now, no wait.
         phase = { kind: "riding", alightTick: service.alightTick };
         return {
           readings: [tap(station, line, "in", balance, tick)],
@@ -208,7 +210,8 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
         };
       }
 
-      // Wait `at` the origin until the train departs; no tap yet.
+      // Wait `at` the origin until the train arrives and the boarding window opens
+      // (boardTick); no tap yet.
       phase = {
         kind: "boarding",
         station,

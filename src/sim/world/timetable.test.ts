@@ -171,9 +171,10 @@ describe("trainIdForLine", () => {
 });
 
 describe("nextService", () => {
-  it("boards and alights at the train's real departure and arrival ticks", () => {
-    // Drive the real Red-line train and compare, for many pairs and boarding times,
-    // that nextService lands on the exact dep(from) and arr(to) the train emits.
+  it("boards inside the dwell and alights at the train's real arrival, matching the oracle", () => {
+    // Drive the real Red-line train and compare, for many pairs and boarding times, that
+    // nextService lands on the same boarding-window start (max(afterTick, dep - dwell))
+    // and arr(to) the event oracle derives from the train's emitted dep/arr.
     const events = trainEvents("red", 5000);
     const stops = timetable.line("red").stops;
     for (const from of stops) {
