@@ -690,6 +690,16 @@ describe("engine publishes findings, events, and the processed watermark", () =>
     expect(snap.events).toEqual([]);
     expect(snap.processed).toBe(0);
   });
+
+  it("emptySnapshot carries empty map fields and nowTick 0 (GH117 Part E)", () => {
+    const snap = emptySnapshot();
+    expect(snap.actors).toEqual([]);
+    expect(snap.flashes).toEqual([]);
+    expect(snap.doors).toEqual([]);
+    expect(snap.crowds).toEqual([]);
+    expect(snap.nowTick).toBe(0);
+    expect(snap.mapLog).toEqual([]);
+  });
 });
 
 describe("engine publishes the wave reading (GH38+40-PLAN.md Part 1)", () => {

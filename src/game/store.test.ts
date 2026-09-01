@@ -110,6 +110,35 @@ describe("store", () => {
     expect(useGameStore.getState().snapshot).toEqual(snapshot);
   });
 
+  it("round-trips a snapshot carrying non-empty map fields through setSnapshot (GH117 Part E)", () => {
+    const snapshot: SimSnapshot = {
+      ...emptySnapshot(),
+      actors: [
+        {
+          id: "attacker-1",
+          kind: "pin-attacker",
+          presence: { kind: "at", node: "k1", fromTick: 0, untilTick: "open" },
+        },
+      ],
+      flashes: [{ id: 1, kind: "pinfail", node: "k1", atTick: 5 }],
+      doors: [{ node: "d1", open: true }],
+      crowds: [{ node: "c1", persons: 3, grants: 2 }],
+      nowTick: 42,
+      mapLog: [
+        {
+          reading: {
+            sensor: "kiosk",
+            reading: { ts: 5, account: "a1", station: "cen", terminal: "K1", outcome: "fail" },
+          },
+          tick: 5,
+          source: "actor",
+        },
+      ],
+    };
+    useGameStore.getState().setSnapshot(snapshot);
+    expect(useGameStore.getState().snapshot).toEqual(snapshot);
+  });
+
   it("starts in source mode and holds a local override through setLocalAlgorithm", () => {
     expect(useGameStore.getState().localAlgorithm).toBeNull();
     useGameStore.getState().setLocalAlgorithm({ path: "/src/algorithms/kiosk.ts", version: 4 });

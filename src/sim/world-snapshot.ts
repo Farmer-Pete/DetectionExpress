@@ -13,14 +13,29 @@ import type { TimedWorldReading } from "./world-reading";
 /** One live actor the map draws, with its semantic presence. */
 export interface ActorView {
   id: string;
-  kind: "rider" | "account-rider" | "train" | "staff" | "operator" | "host";
+  kind: "rider" | "account-rider" | "train" | "staff" | "operator" | "host" | "pin-attacker";
   presence: Presence;
 }
 
-/** A short, fading mark the view draws at a node when a sensor fires. */
+/**
+ * A short, fading mark the view draws at a node when a sensor fires. `pinfail` is a
+ * wrong-PIN kiosk fail (GH117), distinct from the door-reader `deny` it sits next to:
+ * the two belong to different sensor families, and reusing `deny` would blur a kiosk
+ * fail with a door-badge fail.
+ */
 export interface FlashEvent {
   id: number;
-  kind: "tap" | "topup" | "signin" | "grant" | "deny" | "door" | "command" | "packet" | "train";
+  kind:
+    | "tap"
+    | "topup"
+    | "signin"
+    | "grant"
+    | "deny"
+    | "door"
+    | "command"
+    | "packet"
+    | "train"
+    | "pinfail";
   node: MapNodeId;
   atTick: number;
 }

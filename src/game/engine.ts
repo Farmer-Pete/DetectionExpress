@@ -187,6 +187,14 @@ function makeSampler(
       events: ring.events,
       processed: ring.processed,
       wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
+      // GH117 Part E: the merged snapshot's map fields. The pipeline engine does not
+      // step the cast yet, so it publishes them empty; Part B wires a real producer.
+      actors: [],
+      flashes: [],
+      doors: [],
+      crowds: [],
+      nowTick: 0,
+      mapLog: [],
     });
   };
 }

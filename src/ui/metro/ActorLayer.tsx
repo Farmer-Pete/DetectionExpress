@@ -53,6 +53,9 @@ const FLASH_COLOR: Record<FlashEvent["kind"], string> = {
   command: "#f94144",
   packet: "#f8961e",
   train: TRAIN_FILL,
+  // A wrong-PIN kiosk fail (GH117 Part E). Not yet emitted by any producer; the
+  // engine still steps only the ambient world cast (Part B wires the scenario cast).
+  pinfail: "#f94144",
 };
 
 /** The flash ring grows from this radius to this over the flash's life (design units). */
