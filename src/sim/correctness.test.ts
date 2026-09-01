@@ -677,6 +677,70 @@ function ringEvent(id: number): RingEvent {
   return { id, ts: id * 10, endpoint: "kiosk-v1", raw: { id }, normalized: { id } };
 }
 
+// Freeze-on-raise: a live finding's own citedEvents, accumulated (merge, never replace)
+// across its emissions, so the trace resolves like a decision's does — against its own
+// frozen copy, not the churning ring.
+describe("scorer liveFindings citedEvents (freeze-on-raise)", () => {
+  it("captures citedEvents for a raised finding via the bound resolver", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.bindEventResolver((ids) => ids.map(ringEvent));
+    s.record(one([10, 11], 50), at(50));
+    expect(s.liveFindings()[0]?.citedEvents).toEqual([ringEvent(10), ringEvent(11)]);
+  });
+
+  it(
+    "merges rather than replaces on re-emit: keeps a still-cited id's already-captured " +
+      "event even once the resolver can no longer resolve it fresh, drops an id no longer " +
+      "cited, and adds a freshly resolvable one",
+    () => {
+      // A resolved entity keeps the row's identity stable across emissions even though the
+      // anchor (eventIds[0]) moves from 10 to 11 between them; an entity-less finding would
+      // key on the anchor and fork a second row instead of upserting this one.
+      const s = createScorer(
+        [attack(1, "acct-1", 0, 300, [10, 11, 12])],
+        cfg({ liveHorizon: 1000 }),
+      );
+      const citing = (eventIds: number[], ts: number): Finding => ({
+        alert: { reason: REASON, at: ts, eventIds },
+        eventId: eventIds[0] ?? 0,
+        subjectType: "acct",
+      });
+
+      // First emission cites [10, 11]; both resolve, so the capture is exactly [10, 11].
+      s.bindEventResolver((ids) => ids.filter((id) => id === 10 || id === 11).map(ringEvent));
+      s.record([sf(citing([10, 11], 50), "acct-1")], at(50));
+      expect(s.liveFindings()[0]?.citedEvents.map((e) => e.id)).toEqual([10, 11]);
+
+      // Re-emit the same row citing [11, 12] (10 dropped, 12 added), while the ring has
+      // moved on: the resolver now returns ONLY 12 (11 has aged out of it). A replace-only
+      // implementation would give [12]; preserve-but-never-add-fresh would give [11];
+      // failing to drop the no-longer-cited 10 would still include it. The merged capture
+      // must be exactly [11, 12], in citation order — matching `toCards`, which iterates
+      // current citation order and uses the source only as an id lookup.
+      s.bindEventResolver((ids) => ids.filter((id) => id === 12).map(ringEvent));
+      s.record([sf(citing([11, 12], 60), "acct-1")], at(60));
+      const live = s.liveFindings();
+      expect(live).toHaveLength(1); // upserted the same row, not forked
+      expect(live[0]?.citedEvents.map((e) => e.id)).toEqual([11, 12]);
+    },
+  );
+
+  it("leaves citedEvents empty when no resolver is bound", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.record(one([10, 11], 50), at(50));
+    expect(s.liveFindings()[0]?.citedEvents).toEqual([]);
+  });
+
+  it("freezes citedEvents with the rest of the live entry", () => {
+    const s = createScorer([attack(1, "root", 0, 100, [10, 11])], cfg());
+    s.bindEventResolver((ids) => ids.map(ringEvent));
+    s.record(one([10, 11], 50), at(50));
+    const live = s.liveFindings()[0];
+    expect(live !== undefined && Object.isFrozen(live.citedEvents)).toBe(true);
+    expect(live !== undefined && Object.isFrozen(live.citedEvents[0])).toBe(true);
+  });
+});
+
 // Seam I (T10, GH34-35-PLAN.md 2.1): cited-event capture, resolvedAt, and the capped log.
 describe("scorer citedEvents, resolvedAt, and the capped log", () => {
   it("captures citedEvents for a caught decision via the bound resolver", () => {

@@ -1,9 +1,10 @@
 /**
  * The trace view-model: turns the selected `LiveFinding` and the current
  * `SimSnapshot` into the shape `TraceOverlay` renders. Pure and total, so it tests
- * with no DOM. Resolves each cited id (`alert.eventIds`) against `snapshot.events`,
- * the sampler's fresh copy of the inspector ring; a cited id the ring has already
- * evicted (aged out, past `RING_SIZE`) gets a placeholder card, never a silent
+ * with no DOM. Resolves each cited id (`alert.eventIds`) against the finding's own
+ * frozen `citedEvents` (accumulated across its emissions, see
+ * `LiveFinding.citedEvents`), never the churning `snapshot.events` ring; a cited id
+ * never resolvable while it was captured gets a placeholder card, never a silent
  * omission (GH34-35-PLAN.md decision 3/4). `null` means the seq named a finding no
  * longer in `snapshot.findings`, which the store's reconciliation would have
  * already cleared the selection for.
@@ -57,7 +58,7 @@ function dedupIds(ids: readonly number[]): number[] {
  * Resolve `ids` (deduped, first-occurrence order preserved) against `source`,
  * one card per id: an event card when `source` carries it, an aged-out
  * placeholder when it does not. Shared by finding mode (resolving against the
- * live `snapshot.events` ring) and decision mode (resolving against a
+ * finding's own frozen `citedEvents`) and decision mode (resolving against a
  * decision's own frozen `citedEvents`) — the only difference between the two
  * is which `source` the caller passes in.
  */
@@ -88,7 +89,7 @@ export function buildTraceViewModel(snapshot: SimSnapshot, seq: number): TraceVi
     return null;
   }
 
-  const cards = toCards(live.finding.alert.eventIds, snapshot.events);
+  const cards = toCards(live.finding.alert.eventIds, live.citedEvents);
 
   const model: TraceViewModel = {
     reason: live.reason,

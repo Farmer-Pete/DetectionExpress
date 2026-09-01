@@ -33,6 +33,7 @@ function finding(seq: number): LiveFinding {
     eventIds: [seq],
     at: 0,
     seq,
+    citedEvents: [],
   };
 }
 

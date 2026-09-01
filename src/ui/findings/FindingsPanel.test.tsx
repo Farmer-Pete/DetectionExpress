@@ -32,6 +32,7 @@ function live(
     eventIds: rest.eventIds ?? [over.seq],
     at: rest.at ?? 0,
     seq: over.seq,
+    citedEvents: rest.citedEvents ?? [],
   };
   // `exactOptionalPropertyTypes`: only set `entity` when present, never to `undefined`.
   if (entity !== undefined) {

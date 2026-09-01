@@ -63,6 +63,7 @@ function live(seq: number, eventIds: number[]): LiveFinding {
     at: 5,
     seq,
     entity: "acct-1",
+    citedEvents: [],
   };
 }
 

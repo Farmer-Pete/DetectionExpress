@@ -12,7 +12,15 @@ import { diffDecisions, diffFindings, unfiredLandingDecisions } from "./fx-event
 /** A minimal LiveFinding fixture; only `seq` and `state` matter to the diff. */
 function finding(seq: number, state: "hit" | "watch", reason = "pin_brute_force"): LiveFinding {
   const alert: Finding["alert"] = { reason, at: 0, eventIds: [seq] };
-  return { finding: { alert, eventId: seq }, state, reason, eventIds: [seq], at: 0, seq };
+  return {
+    finding: { alert, eventId: seq },
+    state,
+    reason,
+    eventIds: [seq],
+    at: 0,
+    seq,
+    citedEvents: [],
+  };
 }
 
 function missed(seq: number): MissedDecision {

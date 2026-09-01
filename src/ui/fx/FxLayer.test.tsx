@@ -162,7 +162,15 @@ function liveFinding(opts: LiveOptions): LiveFinding {
     state === "watch"
       ? { alert: { reason, at: 0, eventIds }, eventId: anchor, isPartial: true }
       : { alert: { reason, at: 0, eventIds }, eventId: anchor };
-  const result: LiveFinding = { finding, state, reason, eventIds, at: 0, seq: opts.seq };
+  const result: LiveFinding = {
+    finding,
+    state,
+    reason,
+    eventIds,
+    at: 0,
+    seq: opts.seq,
+    citedEvents: [],
+  };
   if (opts.entity !== undefined) {
     result.entity = opts.entity;
   }
