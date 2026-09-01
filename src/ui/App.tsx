@@ -1,30 +1,30 @@
 /**
  * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md). It holds
- * only the `view` toggle (`"pipeline"` or `"metro"`), the wave shake, the modal-open
- * derivation, and the two panel refs shared with `InspectorShell`/`DecisionsPanel`/
- * `TraceOverlay`; everything else is composed from a hook or a component that owns
- * its own lifecycle and its own tests:
+ * only the `mapShown` toggle, the wave shake, the modal-open derivation, and the two
+ * panel refs shared with `InspectorShell`/`DecisionsPanel`/`TraceOverlay`; everything
+ * else is composed from a hook or a component that owns its own lifecycle and its own
+ * tests:
  *
  * - `useIntroOverlay` (intro/) owns the overlay's seen-flag state, its three dismiss
  *   actions, and the post-close scroll+focus effect.
- * - `usePipelineController` and `useWorldController` (run/) each build a FRESH
- *   controller from their factory when their mode becomes visible and dispose it
- *   (permanently) on hide, so only the visible mode's loop runs. React Strict Mode's
+ * - `usePipelineController` (run/) builds the one merged-engine `RunController` on
+ *   mount and disposes it (permanently) on unmount. React Strict Mode's
  *   mount/unmount/mount cycle is safe: the factory yields a new controller per epoch
- *   and the cleanup disposes the old one. Render never drives either loop. Tests
- *   inject controller factories through `createPipelineController` /
- *   `createWorldController`, so the app never loads the real loader or engine under
- *   test. The Apply button reloads the current Algorithm source.
+ *   and the cleanup disposes the old one. Render never drives the loop. Tests inject
+ *   a controller factory through `createPipelineController`, so the app never loads
+ *   the real loader or engine under test. The Apply button reloads the current
+ *   Algorithm source. GH117 unified the metro map onto this same engine, so there is
+ *   only one controller and one loop now — `useWorldController` and its own
+ *   `WorldRunController` are retired from the app (their files stay on disk for a
+ *   later deletion step; nothing here imports them).
  * - `useLocalIde` (dev/) wires the dev-only local-IDE (algorithms hot-reload) client.
  *   Its whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
  *   production build inlines the gate to `false` and strips both the client and its
  *   loader out entirely; under test there is no `import.meta.hot`, so it stays inert
  *   too. That client maps a watched save into the run and drives the store's generic
- *   `sourceLocked` while a local file is authoritative. It lives in its own effect, so
- *   a mode switch never tears the dev client down or reconnects it. `LocalIdeToggle`
- *   renders its "Edit in IDE" / "Stop editing" control.
- * - `Topbar` renders the header: the title, the slice tag, the view toggle, the
- *   "How this works" reopen button (wired to `useIntroOverlay`'s `reopenRef` and
+ *   `sourceLocked` while a local file is authoritative.
+ * - `Topbar` renders the header: the title, the slice tag, the map show/hide toggle,
+ *   the "How this works" reopen button (wired to `useIntroOverlay`'s `reopenRef` and
  *   `onReopen`), and Hire Me.
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
@@ -33,11 +33,7 @@
  * null || decisionSelection !== null` — and hands it in along with both overlays,
  * `IntroOverlay` and `TraceOverlay`, as `ModalHost`'s `overlays` prop. Both render as
  * siblings of the inert shell, so a screen reader's browse mode and the keyboard
- * cannot reach shell content behind either one. `TraceOverlay` used to mount inside
- * `InspectorShell`, a shell descendant, which meant inerting the shell would have
- * inerted the dialog too; as a shell sibling it renders unconditionally now (it
- * returns null itself when neither selection is set), across both the pipeline and
- * metro views.
+ * cannot reach shell content behind either one.
  *
  * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
  * (`useWavePhaseEdge`) toggles `.shake` on `.app-shell` for `SHAKE_MS` on the
@@ -58,7 +54,6 @@ import { useRef, useState } from "react";
 import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
-import type { WorldRunController } from "../game/world-run-controller";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 import { Briefing } from "./Briefing";
 import { ChaosLadder } from "./ChaosLadder";
@@ -73,9 +68,7 @@ import { useIntroOverlay } from "./intro/use-intro-overlay";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { usePipelineController } from "./run/use-pipeline-controller";
-import { useWorldController } from "./run/use-world-controller";
 import { Topbar } from "./Topbar";
-import type { View } from "./view";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
@@ -86,14 +79,16 @@ const SHAKE_MS = 300;
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 interface AppProps {
-  // Controller FACTORIES: each mode builds a FRESH controller when it becomes visible
-  // and disposes it on hide (disposal is permanent). Tests inject stub factories.
+  // The controller FACTORY: builds a FRESH controller on mount and disposes it on
+  // unmount (disposal is permanent). Tests inject a stub factory.
   createPipelineController?: () => RunController;
-  createWorldController?: () => WorldRunController;
 }
 
-export function App({ createPipelineController, createWorldController }: AppProps = {}) {
-  const [view, setView] = useState<View>("pipeline");
+export function App({ createPipelineController }: AppProps = {}) {
+  // Whether the embedded metro map region shows (GH117 Part F). Purely a display
+  // toggle now: the one merged engine keeps running underneath either way, so
+  // flipping it never builds or tears down a controller.
+  const [mapShown, setMapShown] = useState(true);
   // Shared with InspectorShell (which passes it to FindingsPanel) and TraceOverlay
   // (which reads it as the finding-mode focus fallback, GH34-35-PLAN.md decision 14).
   // Lifted here from InspectorShell (GH105-PLAN.md) since TraceOverlay no longer lives
@@ -105,11 +100,8 @@ export function App({ createPipelineController, createWorldController }: AppProp
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
-  // never shakes. The hook stays armed in the metro view too, which is harmless:
-  // switching views disposes the pipeline engine, so the snapshot freezes at its
-  // last published reading, and a frozen phase can never produce a new edge.
-  // Gated on conclusion, not the transport freeze (F004+F006): while the run is
-  // running, the hook sees the live phase; once it has concluded, it sees
+  // never shakes. Gated on conclusion, not the transport freeze (F004+F006): while
+  // the run is running, the hook sees the live phase; once it has concluded, it sees
   // `"calm"` instead, so the edge cannot fire off a frozen terminal frame.
   const wavePhase = useGameStore((s) => s.snapshot.wave.phase);
   const status = useGameStore((s) => s.snapshot.status);
@@ -132,18 +124,15 @@ export function App({ createPipelineController, createWorldController }: AppProp
   const intro = useIntroOverlay();
 
   // The pipeline controller lifecycle, extracted to its own hook (GH109-PLAN.md): a
-  // fresh controller per visible epoch, seeded from the store transport, disposed
-  // (with the F024 empty-snapshot repaint and cleared selection) on hide or unmount,
-  // plus the two transport-reflector effects.
+  // fresh controller per epoch, seeded from the store transport, disposed (with the
+  // F024 empty-snapshot repaint and cleared selection) on unmount, plus the two
+  // transport-reflector effects. It is the one engine now (GH117): its blueprint
+  // steps the scenario cast the embedded map draws, so there is no separate world
+  // controller to build or tear down alongside it.
   const { controllerRef } = usePipelineController({
-    view,
+    view: "pipeline",
     createController: createPipelineController,
   });
-
-  // The world controller lifecycle, extracted to its own hook (GH109-PLAN.md): the same
-  // fresh-per-epoch rule as the pipeline controller; a mode switch disposes the hidden
-  // mode's loop and builds the shown one's.
-  useWorldController({ view, createController: createWorldController });
 
   // The dev-only local-IDE (algorithms hot-reload) client, extracted to its own hook
   // (GH109-PLAN.md): the `import.meta.env.DEV` + live-HMR-channel gate, the
@@ -178,32 +167,24 @@ export function App({ createPipelineController, createWorldController }: AppProp
       }
     >
       <Topbar
-        view={view}
-        onToggleView={() => setView(view === "pipeline" ? "metro" : "pipeline")}
+        mapShown={mapShown}
+        onToggleMap={() => setMapShown(!mapShown)}
         reopenRef={intro.reopenRef}
         onReopen={intro.onReopen}
       />
-      {view === "pipeline" ? (
-        <>
-          <Hud />
-          <InspectorShell findingsPanelRef={findingsPanelRef} />
-          <DecisionsPanel panelRef={decisionsPanelRef} />
-          <Briefing
-            tagline={liveScenario.tagline}
-            text={defaultEntry.catalogue.security.briefing}
-          />
-          <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
-          <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
-          <LocalIdeToggle
-            ready={dev.algoReady}
-            localMode={dev.localMode}
-            onEnter={dev.onEnterLocalMode}
-            onStop={dev.onStopLocalMode}
-          />
-        </>
-      ) : (
-        <MetroView />
-      )}
+      <Hud />
+      {mapShown ? <MetroView /> : null}
+      <InspectorShell findingsPanelRef={findingsPanelRef} />
+      <DecisionsPanel panelRef={decisionsPanelRef} />
+      <Briefing tagline={liveScenario.tagline} text={defaultEntry.catalogue.security.briefing} />
+      <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
+      <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+      <LocalIdeToggle
+        ready={dev.algoReady}
+        localMode={dev.localMode}
+        onEnter={dev.onEnterLocalMode}
+        onStop={dev.onStopLocalMode}
+      />
     </ModalHost>
   );
 }

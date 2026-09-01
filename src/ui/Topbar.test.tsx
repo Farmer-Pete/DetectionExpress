@@ -1,8 +1,8 @@
 /**
- * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the Metro/
- * Pipeline view toggle, the "How this works" reopen button, and Hire Me. It consumes
- * `reopenRef`/`onReopen` from `useIntroOverlay` rather than owning them, so these
- * tests stub both.
+ * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the embedded
+ * metro map's show/hide toggle, the "How this works" reopen button, and Hire Me. It
+ * consumes `reopenRef`/`onReopen` from `useIntroOverlay` rather than owning them, so
+ * these tests stub both.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
@@ -14,8 +14,8 @@ describe("Topbar", () => {
   it("renders the title, slice tag, and Hire Me button", () => {
     render(
       <Topbar
-        view="pipeline"
-        onToggleView={vi.fn()}
+        mapShown={false}
+        onToggleMap={vi.fn()}
         reopenRef={createRef<HTMLButtonElement>()}
         onReopen={vi.fn()}
       />,
@@ -26,47 +26,47 @@ describe("Topbar", () => {
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
   });
 
-  it("labels the view toggle for the pipeline view and flips it for metro", () => {
+  it("labels the map toggle for the hidden map and flips it once shown", () => {
     const { rerender } = render(
       <Topbar
-        view="pipeline"
-        onToggleView={vi.fn()}
+        mapShown={false}
+        onToggleMap={vi.fn()}
         reopenRef={createRef<HTMLButtonElement>()}
         onReopen={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Metro view" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Show metro view" })).toBeDefined();
 
     rerender(
       <Topbar
-        view="metro"
-        onToggleView={vi.fn()}
+        mapShown={true}
+        onToggleMap={vi.fn()}
         reopenRef={createRef<HTMLButtonElement>()}
         onReopen={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Pipeline view" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Hide metro view" })).toBeDefined();
   });
 
-  it("calls onToggleView when the view toggle is clicked", () => {
-    const onToggleView = vi.fn();
+  it("calls onToggleMap when the map toggle is clicked", () => {
+    const onToggleMap = vi.fn();
     render(
       <Topbar
-        view="pipeline"
-        onToggleView={onToggleView}
+        mapShown={false}
+        onToggleMap={onToggleMap}
         reopenRef={createRef<HTMLButtonElement>()}
         onReopen={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
-    expect(onToggleView).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
+    expect(onToggleMap).toHaveBeenCalledTimes(1);
   });
 
   it("wires the reopen button to reopenRef and calls onReopen when clicked", () => {
     const onReopen = vi.fn();
     const reopenRef = createRef<HTMLButtonElement>();
     render(
-      <Topbar view="pipeline" onToggleView={vi.fn()} reopenRef={reopenRef} onReopen={onReopen} />,
+      <Topbar mapShown={false} onToggleMap={vi.fn()} reopenRef={reopenRef} onReopen={onReopen} />,
     );
     const reopen = screen.getByRole("button", { name: /how this works/i });
     expect(reopenRef.current).toBe(reopen);

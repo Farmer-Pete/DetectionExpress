@@ -1,20 +1,23 @@
 /**
- * The metro view chrome: the header (title, live counts, pause and speed controls),
- * the legend pinned top-left, the event-log panel pinned bottom-right, and the map
- * itself filling the rest. Every live value is read through a per-field `useWorldStore`
- * selector, so a snapshot update re-renders only the panel that reads the changed
- * field, not the whole view (ARCHITECTURE rule 4). The map's hot path (moving actors,
- * flashes) is the canvas layer, not React.
+ * The embedded metro map region (GH117 Part F): the legend pinned to the left, the
+ * compact event log pinned bottom-right, the map itself filling the rest, and a
+ * "simulation ended" overlay over the map once the run concludes. It sits inline in
+ * `App`'s page flow between `Hud` and `InspectorShell`, sized to a bounded box rather
+ * than filling the viewport — the pipeline transport (freeze, 0.5x/1x/2x) is the one
+ * clock now, so this component owns no header, no counts, and no speed control.
+ *
+ * Every live value is read through a per-field `useGameStore` selector, so a snapshot
+ * update re-renders only the panel that reads the changed field, not the whole view
+ * (ARCHITECTURE rule 4). The map's hot path (moving actors, flashes) is the canvas
+ * layer, not React.
  */
 
+import { useGameStore } from "../game/store";
 import { GAME_SECONDS_PER_TICK } from "../game/tuning";
-import { useWorldStore } from "../game/world-store";
+import type { FailureReason, RunStatus } from "../sim/snapshot";
 import { world } from "../sim/world/world";
 import type { TimedWorldReading } from "../sim/world-reading";
 import { MetroMap } from "./MetroMap";
-
-/** A game-minute in whole sim ticks, for the trailing taps/min rate. */
-const TICKS_PER_MINUTE = 60 / GAME_SECONDS_PER_TICK;
 
 /** How many of the retained log entries the panel shows. */
 const LOG_ROWS = 70;
@@ -50,12 +53,6 @@ const LEGEND_SENSORS: readonly { code: string; color: string; name: string }[] =
   { code: "N", color: "var(--s-relay)", name: "network relay (Z2-Z4)" },
   { code: "O", color: "var(--s-console)", name: "control console (Z4)" },
 ];
-
-/** Taps in the trailing game-minute, from the log's fare-gate readings. */
-function tapsPerMinute(log: readonly TimedWorldReading[], nowTick: number): number {
-  const cutoff = nowTick - TICKS_PER_MINUTE;
-  return log.filter((entry) => entry.reading.sensor === "fare-gate" && entry.tick > cutoff).length;
-}
 
 /** One event-log row: its sensor chip code and color, and its human-readable message. */
 function logRow(entry: TimedWorldReading): { code: string; color: string; text: string } {
@@ -134,55 +131,6 @@ function logRow(entry: TimedWorldReading): { code: string; color: string; text: 
   };
 }
 
-function Header() {
-  const riders = useWorldStore((state) => state.worldSnapshot.counts.riders);
-  const trains = useWorldStore((state) => state.worldSnapshot.counts.trains);
-  const staff = useWorldStore((state) => state.worldSnapshot.counts.staff);
-  const log = useWorldStore((state) => state.worldSnapshot.log);
-  const nowTick = useWorldStore((state) => state.worldSnapshot.nowTick);
-  const paused = useWorldStore((state) => state.paused);
-  const speed = useWorldStore((state) => state.speed);
-  const setPaused = useWorldStore((state) => state.setPaused);
-  const setSpeed = useWorldStore((state) => state.setSpeed);
-  const taps = tapsPerMinute(log, nowTick);
-
-  return (
-    <header className="metro-header">
-      <div className="metro-title">LIVING METRO</div>
-      <div className="metro-counts">
-        <span>
-          riders <b>{riders}</b>
-        </span>
-        <span>
-          trains <b>{trains}</b>
-        </span>
-        <span>
-          staff <b>{staff}</b>
-        </span>
-        <span>
-          taps/min <b>{taps}</b>
-        </span>
-      </div>
-      <div className="metro-controls">
-        <button type="button" className="metro-btn" onClick={() => setPaused(!paused)}>
-          {paused ? "Play" : "Pause"}
-        </button>
-        <input
-          className="metro-speed"
-          type="range"
-          min={0.25}
-          max={4}
-          step={0.25}
-          value={speed}
-          aria-label="Speed"
-          onChange={(event) => setSpeed(Number(event.target.value))}
-        />
-        <span className="metro-speed-read">{speed.toFixed(2)}x</span>
-      </div>
-    </header>
-  );
-}
-
 function Legend() {
   return (
     <aside className="metro-legend">
@@ -202,6 +150,11 @@ function Legend() {
         {/* A kiosk-colored dot matching the account rider's real glyph (--s-kiosk). */}
         <span className="metro-swatch metro-swatch-dot" style={{ background: "var(--s-kiosk)" }} />
         account rider
+      </div>
+      <div className="metro-legend-row">
+        {/* A red-ringed dot matching the pin attacker's real glyph (GH117 Part F). */}
+        <span className="metro-swatch metro-swatch-attacker" />
+        pin attacker
       </div>
       <div className="metro-legend-row">
         {/* A square swatch matching the staff's real 7x7 green square glyph (--ok). */}
@@ -230,7 +183,7 @@ function Legend() {
 }
 
 function EventLog() {
-  const log = useWorldStore((state) => state.worldSnapshot.log);
+  const log = useGameStore((state) => state.snapshot.mapLog);
   const rows = log.slice(0, LOG_ROWS);
   return (
     <aside className="metro-log">
@@ -256,20 +209,49 @@ function EventLog() {
   );
 }
 
+/** The one-line outcome the overlay reads, mirroring `Hud`'s own outcome copy. */
+function outcomeText(status: RunStatus, reason: FailureReason) {
+  if (status === "won") {
+    return "Simulation ended — won";
+  }
+  return reason === "queue"
+    ? "Simulation ended — failed: queue overflowed"
+    : reason === "correctness"
+      ? "Simulation ended — failed: correctness too low"
+      : "Simulation ended — failed";
+}
+
+/**
+ * A small overlay over the map region once the scored run concludes (GH117 decision
+ * 5): the engine has already stopped stepping, so the map beneath it is a frozen
+ * terminal frame, and this names the outcome rather than leaving it silently static.
+ * Renders nothing while the run is still running.
+ */
+function EndedOverlay() {
+  const status = useGameStore((state) => state.snapshot.status);
+  const failureReason = useGameStore((state) => state.snapshot.failureReason);
+  if (status === "running") {
+    return null;
+  }
+  return (
+    <div className="metro-ended-overlay" role="status">
+      {outcomeText(status, failureReason)}
+    </div>
+  );
+}
+
 export function MetroView() {
   return (
     <div className="metro-view">
-      <Header />
       {/* Layout children, not overlays: the legend is a left column, the log a
           bottom-right region, and the map fills the remainder, so the full map (Harbor
           to World's End, and every site) is never hidden under a panel. */}
-      <div className="metro-stage">
-        <Legend />
-        <div className="metro-map-region">
-          <MetroMap />
-        </div>
-        <EventLog />
+      <Legend />
+      <div className="metro-map-region">
+        <MetroMap />
+        <EndedOverlay />
       </div>
+      <EventLog />
     </div>
   );
 }

@@ -1037,83 +1037,25 @@ body {
   cursor: pointer;
 }
 
-/* ---- Living Metro view ---- */
+/* ---- Embedded metro map region (GH117 Part F) ---- */
+/* The map embeds inline in the page flow, between the HUD and the inspector shell,
+   sized to a bounded box rather than filling the viewport. The legend is the left
+   column (full height); the map fills the top-right; the log is the bottom-right
+   region. No panel overlays the map, so the whole network stays visible. The scored
+   pipeline transport (freeze, 0.5x/1x/2x) is the one clock now, so this region carries
+   no header, counts, or speed control of its own — those retired with the standalone
+   metro view. */
 .metro-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.metro-header {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.metro-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  color: var(--ink);
-}
-
-.metro-counts {
-  display: flex;
-  gap: 1rem;
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.metro-counts b {
-  color: var(--ink);
-}
-
-.metro-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-.metro-btn {
-  padding: 0.25rem 0.8rem;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--ink);
-  font-weight: 700;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.metro-speed {
-  accent-color: var(--s-gate);
-  cursor: pointer;
-}
-
-.metro-speed-read {
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
-  min-width: 3ch;
-}
-
-/* The legend is the left column (full height); the map fills the top-right; the log
-   is the bottom-right region. No panel overlays the map, so the whole network is
-   visible. Column and row extents follow 87-VIEW-NOTES.md section 1's gutter/log clamps. */
-.metro-stage {
   display: grid;
-  grid-template-columns: clamp(210px, 26%, 300px) 1fr;
-  grid-template-rows: 1fr clamp(150px, 28%, 300px);
+  grid-template-columns: clamp(180px, 24%, 260px) 1fr;
+  grid-template-rows: 1fr clamp(120px, 24%, 220px);
   gap: 10px;
+  height: clamp(320px, 48vh, 440px);
+  margin: 0 1.5rem 1rem;
   padding: 10px;
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
 }
 
 .metro-map-region {
@@ -1123,6 +1065,24 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+/* The "simulation ended" overlay (GH117 decision 5): shown over the map region once
+   the scored run concludes, so a frozen terminal frame reads as concluded, not stuck. */
+.metro-ended-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(10, 20, 26, 0.6);
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: center;
+  border-radius: 6px;
+  pointer-events: none;
 }
 
 .metro-map {
@@ -1252,6 +1212,16 @@ body {
   width: 8px;
   height: 8px;
   border-radius: 1px;
+}
+
+/* The pin attacker swatch mirrors the map glyph: a rider dot ringed in red
+   (ActorLayer's `ATTACKER_RING`), so the legend teaches the same distinction. */
+.metro-swatch-attacker {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--ink);
+  box-shadow: 0 0 0 1.5px #f94144;
 }
 
 .metro-chip-swatch {

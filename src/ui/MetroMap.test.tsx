@@ -1,15 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { useWorldStore } from "../game/world-store";
-import { emptyWorldSnapshot } from "../sim/world-snapshot";
+import { useGameStore } from "../game/store";
+import { emptySnapshot } from "../sim/snapshot";
 import { MetroMap } from "./MetroMap";
 
 beforeEach(() => {
-  // The map mounts the actor layer, which reads the world store; seed a snapshot so
+  // The map mounts the actor layer, which reads the game store; seed a snapshot so
   // the injected state is well-formed.
-  useWorldStore.setState({
-    worldSnapshot: {
-      ...emptyWorldSnapshot(),
+  useGameStore.setState({
+    snapshot: {
+      ...emptySnapshot(),
       nowTick: 10,
       actors: [
         {
@@ -18,7 +18,6 @@ beforeEach(() => {
           presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
         },
       ],
-      counts: { riders: 1, trains: 0, staff: 0 },
     },
   });
 });

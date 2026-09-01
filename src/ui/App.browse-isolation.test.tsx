@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { referenceSource } from "../game/engine-source";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
-import type { WorldRunController } from "../game/world-run-controller";
 import type { LiveFinding } from "../sim/correctness";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
@@ -41,14 +40,6 @@ function stubController(): RunController {
     run() {},
     setFrozen() {},
     setSpeed() {},
-    dispose() {},
-  };
-}
-
-/** A no-op world controller, the same shape as the real one. */
-function stubWorldController(): WorldRunController {
-  return {
-    run() {},
     dispose() {},
   };
 }
@@ -87,9 +78,7 @@ function isInInertSubtree(element: Element): boolean {
 describe("App browse-mode isolation (GH105)", () => {
   it("inerts the shell around .findings-panel while a finding's trace dialog is open, and keeps the dialog outside it", () => {
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
 
@@ -105,9 +94,7 @@ describe("App browse-mode isolation (GH105)", () => {
 
   it("inerts the shell around .decisions-panel while a decision's trace dialog is open, and keeps the dialog outside it", () => {
     publishDecision(caughtDecision({ seq: 1, eventIds: [0] }));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
 
@@ -123,9 +110,7 @@ describe("App browse-mode isolation (GH105)", () => {
 
   it("lifts the isolation on close: the shell is no longer inert and the dialog is gone", () => {
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
     const dialog = screen.getByRole("dialog");
@@ -141,9 +126,7 @@ describe("App browse-mode isolation (GH105)", () => {
 
   it("lifts the isolation on a backdrop dismiss: the shell is no longer inert and the dialog is gone", () => {
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
     const dialog = screen.getByRole("dialog");
@@ -163,9 +146,7 @@ describe("App browse-mode isolation (GH105)", () => {
 
   it("lifts the isolation when reconciliation evicts the selection: the shell is no longer inert and the dialog is gone", () => {
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
     expect(screen.getByRole("dialog")).toBeDefined();
@@ -187,9 +168,7 @@ describe("App browse-mode isolation (GH105)", () => {
 
   it("restores focus only after the shell's inert attribute is already removed (the ordering, not just the end state)", () => {
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     const row = screen.getByRole("button", { name: /pin brute force/i });
     // Record the shell's inert state at the moment each `focus()` call runs, not just
@@ -219,27 +198,27 @@ describe("App browse-mode isolation (GH105)", () => {
     expect(document.activeElement).toBe(row);
   });
 
-  it("closes the finding trace and releases its freeze on a Pipeline -> Metro view toggle (freeze lifecycle 7a)", () => {
+  it("keeps the finding trace open and its freeze held across a map show/hide toggle (GH117: one engine, no more view teardown)", () => {
+    // Pre-GH117, "Metro view" swapped controllers and the pipeline's teardown closed
+    // the dialog and released its freeze (freeze lifecycle 7a). Now the map toggle is
+    // a display-only flip over the one merged engine, so neither the dialog nor its
+    // freeze claim should be disturbed by it.
     publishFinding(live(1, [0]));
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     fireEvent.click(screen.getByRole("button", { name: /pin brute force/i }));
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(useGameStore.getState().transport.frozen).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "Metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
 
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(useGameStore.getState().transport.frozen).toBe(false);
+    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(useGameStore.getState().transport.frozen).toBe(true);
   });
 
   it("still inerts the shell while the intro overlay is open (regression)", () => {
     localStorage.clear(); // override this file's beforeEach markIntroSeen(): show the intro
-    render(
-      <App createPipelineController={stubController} createWorldController={stubWorldController} />,
-    );
+    render(<App createPipelineController={stubController} />);
 
     const shell = document.querySelector(".app-shell");
     if (shell === null) {

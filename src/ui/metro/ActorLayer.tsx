@@ -1,6 +1,6 @@
 /**
  * The actor layer: a canvas over the static SVG map that draws the moving cast and
- * the sensor flashes. It subscribes to `useWorldStore` OUTSIDE React's render, reading
+ * the sensor flashes. It subscribes to `useGameStore` OUTSIDE React's render, reading
  * the latest snapshot each animation frame, so a 20 Hz publish still animates at 60 Hz
  * and React never reconciles the hot path (ARCHITECTURE rules 3-5).
  *
@@ -9,15 +9,22 @@
  * never re-enters the sim). Flashes use ONE universal treatment: an expanding, fading
  * ring plus a dot, colored by the firing sensor's token. `requestAnimationFrame`
  * drives it; the effect cancels on unmount.
+ *
+ * GH117 Part F: the merged engine publishes both the scored run and the map onto one
+ * `SimSnapshot` in `useGameStore`, so this layer reads that store now, not the
+ * retired `useWorldStore`. The render-estimate speed comes from the one pipeline
+ * transport (`snapshot` state's `transport.frozen`/`transport.speed`), not a metro-only
+ * pause/speed pair.
  */
 import { useEffect, useRef } from "react";
+import { useGameStore } from "../../game/store";
 import { CLOCK_HZ, FLASH_LIFE_TICKS } from "../../game/tuning";
-import { useWorldStore } from "../../game/world-store";
+import type { SimSnapshot } from "../../sim/snapshot";
 import { metroLayout, metroLines, type Point } from "../../sim/world/layout";
 import type { Presence } from "../../sim/world/presence";
 import { trainIdForLine } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
-import type { ActorView, FlashEvent, WorldSnapshot } from "../../sim/world-snapshot";
+import type { ActorView, FlashEvent } from "../../sim/world-snapshot";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./design";
 import { presencePoint, stepBetween } from "./interpolate";
 
@@ -26,6 +33,14 @@ const INK = "#fbd57b";
 /** An account rider's dot color (`--s-kiosk`), so it reads as "at the kiosk". */
 const ACCOUNT_FILL = "#f9c74f";
 const TRAIN_FILL = "#cfe3ea";
+/**
+ * The pin attacker's distinguishing ring (GH117 decision 4): a red-ringed dot, so the
+ * player can spot the attacker on the map before the detector ever raises a finding.
+ * Shares its hue with the `pinfail` flash below, so an attacker and the wrong-PIN
+ * fumbles it causes read as one family.
+ */
+const ATTACKER_RING = "#f94144";
+const ATTACKER_RING_RADIUS = 5.5;
 /** The staff glyph: a filled 7x7 green (`--ok`) square (view notes section 4). */
 const STAFF_FILL = "#43aa8b";
 const STAFF_SIZE = 7;
@@ -53,9 +68,9 @@ const FLASH_COLOR: Record<FlashEvent["kind"], string> = {
   command: "#f94144",
   packet: "#f8961e",
   train: TRAIN_FILL,
-  // A wrong-PIN kiosk fail (GH117 Part E). Not yet emitted by any producer; the
-  // engine still steps only the ambient world cast (Part B wires the scenario cast).
-  pinfail: "#f94144",
+  // A wrong-PIN kiosk fail (GH117 decision 4), benign or attack: every fumble flashes,
+  // whichever actor caused it, so the player can see it before the detector scores it.
+  pinfail: ATTACKER_RING,
 };
 
 /** The flash ring grows from this radius to this over the flash's life (design units). */
@@ -272,6 +287,21 @@ function drawRider(ctx: CanvasRenderingContext2D, view: View, point: Point): voi
   ctx.fill();
 }
 
+/**
+ * A pin attacker: the rider dot plus a red ring around it (GH117 decision 4), so it
+ * reads distinctly from a benign rider or account rider at a glance.
+ */
+function drawPinAttacker(ctx: CanvasRenderingContext2D, view: View, point: Point): void {
+  drawRider(ctx, view, point);
+  const cx = view.offsetX + point.x * view.scale;
+  const cy = view.offsetY + point.y * view.scale;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ATTACKER_RING_RADIUS * view.scale, 0, Math.PI * 2);
+  ctx.strokeStyle = ATTACKER_RING;
+  ctx.lineWidth = 1.5 * view.scale;
+  ctx.stroke();
+}
+
 /** A staff member: a filled green square centered on its point (view notes section 4). */
 function drawStaff(ctx: CanvasRenderingContext2D, view: View, point: Point): void {
   const size = STAFF_SIZE * view.scale;
@@ -407,7 +437,7 @@ export function ActorLayer() {
     // when a rider despawns. It is pure render state and never re-enters the sim.
     const riderAnim = new Map<string, RiderAnim>();
 
-    const draw = (snapshot: WorldSnapshot, renderNow: number): void => {
+    const draw = (snapshot: SimSnapshot, renderNow: number): void => {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
       const height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
@@ -520,7 +550,11 @@ export function ActorLayer() {
 
         if (point !== null) {
           ctx.globalAlpha = alpha;
-          drawRider(ctx, view, point);
+          if (actor.kind === "pin-attacker") {
+            drawPinAttacker(ctx, view, point);
+          } else {
+            drawRider(ctx, view, point);
+          }
         }
         riderAnim.set(actor.id, {
           kind: presence.kind,
@@ -588,9 +622,9 @@ export function ActorLayer() {
     };
 
     const frame = (): void => {
-      const state = useWorldStore.getState();
-      const snapshot = state.worldSnapshot;
-      const speed = state.paused ? 0 : state.speed;
+      const state = useGameStore.getState();
+      const snapshot = state.snapshot;
+      const speed = state.transport.frozen ? 0 : state.transport.speed;
       const wall = performance.now();
       if (snapshot.nowTick !== lastNowTick) {
         lastNowTick = snapshot.nowTick;
