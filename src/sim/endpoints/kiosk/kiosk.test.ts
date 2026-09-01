@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { referenceAlgorithm } from "../../scenarios/pin-brute-force/reference";
+import { buildReferenceAlgorithm } from "../../scenarios/pin-brute-force/reference";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "./formats/kiosk-v1";
 import type { AccountKioskReading } from "./internal";
 
@@ -56,13 +56,14 @@ describe("isRawKioskV1", () => {
 
 describe("reference normalize round trip", () => {
   it("recovers account, terminal, and outcome from a kiosk-v1 reading", () => {
+    const ref = buildReferenceAlgorithm();
     const raw: RawKioskV1 = { t: 5, acct: "root", term: "K1", res: "WRONG_PIN" };
-    expect(referenceAlgorithm.normalize(raw)).toEqual({
+    expect(ref.normalize(raw)).toEqual({
       account: "root",
       terminal: "K1",
       outcome: "fail",
     });
     const ok: RawKioskV1 = { t: 5, acct: "root", term: "K1", res: "OK" };
-    expect(referenceAlgorithm.normalize(ok).outcome).toBe("success");
+    expect(ref.normalize(ok).outcome).toBe("success");
   });
 });

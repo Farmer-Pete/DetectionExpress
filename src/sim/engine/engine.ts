@@ -62,7 +62,7 @@ export function createEngine(config: EngineConfig): Engine {
   return {
     normalize(raw, endpoint) {
       const normalizer = config.normalizers[endpoint];
-      if (normalizer === undefined) {
+      if (!Object.hasOwn(config.normalizers, endpoint) || normalizer === undefined) {
         throw new Error(`No normalizer is registered for endpoint "${endpoint}".`);
       }
       return normalizer(raw);

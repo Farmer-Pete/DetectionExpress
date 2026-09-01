@@ -65,6 +65,23 @@ describe("buildPartitionedIdentityPools", () => {
     expect(() => buildPartitionedIdentityPools(world, 40, -1)).toThrow(/partition/);
     expect(() => buildPartitionedIdentityPools(world, 40, 999)).toThrow(/partition/);
   });
+
+  it("keeps partitions disjoint even when two runs request different account counts", () => {
+    // GH42 code review: the partition slice rides a fixed stride, not the caller's
+    // accountCount, so a wide run in one partition and a narrow run in the next never
+    // overlap. Before the fix, count 40 partition 0 ([0,40)) and count 20 partition 1
+    // ([20,40)) collided.
+    const wide = buildPartitionedIdentityPools(world, 40, 0).accounts;
+    const narrow = buildPartitionedIdentityPools(world, 20, 1).accounts;
+    expect(wide).toHaveLength(40);
+    expect(narrow).toHaveLength(20);
+    const overlap = wide.filter((account) => narrow.includes(account));
+    expect(overlap).toEqual([]);
+  });
+
+  it("rejects an accountCount wider than the per-partition stride", () => {
+    expect(() => buildPartitionedIdentityPools(world, 65, 0)).toThrow(/stride/);
+  });
 });
 
 describe("budgetFumbles", () => {

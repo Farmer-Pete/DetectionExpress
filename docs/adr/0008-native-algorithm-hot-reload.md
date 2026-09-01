@@ -47,10 +47,12 @@ Serve TypeScript algorithms as native Vite modules, hot-reloaded, on one dev ser
   lint covers it; Biome cannot lint a gitignored file. `src/algorithms/` is player scratch
   space, gitignored whole, so no player file is committed by accident.
 - **The mechanism is a thin change notification, not a protocol.** A dev-only plugin watches
-  `src/algorithms/engine.ts` and holds one monotonic version counter. It answers a slugless
+  every direct child of `src/algorithms/` — a change to `engine.ts` or to any helper file
+  beside it triggers a ping — and holds one monotonic version counter. It answers a slugless
   `algo:hello` by resolving the active file (`src/algorithms/engine.ts` if it exists, else the
-  default engine) and replies `algo:changed { path, version }`. On any change it re-resolves
-  and pings. The client re-imports the versioned URL and runs the module. (ADR 0010: the
+  default engine) and replies `algo:changed { path, version }`. On any create, change, or
+  delete under the directory it bumps the counter, re-resolves, and pings. The client
+  re-imports the versioned URL and runs the module. (ADR 0010: the
   handshake dropped its `slug` field; one fixed file replaces per-slug resolution.)
 
 ```text

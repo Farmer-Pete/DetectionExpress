@@ -46,5 +46,3 @@ export function buildReferenceAlgorithm(): ReferenceAlgorithm {
     detect: (e) => rule.detect({ ...e }),
   };
 }
-
-export const referenceAlgorithm = buildReferenceAlgorithm();

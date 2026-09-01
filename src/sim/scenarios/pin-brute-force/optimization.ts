@@ -115,7 +115,7 @@ function isString(value: unknown): value is string {
  * would. Amortized O(1) per Event, with state bounded to one window plus a
  * per-account ring of THRESHOLD ids.
  */
-export function buildOptimizedRule(): EngineRule {
+function buildOptimizedRule(): EngineRule {
   let queue: QueuedFail[] = [];
   let head = 0;
   // Per-account state (counts, recent, firing) is not pruned when an account's

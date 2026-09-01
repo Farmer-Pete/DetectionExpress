@@ -8,5 +8,7 @@ export function withinWindow<T extends { ts: number }>(
   now: number,
   windowSeconds: number,
 ): T[] {
-  return items.filter((x) => x.ts > now - windowSeconds);
+  // The `x.ts <= now` upper bound is a no-op under the in-order stream (no item
+  // arrives from the future), but it hardens this shared core against out-of-order input.
+  return items.filter((x) => x.ts > now - windowSeconds && x.ts <= now);
 }

@@ -95,16 +95,29 @@ const PARTITION_NAMESPACE_SEED = 0x9a1e5;
 const MAX_PARTITIONS = 8;
 
 /**
+ * The fixed slot each partition reserves in the shared namespace. A partition's
+ * account slice starts at `partition * MAX_ACCOUNTS_PER_PARTITION`, so the range
+ * a partition owns depends only on this stride, never on the caller's
+ * `accountCount`. That keeps two runs disjoint even when they request different
+ * counts. `MAX_PARTITIONS * MAX_ACCOUNTS_PER_PARTITION` (512) stays under
+ * `buildAccounts`'s own ceiling (`STEMS.length * 26`, 520 today); the scenario
+ * draws 40 today, so 64 leaves headroom for a wider run.
+ */
+const MAX_ACCOUNTS_PER_PARTITION = 64;
+
+/**
  * The identity pools for one partition of a composed (merged) run. `accounts`
  * comes from the fixed `PARTITION_NAMESPACE_SEED` namespace, sliced by
- * `partition`, not from any run's own seed, so two runs given different
- * partitions never share an account no matter what seed generated each run.
+ * `partition` on a fixed `MAX_ACCOUNTS_PER_PARTITION` stride, not from any run's
+ * own seed or count, so two runs given different partitions never share an
+ * account no matter what seed generated each run or how many accounts each drew.
  * Stations and terminals are already world-fixed, so they need no partitioning.
  *
  * Throws on a `partition` outside `[0, MAX_PARTITIONS)`: a caller asking for an
  * unreserved partition would otherwise silently slice past the namespace and
  * get an under-full (or empty) pool, corrupting the disjointness guarantee this
- * function exists to provide.
+ * function exists to provide. Throws on an `accountCount` past the stride for the
+ * same reason: a slice wider than its slot would spill into the next partition.
  */
 export function buildPartitionedIdentityPools(
   world: World,
@@ -116,11 +129,17 @@ export function buildPartitionedIdentityPools(
       `buildPartitionedIdentityPools: partition must be an integer in [0, ${MAX_PARTITIONS}), got ${partition}.`,
     );
   }
+  if (accountCount > MAX_ACCOUNTS_PER_PARTITION) {
+    throw new Error(
+      `buildPartitionedIdentityPools: accountCount ${accountCount} exceeds the per-partition ` +
+        `stride ${MAX_ACCOUNTS_PER_PARTITION}, so its slice would overlap the next partition.`,
+    );
+  }
   const namespace = buildAccounts(
-    accountCount * MAX_PARTITIONS,
+    MAX_PARTITIONS * MAX_ACCOUNTS_PER_PARTITION,
     randomLcg(PARTITION_NAMESPACE_SEED),
   ).map((account) => account.name);
-  const start = partition * accountCount;
+  const start = partition * MAX_ACCOUNTS_PER_PARTITION;
   const accounts = namespace.slice(start, start + accountCount);
   const stations = world.stations.map((station) => station.id);
   return { accounts, stations, terminals: KIOSK_TERMINALS };

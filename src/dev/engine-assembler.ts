@@ -97,7 +97,8 @@ function resolveTsFile(fromDir: string, spec: string): string {
   );
   if (found === undefined) {
     throw new Error(
-      `engine-assembler: cannot resolve "${spec}" from "${fromDir}" (tried ${candidates.join(", ")}).`,
+      `engine-assembler: cannot resolve "${spec}" from "${fromDir}". Engine files may import ` +
+        `only relative TypeScript files or URL specifiers (tried ${candidates.join(", ")}).`,
     );
   }
   return found;

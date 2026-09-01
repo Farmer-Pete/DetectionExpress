@@ -136,9 +136,16 @@ export function composeScenario<
     attackIdOf: (t) => spec.attackIdOf(t, attacker.labels),
   });
 
-  const attacks: Attack[] = attacker.plans.map((plan) =>
-    spec.attackFromPlan(plan, eventIdsByAttack.get(plan.id) ?? []),
-  );
+  const attacks: Attack[] = attacker.plans.map((plan) => {
+    const eventIds = eventIdsByAttack.get(plan.id);
+    if (eventIds === undefined) {
+      throw new Error(
+        `composeScenario: "${spec.id}" plan ${plan.id} composed no Events, so its Attack would ` +
+          "carry no evidence and could never be credited.",
+      );
+    }
+    return spec.attackFromPlan(plan, eventIds);
+  });
 
   const records = timed.map((t) => spec.toRecord(t, attacker.labels));
   spec.assertSeparable(records, attacks);

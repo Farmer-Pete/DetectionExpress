@@ -282,6 +282,16 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     // The scorer seam: a bad threshold fails loudly here, before it can silently
     // under- or over-credit an Alert.
     assertValidThreshold(attack);
+    // `hitsFor` credits on DISTINCT cited ids, so a threshold exceeding the count of
+    // distinct evidence can never be met: the Attack would silently record as missed
+    // rather than fail at setup. Reject it here at the same seam.
+    const distinctEvidence = new Set(attack.eventIds).size;
+    if (distinctEvidence < attack.threshold) {
+      throw new Error(
+        `Attack ${attack.id} has ${distinctEvidence} distinct evidence ids but a threshold of ` +
+          `${attack.threshold}, so no Alert could ever satisfy it.`,
+      );
+    }
     state.set(attack.id, "pending");
     for (const eventId of attack.eventIds) {
       owner.set(eventId, attack.id);

@@ -1,4 +1,7 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { assembleEngineSource } from "./engine-assembler";
 
 /** One normalized kiosk fail view, the flat record detect reads. */
@@ -108,5 +111,52 @@ describe("assembled engine runs", () => {
     const engineB = evaluate(SOURCE);
     const findings = [engineB.detect(fail(0, 0)), engineB.detect(fail(1, 10))].flat();
     expect(findings.filter((f) => f.isPartial !== true)).toHaveLength(0);
+  });
+});
+
+describe("assembly fails loudly", () => {
+  let root: string | undefined;
+
+  afterEach(() => {
+    if (root !== undefined) {
+      rmSync(root, { recursive: true, force: true });
+      root = undefined;
+    }
+  });
+
+  /**
+   * Write a minimal, self-contained `src/sim` tree the assembler can drive: a stub
+   * `createEngine`, one endpoint `normalizers` table, and one scenario `buildRule`.
+   * `ruleSource` is the rule file's body, so a test can plant a bad import in it.
+   */
+  function writeSimFixture(ruleSource: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "engine-assembler-"));
+    const sim = join(dir, "src", "sim");
+    mkdirSync(join(sim, "engine"), { recursive: true });
+    mkdirSync(join(sim, "endpoints", "kiosk"), { recursive: true });
+    mkdirSync(join(sim, "scenarios", "demo"), { recursive: true });
+    writeFileSync(
+      join(sim, "engine", "engine.ts"),
+      "export function createEngine(config) { return config; }\n",
+    );
+    writeFileSync(
+      join(sim, "endpoints", "kiosk", "normalize.ts"),
+      "export const normalizers = {};\n",
+    );
+    writeFileSync(join(sim, "scenarios", "demo", "rule.ts"), ruleSource);
+    return dir;
+  }
+
+  it("rejects a bare (non-relative, non-URL) import in an inlined engine file", async () => {
+    // GH42 code review: the assembler resolves engine imports as relative TS files or
+    // URL specifiers only. A bare package specifier has no relative file to resolve, so
+    // assembly must throw rather than ship a module with a dangling import. This locks
+    // that policy and restores the deleted fail-loud contract for the Rolldown path.
+    // The import must be USED, or Rolldown tree-shakes the dead import away before the
+    // resolver ever sees it. `detect` returns `[_]` so the binding stays live.
+    root = writeSimFixture(
+      'import _ from "some-bare-package";\nexport function buildRule() { return { id: "demo", endpoints: [], detect() { return [_]; } }; }\n',
+    );
+    await expect(assembleEngineSource(root)).rejects.toThrow(/some-bare-package/);
   });
 });

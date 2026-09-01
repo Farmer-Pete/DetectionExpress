@@ -290,6 +290,15 @@ describe("scorer (per-attack threshold, GH42 mixed hunts)", () => {
     };
     expect(() => createScorer([bad], cfg())).toThrow(/threshold must be a positive integer/);
   });
+
+  it("rejects an Attack whose distinct evidence cannot meet its threshold", () => {
+    // GH42 code review: `hitsFor` dedups cited ids, so a threshold above the count
+    // of DISTINCT evidence ids can never be satisfied. Repeated ids do not help: two
+    // copies of id 10 are one distinct id, below a threshold of two. That must fail at
+    // the scorer seam rather than silently recording a missed hunt.
+    const unsatisfiable = attack(1, "root", 0, 100, [10, 10], 2);
+    expect(() => createScorer([unsatisfiable], cfg())).toThrow(/distinct evidence/);
+  });
 });
 
 // Seam B: the partial-skip moved from the Detect task into the scorer.
