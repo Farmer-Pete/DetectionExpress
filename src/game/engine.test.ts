@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import type { Actor } from "../sim/actors/actor";
@@ -27,6 +27,7 @@ import {
 import { buildReferenceAlgorithm } from "../sim/scenarios/pin-brute-force/reference";
 import { buildBlueprint, pinBruteForce } from "../sim/scenarios/pin-brute-force/scenario";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../sim/scenarios/pin-brute-force/tuning";
+import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
@@ -43,6 +44,7 @@ import {
   type AmbientFixture,
   type ScenarioCast,
   type ScenarioCastMember,
+  type ScoredIngestSource,
   type StartOptions,
   start,
 } from "./engine";
@@ -236,6 +238,36 @@ describe("engine start guards", () => {
         driver,
       }),
     ).toThrow();
+    expect(driver.started).toBe(false); // the Clock was never constructed
+  });
+
+  it("throws when scoredIngest is passed without scenarioCast, and allocates nothing", () => {
+    // scoredIngest.ingress.offer/close only ever run inside the scenarioCast branch
+    // (GH117 Part C). Without a cast, the pump would still install off scoredIngest
+    // alone, park on take() forever, and silently never admit anything. The start-time
+    // guard converts that into a loud setup error instead.
+    const driver = new SpyDriver();
+    const scoredIngest: ScoredIngestSource = {
+      ingress: new ScoredIngress(),
+      toEvent: () => {
+        throw new Error("unreachable: the guard must throw before this is ever called");
+      },
+      lastScoredTick: 0,
+    };
+    expect(() =>
+      start({
+        getGraph,
+        setSnapshot: () => undefined,
+        algorithm: idleAlgorithm,
+        scorer: createScorer([], SCORER_CONFIG),
+        generator: scheduleOf([]),
+        serviceRate: FAST_RATE,
+        checkpoints: [],
+        waves: [],
+        scoredIngest,
+        driver,
+      }),
+    ).toThrow(/scoredIngest requires scenarioCast/);
     expect(driver.started).toBe(false); // the Clock was never constructed
   });
 
@@ -1678,5 +1710,49 @@ describe("engine bounded cost over a long run (ported from world-engine.test.ts)
     h.handle.stop();
     // One flash per tick, pruned to the window, so it never grows without bound.
     expect(maxFlashes).toBeLessThanOrEqual(FLASH_WINDOW_TICKS + 1);
+  });
+
+  it("evicts a dormant actor's provenance entry alongside its view, not just from views", async () => {
+    // provenanceById is a private closure in start(), so there is no public getter for
+    // its size. Spy on the one built-in it's built from (Map.prototype.delete) instead,
+    // and count DISTINCT Map instances that delete the dormant id: `createSchedule`'s own
+    // internal registry (actor.ts) always prunes it on dormancy, and `views` always did
+    // too, so a fixed-but-unpruned provenanceById holds the count at 2. A third distinct
+    // instance is direct evidence provenanceById was pruned as well.
+    const deleteSpy = vi.spyOn(Map.prototype, "delete");
+    try {
+      const h = launch({
+        scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+        ambientCast: {
+          fixtures: [],
+          accountSpawner: oneAmbientAccountRider("prov-evict-1", "cen", 6), // dormant at tick 10
+        },
+        checkpoints: deadlineAt(60),
+      });
+      await step(h.driver, 30, 10);
+      h.handle.stop();
+
+      // Sanity: the rider really was admitted, then evicted (gone from a later snapshot).
+      const seenIndex = h.snapshots.findIndex((snap) =>
+        snap.actors.some((a) => a.id === "prov-evict-1"),
+      );
+      expect(seenIndex).toBeGreaterThan(-1);
+      const evictedLater = h.snapshots
+        .slice(seenIndex + 1)
+        .some((snap) => !snap.actors.some((a) => a.id === "prov-evict-1"));
+      expect(evictedLater).toBe(true);
+
+      // Three distinct registries had `.delete("prov-evict-1")` called on them: the
+      // schedule's own bookkeeping, `views`, and `provenanceById`.
+      const registriesThatDeletedIt = new Set(
+        deleteSpy.mock.calls
+          .map((call, i) => ({ id: call[0], instance: deleteSpy.mock.instances[i] }))
+          .filter((entry) => entry.id === "prov-evict-1")
+          .map((entry) => entry.instance),
+      );
+      expect(registriesThatDeletedIt.size).toBeGreaterThanOrEqual(3);
+    } finally {
+      deleteSpy.mockRestore();
+    }
   });
 });

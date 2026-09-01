@@ -379,6 +379,13 @@ export function start(options: StartOptions): EngineHandle {
   const graph = options.getGraph();
   validateLinearChain(graph.nodes, graph.edges); // throws before allocation
   assertWaveScheduleOrdered(options.waves); // throws before allocation
+  // scoredIngest only ever offers or closes inside the `if (cast)` branch below, so
+  // without a scenarioCast nothing ever calls ingress.offer/close: Ingest parks on
+  // take() forever, admitted stays 0, and a queued === 0 terminal checkpoint reports a
+  // false "won". Reject the misuse at setup instead of letting it silently hang.
+  if (options.scoredIngest && !options.scenarioCast) {
+    throw new Error("start: scoredIngest requires scenarioCast, or its Ingest never admits.");
+  }
 
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
@@ -650,8 +657,14 @@ export function start(options: StartOptions): EngineHandle {
             views.set(id, { ...view, presence });
           }
         }
+        // Evict the dormant actor from both registries, or provenanceById grows with
+        // total admissions instead of live actors on a perpetual run. Safe: this
+        // step's readings (above) already read provenance before this loop runs, and
+        // ids are never reused (createSchedule reserves every startup id; the
+        // spawners mint monotonic ids), so no later actor can inherit a stale entry.
         for (const id of step.dormant) {
           views.delete(id);
+          provenanceById.delete(id);
         }
       };
 
