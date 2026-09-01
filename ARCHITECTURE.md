@@ -29,6 +29,33 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 | `src/game/` | The glue: the run loop and the store that bridges sim to UI. | Only the store.   |
 | `src/ui/`   | React components, gauges, the inspector shell, the findings panel. | Yes.              |
 
+## Inside `src/ui/`
+
+There is no `widgets/` or `components/` folder. "Widget" is a narrow domain term for the
+four `Finding.context` renderers in `src/ui/findings/widgets.tsx`. The real convention:
+
+- **One feature folder per concern.** `intro/`, `decisions/`, `hud/`, `sidepanel/`.
+- **A presentational component, paired with a controller hook.** `Foo.tsx` renders. A
+  `use-foo.ts(x)` hook owns its state, effects, and lifecycle. A hook that returns JSX
+  is a `.tsx` file, like `use-intro-overlay.tsx`. A hook may return the ready-to-mount
+  node itself, so the caller drops it straight into the tree instead of assembling it.
+- **Pure display logic goes in a DOM-free `view-model.ts`.** No React, no DOM reads, so
+  it tests as a plain function (`src/ui/findings/view-model.ts`,
+  `src/ui/decisions/view-model.ts`).
+- **One narrow `useGameStore` selector per value.** Never a fat selector that reads
+  several fields at once. Each call names one value: `useGameStore((state) => state.x)`.
+- **Props carry cross-component wiring the store cannot express.** A focus-restore ref,
+  a callback the parent owns. Optional props are typed `?: T | undefined`, not `?: T`,
+  for `exactOptionalPropertyTypes`.
+- **All CSS lives in the global `src/index.css`.** No CSS modules, no styled-components,
+  no per-component stylesheets.
+- **Tests sit next to the code they test and use React Testing Library.** They assert
+  accessible roles and text, not implementation detail.
+
+`src/ui/sidepanel/` and `src/ui/intro/` follow this exactly: a presentational component
+(`SidePanel.tsx`, `IntroOverlay.tsx`), a controller hook that returns the mounted node
+(`use-side-panel.tsx`, `use-intro-overlay.tsx`), and co-located tests for both.
+
 ## The rules
 
 1. **The sim owns the loop. React never drives it.** The loop lives in a plain-TS module in `src/game/`. A `useEffect` starts and stops it. Render never ticks the sim.
@@ -82,16 +109,16 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 - `src/sim/actors/` holds the shared generation machinery (the FSM engine, the scheduler, the composer, the wave admission controller) and the benign actors every Scenario reuses (the rider, the account rider, staff, trains). Pure logic, no React. **Graduation rule:** a deviant or specialized actor is born in its Scenario's own folder (e.g. `pin-attacker.ts` under `pin-brute-force/`), and graduates into `src/sim/actors/` only when a second Scenario casts it — until then it stays local, so `src/sim/actors/` holds only what is genuinely shared.
 - `src/sim/scenarios/` holds one folder per Scenario. A Scenario builds its actor cast, drives the intent timeline, injects Attacks as deviant actors, and records the Ground truth. Pure logic, no React.
 - The player's Algorithm is an ES module the engine imports at runtime. A run controller in `src/game/` owns its edit, load, and reload lifecycle.
-- One composed engine detects every registered hunt, authored as many files: a core plus one rule per scenario, composed by `createEngine`. Two ways to read or change it. The in-game editor shows one assembled JS module, built from those files and served as a Vite virtual module. Or a player edits one real TypeScript override at `src/algorithms/engine.ts` in their own editor, and Vite hot-reloads it into the run. `src/algorithms/` is gitignored player scratch space; the checked-in default engine is composed from the scenario rules. See `docs/adr/0010-one-engine-composable-scenarios.md` and `docs/adr/0008-native-algorithm-hot-reload.md`.
+- One composed engine detects every registered hunt, authored as many files: a core plus one rule per scenario, composed by `createEngine`. The in-game editor shows one assembled JS module, built from those files and served as a Vite virtual module (`virtual:engine-source`). A player edits that text and presses Apply, in the Algorithm tab of the side panel. See `docs/adr/0010-one-engine-composable-scenarios.md`.
 
 ## Toolchain
 
 - **Node** (26.5.1, pinned in `.nvmrc` and CI) is the runtime. **pnpm** (10.29.3) is the
   package manager, with a 7-day install cooldown in `pnpm-workspace.yaml`.
-- **Vite** is the only dev server and the bundler. Dev server: `pnpm run dev`, which also
-  serves and hot-reloads local-IDE algorithms. Build: `pnpm run build` (to `dist`). Vite
-  bundles the profiler Web Worker and serves it over http. The dev-only local-IDE code is
-  behind `import.meta.env.DEV` and drops from the build; `verify:static` proves it.
+- **Vite** is the only dev server and the bundler. Dev server: `pnpm run dev`. Build:
+  `pnpm run build` (to `dist`). Vite bundles the profiler Web Worker and serves it over
+  http. `verify:static` checks the production build: it carries the assembled engine and
+  is non-vacuous.
 - **Vitest** (happy-dom) is the test runner; **tsx** runs the TypeScript scripts.
 - See `docs/adr/0005-node-toolchain-drop-bun.md` for the move to Node, and
   `docs/adr/0001-all-bun-drop-vite.md` (Superseded) for the Bun era it reverses.

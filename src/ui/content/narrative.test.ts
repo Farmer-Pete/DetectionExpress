@@ -55,6 +55,7 @@ describe("narrative content", () => {
 
   it("carries Peter's contact and the source repo", () => {
     expect(hireMe.email).toBe("peter@naud.us");
+    expect(hireMe.linkedin).toBe("https://www.linkedin.com/in/linuxlefty/");
     expect(REPO_URL).toBe("https://github.com/Farmer-Pete/DetectionExpress");
   });
 

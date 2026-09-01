@@ -30,11 +30,12 @@ export interface IntroCopy {
   editLabel: string;
 }
 
-/** The Hire Me card copy: heading, body paragraphs, and the contact email. */
+/** The Hire Me card copy: heading, body paragraphs, and the two contact links. */
 export interface HireMeCopy {
   heading: string;
   body: string[];
   email: string;
+  linkedin: string;
 }
 
 /** One rung of the chaos ladder. `playable` marks a level a player can run today. */
@@ -72,10 +73,11 @@ export const introCopy: IntroCopy = {
 export const hireMe: HireMeCopy = {
   heading: "Hire me",
   body: [
-    "I am Peter Naudus. I have spent 25 years building calculation and detection engines. This simulation is one of them, running in your browser.",
-    "If you need someone who builds engines like this, I am open to work.",
+    "Hello! 👋",
+    "My name is Peter Naudus and I've spent 25 years building analytical and detection engines. If you have a ton of data and you need someone to ingest and process it, I'd love to chat!",
   ],
   email: "peter@naud.us",
+  linkedin: "https://www.linkedin.com/in/linuxlefty/",
 };
 
 export const chaosLevels: readonly ChaosLevel[] = [

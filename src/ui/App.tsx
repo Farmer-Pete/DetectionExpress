@@ -1,38 +1,73 @@
 /**
- * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md). It holds
- * only the `mapShown` toggle, the wave shake, the modal-open derivation, and the two
- * panel refs shared with `InspectorShell`/`DecisionsPanel`/`TraceOverlay`; everything
- * else is composed from a hook or a component that owns its own lifecycle and its own
- * tests:
+ * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md,
+ * GH118-PLAN.md). It holds only the `mapShown` toggle, the wave shake, the
+ * modal-open derivation, the two panel refs shared with
+ * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the two Topbar button refs
+ * shared with the side panel; everything else is composed from a hook or a
+ * component that owns its own lifecycle and its own tests:
  *
  * - `useIntroOverlay` (intro/) owns the overlay's seen-flag state, its three dismiss
- *   actions, and the post-close scroll+focus effect.
+ *   actions, and the post-close focus-return effect. Its "Cause chaos"/"Edit the
+ *   Engine" actions report the side-panel tab they want through the
+ *   `onRequestPanel` callback this file injects (see "The intro transition" below).
  * - `usePipelineController` (run/) builds the one merged-engine `RunController` on
  *   mount and disposes it (permanently) on unmount. React Strict Mode's
  *   mount/unmount/mount cycle is safe: the factory yields a new controller per epoch
  *   and the cleanup disposes the old one. Render never drives the loop. Tests inject
  *   a controller factory through `createPipelineController`, so the app never loads
- *   the real loader or engine under test. The Apply button reloads the current
- *   Algorithm source. GH117 unified the metro map onto this same engine, so there is
- *   only one controller and one loop now — the standalone `useWorldController` and
- *   `WorldRunController` are retired.
- * - `useLocalIde` (dev/) wires the dev-only local-IDE (algorithms hot-reload) client.
- *   Its whole path is gated on `import.meta.env.DEV` and a live HMR channel, so the
- *   production build inlines the gate to `false` and strips both the client and its
- *   loader out entirely; under test there is no `import.meta.hot`, so it stays inert
- *   too. That client maps a watched save into the run and drives the store's generic
- *   `sourceLocked` while a local file is authoritative.
+ *   the real loader or engine under test. The Apply button (now inside the side
+ *   panel) reloads the current Algorithm source. GH117 unified the metro map onto
+ *   this same engine, so there is only one controller and one loop now — the
+ *   standalone `useWorldController` and `WorldRunController` are retired.
+ * - `useSidePanel` (sidepanel/) owns the chaos-ladder/Algorithm side panel: its
+ *   `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
+ *   Apply-on-success-only wiring. `Topbar`'s two openers and the intro's two actions
+ *   all route through it.
  * - `Topbar` renders the header: the title, the slice tag, the map show/hide toggle,
- *   the "How this works" reopen button (wired to `useIntroOverlay`'s `reopenRef` and
- *   `onReopen`), and Hire Me.
+ *   the two side-panel openers, the "How this works" reopen button (wired to
+ *   `useIntroOverlay`'s `reopenRef` and `onReopen`), and Hire Me.
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
- * derives `modalOpen` — `introOpen || traceOpen`, where `traceOpen` is `selection !==
- * null || decisionSelection !== null` — and hands it in along with both overlays,
- * `IntroOverlay` and `TraceOverlay`, as `ModalHost`'s `overlays` prop. Both render as
- * siblings of the inert shell, so a screen reader's browse mode and the keyboard
- * cannot reach shell content behind either one.
+ * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open` — and hands it in
+ * along with all three overlays, `IntroOverlay`, `TraceOverlay`, and the side panel,
+ * as `ModalHost`'s `overlays` prop. All three render as siblings of the inert shell,
+ * so a screen reader's browse mode and the keyboard cannot reach shell content
+ * behind any of them. `openChaos`/`openAlgorithm` are mutually exclusive with the
+ * trace overlay (`useSidePanel`'s own concern), so the shell never stacks two dim
+ * backdrops.
+ *
+ * `App` also publishes `modalOpen` to the store as `overlayOpen`, with
+ * `useLayoutEffect` (not a passive effect) so it lands in the same commit as
+ * `ModalHost`'s `inert` change: `LogPanel`'s global Space-to-freeze listener has no
+ * idea the shell is inert, so without this it could resume a run the player can't
+ * see or reach. A second effect resets `overlayOpen` to false on unmount, so an
+ * unmount while an overlay is open can never leave it stuck true.
+ *
+ * ## The intro transition (GH118-PLAN.md)
+ * The intro's "Cause chaos" and "Edit the Engine" must open the side panel, but
+ * `setIntroOpen(false)` is asynchronous, so the intro still reads open at the
+ * moment either fires — calling `sidePanel.openChaos()`/`openAlgorithm()` right then
+ * would trip the exclusivity check the trace overlay guards against (and there is no
+ * trace overlay open here; the check that matters is simply "don't open two modals
+ * at once"). So the protocol is: the action (via `onRequestPanel`, injected into
+ * `useIntroOverlay` below) records the requested tab in `pendingPanelTabRef` and
+ * closes the intro; a plain `useEffect` here opens the panel once `intro.introOpen`
+ * has actually gone false. This never fires the panel while the intro still renders,
+ * since the intro is gone by the time the effect runs.
+ *
+ * The intro button that triggered this is unmounted before the panel could restore
+ * focus to it, so the panel falls back to a stable Topbar button instead:
+ * `chaosButtonRef`/`algorithmButtonRef` are handed to both `Topbar` (which attaches
+ * them to its two openers) and `useSidePanel` (which forwards whichever one matches
+ * the active tab as `SidePanel`'s `fallbackFocusRef`), the same fallback-focus
+ * pattern `TraceOverlay` already uses.
+ *
+ * ## Pause ownership (GH118-PLAN.md)
+ * The pause runs through the store's `transport.frozen`, not a direct controller
+ * call — the reflection effect in `use-pipeline-controller.ts` mirrors it onto
+ * `controller.setFrozen`. `useSidePanel` owns the save/restore/unfreeze protocol
+ * around opening and closing the panel; this file only feeds it `controllerRef`.
  *
  * The shell also owns the wave shake (#38 juice item 1): one-shot ownership
  * (`useWavePhaseEdge`) toggles `.shake` on `.app-shell` for `SHAKE_MS` on the
@@ -49,17 +84,10 @@
  * instant a run concludes, instead of running out its own timer over a frozen
  * frame. A fresh run re-arms the edge once it starts running again.
  */
-import { useRef, useState } from "react";
-import { defaultEntry } from "../game/registry";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
-import { AlgorithmEditor } from "./AlgorithmEditor";
-import { Briefing } from "./Briefing";
-import { ChaosLadder } from "./ChaosLadder";
-import { chaosLevels, liveScenarioFrom } from "./content/narrative";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
-import { LocalIdeToggle } from "./dev/LocalIdeToggle";
-import { useLocalIde } from "./dev/use-local-ide";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
 import { Hud } from "./hud/Hud";
@@ -67,15 +95,13 @@ import { useIntroOverlay } from "./intro/use-intro-overlay";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { usePipelineController } from "./run/use-pipeline-controller";
+import { type SidePanelTab, useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
 /** Matches the CSS `shake` keyframes' 0.3s duration (`src/index.css`). */
 const SHAKE_MS = 300;
-
-/** The live scenario's display copy, joined from the registry's catalogue entry. */
-const liveScenario = liveScenarioFrom(defaultEntry);
 
 interface AppProps {
   // The controller FACTORY: builds a FRESH controller on mount and disposes it on
@@ -96,6 +122,11 @@ export function App({ createPipelineController }: AppProps = {}) {
   // Shared with DecisionsPanel (which renders it) and TraceOverlay (which reads it as
   // the decision-mode focus fallback, GH34-35-PLAN.md decision 14).
   const decisionsPanelRef = useRef<HTMLElement>(null);
+  // Shared with Topbar (which attaches them to its two openers) and useSidePanel
+  // (which forwards them as the panel's intro-path focus fallback, see the module
+  // doc's "The intro transition").
+  const chaosButtonRef = useRef<HTMLButtonElement>(null);
+  const algorithmButtonRef = useRef<HTMLButtonElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -109,18 +140,28 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   // Whether the trace dialog is open (GH105-PLAN.md): `selection !== null` OR
   // `decisionSelection !== null` IS "the dialog is open" (GH34-35-PLAN.md decision 2).
-  // Feeds ModalHost's modalOpen alongside introOpen, so the shell goes inert whenever
-  // either overlay is showing. This derivation is sound only because the store now
-  // validates a selection against the live snapshot before storing it (store.ts), so a
-  // set selection always implies TraceOverlay actually renders a dialog.
+  // Feeds ModalHost's modalOpen alongside introOpen and the side panel's open state,
+  // so the shell goes inert whenever any of the three is showing. This derivation is
+  // sound only because the store now validates a selection against the live snapshot
+  // before storing it (store.ts), so a set selection always implies TraceOverlay
+  // actually renders a dialog.
   const selection = useGameStore((s) => s.selection);
   const decisionSelection = useGameStore((s) => s.decisionSelection);
   const traceOpen = selection !== null || decisionSelection !== null;
 
+  // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
+  // requests a side-panel tab records it here instead of opening the panel
+  // directly, since the intro is still (asynchronously) open at call time. Stable
+  // identity, so useIntroOverlay's onCauseChaos/onEditEngine never churn.
+  const pendingPanelTabRef = useRef<SidePanelTab | null>(null);
+  const onRequestPanel = useCallback((tab: SidePanelTab) => {
+    pendingPanelTabRef.current = tab;
+  }, []);
+
   // The intro overlay, extracted to its own hook (GH109-PLAN.md): the seen-flag lazy
-  // init, the three dismiss actions, the deferred post-close scroll+focus effect, and
-  // the reopen control's ref/handler.
-  const intro = useIntroOverlay();
+  // init, the three dismiss actions, the post-close focus-return effect, and the
+  // reopen control's ref/handler.
+  const intro = useIntroOverlay({ onRequestPanel });
 
   // The pipeline controller lifecycle, extracted to its own hook (GH109-PLAN.md): a
   // fresh controller per epoch, seeded from the store transport, disposed (with the
@@ -132,27 +173,68 @@ export function App({ createPipelineController }: AppProps = {}) {
     createController: createPipelineController,
   });
 
-  // The dev-only local-IDE (algorithms hot-reload) client, extracted to its own hook
-  // (GH109-PLAN.md): the `import.meta.env.DEV` + live-HMR-channel gate, the
-  // `algoReady`/`localMode` state, and the enter/stop handlers. The one-engine model
-  // (ADR 0010) makes it slugless: the override is the fixed `src/algorithms/engine.ts`.
-  const dev = useLocalIde({ controllerRef });
+  // The side panel (GH118-PLAN.md, sidepanel/): the chaos ladder and Algorithm
+  // editor tabs, moved off the main column behind a right-edge overlay. Owns its own
+  // open/tab state, the pause protocol, and the Apply-on-success wiring.
+  const sidePanel = useSidePanel({
+    controllerRef,
+    chaosFocusRef: chaosButtonRef,
+    algorithmFocusRef: algorithmButtonRef,
+  });
+
+  // Complete the intro transition: once the intro has actually closed, act on
+  // whatever tab a dismiss recorded (see the module doc's "The intro transition").
+  // A no-op on every other render, since `pendingPanelTabRef` only ever holds a
+  // value between an intro dismiss and this effect's next run.
+  useEffect(() => {
+    if (intro.introOpen) {
+      return;
+    }
+    const tab = pendingPanelTabRef.current;
+    if (tab === null) {
+      return;
+    }
+    pendingPanelTabRef.current = null;
+    if (tab === "chaos") {
+      sidePanel.openChaos();
+    } else {
+      sidePanel.openAlgorithm();
+    }
+  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm]);
+
+  const modalOpen = intro.introOpen || traceOpen || sidePanel.open;
+
+  // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
+  // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
+  // LogPanel's Space-to-freeze listener has no idea the shell is inert, so this is
+  // what keeps Space from resuming a run hidden behind an overlay.
+  const setOverlayOpen = useGameStore((s) => s.setOverlayOpen);
+  useLayoutEffect(() => {
+    setOverlayOpen(modalOpen);
+  }, [modalOpen, setOverlayOpen]);
+  // A separate effect, not the cleanup of the one above: its cleanup should fire
+  // only on a real App unmount, not on every modalOpen change. Guards against an
+  // unmount while an overlay is open leaving `overlayOpen` stuck true forever.
+  useLayoutEffect(() => {
+    return () => setOverlayOpen(false);
+  }, [setOverlayOpen]);
 
   return (
     // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
-    // (GH105-PLAN.md). `modalOpen` covers both overlays, so the shell goes inert
-    // while EITHER the intro or the trace dialog is open, and a screen reader's
-    // browse mode and the keyboard cannot reach shell content behind either one. The
-    // shake class lands on the shell class it manages, not the outer `.app` wrapper,
-    // so its transform never turns into a containing block for an overlay's
-    // `position: fixed` backdrop (F006). `shellExtraClass` ANDs `shaking` with
-    // `status === "running"`, so an in-flight shake clears immediately if the run
-    // concludes mid-animation, instead of running out its own timer over a frozen
-    // frame (CodeRabbit review). Both overlays are ModalHost's `overlays` siblings:
-    // `IntroOverlay` when `introOpen`, and `TraceOverlay` unconditionally (it renders
-    // null itself when neither selection is set).
+    // (GH105-PLAN.md). `modalOpen` covers all three overlays, so the shell goes
+    // inert while ANY of the intro, the trace dialog, or the side panel is open, and
+    // a screen reader's browse mode and the keyboard cannot reach shell content
+    // behind any of them. The shake class lands on the shell class it manages, not
+    // the outer `.app` wrapper, so its transform never turns into a containing block
+    // for an overlay's `position: fixed` backdrop (F006). `shellExtraClass` ANDs
+    // `shaking` with `status === "running"`, so an in-flight shake clears
+    // immediately if the run concludes mid-animation, instead of running out its own
+    // timer over a frozen frame (CodeRabbit review). All three overlays are
+    // ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
+    // `TraceOverlay` unconditionally (it renders null itself when neither selection
+    // is set), and the side panel when `sidePanel.open`.
     <ModalHost
-      modalOpen={intro.introOpen || traceOpen}
+      modalOpen={modalOpen}
       shellExtraClass={shaking && status === "running" ? "shake" : undefined}
       overlays={
         <>
@@ -161,6 +243,7 @@ export function App({ createPipelineController }: AppProps = {}) {
             fallbackFocusRef={findingsPanelRef}
             decisionsFallbackFocusRef={decisionsPanelRef}
           />
+          {sidePanel.sidePanel}
         </>
       }
     >
@@ -169,20 +252,15 @@ export function App({ createPipelineController }: AppProps = {}) {
         onToggleMap={() => setMapShown(!mapShown)}
         reopenRef={intro.reopenRef}
         onReopen={intro.onReopen}
+        onOpenChaos={sidePanel.openChaos}
+        onOpenAlgorithm={sidePanel.openAlgorithm}
+        chaosButtonRef={chaosButtonRef}
+        algorithmButtonRef={algorithmButtonRef}
       />
       <Hud />
       {mapShown ? <MetroView /> : null}
       <InspectorShell findingsPanelRef={findingsPanelRef} />
       <DecisionsPanel panelRef={decisionsPanelRef} />
-      <Briefing tagline={liveScenario.tagline} text={defaultEntry.catalogue.security.briefing} />
-      <AlgorithmEditor onRun={() => controllerRef.current?.run()} />
-      <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
-      <LocalIdeToggle
-        ready={dev.algoReady}
-        localMode={dev.localMode}
-        onEnter={dev.onEnterLocalMode}
-        onStop={dev.onStopLocalMode}
-      />
     </ModalHost>
   );
 }

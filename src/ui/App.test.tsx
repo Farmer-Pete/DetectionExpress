@@ -13,17 +13,16 @@ import { markIntroSeen } from "./onboarding-storage";
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 // The zustand store is a singleton shared across test files, so reset the fields
-// this file reads before each test, or a leaked `sourceLocked` would hide the Apply
-// button. Mirrors the reset pattern in store.test.ts.
+// this file reads before each test. Mirrors the reset pattern in store.test.ts.
 //
 // The onboarding overlay covers the shell on first load. Shell tests seed the seen
 // flag so the overlay stays closed; the onboarding tests clear it to see the overlay.
 beforeEach(() => {
   useGameStore.setState({
     source: referenceSource,
-    sourceLocked: false,
     runPending: false,
     transport: { frozen: false, speed: 1 },
+    overlayOpen: false,
   });
   markIntroSeen();
 });
@@ -64,14 +63,37 @@ function stubController(): RunController & {
 }
 
 describe("App shell", () => {
-  it("renders the heading, both gauges, and the Algorithm editor", () => {
+  it("renders the heading and both gauges", () => {
     render(<App createPipelineController={() => stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Queue")).toBeDefined();
+  });
+
+  it("has no side panel on screen at rest", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+  });
+
+  it("opens the side panel on the chaos tab, chaos ladder default, from the Topbar's Chaos ladder button", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("heading", { name: /chaos ladder/i })).toBeDefined();
+    expect(screen.getByText(new RegExp(liveScenario.displayName))).toBeDefined();
+  });
+
+  it("opens the side panel on the algorithm tab, with Apply and Reset, from the Topbar's Algorithm button", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Algorithm" }));
+    expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
+    expect(screen.getByRole("button", { name: /reset to default/i })).toBeDefined();
   });
 
   it("runs the controller on mount and disposes it on unmount", () => {
@@ -80,14 +102,6 @@ describe("App shell", () => {
     expect(controller.runs).toBe(1);
     unmount();
     expect(controller.disposes).toBe(1);
-  });
-
-  it("does not mount the local-IDE control without a dev HMR channel", () => {
-    // The local-IDE client gates on a live `import.meta.hot` channel, which the test
-    // environment lacks, so neither the "Edit in IDE" nor "Stop editing" control shows.
-    render(<App createPipelineController={() => stubController()} />);
-    expect(screen.queryByRole("button", { name: "Edit in IDE" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Stop editing" })).toBeNull();
   });
 
   it("carries the Hire Me button and the reopen control in the topbar", () => {
@@ -127,11 +141,60 @@ describe("App shell", () => {
     expect(inspector.nextElementSibling).toBe(decisions);
     expect(container.contains(decisions)).toBe(true);
   });
+});
 
-  it("renders the chaos ladder in the shell", () => {
-    const { container } = render(<App createPipelineController={() => stubController()} />);
-    expect(container.querySelector("#chaos-ladder")).not.toBeNull();
-    expect(screen.getByText(new RegExp(liveScenario.displayName))).toBeDefined();
+describe("App side panel (GH118-PLAN.md)", () => {
+  it("inerts the shell while the side panel is open, and lifts it on close", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    const shell = document.querySelector(".app-shell");
+    expect(shell?.hasAttribute("inert")).toBe(true);
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Side panel" }), { key: "Escape" });
+    expect(shell?.hasAttribute("inert")).toBe(false);
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+  });
+
+  it("publishes overlayOpen true/false as the panel opens and closes, and resets it false on unmount", () => {
+    const { unmount } = render(<App createPipelineController={() => stubController()} />);
+    expect(useGameStore.getState().overlayOpen).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(useGameStore.getState().overlayOpen).toBe(true);
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Side panel" }), { key: "Escape" });
+    expect(useGameStore.getState().overlayOpen).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(useGameStore.getState().overlayOpen).toBe(true);
+    unmount();
+    expect(useGameStore.getState().overlayOpen).toBe(false);
+  });
+
+  it("publishes overlayOpen in the same commit the shell goes inert (useLayoutEffect, not a lagging passive effect)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    // Record whether the shell is already inert at the instant the store notifies
+    // subscribers of an overlayOpen flip, the same "ordering, not just the end
+    // state" rigor as App.browse-isolation.test.tsx's inert-at-focus-time check: a
+    // passive effect would still reach the right end state, but could notify one
+    // task later than the DOM mutation, which this catches.
+    const inertAtPublish: Array<boolean | undefined> = [];
+    const unsubscribe = useGameStore.subscribe((state, prevState) => {
+      if (state.overlayOpen !== prevState.overlayOpen) {
+        inertAtPublish.push(document.querySelector(".app-shell")?.hasAttribute("inert"));
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    unsubscribe();
+    expect(inertAtPublish).toEqual([true]);
+  });
+
+  it("opens the panel from the Topbar's Algorithm button on the algorithm tab", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Algorithm" }));
+    expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
   });
 });
 
@@ -159,21 +222,47 @@ describe("App onboarding", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("scrolls to the chaos ladder, then focuses it, after Cause chaos dismisses", () => {
+  it("opens the side panel on the chaos tab after Cause chaos closes the intro, without scrolling", () => {
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    // The scroll and the focus both land on the chaos ladder after the overlay unmounts.
-    expect(scrollTargets).toContain("chaos-ladder");
-    expect(document.activeElement?.id).toBe("chaos-ladder");
+    expect(screen.queryByRole("dialog", { name: introCopy.title })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("true");
+    expect(scrollTargets).toEqual([]);
   });
 
-  it("scrolls to the engine editor, then focuses it, after Edit the Engine dismisses", () => {
+  it("opens the side panel on the algorithm tab after Edit the Engine closes the intro, without scrolling", () => {
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(scrollTargets).toContain("algorithm-editor");
-    expect(document.activeElement?.id).toBe("algorithm-editor");
+    expect(screen.queryByRole("dialog", { name: introCopy.title })).toBeNull();
+    expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(scrollTargets).toEqual([]);
+  });
+
+  it("restores focus to the Topbar's Chaos ladder button when the panel opened via Cause chaos then closes (the intro's own button is gone)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
+    const panel = screen.getByRole("dialog", { name: "Side panel" });
+    const chaosButton = screen.getByRole("button", { name: "Chaos ladder" });
+
+    fireEvent.keyDown(panel, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+    expect(document.activeElement).toBe(chaosButton);
+  });
+
+  it("restores focus to the Topbar's Algorithm button when the panel opened via Edit the Engine then closes", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
+    const panel = screen.getByRole("dialog", { name: "Side panel" });
+    const algorithmButton = screen.getByRole("button", { name: "Algorithm" });
+
+    fireEvent.keyDown(panel, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+    expect(document.activeElement).toBe(algorithmButton);
   });
 
   it("reopens the overlay from the topbar without clearing the seen flag", () => {

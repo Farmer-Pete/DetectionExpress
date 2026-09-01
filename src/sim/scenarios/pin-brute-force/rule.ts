@@ -4,8 +4,8 @@
  * engine and the profiler's isolated copy.
  *
  * The logic is the single source of truth for this hunt: the typed composed engine
- * (`default-engine.ts`), the in-process twin (`reference.ts`), and the assembled
- * editor source all derive from this file, so the three stay in parity by
+ * (`registry.ts`'s `buildEngine()`), the in-process twin (`reference.ts`), and the
+ * assembled editor source all derive from this file, so the three stay in parity by
  * construction rather than by hand.
  *
  * On the way up it emits an anchored watch per fail ("N of 5 wrong PINs"), then one

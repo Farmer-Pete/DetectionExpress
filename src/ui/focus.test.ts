@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { focusableControls, installOutsidePointerDismiss } from "./focus";
+import { focusableControls, installOutsidePointerDismiss, trapTab } from "./focus";
 
 describe("focusableControls", () => {
   it("excludes a disabled control and one nested inside an aria-hidden wrapper, keeping enabled visible ones", () => {
@@ -16,6 +16,48 @@ describe("focusableControls", () => {
     }
     const ids = focusableControls(dialog).map((el) => el.id);
     expect(ids).toEqual(["enabled"]);
+  });
+
+  it("excludes a native control with a negative tabIndex, e.g. a roving-tabindex inactive tab", () => {
+    document.body.innerHTML = `
+      <div id="dialog">
+        <button id="inactive-tab" tabindex="-1">Inactive</button>
+        <button id="active-tab" tabindex="0">Active</button>
+        <button id="close">Close</button>
+      </div>
+    `;
+    const dialog = document.getElementById("dialog");
+    if (dialog === null) {
+      throw new Error("expected the dialog fixture");
+    }
+    const ids = focusableControls(dialog).map((el) => el.id);
+    expect(ids).toEqual(["active-tab", "close"]);
+  });
+});
+
+describe("trapTab", () => {
+  it("wraps Shift+Tab from the active tab, skipping the negative-tabIndex inactive tab before it", () => {
+    // The regression guard for the focus-leak bug: before the tabIndex filter, the
+    // inactive tab counted as the first control, so Shift+Tab from the active tab was
+    // treated as interior and native focus escaped the dialog.
+    document.body.innerHTML = `
+      <div id="dialog" tabindex="-1">
+        <button id="inactive-tab" tabindex="-1">Inactive</button>
+        <button id="active-tab" tabindex="0">Active</button>
+        <button id="close">Close</button>
+      </div>
+    `;
+    const dialog = document.getElementById("dialog");
+    const active = document.getElementById("active-tab");
+    if (dialog === null || active === null) {
+      throw new Error("expected the dialog fixture");
+    }
+    active.focus();
+    const preventDefault = vi.fn();
+    const handled = trapTab(dialog, { key: "Tab", shiftKey: true, preventDefault });
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(document.activeElement?.id).toBe("close");
   });
 });
 
