@@ -26,13 +26,7 @@ import { RuleError } from "../sim/rule-error";
 import type { Scenario } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
-import {
-  type AlgorithmSource,
-  type LoadedAlgorithm,
-  type LoadTarget,
-  loadAlgorithm as loadAlgorithmDefault,
-  toLoadTarget,
-} from "./algorithm";
+import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
 import { type EngineHandle, type StartOptions, start as startDefault } from "./engine";
 import { tabHidden } from "./profiler/guard";
 import { profile, spawnProfilerWorker } from "./profiler/profile";
@@ -83,8 +77,8 @@ export interface ServiceRateHandle {
   cancel: () => void;
 }
 
-/** Measure the service rate for a load target. Injected so tests never spawn a worker. */
-type ResolveServiceRate = (target: LoadTarget) => ServiceRateHandle;
+/** Measure the service rate for a source string. Injected so tests never spawn a worker. */
+type ResolveServiceRate = (source: string) => ServiceRateHandle;
 
 export interface RunController {
   /** Load the current source and (re)start the engine. Safe to call repeatedly. */
@@ -92,13 +86,13 @@ export interface RunController {
   /**
    * Freeze or unfreeze the run. The controller retains the desired state, delegates
    * to the live engine handle when one exists, and reapplies it on the next start,
-   * so an Apply or hot-reload inherits the current freeze. Safe with no engine live.
+   * so any fresh run inherits the current freeze. Safe with no engine live.
    */
   setFrozen(frozen: boolean): void;
   /**
    * Set the run's playback speed. The controller validates the value before it retains
    * it, delegates to the live engine handle when one exists, and reapplies it on the
-   * next start, so an Apply or hot-reload inherits the current speed. Safe with no
+   * next start, so any fresh run inherits the current speed. Safe with no
    * engine live.
    */
   setSpeed(speed: Speed): void;
@@ -110,17 +104,17 @@ export interface RunControllerDeps {
   scenario: Scenario;
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
   /**
-   * The one discriminated input (86-PLAN.md). The controller derives the loader,
-   * the profiler request, and the calibration cache key from it. Source mode carries
-   * the in-game editor string; url mode carries a served module URL (M2b's producer).
+   * The in-game editor's source string. The controller derives the loader, the
+   * profiler request, and the calibration cache key from it.
    */
-  getAlgorithmSource: () => AlgorithmSource;
+  getAlgorithmSource: () => string;
   getSeed: () => number;
   setSnapshot: (snapshot: SimSnapshot) => void;
   setError: (error: RuleErrorInfo | null) => void;
   /**
-   * True while a run loads and profiles (the Apply dry-run, app mount, or a hot-reload);
-   * false once it commits, fails, or is superseded. The editor reads it to disable Apply.
+   * True while a run loads and profiles (an Apply dry-run, app mount, or any other
+   * fresh run); false once it commits, fails, or is superseded. The editor reads it
+   * to disable Apply.
    */
   setRunPending: (pending: boolean) => void;
   /**
@@ -134,7 +128,7 @@ export interface RunControllerDeps {
    */
   bumpRunToken: () => void;
   /** Defaults to the real loader; tests inject a deterministic one. */
-  loadAlgorithm?: (target: LoadTarget) => Promise<LoadedAlgorithm>;
+  loadAlgorithm?: (source: string) => Promise<LoadedAlgorithm>;
   /**
    * The whole service-rate seam. Defaults to the worker-backed resolver built from
    * `spawnProfilerWorker` and `mainThreadResolveServiceRate` below; a test can
@@ -214,31 +208,22 @@ function deferredWhileHidden(data: unknown): boolean {
 
 /**
  * The separator between calibration-cache-key parts. U+241F (SYMBOL FOR UNIT
- * SEPARATOR) is a printable character that no scenario id, seed, version, path, or
- * player source contains, so two distinct key tuples never collide onto one rate. It
- * is ordinary text, not a NUL byte, so git keeps treating this file as text.
+ * SEPARATOR) is a printable character that no scenario id, seed, version, or player
+ * source contains, so two distinct key tuples never collide onto one rate. It is
+ * ordinary text, not a NUL byte, so git keeps treating this file as text.
  */
 const CACHE_KEY_SEP = "\u241F";
 
 /**
- * The calibration cache key (GH3-PLAN.md 5.1, 86-PLAN.md "cache identity"): a valid
- * entry is never re-measured. Every fixed dimension is kept: scenario id, numeric
- * seed, and the corpus/profiler versions that bust the cache when either changes.
- * Only the source component varies by mode. In url mode it is `path + version`, so an
- * unchanged file reuses the rate and a save (a bumped version) busts it. In source
- * mode it is the FULL source string, not a hash. Every part is joined by
- * `CACHE_KEY_SEP`, which none of the parts can contain, so no two distinct tuples,
- * across scenario, seed, version, or mode, ever share a key.
+ * The calibration cache key (GH3-PLAN.md 5.1): a valid entry is never re-measured.
+ * Every fixed dimension is kept: scenario id, numeric seed, and the corpus/profiler
+ * versions that bust the cache when either changes, plus the FULL source string, not
+ * a hash. Every part is joined by `CACHE_KEY_SEP`, which none of the parts can
+ * contain, so no two distinct tuples, across scenario, seed, version, or source, ever
+ * share a key.
  */
-function calibrationCacheKey(
-  scenarioId: string,
-  seed: number,
-  algorithmSource: AlgorithmSource,
-): string {
-  const prefix = [scenarioId, seed, CORPUS_VERSION, PROFILER_VERSION].join(CACHE_KEY_SEP);
-  return algorithmSource.kind === "url"
-    ? [prefix, "url", algorithmSource.path, algorithmSource.version].join(CACHE_KEY_SEP)
-    : [prefix, "source", algorithmSource.source].join(CACHE_KEY_SEP);
+function calibrationCacheKey(scenarioId: string, seed: number, source: string): string {
+  return [scenarioId, seed, CORPUS_VERSION, PROFILER_VERSION, source].join(CACHE_KEY_SEP);
 }
 
 /** Cap the memo so a long editing session cannot grow it without bound. */
@@ -248,11 +233,11 @@ const RATE_CACHE_MAX = 64;
  * The fallback service-rate seam: measure on the main thread. Correct, but it
  * blocks for the profile's duration, so it is only used where a module Worker is
  * unavailable (some dev servers and embedded browsers reject one). It loads the
- * target, adapts it exactly as the worker does, profiles it, and quantizes.
+ * source, adapts it exactly as the worker does, profiles it, and quantizes.
  */
-function mainThreadResolveServiceRate(target: LoadTarget): ServiceRateHandle {
+function mainThreadResolveServiceRate(source: string): ServiceRateHandle {
   const rate = (async (): Promise<ServiceRate> => {
-    const loaded = await loadAlgorithmDefault(target);
+    const loaded = await loadAlgorithmDefault(source);
     // The hidden-tab defer exists for the Worker, whose timers are clamped while
     // hidden. This synchronous main-thread measurement is not throttled by
     // visibility, so it profiles regardless (hidden: false).
@@ -281,7 +266,7 @@ function makeWorkerResolveServiceRate(
   spawn: () => ProfilerWorkerLike,
   fallback: ResolveServiceRate,
 ): ResolveServiceRate {
-  return (target: LoadTarget): ServiceRateHandle => {
+  return (source: string): ServiceRateHandle => {
     let activeWorker: ProfilerWorkerLike | null = null;
     let detachVisibility: (() => void) | null = null;
     let done = false;
@@ -318,7 +303,7 @@ function makeWorkerResolveServiceRate(
         } catch {
           // No module Worker here: measure on the main thread once. That path is
           // not throttled by visibility, so it profiles regardless.
-          fallback(target).rate.then(settleRate, settleError);
+          fallback(source).rate.then(settleRate, settleError);
           return;
         }
         activeWorker = worker;
@@ -347,7 +332,7 @@ function makeWorkerResolveServiceRate(
             event.error instanceof Error ? event.error : new Error("the profiler worker failed"),
           );
         });
-        worker.postMessage({ target, hidden: tabHidden() });
+        worker.postMessage({ source, hidden: tabHidden() });
       };
 
       const waitForVisible = (): void => {
@@ -402,8 +387,8 @@ export function createRunController(deps: RunControllerDeps): RunController {
   let generation = 0;
   let disposed = false;
   // The retained transport state. This is the source of truth: startEngine reapplies
-  // it to every fresh clock, so an Apply or hot-reload inherits the current freeze and
-  // speed. Default speed 1, so a normal startup runs at the base rate.
+  // it to every fresh clock, so any fresh run inherits the current freeze and speed.
+  // Default speed 1, so a normal startup runs at the base rate.
   let frozen = false;
   let speed: Speed = 1;
 
@@ -420,17 +405,15 @@ export function createRunController(deps: RunControllerDeps): RunController {
     try {
       // Guarded so a throw here (a getAlgorithmSource/getSeed bug) reports a structured
       // setup-phase error instead of rejecting the discarded run() promise silently. The
-      // one discriminated input is captured here; the loader, the profiler request, and
-      // the cache key are all derived from it. This is a dry-run step: it must NOT stop
-      // the live engine, so a setup failure leaves the running engine owned and untouched.
-      let algorithmSource: AlgorithmSource;
-      let target: LoadTarget;
+      // source string is captured here; the loader, the profiler request, and the cache
+      // key are all derived from it. This is a dry-run step: it must NOT stop the live
+      // engine, so a setup failure leaves the running engine owned and untouched.
+      let source: string;
       let seed: number;
       try {
         profile?.cancel(); // terminate a still-running measurement from the prior run
         profile = null;
-        algorithmSource = deps.getAlgorithmSource();
-        target = toLoadTarget(algorithmSource); // the loader and profiler both import this
+        source = deps.getAlgorithmSource();
         seed = deps.getSeed();
       } catch (error) {
         deps.setError(toErrorInfo("setup", error));
@@ -439,7 +422,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
 
       let algo: LoadedAlgorithm;
       try {
-        algo = await load(target);
+        algo = await load(source);
       } catch (error) {
         if (!disposed && gen === generation) {
           deps.setError(toErrorInfo("load", error));
@@ -451,14 +434,14 @@ export function createRunController(deps: RunControllerDeps): RunController {
       }
 
       // Reuse a cached rate for an unchanged source: no worker, no measurement.
-      const cacheKey = calibrationCacheKey(deps.scenario.id, seed, algorithmSource);
+      const cacheKey = calibrationCacheKey(deps.scenario.id, seed, source);
       let serviceRate: ServiceRate;
       const cached = rateCache.get(cacheKey);
       if (cached !== undefined) {
         serviceRate = cached;
       } else {
         // Measure the service rate off the sim. A superseded run cancels its worker.
-        const pending = resolveServiceRate(target);
+        const pending = resolveServiceRate(source);
         profile = pending;
         try {
           serviceRate = await pending.rate;
@@ -509,8 +492,8 @@ export function createRunController(deps: RunControllerDeps): RunController {
         });
         engine = handle;
         deps.bumpRunToken(); // the engine actually installed: publish the restart
-        // Reapply the retained transport state to the fresh clock. Apply and hot-reload
-        // build a new clock, so without this a frozen or 2x session would drive a new
+        // Reapply the retained transport state to the fresh clock. Any run() call builds
+        // a new clock, so without this a frozen or 2x session would drive a new
         // unpaused 1x one. The reapply is transactional: if pause or setSpeed throws, the
         // freshly built handle is stopped rather than orphaned, then the throw rethrows to
         // the outer catch, which nulls the engine and reports it as a start-phase error.

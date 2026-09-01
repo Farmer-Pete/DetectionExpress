@@ -1,26 +1,29 @@
 /**
  * `useIntroOverlay` owns the intro-overlay lifecycle App used to inline: the seen-flag
- * lazy init, the three dismiss actions, the deferred post-close scroll+focus effect,
- * and the reopen control's ref/handler. The harness mounts `introOverlay` plus a
- * button wired to `onReopen`/`reopenRef`, mirroring how `Topbar` and `ModalHost` will
- * consume the hook, so these tests exercise the same DOM shape App does today.
+ * lazy init, the three dismiss actions, the post-close focus-return effect, and the
+ * reopen control's ref/handler. Cause chaos and Edit the Engine no longer scroll
+ * (GH118-PLAN.md): they report the requested side-panel tab through the injected
+ * `onRequestPanel` callback instead, and this harness stubs it the way App will.
  */
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { isValidElement } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { introCopy } from "../content/narrative";
 import { hasSeenIntro, markIntroSeen } from "../onboarding-storage";
 import { useIntroOverlay } from "./use-intro-overlay";
 
-function Harness({ tick }: { tick?: number } = {}) {
-  const intro = useIntroOverlay();
+function Harness({
+  onRequestPanel,
+}: {
+  onRequestPanel?: (tab: "chaos" | "algorithm") => void;
+} = {}) {
+  const intro = useIntroOverlay({ onRequestPanel });
   return (
     <div>
       {intro.introOverlay}
       <button type="button" ref={intro.reopenRef} onClick={intro.onReopen}>
         How this works
       </button>
-      <span>tick:{tick ?? 0}</span>
     </div>
   );
 }
@@ -35,16 +38,6 @@ describe("useIntroOverlay", () => {
     Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
       scrollTargets.push(this.id);
     };
-    // Two anchors the dismiss actions scroll+focus, matching App's shell markup.
-    document.body.innerHTML = "";
-    const chaos = document.createElement("div");
-    chaos.id = "chaos-ladder";
-    chaos.tabIndex = -1;
-    document.body.appendChild(chaos);
-    const editor = document.createElement("div");
-    editor.id = "algorithm-editor";
-    editor.tabIndex = -1;
-    document.body.appendChild(editor);
   });
 
   afterEach(() => {
@@ -71,20 +64,26 @@ describe("useIntroOverlay", () => {
     expect(document.activeElement).toBe(reopen);
   });
 
-  it("Cause chaos closes the overlay, then scrolls to and focuses the chaos ladder", () => {
-    render(<Harness />);
+  it("Cause chaos closes the overlay, marks it seen, and requests the chaos panel tab without scrolling", () => {
+    const onRequestPanel = vi.fn();
+    render(<Harness onRequestPanel={onRequestPanel} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(scrollTargets).toContain("chaos-ladder");
-    expect(document.activeElement?.id).toBe("chaos-ladder");
+    expect(hasSeenIntro()).toBe(true);
+    expect(onRequestPanel).toHaveBeenCalledTimes(1);
+    expect(onRequestPanel).toHaveBeenCalledWith("chaos");
+    expect(scrollTargets).toEqual([]);
   });
 
-  it("Edit engine closes the overlay, then scrolls to and focuses the algorithm editor", () => {
-    render(<Harness />);
+  it("Edit engine closes the overlay, marks it seen, and requests the algorithm panel tab without scrolling", () => {
+    const onRequestPanel = vi.fn();
+    render(<Harness onRequestPanel={onRequestPanel} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(scrollTargets).toContain("algorithm-editor");
-    expect(document.activeElement?.id).toBe("algorithm-editor");
+    expect(hasSeenIntro()).toBe(true);
+    expect(onRequestPanel).toHaveBeenCalledTimes(1);
+    expect(onRequestPanel).toHaveBeenCalledWith("algorithm");
+    expect(scrollTargets).toEqual([]);
   });
 
   it("reopen shows the overlay again without clearing the seen flag", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../sim/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
-import type { AlgorithmSource, LoadedAlgorithm, LoadTarget } from "./algorithm";
+import type { LoadedAlgorithm } from "./algorithm";
 import type { EngineHandle, StartOptions } from "./engine";
 import {
   createRunController,
@@ -19,14 +19,9 @@ const scenario: Scenario = { id: "test", generate: () => emptyRun };
 
 const graph = { nodes: [], edges: [] };
 
-/** A source-mode input, the in-game editor's path — the default across most tests. */
-function sourceMode(source = "source"): AlgorithmSource {
-  return { kind: "source", source };
-}
-
-/** A url-mode input, local-IDE mode. `url = path + "?v=" + version`, as the plan sets it. */
-function urlMode(path: string, version: number): AlgorithmSource {
-  return { kind: "url", path, version, url: `${path}?v=${version}` };
+/** The algorithm source input, the in-game editor's string — the default across most tests. */
+function sourceMode(source = "source"): string {
+  return source;
 }
 
 const FIXED_RATE: ServiceRate = { num: 7, den: 1 };
@@ -813,15 +808,15 @@ describe("run controller", () => {
   });
 });
 
-describe("run controller loader and profiler seam derive from one AlgorithmSource (M2a)", () => {
-  it("derives a url loader target and a url profiler request in url mode", async () => {
+describe("run controller loader and profiler seam derive from the algorithm source", () => {
+  it("derives a loader target and a profiler request from the algorithm source", async () => {
     const workers: FakeProfilerWorker[] = [];
-    const loaded: LoadTarget[] = [];
+    const loaded: string[] = [];
     const controller = createRunController(
       workerDeps({
-        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 4),
-        loadAlgorithm: async (target) => {
-          loaded.push(target);
+        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
+        loadAlgorithm: async (source) => {
+          loaded.push(source);
           return algo;
         },
         spawnProfilerWorker: () => {
@@ -833,120 +828,34 @@ describe("run controller loader and profiler seam derive from one AlgorithmSourc
     );
     controller.run();
     await flush();
-    // The loader imported the versioned URL, not a source string.
-    expect(loaded).toEqual([{ kind: "url", url: "src/algorithms/kiosk.ts?v=4" }]);
-    // The profiler worker was handed the same discriminated url target.
-    expect(workers[0]?.posted[0]?.target).toEqual({
-      kind: "url",
-      url: "src/algorithms/kiosk.ts?v=4",
-    });
+    expect(loaded).toEqual(["export const detect = () => []"]);
+    expect(workers[0]?.posted[0]?.source).toEqual("export const detect = () => []");
     workers[0]?.emitMessage(OK_OUTCOME);
     await flush();
   });
 
-  it("derives a source loader target and a source profiler request in source mode", async () => {
-    const workers: FakeProfilerWorker[] = [];
-    const loaded: LoadTarget[] = [];
-    const controller = createRunController(
-      workerDeps({
-        getAlgorithmSource: () => sourceMode("export const detect = () => []"),
-        loadAlgorithm: async (target) => {
-          loaded.push(target);
-          return algo;
-        },
-        spawnProfilerWorker: () => {
-          const worker = new FakeProfilerWorker();
-          workers.push(worker);
-          return worker;
-        },
-      }),
-    );
-    controller.run();
-    await flush();
-    expect(loaded).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
-    expect(workers[0]?.posted[0]?.target).toEqual({
-      kind: "source",
-      source: "export const detect = () => []",
-    });
-    workers[0]?.emitMessage(OK_OUTCOME);
-    await flush();
-  });
-
-  it("hands the main-thread fallback a url target when the worker cannot spawn", async () => {
-    const targets: LoadTarget[] = [];
-    const controller = createRunController(
-      workerDeps({
-        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 2),
-        spawnProfilerWorker: () => {
-          throw new Error("module Worker forbidden here");
-        },
-        mainThreadResolveServiceRate: (target) => {
-          targets.push(target);
-          return { rate: Promise.resolve(FIXED_RATE), cancel: () => undefined };
-        },
-      }),
-    );
-    controller.run();
-    await flush();
-    expect(targets).toEqual([{ kind: "url", url: "src/algorithms/kiosk.ts?v=2" }]);
-  });
-
-  it("hands the main-thread fallback a source target when the worker cannot spawn", async () => {
-    const targets: LoadTarget[] = [];
+  it("hands the main-thread fallback the source when the worker cannot spawn", async () => {
+    const sources: string[] = [];
     const controller = createRunController(
       workerDeps({
         getAlgorithmSource: () => sourceMode("export const detect = () => []"),
         spawnProfilerWorker: () => {
           throw new Error("module Worker forbidden here");
         },
-        mainThreadResolveServiceRate: (target) => {
-          targets.push(target);
+        mainThreadResolveServiceRate: (source) => {
+          sources.push(source);
           return { rate: Promise.resolve(FIXED_RATE), cancel: () => undefined };
         },
       }),
     );
     controller.run();
     await flush();
-    expect(targets).toEqual([{ kind: "source", source: "export const detect = () => []" }]);
+    expect(sources).toEqual(["export const detect = () => []"]);
   });
 });
 
 describe("run controller calibration cache key (M2a)", () => {
-  it("keys url mode on path+version: an unchanged ref reuses the rate, a save (version bump) busts it", async () => {
-    let src = urlMode("src/algorithms/kiosk.ts", 1);
-    let calls = 0;
-    const controller = createRunController(
-      baseDeps({
-        getAlgorithmSource: () => src,
-        resolveServiceRate: () => {
-          calls += 1;
-          return fixedServiceRate();
-        },
-      }),
-    );
-    controller.run();
-    await flush();
-    controller.run(); // same path + version: cached, no re-profile
-    await flush();
-    expect(calls).toBe(1);
-
-    src = urlMode("src/algorithms/kiosk.ts", 2); // a save bumps the version -> bust
-    controller.run();
-    await flush();
-    expect(calls).toBe(2);
-
-    src = urlMode("src/algorithms/kiosk.ts", 1); // back to v1: still cached, no collision
-    controller.run();
-    await flush();
-    expect(calls).toBe(2);
-
-    src = urlMode("src/algorithms/other.ts", 1); // a different path -> bust
-    controller.run();
-    await flush();
-    expect(calls).toBe(3);
-  });
-
-  it("keys source mode on the full source string: unchanged reuses, changed re-profiles", async () => {
+  it("keys the cache on the full source string: unchanged reuses, changed re-profiles", async () => {
     let source = "source-A";
     let calls = 0;
     const controller = createRunController(
@@ -974,7 +883,7 @@ describe("run controller calibration cache key (M2a)", () => {
     let calls = 0;
     const controller = createRunController(
       baseDeps({
-        getAlgorithmSource: () => urlMode("src/algorithms/kiosk.ts", 1), // fixed ref
+        getAlgorithmSource: () => sourceMode("source"), // fixed source
         getSeed: () => seed,
         resolveServiceRate: () => {
           calls += 1;
@@ -1001,10 +910,10 @@ function setHidden(hidden: boolean): void {
 class FakeProfilerWorker implements ProfilerWorkerLike {
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private errorHandler: ((event: ErrorEvent) => void) | null = null;
-  posted: { target: LoadTarget; hidden: boolean }[] = [];
+  posted: { source: string; hidden: boolean }[] = [];
   terminated = false;
 
-  postMessage(message: { target: LoadTarget; hidden: boolean }): void {
+  postMessage(message: { source: string; hidden: boolean }): void {
     this.posted.push(message);
   }
   terminate(): void {

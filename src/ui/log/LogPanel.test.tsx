@@ -37,6 +37,7 @@ beforeEach(() => {
     snapshot: emptySnapshot(),
     transport: { frozen: false, speed: 1 },
     flashes: new Map(),
+    overlayOpen: false,
   });
 });
 
@@ -200,6 +201,26 @@ describe("LogPanel freeze control", () => {
     // if it did not stand down, the keydown toggle plus the click toggle would cancel out.
     fireEvent.keyDown(button, { code: "Space" });
     fireEvent.click(button);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("ignores Space while an overlay is open (GH118-PLAN.md): the inert shell must not resume the run", () => {
+    useGameStore.setState({ overlayOpen: true });
+    render(<LogPanel />);
+    fireEvent.keyDown(document.body, { code: "Space" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("resumes handling Space once the overlay closes", () => {
+    useGameStore.setState({ overlayOpen: true });
+    render(<LogPanel />);
+    fireEvent.keyDown(document.body, { code: "Space" });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    act(() => {
+      useGameStore.setState({ overlayOpen: false });
+    });
+    fireEvent.keyDown(document.body, { code: "Space" });
     expect(useGameStore.getState().transport.frozen).toBe(true);
   });
 });

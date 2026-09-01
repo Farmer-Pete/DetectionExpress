@@ -1,11 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { referenceSource } from "../game/engine-source";
 import { useGameStore } from "../game/store";
 import { AlgorithmEditor } from "./AlgorithmEditor";
 
 beforeEach(() => {
-  useGameStore.setState({ sourceLocked: false, runPending: false });
+  useGameStore.setState({ runPending: false });
   useGameStore.getState().setAlgorithmSource(referenceSource);
 });
 
@@ -14,11 +14,12 @@ describe("AlgorithmEditor", () => {
     expect(useGameStore.getState().source).toBe(referenceSource);
   });
 
-  it("is editable with an Apply button when the source is not locked", () => {
+  it("is editable, with Apply and Reset buttons always shown", () => {
     render(<AlgorithmEditor onRun={() => {}} />);
     const textarea = screen.getByRole("textbox");
     expect(textarea.hasAttribute("readonly")).toBe(false);
     expect(screen.getByRole("button", { name: "Apply" })).toBeDefined();
+    expect(screen.getByRole("button", { name: /reset to default/i })).toBeDefined();
   });
 
   it("resets the source to the reference default when Reset to default is clicked", () => {
@@ -49,28 +50,6 @@ describe("AlgorithmEditor", () => {
     expect(apply).toHaveProperty("disabled", false);
   });
 
-  it("is read-only and hides the Apply and Reset buttons while the source is locked", () => {
-    useGameStore.setState({ sourceLocked: true });
-    render(<AlgorithmEditor onRun={() => {}} />);
-    const textarea = screen.getByRole("textbox");
-    expect(textarea.hasAttribute("readonly")).toBe(true);
-    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /reset to default/i })).toBeNull();
-  });
-
-  it("shows the pushed source in the locked textarea", () => {
-    useGameStore.setState({ sourceLocked: true, source: "// pushed from my IDE" });
-    render(<AlgorithmEditor onRun={() => {}} />);
-    const textarea = screen.getByRole("textbox");
-    expect(textarea).toHaveProperty("value", "// pushed from my IDE");
-  });
-
-  it("keeps the Download button available even while the source is locked", () => {
-    useGameStore.setState({ sourceLocked: true });
-    render(<AlgorithmEditor onRun={() => {}} />);
-    expect(screen.getByRole("button", { name: "Download engine.ts" })).toBeDefined();
-  });
-
   it("shows the error line bound to the store error", () => {
     useGameStore.setState({ error: { phase: "load", message: "bad syntax" } });
     render(<AlgorithmEditor onRun={() => {}} />);
@@ -80,34 +59,8 @@ describe("AlgorithmEditor", () => {
     useGameStore.setState({ error: null });
   });
 
-  it("downloads the Scenario as engine.ts", () => {
-    useGameStore.setState({ source: "// my algorithm" });
+  it("has no download button", () => {
     render(<AlgorithmEditor onRun={() => {}} />);
-
-    // Capture the temporary anchor the download builds, and stub the object-URL
-    // lifecycle so happy-dom does not need a real Blob URL implementation.
-    const anchors: HTMLElement[] = [];
-    const realCreateElement = document.createElement.bind(document);
-    const createSpy = vi.spyOn(document, "createElement");
-    createSpy.mockImplementation((tagName: string) => {
-      const element = realCreateElement(tagName);
-      if (tagName === "a") {
-        anchors.push(element);
-      }
-      return element;
-    });
-    const createUrlSpy = vi.spyOn(URL, "createObjectURL");
-    createUrlSpy.mockImplementation(() => "blob:test");
-    const revokeUrlSpy = vi.spyOn(URL, "revokeObjectURL");
-    revokeUrlSpy.mockImplementation(() => {});
-
-    fireEvent.click(screen.getByRole("button", { name: "Download engine.ts" }));
-
-    createSpy.mockRestore();
-    createUrlSpy.mockRestore();
-    revokeUrlSpy.mockRestore();
-
-    expect(anchors).toHaveLength(1);
-    expect(anchors[0]?.getAttribute("download")).toBe("engine.ts");
+    expect(screen.queryByRole("button", { name: /download/i })).toBeNull();
   });
 });
