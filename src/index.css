@@ -1345,33 +1345,139 @@ body {
   position: relative;
 }
 
+/* The angle the conic border sweeps to; animated so the accent rotates round the
+   edge. Registered so it can transition/animate (a bare custom prop cannot). */
+@property --hire-edge {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+/* The button draws attention two ways at once: a conic gradient rotates around the
+   border (padding-box fill over a border-box conic gradient), and a periodic nudge
+   wiggles it every few seconds. Both pause while the card is open, so it sits still
+   to read, and both drop under reduced motion. */
 .hire-me-toggle {
+  position: relative;
   padding: 0.3rem 0.8rem;
   border-radius: 8px;
-  border: 1px solid var(--a1);
-  background: color-mix(in srgb, var(--a1) 18%, transparent);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--a1) 20%, var(--bg)),
+      color-mix(in srgb, var(--a1) 20%, var(--bg))
+    )
+    padding-box,
+    conic-gradient(from var(--hire-edge), var(--a1), var(--a2), var(--ink), var(--a1)) border-box;
   color: var(--ink);
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
+  animation:
+    hire-edge 4s linear infinite,
+    hire-nudge 4.5s ease-in-out infinite;
 }
 
 .hire-me-toggle:hover {
-  background: color-mix(in srgb, var(--a1) 30%, transparent);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--a1) 34%, var(--bg)),
+      color-mix(in srgb, var(--a1) 34%, var(--bg))
+    )
+    padding-box,
+    conic-gradient(from var(--hire-edge), var(--a1), var(--a2), var(--ink), var(--a1)) border-box;
+}
+
+/* While the card is open the button is lifted above the scrim and holds still. */
+.hire-me.open .hire-me-toggle {
+  z-index: 31;
+  animation-play-state: paused;
+}
+
+@keyframes hire-edge {
+  to {
+    --hire-edge: 360deg;
+  }
+}
+
+@keyframes hire-nudge {
+  0%,
+  82%,
+  100% {
+    transform: rotate(0) translateX(0);
+  }
+  85% {
+    transform: rotate(-3deg) translateX(-1px);
+  }
+  88% {
+    transform: rotate(3deg) translateX(1px);
+  }
+  91% {
+    transform: rotate(-2deg);
+  }
+  94% {
+    transform: rotate(2deg);
+  }
+  97% {
+    transform: rotate(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hire-me-toggle {
+    animation: none;
+    /* Keep the gradient border, just stop it rotating. */
+    background:
+      linear-gradient(
+        color-mix(in srgb, var(--a1) 20%, var(--bg)),
+        color-mix(in srgb, var(--a1) 20%, var(--bg))
+      )
+      padding-box,
+      conic-gradient(var(--a1), var(--a2), var(--ink), var(--a1)) border-box;
+  }
+}
+
+/* The scrim that dims the rest of the app while the card is open. Fixed to the
+   viewport, above normal content but below the intro overlay's backdrop (z-index
+   40); the button (31) and card (31) sit above it, so only Hire Me stays lit. */
+.hire-me-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  border: none;
+  padding: 0;
+  cursor: default;
+  background: rgba(6, 22, 29, 0.72);
+  animation: hire-scrim-in 200ms ease both;
+}
+
+@keyframes hire-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hire-me-scrim {
+    animation: none;
+  }
 }
 
 .hire-me-card {
   position: absolute;
   top: calc(100% + 0.5rem);
   right: 0;
-  z-index: 20;
+  z-index: 31;
   /* Stay inside a narrow viewport instead of forcing horizontal scroll. */
   width: min(300px, calc(100vw - 2rem));
   padding: 0.9rem 1rem;
   border-radius: 10px;
   background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--a1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
 
 .hire-me-text {
@@ -1381,14 +1487,30 @@ body {
   line-height: 1.5;
 }
 
-.hire-me-email {
-  color: var(--a1);
+/* Each contact row: an emoji marker beside its link. `gap` sets the spacing, so the
+   emoji and link never collide, and the URL wraps inside the card instead of
+   overflowing it. */
+.hire-me-contact {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0 0 0.4rem;
   font-size: 0.85rem;
-  font-weight: 700;
-  text-decoration: none;
 }
 
-.hire-me-email:hover {
+.hire-me-contact:last-child {
+  margin-bottom: 0;
+}
+
+.hire-me-link {
+  color: var(--a1);
+  font-weight: 700;
+  text-decoration: none;
+  /* Long URLs break rather than force the card wider. */
+  overflow-wrap: anywhere;
+}
+
+.hire-me-link:hover {
   text-decoration: underline;
 }
 
