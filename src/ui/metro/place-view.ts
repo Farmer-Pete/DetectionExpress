@@ -138,7 +138,7 @@ function nodeLabel(id: MapNodeId, world: World): string {
  * `Presence`'s three arms:
  *
  * - `at`: `destination` is the FEASIBILITY answer's plumbed field (GH124-PLAN.md
- *   Checkpoint 4 Part 1/2) — a trip actor (`rider`, `account-rider`) that has
+ *   Checkpoint 4 Part 1/2) — a `rider` that has
  *   committed to a trip carries it (set by `world-rider.ts` the moment its trip core
  *   picks a destination, cleared once the trip ends), so a waiting rider that HAS
  *   already chosen where it is going reads "heading to X" instead of a bare "waiting".
@@ -176,23 +176,26 @@ export function describePresence(
   }
 }
 
-/** `rider` and `account-rider`: the two kinds `ActorView.destination` is ever
- *  populated for (the FEASIBILITY answer, GH124-PLAN.md Checkpoint 4 Part 1). */
+/** Only `rider` ever populates `ActorView.destination` (the FEASIBILITY answer,
+ *  GH124-PLAN.md Checkpoint 4 Part 1). An account rider only visits a kiosk and
+ *  leaves; it takes no metro trip and carries no destination, so it is NOT a trip
+ *  kind and must not fall through to the "waiting for a train" wording. */
 function isTripKind(kind: ActorView["kind"]): boolean {
-  return kind === "rider" || kind === "account-rider";
+  return kind === "rider";
 }
 
 /**
- * One actor's activity phrase for the table: a non-trip actor `at` a node (staff,
- * host, operator, a dwelling train, a pin-attacker) reads "on duty" rather than
- * "waiting for a train", since `describePresence`'s "at" wording is specifically a
- * trip actor's fallback and has no meaning for a fixture or an attacker mid-attack.
- * Every other presence shape (`moving`, `onTrain`, or an "at" trip actor) routes
- * straight through `describePresence`, destination included.
+ * One actor's activity phrase for the table. A non-trip actor `at` a node does not
+ * route through `describePresence`, whose "at" wording is a trip actor's fallback
+ * and has no meaning for a fixture, a patron at a kiosk, or an attacker mid-attack:
+ * an `account-rider` reads "signing in" (it is at a kiosk), and staff, operators,
+ * hosts, a dwelling train, and a pin-attacker read "on duty". Every other presence
+ * shape (`moving`, `onTrain`, or an "at" trip rider) routes straight through
+ * `describePresence`, destination included.
  */
 function activityFor(actor: ActorView, snapshot: SimSnapshot, world: World): string {
   if (actor.presence.kind === "at" && !isTripKind(actor.kind)) {
-    return "on duty";
+    return actor.kind === "account-rider" ? "signing in" : "on duty";
   }
   return describePresence(actor.presence, snapshot, world, actor.destination);
 }

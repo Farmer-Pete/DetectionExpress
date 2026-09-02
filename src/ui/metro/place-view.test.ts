@@ -303,6 +303,18 @@ describe("actorSummaryRows", () => {
     expect(rows).toEqual([{ kind: "staff", activity: "on duty", count: 1 }]);
   });
 
+  it("labels an account rider at a kiosk 'signing in', never 'waiting for a train'", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "A1",
+        kind: "account-rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows).toEqual([{ kind: "account-rider", activity: "signing in", count: 1 }]);
+  });
+
   it("returns an empty table for a node with no actors", () => {
     expect(actorSummaryRows({ kind: "node", id: "cen" }, emptySnapshot(), world)).toEqual([]);
   });
