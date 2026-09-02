@@ -102,7 +102,7 @@
  * instant a run concludes, instead of running out its own timer over a frozen
  * frame. A fresh run re-arms the edge once it starts running again.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
 import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
@@ -157,6 +157,12 @@ export function App({ createPipelineController }: AppProps = {}) {
   // its own, since only ONE shared ref can survive a push swapping which of the two
   // dialogs is actually mounted.
   const mapDialogRootTriggerRef = useRef<Element | null>(null);
+  // Paired with the ref above (same capture instant, same lifetime): the ROOT
+  // session's own fallback-focus ref (`metroMapRegionRef` for a map-rooted session,
+  // `logPanelRef` for an event-rooted one), so a full close restores to the fallback
+  // of whichever dialog opened the session rather than whichever one is on top when
+  // it closes — see `dialog-stack-focus.ts`.
+  const mapDialogRootFallbackRef = useRef<RefObject<HTMLElement | null> | null>(null);
   // Shared with Topbar (which attaches them to its three openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
@@ -345,8 +351,13 @@ export function App({ createPipelineController }: AppProps = {}) {
           <PlaceDialog
             fallbackFocusRef={metroMapRegionRef}
             rootTriggerRef={mapDialogRootTriggerRef}
+            rootFallbackFocusRef={mapDialogRootFallbackRef}
           />
-          <EventDialog fallbackFocusRef={logPanelRef} rootTriggerRef={mapDialogRootTriggerRef} />
+          <EventDialog
+            fallbackFocusRef={logPanelRef}
+            rootTriggerRef={mapDialogRootTriggerRef}
+            rootFallbackFocusRef={mapDialogRootFallbackRef}
+          />
           {sidePanel.sidePanel}
         </>
       }

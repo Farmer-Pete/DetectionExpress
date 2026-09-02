@@ -35,8 +35,9 @@ export type MapSelection = { kind: "node"; id: MapNodeId } | { kind: "train"; ac
  * two independent single-selection fields (`mapSelection`/`eventSelection`) GH124
  * Checkpoints 4-5 introduced: those let EventDialog's "Open place" link and
  * PlaceDialog's scoped-log row only SWAP one dialog for the other, with no way back.
- * A bounded stack (in practice at most a handful of entries: nothing loops it
- * automatically) gives both a real "Back", not just a bigger single slot.
+ * A bounded stack (capped at `MAX_MAP_DIALOG_DEPTH` entries — see the two "inside"
+ * pushers below — a realistic session never nests anywhere near that deep) gives both
+ * a real "Back", not just a bigger single slot.
  */
 export type MapModalEntry =
   | { kind: "place"; selection: MapSelection }
@@ -115,9 +116,10 @@ interface GameState {
   decisionSelection: { seq: number } | null;
   /**
    * The map/event dialog stack (GH124 Checkpoints 4-5, restructured for Back
-   * navigation): PlaceDialog and EventDialog together track ONE bounded stack instead
-   * of two independent selections, so opening one from inside the other PUSHES
-   * instead of swapping, and a "Back" control can pop back to what was open before.
+   * navigation): PlaceDialog and EventDialog together track ONE bounded stack (capped
+   * at `MAX_MAP_DIALOG_DEPTH` entries) instead of two independent selections, so
+   * opening one from inside the other PUSHES instead of swapping, and a "Back"
+   * control can pop back to what was open before.
    * The TOP entry (`topMapDialogEntry(mapDialogStack)`) is the dialog on screen; an
    * empty stack means neither dialog is open. A `"place"` entry needs no snapshot
    * reconciliation (every node/train it can name is a fixed `world.json` fixture,
@@ -209,7 +211,9 @@ interface GameState {
    * within an already-open event dialog. PUSHES a `"place"` entry naming `placeId` on
    * top of whatever is already in `mapDialogStack`, so the event dialog it was clicked
    * from stays in the stack for a later "Back" to return to, instead of being
-   * discarded.
+   * discarded. A no-op once the stack already sits at `MAX_MAP_DIALOG_DEPTH`, so
+   * alternating this with `openEventFromPlace` can never grow the stack without
+   * bound.
    */
   openPlaceFromEvent: (placeId: MapNodeId) => void;
   /**
@@ -217,6 +221,9 @@ interface GameState {
    * `openPlaceFromEvent`. PUSHES an `"event"` entry naming `id` on top of whatever is
    * already in `mapDialogStack`. Validated the same way `selectWorldEvent` is: an id
    * absent from the current snapshot's `worldEvents` ring leaves the stack untouched.
+   * Also a no-op once the stack already sits at `MAX_MAP_DIALOG_DEPTH` (checked
+   * before the id validation, so a stale id at the cap still reports as a no-op the
+   * same way).
    */
   openEventFromPlace: (id: number) => void;
   /**
@@ -256,6 +263,16 @@ interface GameState {
  * on every call. Never mutated: pushes, pops, and resets all build fresh arrays.
  */
 const EMPTY_MAP_DIALOG_STACK: MapModalEntry[] = [];
+
+/**
+ * Hard cap on `mapDialogStack`'s depth (GH124 follow-up): the two "inside" pushers,
+ * `openPlaceFromEvent` and `openEventFromPlace`, push onto whatever is already there
+ * rather than resetting it, so alternating "Open place" and a scoped-log row could
+ * otherwise grow the stack without bound. A realistic session never nests anywhere
+ * near this deep — this exists only to stop that pathological growth, not to bound
+ * anything a real session would hit.
+ */
+export const MAX_MAP_DIALOG_DEPTH = 12;
 
 /**
  * The trace-dialog fields, both cleared, plus an empty map/event dialog stack: the
@@ -398,19 +415,29 @@ export const useGameStore = create<GameState>((set) => ({
   // it, keeping the dialog they were clicked from in the stack for a later Back. Never
   // touch the trace fields: the stack being non-empty already implies no trace dialog
   // is open (the two dialog kinds stay mutually exclusive from every direction), so
-  // there is nothing to heal.
+  // there is nothing to heal. Both no-op at MAX_MAP_DIALOG_DEPTH, so alternating "Open
+  // place" and a scoped-log row can never grow the stack past the cap.
   openPlaceFromEvent: (placeId) =>
-    set((state) => ({
-      mapDialogStack: [
-        ...state.mapDialogStack,
-        { kind: "place", selection: { kind: "node", id: placeId } },
-      ],
-    })),
+    set((state) => {
+      if (state.mapDialogStack.length >= MAX_MAP_DIALOG_DEPTH) {
+        return state; // at the cap: do not change the stack
+      }
+      return {
+        mapDialogStack: [
+          ...state.mapDialogStack,
+          { kind: "place", selection: { kind: "node", id: placeId } },
+        ],
+      };
+    }),
   // Validated the same way selectWorldEvent is: an id absent from the live ring is
   // stale and leaves the stack untouched rather than pushing a dialog with nothing to
-  // show.
+  // show. The cap check runs first, so a stale id at the cap still reads as a plain
+  // no-op rather than one masking the other.
   openEventFromPlace: (id) =>
     set((state) => {
+      if (state.mapDialogStack.length >= MAX_MAP_DIALOG_DEPTH) {
+        return state; // at the cap: do not change the stack
+      }
       if (!state.snapshot.worldEvents.some((event) => event.id === id)) {
         return state; // stale id: do not change the stack
       }

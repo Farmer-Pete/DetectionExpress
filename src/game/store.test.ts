@@ -3,7 +3,8 @@ import type { Decision, LiveFinding } from "../sim/correctness";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldLogEvent } from "../sim/world-log";
 import { referenceSource } from "./engine-source";
-import { getGraph, useGameStore } from "./store";
+import type { MapModalEntry } from "./store";
+import { getGraph, MAX_MAP_DIALOG_DEPTH, useGameStore } from "./store";
 import { LEVEL_SEED } from "./tuning";
 
 beforeEach(() => {
@@ -534,6 +535,45 @@ describe("store map/event dialog stack: 'inside' pushers (GH124 follow-up, dialo
     useGameStore.getState().openPlaceFromEvent("cen");
     expect(useGameStore.getState().selection).toBeNull();
     expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+});
+
+describe("store map/event dialog stack: MAX_MAP_DIALOG_DEPTH cap (GH124 follow-up, bounded stack)", () => {
+  /** A stack of `length` place entries — enough to exercise the cap without caring
+   *  about the id validation either pusher separately does. */
+  function fullStack(length: number): MapModalEntry[] {
+    return Array.from({ length }, (_, i) => ({
+      kind: "place" as const,
+      selection: { kind: "node" as const, id: `n${i}` },
+    }));
+  }
+
+  it("openPlaceFromEvent still pushes one entry below the cap", () => {
+    useGameStore.setState({ mapDialogStack: fullStack(MAX_MAP_DIALOG_DEPTH - 1) });
+    useGameStore.getState().openPlaceFromEvent("cen");
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(MAX_MAP_DIALOG_DEPTH);
+  });
+
+  it("openPlaceFromEvent no-ops once the stack is already at the cap", () => {
+    const atCap = fullStack(MAX_MAP_DIALOG_DEPTH);
+    useGameStore.setState({ mapDialogStack: atCap });
+    useGameStore.getState().openPlaceFromEvent("cen");
+    expect(useGameStore.getState().mapDialogStack).toBe(atCap); // unchanged, same reference
+  });
+
+  it("openEventFromPlace still pushes one entry below the cap, for a live id", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.setState({ mapDialogStack: fullStack(MAX_MAP_DIALOG_DEPTH - 1) });
+    useGameStore.getState().openEventFromPlace(5);
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(MAX_MAP_DIALOG_DEPTH);
+  });
+
+  it("openEventFromPlace no-ops once the stack is already at the cap, even for a live id", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    const atCap = fullStack(MAX_MAP_DIALOG_DEPTH);
+    useGameStore.setState({ mapDialogStack: atCap });
+    useGameStore.getState().openEventFromPlace(5);
+    expect(useGameStore.getState().mapDialogStack).toBe(atCap); // unchanged, same reference
   });
 });
 

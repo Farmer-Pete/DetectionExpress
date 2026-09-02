@@ -500,6 +500,31 @@ describe("App map/event dialog navigation stack (GH124 follow-up: Back)", () => 
     expect(useGameStore.getState().mapDialogStack).toEqual([]);
     expect(document.activeElement).toBe(logRow);
   });
+
+  it("closing an event-rooted stack that pushed a place restores focus to the event's own fallback (the log panel), not the place dialog's, when the trigger is gone", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    const logRow = screen.getByTestId("log-row-5");
+    fireEvent.click(logRow); // opens the event dialog: the root of this session
+
+    fireEvent.click(screen.getByRole("button", { name: "Open place" })); // pushes the place dialog on top
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    logRow.remove(); // the root trigger leaves the DOM while the place dialog is on top
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" })); // closes via the PLACE dialog's × button
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    // Restores to the EVENT dialog's own fallback (the log panel) — the fallback
+    // captured when the event dialog rooted the session — not the PLACE dialog's own
+    // fallback (the map region), even though the place dialog is the one that was
+    // actually on top, and whose × button was actually clicked, when the stack closed
+    // (GH124 follow-up: bug fix).
+    expect(document.activeElement).toBe(document.querySelector(".log-panel"));
+    expect(document.activeElement).not.toBe(document.querySelector(".metro-map-region"));
+  });
 });
 
 describe("App onboarding", () => {

@@ -67,6 +67,12 @@ function noRootTrigger(): RefObject<Element | null> {
   return { current: null };
 }
 
+/** A fresh root-fallback ref, paired with `noRootTrigger()` above for the same
+ *  single-dialog tests. */
+function noRootFallback(): RefObject<RefObject<HTMLElement | null> | null> {
+  return { current: null };
+}
+
 beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
@@ -77,7 +83,11 @@ beforeEach(() => {
 describe("EventDialog: lifecycle", () => {
   it("renders nothing while the stack's top entry is not an event entry", () => {
     const { container } = render(
-      <EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />,
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
     );
     expect(container.firstChild).toBeNull();
   });
@@ -85,7 +95,13 @@ describe("EventDialog: lifecycle", () => {
   it("opens when the stack's top entry names a live world event", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByRole("dialog")).toBeDefined();
   });
 
@@ -95,7 +111,13 @@ describe("EventDialog: lifecycle", () => {
     trigger.focus();
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 
@@ -107,7 +129,13 @@ describe("EventDialog: lifecycle", () => {
   it("the close button clears the whole stack", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
@@ -123,7 +151,11 @@ describe("EventDialog: lifecycle", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
     render(
-      <EventDialog fallbackFocusRef={{ current: fallback }} rootTriggerRef={noRootTrigger()} />,
+      <EventDialog
+        fallbackFocusRef={{ current: fallback }}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
     );
 
     trigger.remove(); // the trigger disappears while the dialog is open
@@ -137,7 +169,13 @@ describe("EventDialog: lifecycle", () => {
   it("closes when the selected entry is evicted from the ring on a later publish", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByRole("dialog")).toBeDefined();
 
     // A fresh publish whose ring no longer carries id 1: the store's own setSnapshot
@@ -156,7 +194,13 @@ describe("EventDialog navigation stack (GH124 follow-up: Back)", () => {
   it("shows no Back control at the root (single-entry) stack", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent()] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
   });
 
@@ -165,7 +209,13 @@ describe("EventDialog navigation stack (GH124 follow-up: Back)", () => {
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }, ...eventStack(1)],
     });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
   });
 
@@ -174,7 +224,13 @@ describe("EventDialog navigation stack (GH124 follow-up: Back)", () => {
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }, ...eventStack(1)],
     });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
@@ -189,7 +245,13 @@ describe("EventDialog navigation stack (GH124 follow-up: Back)", () => {
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }, ...eventStack(1)],
     });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 
@@ -203,7 +265,13 @@ describe("EventDialog navigation stack (GH124 follow-up: Back)", () => {
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }, ...eventStack(1)],
     });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
@@ -227,7 +295,13 @@ describe("EventDialog: adaptive detail", () => {
       ],
     });
     useGameStore.setState({ mapDialogStack: eventStack(5) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByText(/"acct": "rider"/)).toBeDefined();
     expect(screen.getByText(/"account": "rider"/)).toBeDefined();
     expect(screen.queryByTestId("event-detail-evicted-note")).toBeNull();
@@ -239,7 +313,13 @@ describe("EventDialog: adaptive detail", () => {
     // inspector ring) no longer does.
     setSnapshot({ worldEvents: [ev], events: [] });
     useGameStore.setState({ mapDialogStack: eventStack(5) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByTestId("event-detail-evicted-note").textContent).toMatch(
       /no longer retained/i,
     );
@@ -251,7 +331,13 @@ describe("EventDialog: adaptive detail", () => {
   it("shows raw + source, and an 'open place' link, for a non-scored reading", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent({ id: 1, actorId: "R1", placeId: "cen" })] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
     expect(screen.getByText(/"card": "card-1"/)).toBeDefined();
     expect(screen.getByText(/R1/)).toBeDefined();
     expect(screen.getByRole("button", { name: "Open place" })).toBeDefined();
@@ -260,7 +346,13 @@ describe("EventDialog: adaptive detail", () => {
   it("the 'open place' link PUSHES a place entry, keeping the event entry underneath (Back returns to it)", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent({ id: 1, placeId: "cen" })] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Open place" }));
 
@@ -285,7 +377,13 @@ describe("EventDialog: adaptive detail", () => {
       ],
     });
     useGameStore.setState({ mapDialogStack: eventStack(5) });
-    render(<EventDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
 
     const openPlace = screen.getByRole("button", { name: "Open place" });
     fireEvent.click(openPlace);

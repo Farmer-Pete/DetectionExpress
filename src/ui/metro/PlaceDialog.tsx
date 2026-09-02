@@ -14,10 +14,12 @@
  * click, focus moves in whenever this dialog becomes the stack's top entry,
  * Tab/Shift+Tab wrap at the dialog's edges, and on a FULL close focus restores to
  * whatever triggered this dialog-stack session's very first, "outside", open —
- * falling back to `fallbackFocusRef` (the metro map region, wired by `App`) when that
- * trigger is no longer connected, mirroring `TraceOverlay`'s decision 14 fallback (see
- * `dialog-stack-focus.ts` for why that root trigger is shared with `EventDialog`
- * rather than captured independently by each dialog). A "‹ Back" control appears in
+ * falling back to `fallbackFocusRef` (the metro map region, wired by `App`) ONLY when
+ * this dialog is the one that rooted the session; an event-rooted session that pushed
+ * this place dialog on top instead falls back to the event dialog's own fallback (the
+ * log panel), mirroring `TraceOverlay`'s decision 14 fallback (see
+ * `dialog-stack-focus.ts` for why the root trigger AND its fallback are shared with
+ * `EventDialog` rather than captured independently by each dialog). A "‹ Back" control appears in
  * the header whenever the stack holds more than this one entry (i.e. this place
  * dialog was pushed from a scoped-log row inside an EventDialog); Esc pops one entry
  * while that control is showing, and only closes the whole stack at the root entry —
@@ -52,16 +54,27 @@ const ACTOR_GLYPH_COLOR: Record<ActorSummaryRow["kind"], string> = {
 };
 
 interface PlaceDialogProps {
-  /** Focus-restore fallback for when the root trigger is no longer connected. */
+  /** Focus-restore fallback for when the root trigger is no longer connected — used
+   *  only when THIS dialog roots the session, via `rootFallbackFocusRef` below (see
+   *  `dialog-stack-focus.ts`). */
   fallbackFocusRef: RefObject<HTMLElement | null>;
   /** Shared with `EventDialog` (owned by `App`): the element that triggered the
    *  current dialog-stack session's very first, "outside", open — see
    *  `dialog-stack-focus.ts` for why this must be shared rather than captured
    *  independently by each dialog. */
   rootTriggerRef: RefObject<Element | null>;
+  /** Shared with `EventDialog` (owned by `App`): the ROOT session's own fallback
+   *  focus ref, captured alongside `rootTriggerRef` above so a full close restores to
+   *  whichever dialog opened the session, not whichever one is on top when it closes
+   *  — see `dialog-stack-focus.ts`. */
+  rootFallbackFocusRef: RefObject<RefObject<HTMLElement | null> | null>;
 }
 
-export function PlaceDialog({ fallbackFocusRef, rootTriggerRef }: PlaceDialogProps) {
+export function PlaceDialog({
+  fallbackFocusRef,
+  rootTriggerRef,
+  rootFallbackFocusRef,
+}: PlaceDialogProps) {
   const stack = useGameStore((state) => state.mapDialogStack);
   const snapshot = useGameStore((state) => state.snapshot);
   const clearMapDialogStack = useGameStore((state) => state.clearMapDialogStack);
@@ -88,6 +101,7 @@ export function PlaceDialog({ fallbackFocusRef, rootTriggerRef }: PlaceDialogPro
     dialogRef,
     fallbackFocusRef,
     rootTriggerRef,
+    rootFallbackFocusRef,
   });
 
   useEffect(() => {
