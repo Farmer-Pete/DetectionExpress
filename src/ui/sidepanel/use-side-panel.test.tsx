@@ -23,6 +23,7 @@ function stubController(run: () => void = () => {}): RunController {
     setFrozen: () => {},
     setSpeed: () => {},
     triggerWave: () => null,
+    setChaosLevel: () => {},
     dispose: () => {},
   };
 }
@@ -48,6 +49,7 @@ function asyncRunController(error: { phase: string; message: string } | null): R
     setFrozen: () => {},
     setSpeed: () => {},
     triggerWave: () => null,
+    setChaosLevel: () => {},
     dispose: () => {},
   };
 }

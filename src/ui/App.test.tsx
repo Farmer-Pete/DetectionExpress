@@ -87,6 +87,7 @@ function stubController(): RunController & {
     triggerWave() {
       return null;
     },
+    setChaosLevel() {},
     dispose() {
       disposes += 1;
     },

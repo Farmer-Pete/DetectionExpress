@@ -416,3 +416,14 @@ export const WAVE_DRAIN_MARGIN_TICKS = 20;
  * revisits it.
  */
 export const QUEUE_CAP = 60;
+
+/**
+ * GH126-PLAN.md M3a — the calm gap between chaos waves, in ticks. When a wave
+ * resolves, the repeating chaos-level loop holds the metro calm for this many ticks
+ * (the metro returns to calm and the held/breach banner shows) before it triggers the
+ * next wave at the currently selected level. At `CLOCK_HZ` (60) this is ~0.75 real
+ * seconds — a short, visible breath between waves, comfortably longer than the publish
+ * stride so the cooldown phase is always sampled. First-draft value; M3b's ladder
+ * tuning revisits it.
+ */
+export const CHAOS_COOLDOWN_TICKS = 45;

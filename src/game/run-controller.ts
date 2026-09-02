@@ -117,6 +117,14 @@ export interface RunController {
    * live. Returns the minted `WaveId`, or `null` when nothing was triggered.
    */
   triggerWave(): WaveId | null;
+  /**
+   * Select the chaos ladder's repeating level (GH126-PLAN.md M3a, Q7). The controller
+   * retains the level, delegates to the live engine handle when one exists, and
+   * reapplies it on the next start, so any fresh engine inherits the current selection.
+   * Level 0 is calm (the loop off); a level > 0 runs the repeating wave loop. Safe with
+   * no engine live.
+   */
+  setChaosLevel(level: number): void;
   /** Permanent teardown. A later load or completion sees this and does nothing. */
   dispose(): void;
 }
@@ -472,6 +480,10 @@ export function createRunController(deps: RunControllerDeps): RunController {
   // Default speed 1, so a normal startup runs at the base rate.
   let frozen = false;
   let speed: Speed = 1;
+  // The retained chaos-ladder level (GH126-PLAN.md M3a). Source of truth: startEngine
+  // reapplies it to every fresh engine, so a hot-reload or Apply inherits the current
+  // selection. Default 0 (calm, the loop off).
+  let chaosLevel = 0;
 
   const run = async (): Promise<void> => {
     if (disposed) {
@@ -633,6 +645,10 @@ export function createRunController(deps: RunControllerDeps): RunController {
             handle.pause();
           }
           handle.setSpeed(speed);
+          // Reapply the retained chaos level, so a fresh engine inherits the current
+          // ladder selection (GH126-PLAN.md M3a). Endless-only at the engine, so a
+          // non-endless run just retains it.
+          handle.setChaosLevel(chaosLevel);
         } catch (reapplyError) {
           handle.stop();
           throw reapplyError;
@@ -699,6 +715,13 @@ export function createRunController(deps: RunControllerDeps): RunController {
   // the handle itself no-ops outside endless mode or during a wave's cooldown.
   const triggerWave = (): WaveId | null => engine?.triggerWave() ?? null;
 
+  // Retain the selected chaos level and, when a clock is live, apply it at once. With
+  // no engine live it just stores the value; startEngine reapplies it on the next start.
+  const setChaosLevel = (level: number): void => {
+    chaosLevel = level;
+    engine?.setChaosLevel(level);
+  };
+
   return {
     run: () => {
       void run();
@@ -706,6 +729,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
     setFrozen,
     setSpeed,
     triggerWave,
+    setChaosLevel,
     dispose,
   };
 }

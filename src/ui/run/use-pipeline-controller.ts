@@ -80,6 +80,11 @@ export function usePipelineController({ createController }: UsePipelineControlle
     // the panel still shows frozen/2x.
     active.setFrozen(useGameStore.getState().transport.frozen);
     active.setSpeed(useGameStore.getState().transport.speed);
+    // Seed the retained chaos-ladder level too (GH126-PLAN.md M3a), mirroring the
+    // transport seed above: the reflection effect below is keyed on [chaosLevel], so it
+    // does not re-fire on a view change, and without this seed a fresh engine would run
+    // at level 0 while the store still holds the player's selection.
+    active.setChaosLevel(useGameStore.getState().chaosLevel);
     return () => {
       active.dispose();
       if (controllerRef.current === active) {
@@ -111,6 +116,16 @@ export function usePipelineController({ createController }: UsePipelineControlle
   useEffect(() => {
     controllerRef.current?.setSpeed(speed);
   }, [speed]);
+
+  // The same reflection for the chaos-ladder level (GH126-PLAN.md M3a). A ladder
+  // selection (M3b's rungs) flows here; an engine swap is handled by the controller
+  // reapplying its retained level on startEngine, which this effect misses because the
+  // store value did not change. The M3b ladder UI is wired separately; this is only the
+  // store -> controller reflection.
+  const chaosLevel = useGameStore((s) => s.chaosLevel);
+  useEffect(() => {
+    controllerRef.current?.setChaosLevel(chaosLevel);
+  }, [chaosLevel]);
 
   // TEMPORARY hand trigger (GH126-PLAN.md M2b). Stable identity so a consumer button
   // needs no per-render callback. M3 wires the ladder rung here instead.

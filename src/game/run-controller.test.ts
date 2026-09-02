@@ -59,6 +59,7 @@ function fakeHandle(whenStopped: Promise<void> = Promise.resolve()): EngineHandl
     resume: () => undefined,
     setSpeed: () => undefined,
     triggerWave: () => null,
+    setChaosLevel: () => undefined,
     whenStopped,
   };
 }
@@ -95,6 +96,7 @@ function spyHandle(whenStopped: Promise<void> = new Promise(() => undefined)): {
     resume: () => undefined,
     setSpeed: () => undefined,
     triggerWave: () => null,
+    setChaosLevel: () => undefined,
     whenStopped,
   };
   return {
@@ -479,6 +481,7 @@ describe("run controller", () => {
               resume: () => undefined,
               setSpeed: () => undefined,
               triggerWave: () => null,
+              setChaosLevel: () => undefined,
               whenStopped: new Promise(() => undefined),
             };
             return handle;
@@ -695,6 +698,7 @@ describe("run controller", () => {
       resume: () => calls.push("resume"),
       setSpeed: () => undefined,
       triggerWave: () => null,
+      setChaosLevel: () => undefined,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -725,6 +729,7 @@ describe("run controller", () => {
             resume: () => undefined,
             setSpeed: () => undefined,
             triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -746,6 +751,7 @@ describe("run controller", () => {
       resume: () => undefined,
       setSpeed: (m) => speeds.push(m),
       triggerWave: () => null,
+      setChaosLevel: () => undefined,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -768,6 +774,7 @@ describe("run controller", () => {
       resume: () => undefined,
       setSpeed: () => undefined,
       triggerWave: () => 7,
+      setChaosLevel: () => undefined,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -779,6 +786,58 @@ describe("run controller", () => {
   it("triggerWave is a safe no-op that returns null when no engine is live", () => {
     const controller = createRunController(baseDeps({}));
     expect(controller.triggerWave()).toBeNull();
+  });
+
+  it("delegates setChaosLevel to the live engine handle", async () => {
+    const levels: number[] = [];
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      setSpeed: () => undefined,
+      triggerWave: () => null,
+      setChaosLevel: (level) => levels.push(level),
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    levels.length = 0; // drop the reapply from startEngine; measure the explicit call
+    controller.setChaosLevel(1);
+    expect(levels).toEqual([1]);
+  });
+
+  it("setChaosLevel is a safe no-op when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(() => controller.setChaosLevel(1)).not.toThrow();
+  });
+
+  it("reapplies the retained chaos level on the next startEngine, so a replacement run inherits it", async () => {
+    const levels: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: () => undefined,
+            triggerWave: () => null,
+            setChaosLevel: (level) => levels.push(level),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first start reapplies the default level 0
+    await flush();
+    controller.setChaosLevel(1); // retained
+    controller.run(); // a replacement run reapplies the retained level
+    await flush();
+    expect(levels).toEqual([0, 1, 1]); // start 0 default, explicit 1, then start reapply 1
   });
 
   it("rejects a speed outside 0.5|1|2 before it retains it", async () => {
@@ -795,6 +854,7 @@ describe("run controller", () => {
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
             triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -826,6 +886,7 @@ describe("run controller", () => {
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
             triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -855,6 +916,7 @@ describe("run controller", () => {
             throw new Error("setSpeed boom");
           },
           triggerWave: () => null,
+          setChaosLevel: () => undefined,
           whenStopped: new Promise(() => undefined),
         }),
       }),

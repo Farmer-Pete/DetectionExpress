@@ -148,6 +148,13 @@ interface GameState {
   mapDialogStack: readonly MapModalEntry[];
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
+  /**
+   * The selected chaos-ladder level (GH126-PLAN.md M3a): 0 is calm (the loop off), a
+   * level > 0 runs the repeating wave loop. Retained here and reflected into the run
+   * controller (mirroring `transport.frozen`/`speed`), so a fresh engine inherits it.
+   * The live `chaosPhase`/`waveOutcome` arrive on the snapshot, not here.
+   */
+  chaosLevel: number;
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
   flashes: Map<number, FlashEntry>;
   /**
@@ -242,6 +249,11 @@ interface GameState {
   setFrozen: (frozen: boolean) => void;
   /** Sets the transport speed mirror. The App reflects it into the run controller. */
   setSpeed: (speed: Speed) => void;
+  /**
+   * Sets the selected chaos-ladder level (GH126-PLAN.md M3a). The pipeline controller
+   * reflects it into the run controller, mirroring `setFrozen`/`setSpeed`.
+   */
+  setChaosLevel: (level: number) => void;
   /** Spawn one batch of cited-row flashes, merging into a fresh Map. */
   spawnFlashes: (entries: readonly FlashSpawn[]) => void;
   /**
@@ -303,6 +315,7 @@ export const useGameStore = create<GameState>((set) => ({
   decisionSelection: null,
   mapDialogStack: EMPTY_MAP_DIALOG_STACK,
   transport: { frozen: false, speed: 1 },
+  chaosLevel: 0,
   flashes: new Map(),
   runToken: 0,
   // Reconcile both trace selections on every snapshot, independently. `seq` is stable
@@ -456,6 +469,7 @@ export const useGameStore = create<GameState>((set) => ({
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),
   setSpeed: (speed) => set((s) => ({ transport: { ...s.transport, speed } })),
+  setChaosLevel: (level) => set({ chaosLevel: level }),
   // Always a NEW Map: zustand's default equality is per-field reference, so a
   // mutated-in-place Map would never notify a `flashes` selector.
   spawnFlashes: (entries) =>

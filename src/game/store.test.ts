@@ -19,6 +19,7 @@ beforeEach(() => {
     decisionSelection: null,
     mapDialogStack: [],
     transport: { frozen: false, speed: 1 },
+    chaosLevel: 0,
     flashes: new Map(),
     runToken: 0,
   });
@@ -198,6 +199,14 @@ describe("store", () => {
     expect(useGameStore.getState().transport).toEqual({ frozen: true, speed: 2 });
     useGameStore.getState().setSpeed(0.5);
     expect(useGameStore.getState().transport).toEqual({ frozen: true, speed: 0.5 });
+  });
+
+  it("starts at chaos level 0 and mirrors the selected level through setChaosLevel", () => {
+    expect(useGameStore.getState().chaosLevel).toBe(0);
+    useGameStore.getState().setChaosLevel(1);
+    expect(useGameStore.getState().chaosLevel).toBe(1);
+    useGameStore.getState().setChaosLevel(0);
+    expect(useGameStore.getState().chaosLevel).toBe(0);
   });
 });
 

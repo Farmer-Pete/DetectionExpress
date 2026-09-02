@@ -61,6 +61,7 @@ import { membersOf, scoringFields } from "./parity-test-helpers";
 import { getGraph } from "./store";
 import {
   CHANNEL_CAP,
+  CHAOS_COOLDOWN_TICKS,
   CLOCK_HZ,
   CORRECTNESS_W_FN,
   CORRECTNESS_W_FP,
@@ -2362,6 +2363,156 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
     });
     await step(h.driver, 3);
     expect(h.handle.triggerWave()).toBeNull();
+    h.handle.stop();
+  });
+});
+
+// GH126-PLAN.md M3a: the chaos ladder is a repeating LEVEL selector (Q7). Selecting a
+// level > 0 runs a wave -> resolve -> cooldown -> wave loop on the engine's own clock;
+// selecting 0 stops it after the current cycle. The snapshot carries a view-only
+// ChaosPhase (idle | wave | cooldown) and a WaveOutcome, folded by the sampler. These
+// tests drive the loop through the injectable ManualDriver, mirroring the M2b harness.
+describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
+  const blueprint = buildBlueprint(LEVEL_SEED);
+
+  function endlessHarness(opts: {
+    algorithm: TaskAlgorithm;
+    onWaveOutcome?: (o: WaveOutcomeObservation) => void;
+  }): Harness {
+    return launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: opts.algorithm,
+      checkpoints: [],
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+      ...(opts.onWaveOutcome ? { onWaveOutcome: opts.onWaveOutcome } : {}),
+    });
+  }
+
+  const attackers = (h: Harness): string[] =>
+    (h.last()?.actors ?? []).filter((a) => a.kind === "pin-attacker").map((a) => a.id);
+
+  it("starts calm: default selected level 0 keeps the loop off (no wave ever triggers)", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    // Never select a level. The loop stays off across a long calm run.
+    await step(h.driver, 250);
+    expect(outcomes).toHaveLength(0);
+    expect(attackers(h)).toHaveLength(0);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    expect(h.last()?.waveOutcome).toBeNull();
+    h.handle.stop();
+  });
+
+  it("setChaosLevel(1) from idle triggers a wave and publishes the wave phase", async () => {
+    const h = endlessHarness({ algorithm: idleAlgorithm });
+    await step(h.driver, 3);
+    expect(h.last()?.chaosPhase.kind).toBe("idle");
+    h.handle.setChaosLevel(1);
+    await step(h.driver, 4); // let the sampler publish the admitted attackers
+    const phase = h.last()?.chaosPhase;
+    expect(phase?.kind).toBe("wave");
+    expect(phase?.selectedLevel).toBe(1);
+    expect(phase?.activeLevel).toBe(1);
+    const ids = attackers(h);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    expect(ids.every((id) => id.startsWith("wave-1-attacker-"))).toBe(true);
+    h.handle.stop();
+  });
+
+  it("resolves a wave into a cooldown gap, then triggers the NEXT wave after CHAOS_COOLDOWN_TICKS", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1); // triggers wave 1 at ~tick 3
+    // Drive past wave 1's resolve (~170 ticks after trigger) but not past the cooldown.
+    await step(h.driver, 195);
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]?.waveId).toBe(1);
+    const cooldown = h.last()?.chaosPhase;
+    expect(cooldown?.kind).toBe("cooldown");
+    expect(cooldown?.selectedLevel).toBe(1);
+    expect(cooldown?.cooldownRemaining).toBeGreaterThan(0);
+    expect(cooldown?.cooldownRemaining).toBeLessThanOrEqual(CHAOS_COOLDOWN_TICKS);
+    // The banner outcome rides through the cooldown gap.
+    expect(h.last()?.waveOutcome?.waveId).toBe(1);
+    expect(attackers(h)).toHaveLength(0); // calm: every attacker went dormant
+
+    // Past the cooldown, the loop triggers wave 2 at the still-selected level 1.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 15);
+    expect(h.last()?.chaosPhase.kind).toBe("wave");
+    expect(h.last()?.waveOutcome).toBeNull(); // a new wave retired the prior banner
+    expect(attackers(h).every((id) => id.startsWith("wave-2-attacker-"))).toBe(true);
+    expect(h.last()?.status).toBe("running"); // the engine never stops
+    h.handle.stop();
+  });
+
+  it("setChaosLevel(0) mid-wave lets the in-flight wave finish, then stops (no re-trigger)", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1); // wave 1 triggers
+    await step(h.driver, 12);
+    expect(h.last()?.chaosPhase.kind).toBe("wave"); // in flight
+    h.handle.setChaosLevel(0); // retained; must NOT interrupt the in-flight wave
+
+    // The in-flight wave still resolves once, then the loop stops after its cooldown.
+    await step(h.driver, 230);
+    expect(outcomes).toHaveLength(1); // exactly one wave ran; no re-trigger
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    expect(attackers(h)).toHaveLength(0);
+    // Confirm no later wave sneaks in.
+    await step(h.driver, 100);
+    expect(outcomes).toHaveLength(1);
+    expect(h.last()?.chaosPhase.kind).toBe("idle");
+    h.handle.stop();
+  });
+
+  it("a level change during a cooldown applies only at the next trigger", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1);
+    await step(h.driver, 195); // wave 1 resolved; now in the cooldown gap
+    expect(h.last()?.chaosPhase.kind).toBe("cooldown");
+    h.handle.setChaosLevel(0); // during cooldown: retained, applies at the next trigger
+
+    // The cooldown finishes and, reading the now-selected level 0, the loop stops.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 20);
+    expect(outcomes).toHaveLength(1);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    expect(attackers(h)).toHaveLength(0);
+    h.handle.stop();
+  });
+
+  it("a manual triggerWave still resolves exactly once when the loop is off (M2 parity)", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    expect(h.handle.triggerWave()).not.toBeNull(); // manual splice, selectedLevel still 0
+    await step(h.driver, 260); // past resolve AND the cooldown that follows
+    expect(outcomes).toHaveLength(1); // the loop is off, so no second wave
+    expect(h.last()?.chaosPhase.kind).toBe("idle");
     h.handle.stop();
   });
 });

@@ -39,7 +39,13 @@ import { PIN_BRUTE_FORCE_REASON } from "../sim/scenarios/pin-brute-force/attacks
 import { planChaosWave } from "../sim/scenarios/pin-brute-force/chaos-wave";
 import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
-import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
+import type {
+  ChaosPhase,
+  FailureReason,
+  RunStatus,
+  SimSnapshot,
+  WaveOutcome,
+} from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
 import { waveSeed } from "../sim/wave-seed";
@@ -65,6 +71,7 @@ import { createDoorReducer } from "./door-reducer";
 import {
   CAMERA_WINDOW_TICKS,
   CHANNEL_CAP,
+  CHAOS_COOLDOWN_TICKS,
   CLOCK_HZ,
   CORRECTNESS_FLOOR,
   DOOR_DWELL_TICKS,
@@ -99,27 +106,13 @@ export type WaveId = number;
 type WaveOutcomeKind = "held" | "breach";
 
 /**
- * A resolved chaos wave, reported once at its drain watermark. For M2b this is the
- * minimal exposure: the engine logs it to the console and hands it to a TEST-ONLY
- * `onWaveOutcome` observer. The store `ChaosPhase`/`WaveOutcome` fields and the
- * on-screen banner are M3.
+ * A resolved chaos wave, reported once at its drain watermark. Structurally the
+ * snapshot's `WaveOutcome` (GH126-PLAN.md M3a): the engine now folds it into every
+ * published snapshot AND still hands it to the TEST-ONLY `onWaveOutcome` observer and
+ * logs it to the console. The alias keeps the existing observer name while the view
+ * type lives in `sim/snapshot.ts`.
  */
-export interface WaveOutcomeObservation {
-  waveId: WaveId;
-  outcome: WaveOutcomeKind;
-  /** How many attacks this wave launched (its 2 to 8 attackers). */
-  attackCount: number;
-  /** How many of those attacks resolved caught (vs missed at the drain watermark). */
-  caughtCount: number;
-  /** Whether EVERY attack resolved caught: `caughtCount === attackCount`. */
-  allCaught: boolean;
-  /**
-   * The wave-window peak of the in-flight backlog: the `ScoredIngress` buffer plus
-   * every channel's contents (finding 8). "held" needs both `allCaught` and this at
-   * or under `QUEUE_CAP`.
-   */
-  queuePeak: number;
-}
+export type WaveOutcomeObservation = WaveOutcome;
 
 /**
  * The live state of the one active chaos wave (GH126-PLAN.md M2b, Q7: one wave at a
@@ -319,6 +312,14 @@ export interface EngineHandle {
    * stop, or while a wave is already active (the cooldown, Q7).
    */
   triggerWave: () => WaveId | null;
+  /**
+   * Select the chaos ladder's repeating LEVEL (GH126-PLAN.md M3a, Q7). The engine
+   * retains the level. `0` stops the loop after the current cycle finishes (the
+   * in-flight wave and its cooldown are never interrupted). A level > 0 selected while
+   * the engine is idle starts a cycle now; selected mid-cycle it is retained and takes
+   * effect at the NEXT trigger. A safe no-op after stop and outside endless mode.
+   */
+  setChaosLevel: (level: number) => void;
   whenStopped: Promise<void>;
 }
 
@@ -385,6 +386,19 @@ interface MapView {
 }
 
 /**
+ * The chaos-loop view the sampler folds into each snapshot (GH126-PLAN.md M3a). The
+ * chaos loop owns the authoritative state (selected level, active wave, cooldown, and
+ * the last resolved outcome); these two getters bundle it into the view-only snapshot
+ * types so the sampler reads one consistent view per publish. With no chaos loop
+ * running (no cast, or a non-endless run) the defaults read idle at level 0 with no
+ * outcome, so scoring and the wave/steady parity are untouched.
+ */
+interface ChaosView {
+  getPhase: () => ChaosPhase;
+  getOutcome: () => WaveOutcome | null;
+}
+
+/**
  * The wave reading `"steady"` and `"endless"` mode always publish: calm, forever,
  * no matter the ticks. `"endless"` (GH126-PLAN.md M1) carries no waves at all, so
  * `waveStateAt` would have nothing to derive a phase from anyway; this constant
@@ -406,6 +420,7 @@ function makeSampler(
   run: RunState,
   waves: readonly Wave[],
   map: MapView,
+  chaos: ChaosView,
   scheduleMode: ScheduleMode,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
@@ -479,6 +494,10 @@ function makeSampler(
       crowds: map.getCrowds(),
       nowTick: map.getNowTick(),
       worldEvents: map.getWorldEvents(),
+      // GH126-PLAN.md M3a: the view-only chaos-loop state, folded in each publish.
+      // Never enters scoring.
+      chaosPhase: chaos.getPhase(),
+      waveOutcome: chaos.getOutcome(),
     });
   };
 }
@@ -510,6 +529,48 @@ export function start(options: StartOptions): EngineHandle {
   // no cast (a legacy scored-only run) it stays this no-op, so the handle's
   // `triggerWave` is always safe to call.
   let triggerWaveImpl: () => WaveId | null = () => null;
+  // GH126-PLAN.md M3a: the repeating chaos-level loop's state, in the outer scope so
+  // the sampler's `chaosView` (below) reads it and the handle's `setChaosLevel` writes
+  // it, while the loop, `triggerWave`, and `resolveWave` (inside the `if (cast)` branch)
+  // drive it. Defaults keep a non-endless or cast-less run permanently idle: level 0,
+  // no wave, no cooldown, no outcome — so scoring and the wave/steady parity are
+  // untouched. `selectedChaosLevel` is retained across cycles; `chaosActiveLevel` is the
+  // per-cycle level captured at each trigger (Q7: a mid-cycle level change does not move
+  // the in-flight wave). `activeWave` non-null IS the wave phase; a non-null
+  // `chaosCooldownUntil` (a game tick) IS the cooldown phase. `lastWaveOutcome` rides
+  // from a wave's resolve until the next wave triggers.
+  let selectedChaosLevel = 0;
+  let chaosActiveLevel = 0;
+  let activeWave: ActiveWave | null = null;
+  let chaosCooldownUntil: number | null = null;
+  let lastWaveOutcome: WaveOutcome | null = null;
+  // The sampler's window onto the chaos state above. Read every publish; derives the
+  // phase from `activeWave`/`chaosCooldownUntil` and reports the retained outcome.
+  const chaosView: ChaosView = {
+    getPhase: (): ChaosPhase => {
+      if (activeWave !== null) {
+        return { kind: "wave", selectedLevel: selectedChaosLevel, activeLevel: chaosActiveLevel };
+      }
+      if (chaosCooldownUntil !== null) {
+        const cooldownRemaining = Math.max(0, chaosCooldownUntil - (clock?.now() ?? 0));
+        return { kind: "cooldown", selectedLevel: selectedChaosLevel, cooldownRemaining };
+      }
+      return { kind: "idle", selectedLevel: selectedChaosLevel };
+    },
+    getOutcome: (): WaveOutcome | null => lastWaveOutcome,
+  };
+  // The handle's `setChaosLevel` (GH126-PLAN.md M3a). Retains the level; when it is > 0
+  // and the engine is idle (no wave, no cooldown), it starts a cycle now by capturing
+  // the per-cycle level and triggering. Mid-cycle it only retains — the loop applies it
+  // at the next trigger (Q7). `triggerWaveImpl` is itself endless-only and no-ops after
+  // stop, so this is safe on any run.
+  const setChaosLevel = (level: number): void => {
+    selectedChaosLevel = level;
+    if (level > 0 && activeWave === null && chaosCooldownUntil === null) {
+      chaosActiveLevel = level;
+      triggerWaveImpl();
+    }
+  };
   let stopped = false;
   let admitted = 0; // real Events pushed out of Ingest
   let completed = 0; // Events drained at the Sink
@@ -697,11 +758,11 @@ export function start(options: StartOptions): EngineHandle {
         }
       }
 
-      // GH126-PLAN.md M2b: the one active chaos wave, plus the monotonic id counters
-      // that mint its WaveId and scorer attackId. `activeWave` non-null IS the
-      // cooldown (Q7). The counters never reuse a value (finding 5); the attackId is
-      // a scorer key, a separate namespace from the dense scored event id.
-      let activeWave: ActiveWave | null = null;
+      // GH126-PLAN.md M2b/M3a: the monotonic id counters that mint each wave's WaveId
+      // and scorer attackId. The `activeWave` slot itself lives in the outer scope (so
+      // the sampler's chaosView reads it); non-null it IS the wave phase (Q7). The
+      // counters never reuse a value (finding 5); the attackId is a scorer key, a
+      // separate namespace from the dense scored event id.
       let nextWaveId = 0;
       let nextAttackId = 0;
 
@@ -725,28 +786,36 @@ export function start(options: StartOptions): EngineHandle {
       // Resolve the wave at its drain watermark: settle a still-pending attack as
       // missed (the existing `closeExpired` path via `advanceTo`; a caught attack is
       // already resolved, so this is a no-op for it), read caught-vs-missed and the
-      // queue peak, then clear the cooldown. NEVER `finishOutcome`, `stop`, or close
-      // the ingress: the engine runs on into calm.
-      const resolveWave = (wave: ActiveWave): void => {
+      // queue peak, then start the cooldown gap (GH126-PLAN.md M3a). NEVER
+      // `finishOutcome`, `stop`, or close the ingress: the engine runs on into calm.
+      // The retained `lastWaveOutcome` rides in every snapshot until the NEXT wave
+      // triggers (`triggerWave` clears it) — a simple, bounded window the M3b banner
+      // reads across the cooldown gap.
+      const resolveWave = (wave: ActiveWave, resolvedTick: number): void => {
         options.scorer.advanceTo(wave.drainDeadline);
         const caughtCount = wave.attacks.filter((attack) => waveCaught(attack.attackId)).length;
         const attackCount = wave.attacks.length;
         const allCaught = caughtCount === attackCount;
-        const outcome: WaveOutcomeKind =
+        const outcomeKind: WaveOutcomeKind =
           allCaught && wave.queuePeak <= QUEUE_CAP ? "held" : "breach";
-        activeWave = null; // lift the cooldown; every attacker is already dormant
-        console.info(
-          `Detection Express: chaos wave ${wave.waveId} resolved ${outcome} ` +
-            `(${caughtCount}/${attackCount} attacks caught, queue peak ${wave.queuePeak}).`,
-        );
-        options.onWaveOutcome?.({
+        activeWave = null; // end the wave phase; every attacker is already dormant
+        // Open the calm cooldown gap: the loop holds here until this tick passes, then
+        // triggers the next wave at the currently selected level (or stops at level 0).
+        chaosCooldownUntil = resolvedTick + CHAOS_COOLDOWN_TICKS;
+        const outcome: WaveOutcome = {
           waveId: wave.waveId,
-          outcome,
+          outcome: outcomeKind,
           attackCount,
           caughtCount,
           allCaught,
           queuePeak: wave.queuePeak,
-        });
+        };
+        lastWaveOutcome = outcome; // published from now until the next wave triggers
+        console.info(
+          `Detection Express: chaos wave ${wave.waveId} resolved ${outcomeKind} ` +
+            `(${caughtCount}/${attackCount} attacks caught, queue peak ${wave.queuePeak}).`,
+        );
+        options.onWaveOutcome?.(outcome);
       };
 
       // Splice one chaos wave into the running clock (GH126-PLAN.md M2b "Target
@@ -759,6 +828,10 @@ export function start(options: StartOptions): EngineHandle {
         if (stopped || scheduleMode !== "endless" || !scoredIngest || activeWave) {
           return null;
         }
+        // A new wave begins: retire the prior wave's banner outcome (GH126-PLAN.md
+        // M3a). It has ridden every snapshot through the cooldown gap; from here the
+        // snapshot carries the live wave phase instead.
+        lastWaveOutcome = null;
         // The trigger tick, captured atomically from the live clock, not a UI
         // snapshot (finding 4). The admit frontier is `clock.now() + 1` after this
         // tick's `foldTick`, so the attacker's start sits a margin past it.
@@ -819,6 +892,37 @@ export function start(options: StartOptions): EngineHandle {
         return waveId;
       };
       triggerWaveImpl = triggerWave;
+
+      // The repeating chaos-level loop (GH126-PLAN.md M3a, Q7), driven once per tick
+      // from `foldTick`. Precedence, in order:
+      //   1. a wave is in flight  -> hold (never interrupt it).
+      //   2. a cooldown is pending -> hold until it elapses, then read the CURRENT
+      //      selected level: > 0 starts the next cycle at it, 0 stops (stay calm).
+      //   3. otherwise idle        -> a selected level > 0 starts a cycle now.
+      // `triggerWave` no-ops if a wave is somehow active, but this gate keeps the loop
+      // from ever double-triggering. Today only level 1 is selectable (the UI locks
+      // 2-5, M3b), but the loop is level-general so higher levels slot in later.
+      const advanceChaosLoop = (tick: number): void => {
+        if (activeWave !== null) {
+          return;
+        }
+        if (chaosCooldownUntil !== null) {
+          if (tick >= chaosCooldownUntil) {
+            chaosCooldownUntil = null;
+            if (selectedChaosLevel > 0) {
+              chaosActiveLevel = selectedChaosLevel;
+              triggerWave();
+            } else {
+              chaosActiveLevel = 0; // the loop has stopped; report idle at level 0
+            }
+          }
+          return;
+        }
+        if (selectedChaosLevel > 0) {
+          chaosActiveLevel = selectedChaosLevel;
+          triggerWave();
+        }
+      };
 
       // The OCC node id an occ-console command flash lands on (the console reading is
       // OCC-only and carries no location of its own).
@@ -1277,9 +1381,14 @@ export function start(options: StartOptions): EngineHandle {
             completed > lastId &&
             tick * GAME_SECONDS_PER_TICK >= wave.drainDeadline
           ) {
-            resolveWave(wave);
+            resolveWave(wave, tick);
           }
         }
+
+        // GH126-PLAN.md M3a: drive the repeating chaos-level loop, after the
+        // resolve check above so a wave that just resolved this tick is already in
+        // the cooldown phase (never re-triggered on the same tick).
+        advanceChaosLoop(tick);
       };
 
       // Tick zero: prime the schedule once at startup, before the clock loop, with
@@ -1363,6 +1472,7 @@ export function start(options: StartOptions): EngineHandle {
       },
       options.waves,
       mapView,
+      chaosView,
       scheduleMode,
     );
 
@@ -1444,6 +1554,7 @@ export function start(options: StartOptions): EngineHandle {
       resume: () => clock?.resume(),
       setSpeed: (multiplier: number) => clock?.setSpeed(multiplier),
       triggerWave: () => triggerWaveImpl(),
+      setChaosLevel,
       whenStopped,
     };
   } catch (error) {
