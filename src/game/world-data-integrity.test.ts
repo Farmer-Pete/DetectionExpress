@@ -201,6 +201,15 @@ describe("line train names", () => {
     lines[0].trainName = "";
     expect(() => checkLineTrainNames(lines)).toThrow(/empty trainName/);
   });
+
+  it("throws when a trainName does not round-trip through its line's train id", () => {
+    // A wrong but non-empty trainName skips the empty-string check above and
+    // exercises the round-trip comparison instead. `trainName` reads the real
+    // `world` singleton, so this clone's wrong value is guaranteed to mismatch it.
+    const lines = clone(world.lines);
+    lines[0].trainName = "Wrong Name";
+    expect(() => checkLineTrainNames(lines)).toThrow(/does not round-trip/);
+  });
 });
 
 describe("scenario sensors resolve", () => {

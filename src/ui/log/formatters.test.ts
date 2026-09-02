@@ -107,21 +107,27 @@ describe("formatRow", () => {
 describe("sensorLabel", () => {
   // The single source of truth is `sensors.data.ts`; four of these names differ from
   // the old hardcoded `SENSOR_LABEL` table it retires (GH127-PLAN.md M2 wiring table).
-  const cases: readonly [SensorKind, string][] = [
-    ["kiosk", "Account kiosk"],
-    ["fare-gate", "Fare gate"],
-    ["tvm", "Ticket vending machine"],
-    ["platform-camera", "Platform camera"],
-    ["door-reader", "Door reader"],
-    ["door-contact", "Door contact sensor"],
-    ["train-tracker", "Train tracker"],
-    ["network-relay", "Network relay"],
-    ["occ-console", "Control console"],
-  ];
+  // Keyed as a `Record<SensorKind, string>` rather than a loose array so a new
+  // `SensorKind` arm is a `tsc` error here, not a silent gap in this table.
+  const cases: Record<SensorKind, string> = {
+    kiosk: "Account kiosk",
+    "fare-gate": "Fare gate",
+    tvm: "Ticket vending machine",
+    "platform-camera": "Platform camera",
+    "door-reader": "Door reader",
+    "door-contact": "Door contact sensor",
+    "train-tracker": "Train tracker",
+    "network-relay": "Network relay",
+    "occ-console": "Control console",
+  };
 
-  it.each(cases)("labels %s as %s, the sensors.data name", (sensor, name) => {
-    expect(sensorLabel(sensor)).toBe(name);
-  });
+  // biome-ignore lint/nursery/noUnsafeTypeAssertion: `cases` above is typed `Record<SensorKind, string>`, so tsc already guarantees these keys are exactly the `SensorKind` members; `Object.entries`'s built-in signature just widens them to `string` on the way out.
+  it.each(Object.entries(cases) as [SensorKind, string][])(
+    "labels %s as %s, the sensors.data name",
+    (sensor, name) => {
+      expect(sensorLabel(sensor)).toBe(name);
+    },
+  );
 });
 
 /** A minimal `WorldLogEvent` for `sensor`, its `reading`, with everything else a
@@ -240,7 +246,7 @@ describe("toLogRow", () => {
       }),
     );
     expect(arr).toMatchObject({
-      who: "Red Line train",
+      who: "Red Line train (T1)",
       where: "Central",
       result: "ARRIVED",
       tone: "neutral",

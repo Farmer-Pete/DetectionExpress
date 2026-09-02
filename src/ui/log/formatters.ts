@@ -157,7 +157,13 @@ export function toLogRow(ev: WorldLogEvent): LogRow {
       const r = reading.reading;
       return {
         ...base,
-        who: trainName(r.train),
+        // `trainName` gives the per-line label (e.g. "Red Line train"), which is the
+        // same string for every train on that line, so the raw train id is appended
+        // to keep this row's train identity. This composes a name from the world
+        // constant with raw id telemetry, like the "Z3 · Operational" zone badge — a
+        // deliberate display composition, not generated flavor text. The id itself
+        // stays raw per decision A.
+        who: `${trainName(r.train)} (${r.train})`,
         where: stationName(r.station),
         result: r.event === "arr" ? "ARRIVED" : "DEPARTED",
         tone: "neutral",

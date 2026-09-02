@@ -55,7 +55,7 @@ The two previously dead files gain real consumers: a `sensor-catalogue` lookup i
 cross-reference invariants nothing checked before — every sensor names at least one real
 manufacturer, every manufacturer's `makes` list resolves back to a real sensor and the two
 directions agree, every scenario's `sensors` list resolves, every `foundAt` token resolves against
-`world.json`'s zones/stations/sites, and every line's `trainName` is non-empty and agrees with
+`src/sim/world/world.data.ts`'s zones/stations/sites, and every line's `trainName` is non-empty and agrees with
 `trainName(trainIdForLine(line))`. Each invariant is proven both on the real data and on a seeded
 broken clone, so a missing check cannot pass silently.
 
