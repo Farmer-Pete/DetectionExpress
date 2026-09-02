@@ -47,6 +47,14 @@ describe("MetroView", () => {
     expect(screen.getByText("train")).toBeDefined();
   });
 
+  it("renders one lucide icon per sensor kind in the legend, not a bare colored square", () => {
+    const { container } = render(<MetroView />);
+    const icons = container.querySelectorAll(".metro-chip-swatch svg.lucide");
+    expect(icons).toHaveLength(9);
+    // Spot-check one mapping: the kiosk row draws the Monitor icon.
+    expect(container.querySelector(".metro-chip-swatch svg.lucide-monitor")).not.toBeNull();
+  });
+
   it("lists a pin attacker row in the Actors key column", () => {
     render(<MetroView />);
     expect(screen.getByText("pin attacker")).toBeDefined();

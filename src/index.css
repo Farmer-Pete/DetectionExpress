@@ -1137,17 +1137,9 @@ body {
   text-anchor: middle;
 }
 
-.metro-chip rect {
-  opacity: 0.55;
-}
-
-.metro-chip-label {
-  fill: #0f303d;
-  font:
-    700 6px ui-monospace,
-    monospace;
-  text-anchor: middle;
-  opacity: 0.9;
+.metro-chip-bg {
+  fill: var(--bg);
+  opacity: 0.75;
 }
 
 /* Key: one element (`MetroKey`, rendered once) holding the Lines/Actors/Sensors
@@ -1236,11 +1228,6 @@ body {
   justify-content: center;
   width: 13px;
   height: 13px;
-  border-radius: 3px;
-  color: #0f303d;
-  font:
-    700 8px ui-monospace,
-    monospace;
 }
 
 /* Topbar actions: the reopen control and the Hire Me surface, pushed to the right.

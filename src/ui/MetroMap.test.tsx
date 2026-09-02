@@ -56,4 +56,10 @@ describe("MetroMap", () => {
     expect(gates.length).toBe(9);
     expect(container.querySelector('[data-site="occ"] [data-chip="O"]')).not.toBeNull();
   });
+
+  it("draws each chip as a lucide icon, not a bare colored square", () => {
+    const { container } = render(<MetroMap />);
+    const gateChip = container.querySelector('[data-station] [data-chip="G"]');
+    expect(gateChip?.querySelector("svg.lucide-log-in")).not.toBeNull();
+  });
 });

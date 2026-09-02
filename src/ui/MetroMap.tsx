@@ -11,24 +11,12 @@
  */
 import { metroLines, metroNodes, type SensorCode } from "../sim/world/layout";
 import { world } from "../sim/world/world";
+import { sensorIcon } from "./icons/sensor-icons";
 import { ActorLayer } from "./metro/ActorLayer";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./metro/design";
 
 /** The zone badge fill per zone integer (view notes section 3). */
 const ZONE_FILL = ["#3a5a66", "#4a7280", "#5a6f4a", "#7a6a3a", "#8a5a3a"] as const;
-
-/** Each sensor chip's color token (view notes section 7). Dim on the static map. */
-const CHIP_COLOR: Record<SensorCode, string> = {
-  K: "#f9c74f",
-  G: "#f2a900",
-  V: "#90be6d",
-  C: "#4cc9f0",
-  R: "#43aa8b",
-  D: "#577590",
-  T: "#cfe3ea",
-  N: "#f8961e",
-  O: "#f94144",
-};
 
 const nodes = metroNodes(world);
 const lines = metroLines(world);
@@ -122,14 +110,15 @@ export function MetroMap() {
   );
 }
 
-/** One static sensor chip: an 8x8 rounded square with its code letter, dimmed. */
+/** One static sensor chip: a dark 8x8 rounded backing square under its lucide icon,
+    tinted with the sensor's color token so the glyph is the primary cue and color
+    stays secondary. */
 function Chip({ code, x, y }: { code: SensorCode; x: number; y: number }) {
+  const { Icon, token } = sensorIcon(code);
   return (
     <g className="metro-chip" data-chip={code}>
-      <rect x={x - 4} y={y - 4} width={8} height={8} rx={2} fill={CHIP_COLOR[code]} />
-      <text className="metro-chip-label" x={x} y={y + 2.2}>
-        {code}
-      </text>
+      <rect className="metro-chip-bg" x={x - 4} y={y - 4} width={8} height={8} rx={2} />
+      <Icon x={x - 3.2} y={y - 3.2} width={6.4} height={6.4} color={token} strokeWidth={2.5} />
     </g>
   );
 }
