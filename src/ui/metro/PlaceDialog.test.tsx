@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { RefObject } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { MapModalEntry } from "../../game/store";
 import { useGameStore } from "../../game/store";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import type { WorldLogEvent } from "../../sim/world-log";
@@ -34,43 +35,55 @@ function fareGateEvent(id: number, placeId: string): WorldLogEvent {
   };
 }
 
+/** A one-entry stack naming the given node, for the common single-dialog cases. */
+function placeStack(id: string): MapModalEntry[] {
+  return [{ kind: "place", selection: { kind: "node", id } }];
+}
+
 function noFallback(): RefObject<HTMLElement | null> {
+  return { current: null };
+}
+
+/** A fresh root-trigger ref for tests that render a single dialog with no
+ *  navigation-stack history to share it with. */
+function noRootTrigger(): RefObject<Element | null> {
   return { current: null };
 }
 
 beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
-    mapSelection: null,
-    eventSelection: null,
+    mapDialogStack: [],
     transport: { frozen: false, speed: 1 },
   });
 });
 
 describe("PlaceDialog", () => {
-  it("renders nothing while no map selection is set", () => {
-    const { container } = render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+  it("renders nothing while the stack's top entry is not a place entry", () => {
+    const { container } = render(
+      <PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 
   it("shows a station's real name, meta, and its devices", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
     expect(screen.getByText("Account kiosk")).toBeDefined();
     expect(screen.getByText("Fare gate")).toBeDefined();
   });
 
   it("shows a site's place kind meta and its restricted devices", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "dep" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    useGameStore.setState({ mapDialogStack: placeStack("dep") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByRole("dialog", { name: "Eastyard Depot" })).toBeDefined();
     expect(screen.getByText("Train tracker")).toBeDefined();
   });
 
   it("shows a train's onboard riders, aggregated, and no devices", () => {
     useGameStore.setState({
-      mapSelection: { kind: "train", actorId: "T1" },
+      mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
       snapshot: snapshotWith([
         {
           id: "T1",
@@ -84,7 +97,7 @@ describe("PlaceDialog", () => {
         },
       ]),
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByRole("dialog", { name: /T1/ })).toBeDefined();
     // The aggregated table: an actor kind/activity/count, never a raw actor id.
     expect(screen.getByText("Rider")).toBeDefined();
@@ -96,7 +109,7 @@ describe("PlaceDialog", () => {
 
   it("re-renders live as the snapshot changes, without ever freezing the engine", () => {
     useGameStore.setState({
-      mapSelection: { kind: "node", id: "cen" },
+      mapDialogStack: placeStack("cen"),
       snapshot: snapshotWith([
         {
           id: "R1",
@@ -105,7 +118,7 @@ describe("PlaceDialog", () => {
         },
       ]),
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByText("waiting for a train")).toBeDefined();
 
     act(() => {
@@ -126,16 +139,16 @@ describe("PlaceDialog", () => {
     expect(useGameStore.getState().transport.frozen).toBe(false);
   });
 
-  it("Escape clears the selection and restores focus to a connected trigger", () => {
+  it("Escape at the root entry clears the whole stack and restores focus to a connected trigger", () => {
     const trigger = document.createElement("button");
     document.body.appendChild(trigger);
     trigger.focus();
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 
-    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });
@@ -148,8 +161,10 @@ describe("PlaceDialog", () => {
     fallback.tabIndex = -1;
     document.body.appendChild(fallback);
 
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={{ current: fallback }} />);
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(
+      <PlaceDialog fallbackFocusRef={{ current: fallback }} rootTriggerRef={noRootTrigger()} />,
+    );
 
     trigger.remove(); // the trigger disappears while the dialog is open
 
@@ -159,18 +174,68 @@ describe("PlaceDialog", () => {
     fallback.remove();
   });
 
-  it("the close button clears the selection", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+  it("the close button clears the whole stack", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+});
+
+describe("PlaceDialog navigation stack (GH124 follow-up: Back)", () => {
+  it("shows no Back control at the root (single-entry) stack", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  it("shows a Back control when this place dialog was pushed on top of an event dialog", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "event", id: 5 }, ...placeStack("cen")],
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+    expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+  });
+
+  it("Back pops this place entry, leaving the event entry underneath and closing this dialog", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "event", id: 5 }, ...placeStack("cen")],
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+  });
+
+  it("Escape pops one entry while a Back is available, instead of closing the whole stack", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "event", id: 5 }, ...placeStack("cen")],
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+  });
+
+  it("the close button (X) always closes the WHOLE stack, even when a Back is available", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "event", id: 5 }, ...placeStack("cen")],
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 });
 
 describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
   it("aggregates several actors doing the same thing into one row with a count, not one row each", () => {
     useGameStore.setState({
-      mapSelection: { kind: "node", id: "cen" },
+      mapDialogStack: placeStack("cen"),
       snapshot: snapshotWith([
         {
           id: "R1",
@@ -189,7 +254,7 @@ describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
         },
       ]),
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByText("waiting for a train")).toBeDefined();
     expect(screen.getByText("3")).toBeDefined();
     expect(screen.queryByText("R1")).toBeNull();
@@ -197,7 +262,7 @@ describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
 
   it("sorts a pin-attacker row first and renders it in the threat tone", () => {
     useGameStore.setState({
-      mapSelection: { kind: "node", id: "cen" },
+      mapDialogStack: placeStack("cen"),
       snapshot: snapshotWith([
         {
           id: "R1",
@@ -216,15 +281,15 @@ describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
         },
       ]),
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     const rows = document.querySelectorAll(".actor-table tbody tr");
     expect(rows[0]?.className).toContain("actor-table-row-threat");
     expect(rows[0]?.textContent).toContain("Pin attacker");
   });
 
   it("shows the empty state when no actor is at the selected place", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByText("No one here right now.")).toBeDefined();
     expect(document.querySelector(".actor-table")).toBeNull();
   });
@@ -233,30 +298,33 @@ describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
 describe("PlaceDialog scoped log (GH124-PLAN.md Checkpoint 5)", () => {
   it("shows only worldEvents scoped to this place, from the same ring", () => {
     useGameStore.setState({
-      mapSelection: { kind: "node", id: "cen" },
+      mapDialogStack: placeStack("cen"),
       snapshot: {
         ...emptySnapshot(),
         worldEvents: [fareGateEvent(0, "cen"), fareGateEvent(1, "riv")],
       },
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByTestId("place-log-row-0")).toBeDefined();
     expect(screen.queryByTestId("place-log-row-1")).toBeNull();
   });
 
   it("shows an empty state when nothing has logged here yet", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     expect(screen.getByText("No activity logged here yet.")).toBeDefined();
   });
 
-  it("selects the world event when a scoped-log row is clicked", () => {
+  it("clicking a scoped-log row PUSHES an event entry, keeping the place entry underneath", () => {
     useGameStore.setState({
-      mapSelection: { kind: "node", id: "cen" },
+      mapDialogStack: placeStack("cen"),
       snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(0, "cen")] },
     });
-    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     fireEvent.click(screen.getByTestId("place-log-row-0"));
-    expect(useGameStore.getState().eventSelection).toBe(0);
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      ...placeStack("cen"),
+      { kind: "event", id: 0 },
+    ]);
   });
 });

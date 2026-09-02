@@ -35,15 +35,21 @@
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
- * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open || placeOpen ||
- * eventOpen` — and hands it in along with all five overlays, `IntroOverlay`,
- * `TraceOverlay`, `PlaceDialog` (GH124-PLAN.md Checkpoint 4), `EventDialog`
- * (Checkpoint 5), and the side panel, as `ModalHost`'s `overlays` prop. All five
- * render as siblings of the inert shell, so a screen reader's browse mode and the
- * keyboard cannot reach shell content behind any of them. `openChaos`/`openAlgorithm`
- * are mutually exclusive with the trace overlay (`useSidePanel`'s own concern), and
- * `onMapSelect`/`onEventSelect` below enforce the same exclusivity for the place and
- * event dialogs, so the shell never stacks two dim backdrops.
+ * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open || stackOpen` —
+ * and hands it in along with all five overlays, `IntroOverlay`, `TraceOverlay`,
+ * `PlaceDialog` (GH124-PLAN.md Checkpoint 4), `EventDialog` (Checkpoint 5), and the
+ * side panel, as `ModalHost`'s `overlays` prop. `PlaceDialog` and `EventDialog` are
+ * both always mounted, but share one bounded stack (`mapDialogStack`, store.ts) and
+ * each self-selects rendering off its TOP entry, so only one of the two is ever
+ * actually on screen — pushing a second dialog from within the first (its "Open
+ * place" link, or a scoped-log row) swaps which of the two renders without emptying
+ * the stack, so a "‹ Back" control in the newly-topmost dialog can pop back to the
+ * one underneath. All five overlays render as siblings of the inert shell, so a
+ * screen reader's browse mode and the keyboard cannot reach shell content behind any
+ * of them. `openChaos`/`openAlgorithm` are mutually exclusive with the trace overlay
+ * (`useSidePanel`'s own concern), and `onMapSelect`/`onEventSelect` below enforce the
+ * same exclusivity against the whole map/event stack, so the shell never stacks a
+ * third dim backdrop behind it.
  *
  * `App` also publishes `modalOpen` to the store as `overlayOpen`, with
  * `useLayoutEffect` (not a passive effect) so it lands in the same commit as
@@ -144,6 +150,13 @@ export function App({ createPipelineController }: AppProps = {}) {
   // reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 5 — the same
   // fallback-focus pattern as the refs above).
   const logPanelRef = useRef<HTMLDivElement>(null);
+  // Shared with BOTH PlaceDialog and EventDialog (GH124 follow-up, the dialog
+  // navigation stack): the element that triggered the current map/event dialog-stack
+  // session's very first, "outside", open — captured and consumed by
+  // `useMapDialogFocus` (`dialog-stack-focus.ts`), not by either dialog component on
+  // its own, since only ONE shared ref can survive a push swapping which of the two
+  // dialogs is actually mounted.
+  const mapDialogRootTriggerRef = useRef<Element | null>(null);
   // Shared with Topbar (which attaches them to its three openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
@@ -172,22 +185,21 @@ export function App({ createPipelineController }: AppProps = {}) {
   const decisionSelection = useGameStore((s) => s.decisionSelection);
   const traceOpen = selection !== null || decisionSelection !== null;
 
-  // The place dialog (GH124-PLAN.md Checkpoint 4): `mapSelection !== null` IS "the
-  // dialog is open", mirroring `traceOpen` above. Unlike the trace dialog, opening it
-  // never freezes the engine (PlaceDialog's own concern, not App's) — it only feeds
-  // `modalOpen` below, so the shell still goes inert while it is up.
-  const mapSelection = useGameStore((s) => s.mapSelection);
-  const placeOpen = mapSelection !== null;
+  // The place/event dialog stack (GH124-PLAN.md Checkpoints 4-5, restructured for
+  // Back navigation): `mapDialogStack.length > 0` IS "a place or event dialog is
+  // open", mirroring `traceOpen` above — one flag covers both dialogs now, since a
+  // push (from inside either one) leaves the stack non-empty exactly like a fresh
+  // "outside" open does. Unlike the trace dialog, opening it never freezes the engine
+  // (PlaceDialog's/EventDialog's own concern, not App's) — it only feeds `modalOpen`
+  // below, so the shell still goes inert while it is up. `PlaceDialog`/`EventDialog`
+  // each self-select which one renders off the stack's top entry, so App only needs
+  // the three "outside" openers (a map click, a main-log-row click) and the
+  // stack-non-empty flag; the "inside" pushers (`openPlaceFromEvent`,
+  // `openEventFromPlace`) live entirely inside the two dialogs.
+  const mapDialogStack = useGameStore((s) => s.mapDialogStack);
+  const stackOpen = mapDialogStack.length > 0;
   const selectMapNode = useGameStore((s) => s.selectMapNode);
   const selectMapTrain = useGameStore((s) => s.selectMapTrain);
-
-  // The event dialog (GH124-PLAN.md Checkpoint 5): `eventSelection !== null` IS "the
-  // dialog is open", mirroring `placeOpen` above. The store already keeps
-  // `mapSelection`/`eventSelection` mutually exclusive (selecting one clears the
-  // other) and reconciles `eventSelection` against the live ring on every publish, so
-  // this derivation needs no further validation here.
-  const eventSelection = useGameStore((s) => s.eventSelection);
-  const eventOpen = eventSelection !== null;
   const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
 
   // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
@@ -227,12 +239,14 @@ export function App({ createPipelineController }: AppProps = {}) {
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
   // exclusivity check): the shell being inert already blocks a real pointer/keyboard
   // click from reaching the map, but this guard is what actually enforces "only one
-  // map modal at a time" against any path that is not gated by inert. `onEventSelect`
-  // below applies the identical guard to the event opener, so the two stay
-  // consistent (a Codex review caught the event opener going unguarded here).
+  // dialog stack at a time" against any path that is not gated by inert. Both this and
+  // `onEventSelect` below guard on the SAME `stackOpen` flag now (a map click and a
+  // main-log-row click are both "outside" openers, only reachable while the stack is
+  // empty — see `mapDialogStack`'s doc comment in store.ts), so the two stay
+  // consistent (a Codex review once caught the event opener going unguarded here).
   const onMapSelect = useCallback(
     (next: MapSelection) => {
-      if (intro.introOpen || traceOpen || sidePanel.open || eventOpen) {
+      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
         return;
       }
       if (next.kind === "node") {
@@ -241,22 +255,20 @@ export function App({ createPipelineController }: AppProps = {}) {
         selectMapTrain(next.actorId);
       }
     },
-    [intro.introOpen, traceOpen, sidePanel.open, eventOpen, selectMapNode, selectMapTrain],
+    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectMapNode, selectMapTrain],
   );
 
-  // The event opener's guard, mirroring `onMapSelect` above: the shell's `inert` gate
-  // already blocks a real click on a log row while another overlay is open, but this
-  // is what enforces "only one event modal at a time" against any path not gated by
-  // inert. Forwarded to `LogPanel` (via `InspectorShell`'s `onSelectEvent` prop) so a
-  // row click routes through this guard instead of calling the store directly.
+  // The event opener's guard, mirroring `onMapSelect` above. Forwarded to `LogPanel`
+  // (via `InspectorShell`'s `onSelectEvent` prop) so a row click routes through this
+  // guard instead of calling the store directly.
   const onEventSelect = useCallback(
     (id: number) => {
-      if (intro.introOpen || traceOpen || sidePanel.open || placeOpen) {
+      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
         return;
       }
       selectWorldEvent(id);
     },
-    [intro.introOpen, traceOpen, sidePanel.open, placeOpen, selectWorldEvent],
+    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectWorldEvent],
   );
 
   // Complete the intro transition: once the intro has actually closed, act on
@@ -287,7 +299,7 @@ export function App({ createPipelineController }: AppProps = {}) {
     }
   }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm, sidePanel.openMetrics]);
 
-  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || placeOpen || eventOpen;
+  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || stackOpen;
 
   // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
   // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
@@ -318,7 +330,8 @@ export function App({ createPipelineController }: AppProps = {}) {
     // overlays are ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
     // `TraceOverlay` unconditionally (it renders null itself when neither selection
     // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
-    // when its own selection is unset), and the side panel when `sidePanel.open`.
+    // unless it is the KIND named by `mapDialogStack`'s top entry), and the side
+    // panel when `sidePanel.open`.
     <ModalHost
       modalOpen={modalOpen}
       shellExtraClass={shaking && status === "running" ? "shake" : undefined}
@@ -329,8 +342,11 @@ export function App({ createPipelineController }: AppProps = {}) {
             fallbackFocusRef={findingsPanelRef}
             decisionsFallbackFocusRef={decisionsPanelRef}
           />
-          <PlaceDialog fallbackFocusRef={metroMapRegionRef} />
-          <EventDialog fallbackFocusRef={logPanelRef} />
+          <PlaceDialog
+            fallbackFocusRef={metroMapRegionRef}
+            rootTriggerRef={mapDialogRootTriggerRef}
+          />
+          <EventDialog fallbackFocusRef={logPanelRef} rootTriggerRef={mapDialogRootTriggerRef} />
           {sidePanel.sidePanel}
         </>
       }

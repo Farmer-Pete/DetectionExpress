@@ -16,7 +16,7 @@
  *
  * GH124-PLAN.md Checkpoint 4: `onSelect` and `mapRegionRef` pass straight through to
  * `MetroMap`/the map region — App owns the actual selection state (the store's
- * `mapSelection`) and the place dialog's focus-restore fallback, so this component
+ * `mapDialogStack`) and the place dialog's focus-restore fallback, so this component
  * stays a thin relay for both, the same way it already relays nothing else of its own.
  */
 

@@ -855,6 +855,26 @@ body {
   border-color: var(--a1);
 }
 
+/* The header's "‹ Back" control (the dialog navigation stack): shown only while a
+   dialog was pushed on top of another, so this pops back to the one underneath
+   instead of closing the whole stack the way `.place-overlay-close` does. */
+.place-overlay-back {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.place-overlay-back:hover {
+  border-color: var(--a1);
+}
+
 .place-section-title {
   margin: 0 0 0.5rem;
   color: var(--ink);
@@ -996,6 +1016,7 @@ body {
 }
 
 .event-open-place {
+  margin-top: 0.2rem;
   padding: 0.3rem 0.7rem;
   border-radius: 8px;
   border: 1px solid var(--line);

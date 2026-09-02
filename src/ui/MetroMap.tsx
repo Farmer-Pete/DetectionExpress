@@ -11,7 +11,7 @@
  *
  * GH124-PLAN.md Checkpoint 4: every station, site, and the OCC is now a clickable
  * place, opening the live place dialog through the `onSelect` callback (lifted to
- * `App`/the store's `mapSelection`, see `place-view.ts`). The container is no longer
+ * `App`/the store's `mapDialogStack`, see `place-view.ts`). The container is no longer
  * `role="img"` — an image's descendants are not exposed as interactive controls to
  * assistive tech, which would make every button below unreachable — so it carries a
  * neutral `role="group"` with the same accessible name instead. Each node's whole `<g>`

@@ -31,14 +31,14 @@
  *
  * Overlay exclusivity (GH118-PLAN.md, extended by GH124-PLAN.md Checkpoints 4-5):
  * `openChaos`/`openAlgorithm`/`openMetrics` no-op while ANY other modal is open — the
- * trace overlay (`selection`/`decisionSelection`), the place dialog (`mapSelection`),
- * or the event dialog (`eventSelection`) — so the shell never stacks two dim
- * backdrops. `App.tsx` returns the guard: its own map/event openers no-op while
- * `sidePanel.open` is true, the same way this hook no-ops against the store's three
- * fields, so the four-way exclusivity (trace, place, event, side panel) holds from
- * every direction. The intro transition is App's concern: App records the tab an
- * intro action requested, closes the intro, then calls `openChaos`/`openAlgorithm`
- * itself once the intro has actually closed.
+ * trace overlay (`selection`/`decisionSelection`) or the map/event dialog stack
+ * (`mapDialogStack`, non-empty) — so the shell never stacks two dim backdrops.
+ * `App.tsx` returns the guard: its own map/event openers no-op while `sidePanel.open`
+ * is true, the same way this hook no-ops against the store's fields, so the three-way
+ * exclusivity (trace, the map/event stack, side panel) holds from every direction.
+ * The intro transition is App's concern: App records the tab an intro action
+ * requested, closes the intro, then calls `openChaos`/`openAlgorithm` itself once the
+ * intro has actually closed.
  *
  * Focus fallback for that intro path (GH118-PLAN.md): the intro button that
  * triggered the open is unmounted by the time the panel closes, so `SidePanel`'s own
@@ -74,12 +74,14 @@ export interface SidePanelController {
   open: boolean;
   /** The active tab. */
   tab: SidePanelTab;
-  /** Open on the chaos tab. No-op while the trace, place, or event dialog is open. */
+  /** Open on the chaos tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
   openChaos: () => void;
-  /** Open on the algorithm tab. No-op while the trace, place, or event dialog is
-   *  open. */
+  /** Open on the algorithm tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
   openAlgorithm: () => void;
-  /** Open on the metrics tab. No-op while the trace, place, or event dialog is open. */
+  /** Open on the metrics tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
   openMetrics: () => void;
   /** Dismiss (Esc, backdrop, or the X button): restores the freeze saved on open. */
   close: () => void;
@@ -100,8 +102,7 @@ export function useSidePanel({
 
   const selection = useGameStore((state) => state.selection);
   const decisionSelection = useGameStore((state) => state.decisionSelection);
-  const mapSelection = useGameStore((state) => state.mapSelection);
-  const eventSelection = useGameStore((state) => state.eventSelection);
+  const mapDialogStack = useGameStore((state) => state.mapDialogStack);
   const setFrozen = useGameStore((state) => state.setFrozen);
   const runPending = useGameStore((state) => state.runPending);
   const error = useGameStore((state) => state.error);
@@ -116,13 +117,8 @@ export function useSidePanel({
 
   const openWith = useCallback(
     (nextTab: SidePanelTab): void => {
-      if (
-        selection !== null ||
-        decisionSelection !== null ||
-        mapSelection !== null ||
-        eventSelection !== null
-      ) {
-        return; // exclusive with the trace/place/event dialogs: never stack two dim backdrops
+      if (selection !== null || decisionSelection !== null || mapDialogStack.length > 0) {
+        return; // exclusive with the trace dialog and the map/event stack: never stack two dim backdrops
       }
       if (!holdsFreezeRef.current) {
         savedFrozenRef.current = useGameStore.getState().transport.frozen;
@@ -132,7 +128,7 @@ export function useSidePanel({
       setTab(nextTab);
       setOpen(true);
     },
-    [selection, decisionSelection, mapSelection, eventSelection, setFrozen],
+    [selection, decisionSelection, mapDialogStack, setFrozen],
   );
 
   const openChaos = useCallback(() => openWith("chaos"), [openWith]);

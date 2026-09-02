@@ -1,23 +1,33 @@
 /**
  * The place dialog (GH124-PLAN.md Checkpoint 4): a centered modal for whatever the
  * player last clicked or activated on the map — a station, a site, the OCC, or a
- * train. It reads `mapSelection` and the live `snapshot` straight from the store, so
- * its content tracks the running sim tick by tick. Unlike `TraceOverlay.tsx` and the
- * side panel, opening it does NOT freeze the engine: `App`'s `modalOpen` still makes
- * the shell `inert` (through `ModalHost`) so the player cannot reach anything behind
- * it, but the sim keeps stepping and this dialog keeps re-rendering as it does.
+ * train. It renders only while the map/event dialog stack's TOP entry
+ * (`topMapDialogEntry`) is a `"place"` entry, reading the stack and the live
+ * `snapshot` straight from the store, so its content tracks the running sim tick by
+ * tick. Unlike `TraceOverlay.tsx` and the side panel, opening it does NOT freeze the
+ * engine: `App`'s `modalOpen` still makes the shell `inert` (through `ModalHost`) so
+ * the player cannot reach anything behind it, but the sim keeps stepping and this
+ * dialog keeps re-rendering as it does.
  *
  * Follows `TraceOverlay`'s dialog shape and its shared `src/ui/focus.ts` plumbing:
- * `role="dialog"`, a backdrop that dismisses on a genuine outside click, Esc
- * dismisses, focus moves in on open, Tab/Shift+Tab wrap at the dialog's edges, and on
- * close focus restores to whatever triggered the open — falling back to
- * `fallbackFocusRef` (the metro map region, wired by `App`) when that trigger is no
- * longer connected, mirroring `TraceOverlay`'s decision 14 fallback.
+ * `role="dialog"`, a backdrop that dismisses (the whole stack) on a genuine outside
+ * click, focus moves in whenever this dialog becomes the stack's top entry,
+ * Tab/Shift+Tab wrap at the dialog's edges, and on a FULL close focus restores to
+ * whatever triggered this dialog-stack session's very first, "outside", open —
+ * falling back to `fallbackFocusRef` (the metro map region, wired by `App`) when that
+ * trigger is no longer connected, mirroring `TraceOverlay`'s decision 14 fallback (see
+ * `dialog-stack-focus.ts` for why that root trigger is shared with `EventDialog`
+ * rather than captured independently by each dialog). A "‹ Back" control appears in
+ * the header whenever the stack holds more than this one entry (i.e. this place
+ * dialog was pushed from a scoped-log row inside an EventDialog); Esc pops one entry
+ * while that control is showing, and only closes the whole stack at the root entry —
+ * the × button and the backdrop always close the whole stack, regardless of depth.
  */
 import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
-import { useGameStore } from "../../game/store";
+import { topMapDialogEntry, useGameStore } from "../../game/store";
 import { world } from "../../sim/world/world";
 import { sensorCodeFor, type WorldLogEvent } from "../../sim/world-log";
+import { useMapDialogFocus } from "../dialog-stack-focus";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { placeIcon, sensorIcon } from "../icons/sensor-icons";
 import { formatClock, toLogRow } from "../log/formatters";
@@ -42,49 +52,61 @@ const ACTOR_GLYPH_COLOR: Record<ActorSummaryRow["kind"], string> = {
 };
 
 interface PlaceDialogProps {
-  /** Focus-restore fallback for when the trigger element is no longer connected. */
+  /** Focus-restore fallback for when the root trigger is no longer connected. */
   fallbackFocusRef: RefObject<HTMLElement | null>;
+  /** Shared with `EventDialog` (owned by `App`): the element that triggered the
+   *  current dialog-stack session's very first, "outside", open — see
+   *  `dialog-stack-focus.ts` for why this must be shared rather than captured
+   *  independently by each dialog. */
+  rootTriggerRef: RefObject<Element | null>;
 }
 
-export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
-  const selection = useGameStore((state) => state.mapSelection);
+export function PlaceDialog({ fallbackFocusRef, rootTriggerRef }: PlaceDialogProps) {
+  const stack = useGameStore((state) => state.mapDialogStack);
   const snapshot = useGameStore((state) => state.snapshot);
-  const clearMapSelection = useGameStore((state) => state.clearMapSelection);
-  const selectWorldEvent = useGameStore((state) => state.selectWorldEvent);
+  const clearMapDialogStack = useGameStore((state) => state.clearMapDialogStack);
+  const popMapDialog = useGameStore((state) => state.popMapDialog);
+  const openEventFromPlace = useGameStore((state) => state.openEventFromPlace);
 
-  const open = selection !== null;
+  const top = topMapDialogEntry(stack);
+  const open = top !== null && top.kind === "place";
+  const selection = open ? top.selection : null;
+  // More than this one entry means a scoped-log row inside an EventDialog pushed this
+  // place dialog on top of it, so a "‹ Back" can pop back to it.
+  const canGoBack = stack.length > 1;
   const view = selection === null ? null : placeView(selection, snapshot, world);
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Move focus into the dialog on open; restore it on close, falling back when the
-  // trigger has since left the document (mirrors TraceOverlay.tsx).
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const trigger = document.activeElement;
-    dialogRef.current?.focus();
-    return () => {
-      if (trigger instanceof HTMLElement && trigger.isConnected) {
-        trigger.focus();
-      } else {
-        fallbackFocusRef.current?.focus();
-      }
-    };
-  }, [open, fallbackFocusRef]);
+  // Move focus into the dialog whenever it becomes (or stays) the stack's top entry;
+  // restore it only on a full close, falling back when the root trigger has since
+  // left the document — see `dialog-stack-focus.ts` for why a push or a pop touches
+  // neither the capture nor the restore.
+  useMapDialogFocus({
+    isTop: open,
+    stackLength: stack.length,
+    dialogRef,
+    fallbackFocusRef,
+    rootTriggerRef,
+  });
 
   useEffect(() => {
     if (!open) {
       return;
     }
-    return installOutsidePointerDismiss(dialogRef, clearMapSelection);
-  }, [open, clearMapSelection]);
+    // A backdrop click always closes the WHOLE stack, not just this entry — it is
+    // the "give up and leave" gesture, not a Back.
+    return installOutsidePointerDismiss(dialogRef, clearMapDialogStack);
+  }, [open, clearMapDialogStack]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {
       event.preventDefault();
-      clearMapSelection();
+      if (canGoBack) {
+        popMapDialog();
+      } else {
+        clearMapDialogStack();
+      }
       return;
     }
     const dialog = dialogRef.current;
@@ -112,6 +134,11 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
         onKeyDown={onKeyDown}
       >
         <header className="place-overlay-header">
+          {canGoBack ? (
+            <button type="button" className="place-overlay-back" onClick={popMapDialog}>
+              <span aria-hidden="true">‹</span> Back
+            </button>
+          ) : null}
           {Icon !== null ? (
             <Icon className="place-overlay-icon" size={20} aria-hidden="true" />
           ) : null}
@@ -125,7 +152,7 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
             type="button"
             className="place-overlay-close"
             aria-label="Close"
-            onClick={clearMapSelection}
+            onClick={clearMapDialogStack}
           >
             <span aria-hidden="true">×</span>
           </button>
@@ -173,7 +200,7 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
           ) : (
             <div className="log-stream place-log-stream">
               {view.log.map((event) => (
-                <PlaceLogRow key={event.id} event={event} onSelect={selectWorldEvent} />
+                <PlaceLogRow key={event.id} event={event} onSelect={openEventFromPlace} />
               ))}
             </div>
           )}
@@ -224,8 +251,9 @@ function ActorTableRow({ row }: { row: ActorSummaryRow }) {
 /**
  * One scoped-log row (GH124-PLAN.md Checkpoint 5): the SAME `toLogRow` mapping the
  * unified log panel uses, so the two never drift in how they describe a reading.
- * Clicking it opens the event dialog on this row's world-log id, exactly like a
- * `LogPanel` row.
+ * Clicking it PUSHES an event entry naming this row's world-log id onto the
+ * map/event dialog stack, so the event dialog opens on top of this place dialog
+ * rather than replacing it — a Back returns here.
  */
 function PlaceLogRow({
   event,

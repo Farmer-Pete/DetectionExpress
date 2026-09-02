@@ -16,8 +16,7 @@ beforeEach(() => {
     runPending: false,
     selection: null,
     decisionSelection: null,
-    mapSelection: null,
-    eventSelection: null,
+    mapDialogStack: [],
     transport: { frozen: false, speed: 1 },
     flashes: new Map(),
     runToken: 0,
@@ -219,15 +218,16 @@ describe("store selection", () => {
     expect(useGameStore.getState().selection).toBeNull();
   });
 
-  it("toggling a finding off also heals a map or event selection left open by a stray click (Codex review gap)", () => {
+  it("toggling a finding off also heals a non-empty map/event dialog stack left open by a stray click (Codex review gap)", () => {
     useGameStore.getState().setSnapshot(snapshotWith([finding(7)]));
     useGameStore.getState().selectFinding(7);
     // Manufacture the conflicting state the toggle-off branch used to leave standing.
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" }, eventSelection: 5 });
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
     useGameStore.getState().selectFinding(7); // re-select toggles off
     expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 
   it("switches selection when a different seq is selected", () => {
@@ -297,13 +297,17 @@ describe("store selection", () => {
     expect(useGameStore.getState().selection).toBeNull();
   });
 
-  it("selecting a finding closes any open map or event selection, so at most one dialog is open", () => {
+  it("selecting a finding closes any open map/event dialog stack, so at most one dialog kind is open", () => {
     useGameStore.getState().setSnapshot(snapshotWith([finding(3)]));
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" }, eventSelection: 5 });
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "place", selection: { kind: "node", id: "cen" } },
+        { kind: "event", id: 5 },
+      ],
+    });
     useGameStore.getState().selectFinding(3);
     expect(useGameStore.getState().selection).toEqual({ seq: 3 });
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 });
 
@@ -325,14 +329,15 @@ describe("store decision selection (T10)", () => {
     expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 
-  it("toggling a decision off also heals a map or event selection left open by a stray click (Codex review gap)", () => {
+  it("toggling a decision off also heals a non-empty map/event dialog stack left open by a stray click (Codex review gap)", () => {
     useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
     useGameStore.getState().selectDecision(7);
-    useGameStore.setState({ mapSelection: { kind: "train", actorId: "T1" }, eventSelection: 5 });
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
+    });
     useGameStore.getState().selectDecision(7); // re-select toggles off
     expect(useGameStore.getState().decisionSelection).toBeNull();
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 
   it("switches decision selection when a different seq is selected", () => {
@@ -411,186 +416,189 @@ describe("store decision selection (T10)", () => {
     expect(useGameStore.getState().decisionSelection).toBeNull();
   });
 
-  it("selecting a decision closes any open map or event selection, so at most one dialog is open", () => {
+  it("selecting a decision closes any open map/event dialog stack, so at most one dialog kind is open", () => {
     useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
-    useGameStore.setState({ mapSelection: { kind: "train", actorId: "T1" }, eventSelection: 5 });
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
+    });
     useGameStore.getState().selectDecision(7);
     expect(useGameStore.getState().decisionSelection).toEqual({ seq: 7 });
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 });
 
-describe("store map selection (GH124-PLAN.md Checkpoint 4)", () => {
-  it("starts with no map selection", () => {
-    expect(useGameStore.getState().mapSelection).toBeNull();
+describe("store map/event dialog stack: 'outside' openers (GH124 follow-up, dialog navigation stack)", () => {
+  it("starts with an empty stack", () => {
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 
-  it("selects a map node by id", () => {
+  it("selectMapNode resets the stack to one place entry", () => {
     useGameStore.getState().selectMapNode("cen");
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "node", id: "cen" });
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
   });
 
-  it("toggles: re-selecting the same node id clears the map selection", () => {
-    useGameStore.getState().selectMapNode("cen");
-    useGameStore.getState().selectMapNode("cen");
-    expect(useGameStore.getState().mapSelection).toBeNull();
-  });
-
-  it("toggling a map node off also heals an open event or trace selection (Codex review gap)", () => {
-    useGameStore.getState().selectMapNode("cen");
-    useGameStore.setState({
-      selection: { seq: 1 },
-      decisionSelection: { seq: 2 },
-      eventSelection: 5,
-    });
-    useGameStore.getState().selectMapNode("cen"); // re-select toggles off
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
-  });
-
-  it("selects a train by actor id", () => {
+  it("selectMapTrain resets the stack to one place entry", () => {
     useGameStore.getState().selectMapTrain("T1");
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "train", actorId: "T1" });
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "train", actorId: "T1" } },
+    ]);
   });
 
-  it("toggles: re-selecting the same train id clears the map selection", () => {
-    useGameStore.getState().selectMapTrain("T1");
-    useGameStore.getState().selectMapTrain("T1");
-    expect(useGameStore.getState().mapSelection).toBeNull();
-  });
-
-  it("toggling a train off also heals an open event or trace selection (Codex review gap)", () => {
-    useGameStore.getState().selectMapTrain("T1");
-    useGameStore.setState({
-      selection: { seq: 1 },
-      decisionSelection: { seq: 2 },
-      eventSelection: 5,
-    });
-    useGameStore.getState().selectMapTrain("T1"); // re-select toggles off
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
-    expect(useGameStore.getState().eventSelection).toBeNull();
-  });
-
-  it("clears the map selection through clearMapSelection", () => {
-    useGameStore.getState().selectMapNode("cen");
-    useGameStore.getState().clearMapSelection();
-    expect(useGameStore.getState().mapSelection).toBeNull();
-  });
-
-  it("selecting a map node closes any open event selection and any open trace selection", () => {
+  it("selectWorldEvent resets the stack to one event entry, when the id is present in the snapshot's worldEvents ring", () => {
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
     useGameStore.getState().selectWorldEvent(5);
-    useGameStore.setState({ selection: { seq: 1 }, decisionSelection: { seq: 2 } });
-    useGameStore.getState().selectMapNode("cen");
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "node", id: "cen" });
-    expect(useGameStore.getState().eventSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
   });
 
-  it("selecting a train closes any open event selection and any open trace selection", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    useGameStore.setState({ selection: { seq: 1 }, decisionSelection: { seq: 2 } });
-    useGameStore.getState().selectMapTrain("T1");
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "train", actorId: "T1" });
-    expect(useGameStore.getState().eventSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
-  });
-});
-
-describe("store event selection (GH124-PLAN.md Checkpoint 5)", () => {
-  it("starts with no event selection", () => {
-    expect(useGameStore.getState().eventSelection).toBeNull();
-  });
-
-  it("selects a world event by id, when the id is present in the snapshot's worldEvents ring", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    expect(useGameStore.getState().eventSelection).toBe(5);
-  });
-
-  it("toggles: re-selecting the same id clears the event selection", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    useGameStore.getState().selectWorldEvent(5);
-    expect(useGameStore.getState().eventSelection).toBeNull();
-  });
-
-  it("toggling an event off also heals an open map or trace selection (Codex review gap)", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    useGameStore.setState({
-      selection: { seq: 1 },
-      decisionSelection: { seq: 2 },
-      mapSelection: { kind: "node", id: "cen" },
-    });
-    useGameStore.getState().selectWorldEvent(5); // re-select toggles off
-    expect(useGameStore.getState().eventSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
-    expect(useGameStore.getState().mapSelection).toBeNull();
-  });
-
-  it("clears the event selection through clearEventSelection", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    useGameStore.getState().clearEventSelection();
-    expect(useGameStore.getState().eventSelection).toBeNull();
-  });
-
-  it("leaves the event selection null when the id is absent from the snapshot's worldEvents ring", () => {
+  it("selectWorldEvent leaves the stack untouched when the id is absent from the snapshot's worldEvents ring", () => {
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(1)]));
     useGameStore.getState().selectWorldEvent(99); // 99 never entered the ring: stale
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 
-  it("leaves an open map selection untouched on a stale selectWorldEvent id", () => {
+  it("selectWorldEvent leaves an already-open place dialog untouched on a stale id", () => {
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(1)]));
     useGameStore.getState().selectMapNode("cen");
     useGameStore.getState().selectWorldEvent(99); // stale: no id 99 in the ring
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "node", id: "cen" });
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
   });
 
   it("a stale id can never wedge the dialog: after the id ages out of the ring, re-selecting it opens nothing", () => {
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
     useGameStore.getState().selectWorldEvent(5);
-    expect(useGameStore.getState().eventSelection).toBe(5);
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
     // The ring evicts id 5 (e.g. a fresh publish that aged it out while frozen).
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(6)]));
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
     // A later click replaying the same stale id opens nothing rather than wedging.
     useGameStore.getState().selectWorldEvent(5);
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
 
-  it("selecting a world event closes any open map selection and any open trace selection", () => {
+  it("selectMapNode/selectMapTrain/selectWorldEvent all clear any open trace selection", () => {
     useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectMapNode("cen");
-    useGameStore.setState({ selection: { seq: 1 }, decisionSelection: { seq: 2 } });
-    useGameStore.getState().selectWorldEvent(5);
-    expect(useGameStore.getState().eventSelection).toBe(5);
-    expect(useGameStore.getState().mapSelection).toBeNull();
-    expect(useGameStore.getState().selection).toBeNull();
-    expect(useGameStore.getState().decisionSelection).toBeNull();
+    for (const open of [
+      () => useGameStore.getState().selectMapNode("cen"),
+      () => useGameStore.getState().selectMapTrain("T1"),
+      () => useGameStore.getState().selectWorldEvent(5),
+    ]) {
+      useGameStore.setState({
+        selection: { seq: 1 },
+        decisionSelection: { seq: 2 },
+        mapDialogStack: [],
+      });
+      open();
+      expect(useGameStore.getState().selection).toBeNull();
+      expect(useGameStore.getState().decisionSelection).toBeNull();
+    }
   });
+});
 
-  it("openPlaceFromEvent swaps the event selection for a map selection and closes any open trace selection, atomically", () => {
-    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
-    useGameStore.getState().selectWorldEvent(5);
-    useGameStore.setState({ selection: { seq: 1 }, decisionSelection: { seq: 2 } });
+describe("store map/event dialog stack: 'inside' pushers (GH124 follow-up, dialog navigation stack)", () => {
+  it("openPlaceFromEvent pushes a place entry on top of an existing stack, keeping what is below", () => {
+    useGameStore.setState({ mapDialogStack: [{ kind: "event", id: 5 }] });
     useGameStore.getState().openPlaceFromEvent("cen");
-    expect(useGameStore.getState().mapSelection).toEqual({ kind: "node", id: "cen" });
-    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "event", id: 5 },
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+  });
+
+  it("openEventFromPlace pushes an event entry on top of an existing stack, when the id is present in the snapshot's worldEvents ring", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
+    useGameStore.getState().openEventFromPlace(5);
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+      { kind: "event", id: 5 },
+    ]);
+  });
+
+  it("openEventFromPlace leaves the stack untouched when the id is absent from the snapshot's worldEvents ring", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(1)]));
+    const before = [{ kind: "place" as const, selection: { kind: "node" as const, id: "cen" } }];
+    useGameStore.setState({ mapDialogStack: before });
+    useGameStore.getState().openEventFromPlace(99); // stale: no id 99 in the ring
+    expect(useGameStore.getState().mapDialogStack).toEqual(before);
+  });
+
+  it("neither pusher touches an open trace selection: the stack being non-empty already implies none is open", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.setState({ mapDialogStack: [{ kind: "event", id: 5 }] });
+    useGameStore.getState().openPlaceFromEvent("cen");
     expect(useGameStore.getState().selection).toBeNull();
     expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+});
+
+describe("store map/event dialog stack: back and clear (GH124 follow-up, dialog navigation stack)", () => {
+  it("popMapDialog pops the last entry off a multi-entry stack, revealing the one beneath", () => {
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "place", selection: { kind: "node", id: "cen" } },
+        { kind: "event", id: 5 },
+      ],
+    });
+    useGameStore.getState().popMapDialog();
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+  });
+
+  it("popMapDialog on a single-entry stack empties it", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
+    useGameStore.getState().popMapDialog();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("popMapDialog is a no-op on an already-empty stack", () => {
+    useGameStore.getState().popMapDialog();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("clearMapDialogStack empties the stack regardless of depth", () => {
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "place", selection: { kind: "node", id: "cen" } },
+        { kind: "event", id: 5 },
+      ],
+    });
+    useGameStore.getState().clearMapDialogStack();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("setSnapshot filters a stale event entry out of the stack even when it is not the top entry", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "event", id: 5 },
+        { kind: "place", selection: { kind: "node", id: "cen" } },
+      ],
+    });
+    // A fresh publish whose ring no longer carries id 5: the buried event entry is
+    // filtered out, leaving the place entry (still the top) untouched.
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([]));
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+  });
+
+  it("setSnapshot leaves a stack with no stale event entries untouched (same array reference)", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
+    const before = useGameStore.getState().mapDialogStack;
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    expect(useGameStore.getState().mapDialogStack).toBe(before);
   });
 });
 

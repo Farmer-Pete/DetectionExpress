@@ -109,7 +109,7 @@ describe("LogPanel", () => {
     setSnapshot([kioskEvent(0), fareGateEvent(1)]);
     render(<LogPanel />);
     fireEvent.click(screen.getByTestId("log-row-1"));
-    expect(useGameStore.getState().eventSelection).toBe(1);
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 1 }]);
   });
 
   it("carries data-scored-event-id only on a scored row, keyed by scoredEventId (not the world id)", () => {

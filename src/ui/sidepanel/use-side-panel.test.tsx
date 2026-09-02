@@ -10,8 +10,7 @@ beforeEach(() => {
     transport: { frozen: false, speed: 1 },
     selection: null,
     decisionSelection: null,
-    mapSelection: null,
-    eventSelection: null,
+    mapDialogStack: [],
     runPending: false,
     error: null,
   });
@@ -142,7 +141,9 @@ describe("useSidePanel", () => {
   });
 
   it("openChaos is a no-op while the place dialog is open (GH124-PLAN.md Checkpoint 4, Codex review gap)", () => {
-    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openChaos());
@@ -151,15 +152,20 @@ describe("useSidePanel", () => {
   });
 
   it("openAlgorithm is a no-op while the event dialog is open (GH124-PLAN.md Checkpoint 5, Codex review gap)", () => {
-    useGameStore.setState({ eventSelection: 5 });
+    useGameStore.setState({ mapDialogStack: [{ kind: "event", id: 5 }] });
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openAlgorithm());
     expect(result.current.open).toBe(false);
   });
 
-  it("openMetrics is a no-op while the place or event dialog is open", () => {
-    useGameStore.setState({ mapSelection: { kind: "train", actorId: "T1" }, eventSelection: 5 });
+  it("openMetrics is a no-op while the map/event dialog stack holds more than one entry (a pushed dialog)", () => {
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "place", selection: { kind: "train", actorId: "T1" } },
+        { kind: "event", id: 5 },
+      ],
+    });
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openMetrics());
