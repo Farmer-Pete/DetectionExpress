@@ -108,7 +108,7 @@ const SENSOR_KEY: Record<SensorCode, string> = {
 };
 
 /** The canonical `sensors.data.ts` id per chip code. */
-const SENSOR_ID: Record<SensorCode, string> = {
+export const SENSOR_ID: Record<SensorCode, string> = {
   K: "kiosk",
   G: "fare-gate",
   V: "tvm",
