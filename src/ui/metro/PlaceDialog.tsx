@@ -152,15 +152,18 @@ export function PlaceDialog({
   );
 }
 
-/** One device card: its sensor icon, human name, canonical detail, and access state. */
+/** One device card: its sensor icon, human name, description, vendor list, and
+ *  access state — every field sourced from `sensors.data` via `sensor-catalogue`
+ *  (GH127-PLAN.md M2), never the raw sensor id. */
 function DeviceCard({ device }: { device: DeviceView }) {
   const { Icon, token } = sensorIcon(device.code);
   return (
     <li className="place-device-card">
       <Icon size={16} color={token} aria-hidden="true" />
       <span className="place-device-name">{device.name}</span>
-      {device.detail !== undefined ? (
-        <span className="place-device-detail">{device.detail}</span>
+      <span className="place-device-description">{device.description}</span>
+      {device.vendors.length > 0 ? (
+        <span className="place-device-vendors">{device.vendors.join(", ")}</span>
       ) : null}
       <span className="place-device-state">{device.state}</span>
     </li>

@@ -6,9 +6,11 @@
  * carries. There is no runtime endpoint registry in the sim, so the panel owns
  * this table.
  */
+import { sensorCatalogueEntry } from "../../game/sensor-catalogue";
 import { isRawGatekeepGate } from "../../sim/endpoints/fare-gate/gatekeep";
 import { isRawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { JsonValue } from "../../sim/finding";
+import { placeName, stationName, trainName } from "../../sim/world/world";
 import type { SensorKind, WorldLogEvent } from "../../sim/world-log";
 
 export interface RowView {
@@ -79,23 +81,13 @@ export function formatClock(ts: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-/** A human label per canonical sensor kind, for the event dialog's header. */
-const SENSOR_LABEL: Record<SensorKind, string> = {
-  kiosk: "Kiosk",
-  "fare-gate": "Fare gate",
-  tvm: "TVM",
-  "platform-camera": "Platform camera",
-  "door-reader": "Door reader",
-  "door-contact": "Door contact",
-  "train-tracker": "Train tracker",
-  "network-relay": "Network relay",
-  "occ-console": "OCC console",
-};
-
-/** A canonical sensor kind's display label. Exhaustive; a future sensor arm is a
- *  `tsc` error, not a blank label. */
+/**
+ * A canonical sensor kind's display label, read from `sensors.data` (the single
+ * source of truth, GH127-PLAN.md M2) rather than a second hardcoded table. A
+ * `SensorKind` id equals its `sensors.data` id, so this lookup is a direct key.
+ */
 export function sensorLabel(sensor: SensorKind): string {
-  return SENSOR_LABEL[sensor];
+  return sensorCatalogueEntry(sensor).name;
 }
 
 /** One unified-log row: the fields `LogPanel` and `PlaceDialog`'s scoped log render. */
@@ -116,6 +108,14 @@ export interface LogRow {
  * sensor kind the world ring carries. Exhaustive over `WorldReading["sensor"]` via the
  * switch below, so a future sensor arm is a `tsc` error here, never a silently blank
  * row. Pure and total; never throws.
+ *
+ * Resolves every world-entity id (a station, a site, or a train) to its display name
+ * (GH127-PLAN.md M2), through the shared `world.ts` resolver layer. Telemetry stays
+ * raw, per the hard rule: a card, a badge, an operator login, a console host, and a
+ * relay destination are never world ids, so they pass through unchanged. `site` reads
+ * `placeName` rather than `siteName`, since a door-reader/door-contact/network-relay
+ * reading's `site` field can also name the control center (`sensors.data.ts`'s
+ * `foundAt.sites` lists `"occ"` alongside the three real sites).
  */
 export function toLogRow(ev: WorldLogEvent): LogRow {
   const base = { id: ev.id, ts: ev.ts, sensor: ev.sensor };
@@ -136,35 +136,41 @@ export function toLogRow(ev: WorldLogEvent): LogRow {
       return {
         ...base,
         who: r.card,
-        where: r.station,
+        where: stationName(r.station),
         result: r.result === "ok" ? "PERMIT" : "REJECT",
         tone: r.result === "reject" ? "bad" : "ok",
       };
     }
     case "tvm": {
       const r = reading.reading;
-      return { ...base, who: r.card, where: r.station, result: `+${r.amount}`, tone: "ok" };
+      return {
+        ...base,
+        who: r.card,
+        where: stationName(r.station),
+        result: `+${r.amount}`,
+        tone: "ok",
+      };
     }
     case "train-tracker": {
       const r = reading.reading;
       return {
         ...base,
-        who: r.train,
-        where: r.station,
+        who: trainName(r.train),
+        where: stationName(r.station),
         result: r.event === "arr" ? "ARRIVED" : "DEPARTED",
         tone: "neutral",
       };
     }
     case "door-reader": {
       const r = reading.reading;
-      return { ...base, who: r.badge, where: r.site, result: "GRANTED", tone: "ok" };
+      return { ...base, who: r.badge, where: placeName(r.site), result: "GRANTED", tone: "ok" };
     }
     case "door-contact": {
       const r = reading.reading;
       return {
         ...base,
         who: "",
-        where: r.site,
+        where: placeName(r.site),
         result: r.event === "open" ? "OPENED" : "CLOSED",
         tone: "neutral",
       };
@@ -174,7 +180,7 @@ export function toLogRow(ev: WorldLogEvent): LogRow {
       return {
         ...base,
         who: "",
-        where: r.station,
+        where: stationName(r.station),
         result: `${r.persons} in view`,
         tone: "neutral",
       };

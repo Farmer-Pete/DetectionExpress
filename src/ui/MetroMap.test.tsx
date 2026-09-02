@@ -47,13 +47,14 @@ describe("MetroMap", () => {
     expect(red?.getAttribute("points")?.trim().split(/\s+/)).toHaveLength(5);
   });
 
-  it("renders sites and the OCC with zone badges, no tinted regions", () => {
+  it("renders sites and the OCC with resolved zone-name badges, no tinted regions", () => {
     render(<MetroMap onSelect={() => {}} />);
     expect(screen.getByText("Eastyard Depot")).toBeDefined();
     expect(screen.getByText("Operations Control Center")).toBeDefined();
-    // Three sites sit in zone 3; the OCC sits in zone 4.
-    expect(screen.getAllByText("Z3")).toHaveLength(3);
-    expect(screen.getByText("Z4")).toBeDefined();
+    // Three sites dominate at zone 3 ("Operational"); the OCC dominates at zone 4
+    // ("Control") — the numeric level stays, joined to the resolved zone name.
+    expect(screen.getAllByText("Z3 · Operational")).toHaveLength(3);
+    expect(screen.getByText("Z4 · Control")).toBeDefined();
   });
 
   it("draws each node's sensor chips as static fixtures", () => {
@@ -119,7 +120,9 @@ describe("MetroMap", () => {
   it("selects a train through its focusable hit target, on click and on Enter", () => {
     const onSelect = vi.fn<(selection: MapSelection) => void>();
     render(<MetroMap onSelect={onSelect} />);
-    const train = screen.getByRole("button", { name: "Open T1" });
+    // T1 derives from the Red Line, so the hit target's accessible name is the
+    // authored train name, never the raw train id (GH127-PLAN.md M2).
+    const train = screen.getByRole("button", { name: "Open Red Line train" });
 
     fireEvent.click(train);
     expect(onSelect).toHaveBeenCalledWith({ kind: "train", actorId: "T1" });
@@ -133,7 +136,7 @@ describe("MetroMap", () => {
     // The four trains are fixed world-data fixtures; the hit target set never
     // shrinks just because a train has not published a frame yet.
     render(<MetroMap onSelect={() => {}} />);
-    expect(screen.getByRole("button", { name: "Open T2" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Open Blue Line train" })).toBeDefined();
   });
 
   it("keeps a hit target unplaced until its train publishes a placement", async () => {
@@ -142,10 +145,10 @@ describe("MetroMap", () => {
     // the seeded snapshot, so the frame loop places it and clears the flag; T2 never
     // publishes a frame and stays unplaced.
     render(<MetroMap onSelect={() => {}} />);
-    const t2 = screen.getByRole("button", { name: "Open T2" });
+    const t2 = screen.getByRole("button", { name: "Open Blue Line train" });
     expect(t2.getAttribute("data-unplaced")).not.toBeNull();
 
-    const t1 = screen.getByRole("button", { name: "Open T1" });
+    const t1 = screen.getByRole("button", { name: "Open Red Line train" });
     await waitFor(() => expect(t1.getAttribute("data-unplaced")).toBeNull());
     expect(t2.getAttribute("data-unplaced")).not.toBeNull();
   });

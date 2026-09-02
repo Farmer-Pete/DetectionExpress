@@ -15,11 +15,13 @@
  * groups those lines by (kind, activity) and counts each group — see its doc for the
  * sort order and the pin-attacker threat tone.
  */
+import { sensorCatalogueEntry } from "../../game/sensor-catalogue";
 import type { MapSelection } from "../../game/store";
 import type { SimSnapshot } from "../../sim/snapshot";
 import { type MapNode, metroNodes, type SensorCode } from "../../sim/world/layout";
 import type { MapNodeId, Presence } from "../../sim/world/presence";
 import type { World } from "../../sim/world/world";
+import { lineName, placeName, trainName, zoneName } from "../../sim/world/world";
 import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import type { PlaceKind } from "../icons/sensor-icons";
@@ -32,12 +34,14 @@ interface MetaBadge {
   value: string;
 }
 
-/** One device card: a sensor chip's code, human name, an optional technical detail,
- *  and its access state (derived from the node it sits on, see `devicesForNode`). */
+/** One device card: a sensor chip's code, its `sensors.data`-sourced name and
+ *  description, the vendor models that build it, and its access state (derived from
+ *  the node it sits on, see `devicesForNode`). */
 export interface DeviceView {
   code: SensorCode;
   name: string;
-  detail?: string;
+  description: string;
+  vendors: readonly string[];
   state: string;
 }
 
@@ -81,19 +85,6 @@ export interface PlaceView {
   log: readonly WorldLogEvent[];
 }
 
-/** A human sensor name per chip code, for the device card title. */
-const SENSOR_NAME: Record<SensorCode, string> = {
-  K: "Account kiosk",
-  G: "Fare gate",
-  V: "Ticket machine",
-  C: "Platform camera",
-  R: "Door reader",
-  D: "Door contact",
-  T: "Train tracker",
-  N: "Network relay",
-  O: "Control console",
-};
-
 /** A human label per actor kind, for the ACTORS table's Actor column. */
 export const ROLE_LABEL: Record<ActorView["kind"], string> = {
   rider: "Rider",
@@ -130,12 +121,6 @@ function trainDestination(presence: Presence): MapNodeId | null {
   return null;
 }
 
-/** A node id's human display name from `world.json` (e.g. `cen` -> `Central`), falling
- *  back to the raw id if it names nothing on the map. */
-function nodeLabel(id: MapNodeId, world: World): string {
-  return metroNodes(world).find((node) => node.id === id)?.name ?? id;
-}
-
 /**
  * A single-phrase description of what a presence is doing right now. Exhaustive over
  * `Presence`'s three arms:
@@ -154,27 +139,30 @@ function nodeLabel(id: MapNodeId, world: World): string {
  *   kind, since a `moving` presence always carries a real near-term target.
  * - `onTrain`: the rider carries only a train id and ticks, so its destination is
  *   resolved by looking up that train's own `ActorView` in the snapshot; if the train
- *   is not (yet) in the snapshot, it degrades to naming the train instead.
+ *   is not (yet) in the snapshot, it degrades to naming the train (via `trainName`)
+ *   instead.
+ *
+ * Resolves every node id through `placeName` (`world.ts`'s resolver layer), never a
+ * raw id (GH127-PLAN.md M2).
  */
 export function describePresence(
   presence: Presence,
   snapshot: SimSnapshot,
-  world: World,
   destination?: MapNodeId,
 ): string {
   switch (presence.kind) {
     case "at":
       return destination === undefined
         ? "waiting for a train"
-        : `heading to ${nodeLabel(destination, world)}`;
+        : `heading to ${placeName(destination)}`;
     case "moving":
-      return `heading to ${nodeLabel(presence.to, world)}`;
+      return `heading to ${placeName(presence.to)}`;
     case "onTrain": {
       const train = snapshot.actors.find((actor) => actor.id === presence.train);
       const trainDest = train === undefined ? null : trainDestination(train.presence);
       return trainDest === null
-        ? `riding on ${presence.train}`
-        : `heading to ${nodeLabel(trainDest, world)}`;
+        ? `riding on ${trainName(presence.train)}`
+        : `heading to ${placeName(trainDest)}`;
     }
   }
 }
@@ -198,7 +186,7 @@ function isTripKind(kind: ActorView["kind"]): boolean {
  * (`moving`, `onTrain`, or an "at" trip rider) routes straight through
  * `describePresence`, destination included.
  */
-function activityFor(actor: ActorView, snapshot: SimSnapshot, world: World): string {
+function activityFor(actor: ActorView, snapshot: SimSnapshot): string {
   if (actor.presence.kind === "at" && !isTripKind(actor.kind)) {
     if (actor.kind === "account-rider") {
       return "signing in at a kiosk";
@@ -208,7 +196,7 @@ function activityFor(actor: ActorView, snapshot: SimSnapshot, world: World): str
     }
     return "on duty";
   }
-  return describePresence(actor.presence, snapshot, world, actor.destination);
+  return describePresence(actor.presence, snapshot, actor.destination);
 }
 
 /**
@@ -225,12 +213,16 @@ export function devicesForNode(nodeId: MapNodeId, world: World): DeviceView[] {
     return [];
   }
   const state = node.kind === "station" ? "public" : "restricted";
-  return node.chips.map((chip) => ({
-    code: chip.code,
-    name: SENSOR_NAME[chip.code],
-    detail: chip.sensor,
-    state,
-  }));
+  return node.chips.map((chip) => {
+    const entry = sensorCatalogueEntry(chip.sensor);
+    return {
+      code: chip.code,
+      name: entry.name,
+      description: entry.description,
+      vendors: entry.vendors,
+      state,
+    };
+  });
 }
 
 /**
@@ -239,7 +231,7 @@ export function devicesForNode(nodeId: MapNodeId, world: World): DeviceView[] {
  * it. The two id spaces (`MapNodeId` and a train's actor id) never collide, so one
  * query serves both a station/site/OCC dialog and a train dialog's onboard-rider list.
  */
-export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot, world: World): ActorLine[] {
+export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot): ActorLine[] {
   const lines: ActorLine[] = [];
   for (const actor of snapshot.actors) {
     const presence = actor.presence;
@@ -259,7 +251,7 @@ export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot, world: Wo
       glyphKind: actor.kind,
       id: actor.id,
       role: ROLE_LABEL[actor.kind],
-      activity: activityFor(actor, snapshot, world),
+      activity: activityFor(actor, snapshot),
     });
   }
   return lines;
@@ -283,9 +275,8 @@ function actorNodeId(selection: MapSelection): MapNodeId {
 export function actorSummaryRows(
   selection: MapSelection,
   snapshot: SimSnapshot,
-  world: World,
 ): ActorSummaryRow[] {
-  const lines = actorsAtNode(actorNodeId(selection), snapshot, world);
+  const lines = actorsAtNode(actorNodeId(selection), snapshot);
   const rowByKey = new Map<string, ActorSummaryRow>();
   for (const line of lines) {
     const key = `${line.glyphKind} ${line.activity}`;
@@ -342,15 +333,19 @@ function stationMeta(node: MapNode, world: World): MetaBadge[] {
   if (station === undefined) {
     return [];
   }
-  return station.lines.map((lineId) => ({
-    label: "Line",
-    value: world.lines.find((line) => line.id === lineId)?.name ?? lineId,
-  }));
+  return station.lines.map((lineId) => ({ label: "Line", value: lineName(lineId) }));
+}
+
+/** A site or the OCC's meta badges: its dominant zone (level and name, decision B),
+ *  then its type. Stations carry no zone, so `zoneMeta` applies only here. */
+function zoneMeta(node: MapNode): string {
+  const level = node.zone ?? 0;
+  return node.zoneId === undefined ? `Z${level}` : `Z${level} · ${zoneName(node.zoneId)}`;
 }
 
 /** A site or the OCC's meta badges: its dominant zone, then its type. */
 function placeMeta(node: MapNode, world: World): MetaBadge[] {
-  const badges: MetaBadge[] = [{ label: "Zone", value: `Z${node.zone ?? 0}` }];
+  const badges: MetaBadge[] = [{ label: "Zone", value: zoneMeta(node) }];
   if (node.kind === "site") {
     const site = world.sites.find((candidate) => candidate.id === node.id);
     if (site !== undefined) {
@@ -385,11 +380,11 @@ function placeLog(selection: MapSelection, snapshot: SimSnapshot): WorldLogEvent
 export function placeView(selection: MapSelection, snapshot: SimSnapshot, world: World): PlaceView {
   if (selection.kind === "train") {
     return {
-      title: `Train ${selection.actorId}`,
+      title: trainName(selection.actorId),
       iconKind: undefined,
       meta: [],
       devices: [],
-      actorRows: actorSummaryRows(selection, snapshot, world),
+      actorRows: actorSummaryRows(selection, snapshot),
       log: placeLog(selection, snapshot),
     };
   }
@@ -402,7 +397,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       iconKind: undefined,
       meta: [],
       devices: [],
-      actorRows: actorSummaryRows(selection, snapshot, world),
+      actorRows: actorSummaryRows(selection, snapshot),
       log: placeLog(selection, snapshot),
     };
   }
@@ -411,7 +406,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
     iconKind: placeKindForNode(node, world),
     meta: node.kind === "station" ? stationMeta(node, world) : placeMeta(node, world),
     devices: devicesForNode(node.id, world),
-    actorRows: actorSummaryRows(selection, snapshot, world),
+    actorRows: actorSummaryRows(selection, snapshot),
     log: placeLog(selection, snapshot),
   };
 }

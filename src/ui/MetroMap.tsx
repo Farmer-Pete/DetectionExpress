@@ -24,7 +24,7 @@
 import type { KeyboardEvent } from "react";
 import type { MapSelection } from "../game/store";
 import { metroLines, metroNodes, type SensorCode } from "../sim/world/layout";
-import { world } from "../sim/world/world";
+import { world, zoneName } from "../sim/world/world";
 import { sensorIcon } from "./icons/sensor-icons";
 import { ActorLayer } from "./metro/ActorLayer";
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from "./metro/design";
@@ -128,7 +128,7 @@ export function MetroMap({ onSelect }: MetroMapProps) {
                 {node.name}
               </text>
               <text className="metro-badge-zone" x={node.point.x} y={node.point.y + 10}>
-                {`Z${zone}`}
+                {node.zoneId === undefined ? `Z${zone}` : `Z${zone} · ${zoneName(node.zoneId)}`}
               </text>
               {node.chips.map((chip) => (
                 <Chip key={chip.id} code={chip.code} x={chip.point.x} y={chip.point.y} />

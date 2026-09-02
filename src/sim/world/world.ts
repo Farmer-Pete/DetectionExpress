@@ -7,6 +7,7 @@
  * field is `readonly`, and the world is deep-frozen, so an actor can read the
  * environment but never mutate it (see ADR-0007, ADR-0011).
  */
+import { lineIdForTrain } from "./timetable";
 import { worldData } from "./world.data";
 
 /**
@@ -395,4 +396,88 @@ export function doorGrade(location: string, door: string): number {
     throw new Error(`unknown door (${location}, ${door}).`);
   }
   return zoneTrustLevel(found.zone);
+}
+
+/**
+ * The world-entity name resolvers (GH127-PLAN.md M2): every id that reaches the
+ * screen resolves through one of these, never a repeated inline `world.x.find(...)`
+ * and never a generated or concatenated string (the hard rule: names and flavor text
+ * come only from the world and sensor data constants). `stationName`/`siteName`/
+ * `lineName`/`zoneName`/`trainName` throw on an unknown id, matching
+ * `zoneTrustLevel`/`doorGrade` above. `placeName` is the one exception: it resolves a
+ * station, a site, OR the control-center id — the world-log ring and the event
+ * dialog's Source line mix all three under one id space — and falls back to the raw
+ * id for one that names none of the three, the same defensive fallback the private
+ * `nodeLabel` it replaces (formerly in `place-view.ts`) always had.
+ */
+
+/** A station's display name. Throws on an unknown station id. */
+export function stationName(stationId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === stationId);
+  if (station === undefined) {
+    throw new Error(`unknown station "${stationId}".`);
+  }
+  return station.name;
+}
+
+/** A site's display name. Throws on an unknown site id. */
+export function siteName(siteId: string): string {
+  const site = world.sites.find((candidate) => candidate.id === siteId);
+  if (site === undefined) {
+    throw new Error(`unknown site "${siteId}".`);
+  }
+  return site.name;
+}
+
+/** A line's display name. Throws on an unknown line id. */
+export function lineName(lineId: string): string {
+  const line = world.lines.find((candidate) => candidate.id === lineId);
+  if (line === undefined) {
+    throw new Error(`unknown line "${lineId}".`);
+  }
+  return line.name;
+}
+
+/** A zone's display name. Throws on an unknown zone id. */
+export function zoneName(zoneId: string): string {
+  const zone = world.zones.find((candidate) => candidate.id === zoneId);
+  if (zone === undefined) {
+    throw new Error(`unknown zone "${zoneId}".`);
+  }
+  return zone.name;
+}
+
+/**
+ * A station, a site, or the control-center id's display name. Falls back to the raw
+ * id when it names none of the three, so a stale or otherwise-unresolvable id renders
+ * as itself rather than throwing and crashing a dialog.
+ */
+export function placeName(placeId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === placeId);
+  if (station !== undefined) {
+    return station.name;
+  }
+  const site = world.sites.find((candidate) => candidate.id === placeId);
+  if (site !== undefined) {
+    return site.name;
+  }
+  if (world.controlCenter.id === placeId) {
+    return world.controlCenter.name;
+  }
+  return placeId;
+}
+
+/**
+ * A train's display name: its line's authored `trainName` constant (never a
+ * generated `${lineName} train` concatenation — see M1). Throws on a train id no
+ * line derives, via `lineIdForTrain`.
+ */
+export function trainName(trainId: string): string {
+  const lineId = lineIdForTrain(world, trainId);
+  const line = world.lines.find((candidate) => candidate.id === lineId);
+  if (line === undefined) {
+    // Unreachable: `lineIdForTrain` only ever returns an id drawn from `world.lines`.
+    throw new Error(`trainName: line "${lineId}" not found.`);
+  }
+  return line.trainName;
 }

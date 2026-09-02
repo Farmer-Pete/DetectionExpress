@@ -901,8 +901,9 @@ body {
 
 .place-device-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.15rem 0.5rem;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -915,10 +916,17 @@ body {
   color: var(--ink);
 }
 
-.place-device-detail {
+.place-device-description {
   /* Text brightened from --dim (3.09:1 on --panel2) to clear WCAG AA (4.75:1). */
   color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-size: 0.72rem;
+  flex-basis: 100%;
+}
+
+.place-device-vendors {
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.68rem;
+  flex-basis: 100%;
 }
 
 .place-device-state {

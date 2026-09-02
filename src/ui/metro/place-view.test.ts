@@ -21,7 +21,6 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
-      world,
     );
     expect(result).toBe("waiting for a train");
   });
@@ -30,7 +29,6 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
-      world,
       "riv",
     );
     expect(result).toBe("heading to Riverside");
@@ -40,7 +38,6 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "moving", from: "cen", to: "riv", line: "red", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
-      world,
     );
     expect(result).toBe("heading to Riverside");
   });
@@ -63,7 +60,6 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "onTrain", train: "T1", fromTick: 0, untilTick: 20 },
       snapshot,
-      world,
     );
     expect(result).toBe("heading to Riverside");
   });
@@ -79,18 +75,18 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "onTrain", train: "T1", fromTick: 0, untilTick: 5 },
       snapshot,
-      world,
     );
     expect(result).toBe("heading to Riverside");
   });
 
-  it("falls back gracefully when the named train is not in the snapshot", () => {
+  it("falls back to the resolved train name when the named train is not in the snapshot", () => {
+    // T1 (Red Line) is a real train id — one that simply has no live ActorView in this
+    // snapshot — never a made-up id like the former "T9", which no line derives.
     const result = describePresence(
-      { kind: "onTrain", train: "T9", fromTick: 0, untilTick: 20 },
+      { kind: "onTrain", train: "T1", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
-      world,
     );
-    expect(result).toBe("riding on T9");
+    expect(result).toBe("riding on Red Line train");
   });
 });
 
@@ -99,6 +95,17 @@ describe("devicesForNode", () => {
     const devices = devicesForNode("cen", world);
     expect(devices.map((device) => device.code)).toEqual(["K", "G", "V", "C"]);
     expect(devices.every((device) => device.state === "public")).toBe(true);
+  });
+
+  it("sets each device's name, description, and vendors from the sensor catalogue", () => {
+    const devices = devicesForNode("cen", world);
+    const gate = devices.find((device) => device.code === "G");
+    expect(gate).toMatchObject({
+      name: "Fare gate",
+      description:
+        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
+    });
+    expect(gate?.vendors).toEqual(["Gatekeep TurnKey 5", "VeriTap FlowGate", "RailSense GateNode"]);
   });
 
   it("lists a depot/signal site's restricted sensor set (R, D, T, N)", () => {
@@ -136,7 +143,7 @@ describe("actorsAtNode", () => {
         presence: { kind: "at", node: "riv", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const lines = actorsAtNode("cen", snapshot, world);
+    const lines = actorsAtNode("cen", snapshot);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ id: "R1", glyphKind: "rider", role: "Rider" });
   });
@@ -159,12 +166,12 @@ describe("actorsAtNode", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const lines = actorsAtNode("T1", snapshot, world);
+    const lines = actorsAtNode("T1", snapshot);
     expect(lines.map((line) => line.id)).toEqual(["R1"]);
   });
 
   it("returns an empty list when no actor resolves to the node", () => {
-    expect(actorsAtNode("cen", emptySnapshot(), world)).toEqual([]);
+    expect(actorsAtNode("cen", emptySnapshot())).toEqual([]);
   });
 });
 
@@ -176,11 +183,12 @@ describe("placeView", () => {
     expect(view.devices.map((device) => device.code)).toEqual(["K", "G", "V", "C"]);
   });
 
-  it("builds a site's view with its place kind and zone meta", () => {
+  it("builds a site's view with its place kind and a resolved zone name in the meta", () => {
     const view = placeView({ kind: "node", id: "dep" }, emptySnapshot(), world);
     expect(view.title).toBe("Eastyard Depot");
     expect(view.iconKind).toBe("depot");
-    expect(view.meta.some((badge) => badge.label === "Zone")).toBe(true);
+    // Eastyard Depot's zonesPresent (z2, z3) dominate at z3, "Operational".
+    expect(view.meta).toContainEqual({ label: "Zone", value: "Z3 · Operational" });
   });
 
   it("builds the OCC's view as the control-center place kind", () => {
@@ -203,7 +211,7 @@ describe("placeView", () => {
       },
     ]);
     const view = placeView({ kind: "train", actorId: "T1" }, snapshot, world);
-    expect(view.title).toContain("T1");
+    expect(view.title).toBe("Red Line train");
     expect(view.devices).toEqual([]);
     expect(view.actorRows).toEqual([{ kind: "rider", activity: "heading to Riverside", count: 1 }]);
   });
@@ -229,7 +237,7 @@ describe("actorSummaryRows", () => {
         destination: "riv",
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows).toEqual([
       { kind: "rider", activity: "waiting for a train", count: 2 },
       { kind: "rider", activity: "heading to Riverside", count: 1 },
@@ -259,7 +267,7 @@ describe("actorSummaryRows", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows[0]).toEqual({
       kind: "pin-attacker",
       activity: "Pin attacking",
@@ -287,7 +295,7 @@ describe("actorSummaryRows", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows.map((row) => row.kind)).toEqual(["rider", "staff"]);
     expect(rows.map((row) => row.count)).toEqual([2, 1]);
   });
@@ -300,7 +308,7 @@ describe("actorSummaryRows", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows).toEqual([{ kind: "staff", activity: "on duty", count: 1 }]);
   });
 
@@ -312,7 +320,7 @@ describe("actorSummaryRows", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows).toEqual([{ kind: "account-rider", activity: "signing in at a kiosk", count: 1 }]);
   });
 
@@ -324,7 +332,7 @@ describe("actorSummaryRows", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows).toEqual([
       { kind: "pin-attacker", activity: "Pin attacking", count: 1, tone: "threat" },
     ]);
@@ -348,12 +356,12 @@ describe("actorSummaryRows", () => {
         },
       ],
     };
-    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot);
     expect(rows).toEqual([{ kind: "account-rider", activity: "signing in at a kiosk", count: 1 }]);
   });
 
   it("returns an empty table for a node with no actors", () => {
-    expect(actorSummaryRows({ kind: "node", id: "cen" }, emptySnapshot(), world)).toEqual([]);
+    expect(actorSummaryRows({ kind: "node", id: "cen" }, emptySnapshot())).toEqual([]);
   });
 });
 

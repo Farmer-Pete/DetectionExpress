@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { assertWorldConsistent, doorGrade, world, zoneTrustLevel } from "./world";
+import {
+  assertWorldConsistent,
+  doorGrade,
+  lineName,
+  placeName,
+  siteName,
+  stationName,
+  trainName,
+  world,
+  zoneName,
+  zoneTrustLevel,
+} from "./world";
 import { worldData } from "./world.data";
 
 /**
@@ -235,5 +246,78 @@ describe("world singleton", () => {
   it("is the validated real world", () => {
     expect(world.stations.length).toBeGreaterThan(0);
     expect(world.doors.length).toBe(7);
+  });
+});
+
+describe("stationName", () => {
+  it("returns the station's real name", () => {
+    expect(stationName("cen")).toBe("Central");
+    expect(stationName("riv")).toBe("Riverside");
+  });
+
+  it("throws on an unknown station", () => {
+    expect(() => stationName("nope")).toThrow(/unknown station/);
+  });
+});
+
+describe("siteName", () => {
+  it("returns the site's real name", () => {
+    expect(siteName("dep")).toBe("Eastyard Depot");
+    expect(siteName("sub")).toBe("Riverside Substation");
+  });
+
+  it("throws on an unknown site", () => {
+    expect(() => siteName("nope")).toThrow(/unknown site/);
+  });
+});
+
+describe("lineName", () => {
+  it("returns the line's real name", () => {
+    expect(lineName("red")).toBe("Red Line");
+    expect(lineName("circle")).toBe("Circle Line");
+  });
+
+  it("throws on an unknown line", () => {
+    expect(() => lineName("purple")).toThrow(/unknown line/);
+  });
+});
+
+describe("zoneName", () => {
+  it("returns the zone's real name", () => {
+    expect(zoneName("z0")).toBe("Public");
+    expect(zoneName("z4")).toBe("Control");
+  });
+
+  it("throws on an unknown zone", () => {
+    expect(() => zoneName("z9")).toThrow(/unknown zone/);
+  });
+});
+
+describe("placeName", () => {
+  it("resolves a station id", () => {
+    expect(placeName("cen")).toBe("Central");
+  });
+
+  it("resolves a site id", () => {
+    expect(placeName("dep")).toBe("Eastyard Depot");
+  });
+
+  it("resolves the control-center id", () => {
+    expect(placeName("occ")).toBe("Operations Control Center");
+  });
+
+  it("falls back to the raw id when it names no place", () => {
+    expect(placeName("nope")).toBe("nope");
+  });
+});
+
+describe("trainName", () => {
+  it("returns the train's line's authored trainName", () => {
+    expect(trainName("T1")).toBe("Red Line train");
+    expect(trainName("T2")).toBe("Blue Line train");
+  });
+
+  it("throws on an unknown train id", () => {
+    expect(() => trainName("T9")).toThrow(/unknown train/);
   });
 });

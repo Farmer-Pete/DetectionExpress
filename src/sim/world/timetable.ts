@@ -124,6 +124,21 @@ export function trainIdForLine(world: World, lineId: string): string {
 }
 
 /**
+ * The inverse of `trainIdForLine`: the line a train id belongs to. Finds the line whose
+ * own `trainIdForLine` derivation equals `trainId`, so the two never drift. Every train
+ * id ever placed on screen (hit targets, selection, rider presence) is itself a
+ * `trainIdForLine` derivation, so a valid id always inverts; throws on an unknown one,
+ * mirroring `trainIdForLine`'s own contract.
+ */
+export function lineIdForTrain(world: World, trainId: string): string {
+  const line = world.lines.find((candidate) => trainIdForLine(world, candidate.id) === trainId);
+  if (line === undefined) {
+    throw new Error(`lineIdForTrain: unknown train "${trainId}".`);
+  }
+  return line.id;
+}
+
+/**
  * The next service on one line from `from` to `to` planned at or after `afterTick`: the
  * tick the rider BOARDS (inside the dwell, at or after `afterTick` and strictly before
  * that train departs `from` heading toward `to`), and the tick it ARRIVES at `to`. It

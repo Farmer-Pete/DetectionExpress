@@ -33,6 +33,7 @@
 import type { RefObject } from "react";
 import { topMapDialogEntry, useGameStore } from "../../game/store";
 import type { MapNodeId } from "../../sim/world/presence";
+import { placeName } from "../../sim/world/world";
 import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { MapDialogShell } from "../MapDialogShell";
@@ -116,7 +117,7 @@ export function EventDialog({
             <h3 className="place-section-title">Source</h3>
             <p className="event-detail-source">
               {detail.source.actorId !== undefined ? `${detail.source.actorId} at ` : ""}
-              {detail.source.placeId}
+              {placeName(detail.source.placeId)}
             </p>
           </section>
         </>

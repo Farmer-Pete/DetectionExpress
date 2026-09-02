@@ -90,6 +90,26 @@ describe("PlaceDialog", () => {
     expect(screen.getByText("Fare gate")).toBeDefined();
   });
 
+  it("renders each device's sensors.data description and vendor list, not the raw sensor id", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
+      ),
+    ).toBeDefined();
+    expect(
+      screen.getByText("Gatekeep TurnKey 5, VeriTap FlowGate, RailSense GateNode"),
+    ).toBeDefined();
+    expect(screen.queryByText("fare-gate")).toBeNull();
+  });
+
   it("shows a site's place kind meta and its restricted devices", () => {
     useGameStore.setState({ mapDialogStack: placeStack("dep") });
     render(
@@ -126,7 +146,9 @@ describe("PlaceDialog", () => {
         rootFallbackFocusRef={noRootFallback()}
       />,
     );
-    expect(screen.getByRole("dialog", { name: /T1/ })).toBeDefined();
+    // T1 derives from the Red Line, so the dialog is titled by the authored train
+    // name — never the raw train id (GH127-PLAN.md M2).
+    expect(screen.getByRole("dialog", { name: "Red Line train" })).toBeDefined();
     // The aggregated table: an actor kind/activity/count, never a raw actor id.
     expect(screen.getByText("Rider")).toBeDefined();
     expect(screen.getByText("heading to Riverside")).toBeDefined();

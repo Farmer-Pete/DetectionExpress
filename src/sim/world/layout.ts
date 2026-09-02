@@ -39,6 +39,9 @@ export interface MapNode {
   point: Point;
   /** The dominant zone (max trust level) for a site or the OCC; stations carry none. */
   zone?: number;
+  /** The dominant zone's own id (e.g. `"z3"`), alongside its numeric `zone` level, for
+   *  a site or the OCC; stations carry none. `zoneName` (`world.ts`) reads this. */
+  zoneId?: string | undefined;
   chips: readonly Chip[];
 }
 
@@ -196,9 +199,23 @@ function chipsFor(
   }));
 }
 
+/** The dominant zone's own id (highest trust level) among a location's present
+ *  zones, or undefined for a location that lists none. `zoneName` (`world.ts`)
+ *  resolves this id to its display name; `dominantZone` below derives the
+ *  numeric level from it, so the two can never disagree on which zone won. */
+function dominantZoneId(zonesPresent: readonly string[]): string | undefined {
+  return zonesPresent.reduce<string | undefined>((best, zoneId) => {
+    if (best === undefined || zoneTrustLevel(zoneId) > zoneTrustLevel(best)) {
+      return zoneId;
+    }
+    return best;
+  }, undefined);
+}
+
 /** The dominant zone (highest trust level) among a location's present zones. */
 function dominantZone(zonesPresent: readonly string[]): number {
-  return zonesPresent.reduce((best, zoneId) => Math.max(best, zoneTrustLevel(zoneId)), 0);
+  const id = dominantZoneId(zonesPresent);
+  return id === undefined ? 0 : zoneTrustLevel(id);
 }
 
 /** Every placed node: stations, sites, and the OCC, each with its derived chips. */
@@ -231,6 +248,7 @@ export function metroNodes(world: World): MapNode[] {
       name: site.name,
       point,
       zone: dominantZone(site.zonesPresent),
+      zoneId: dominantZoneId(site.zonesPresent),
       chips: chipsFor(site.id, point, codes, point.y + SITE_ROW_DROP),
     });
   }
@@ -241,6 +259,7 @@ export function metroNodes(world: World): MapNode[] {
     name: world.controlCenter.name,
     point: OCC_XY,
     zone: dominantZone(world.controlCenter.zonesPresent),
+    zoneId: dominantZoneId(world.controlCenter.zonesPresent),
     chips: chipsFor(OCC_ID, OCC_XY, OCC_SENSORS, OCC_XY.y + SITE_ROW_DROP),
   });
 

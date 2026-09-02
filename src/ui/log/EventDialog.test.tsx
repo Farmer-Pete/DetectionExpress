@@ -328,7 +328,7 @@ describe("EventDialog: adaptive detail", () => {
     expect(screen.getByRole("button", { name: "Open place" })).toBeDefined();
   });
 
-  it("shows raw + source, and an 'open place' link, for a non-scored reading", () => {
+  it("shows raw + source, resolving the placeId while keeping the actorId raw", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent({ id: 1, actorId: "R1", placeId: "cen" })] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });
     render(
@@ -339,7 +339,8 @@ describe("EventDialog: adaptive detail", () => {
       />,
     );
     expect(screen.getByText(/"card": "card-1"/)).toBeDefined();
-    expect(screen.getByText(/R1/)).toBeDefined();
+    // `placeId` resolves to its real name; `actorId` stays raw (GH127-PLAN.md M2).
+    expect(screen.getByText("R1 at Central")).toBeDefined();
     expect(screen.getByRole("button", { name: "Open place" })).toBeDefined();
   });
 
