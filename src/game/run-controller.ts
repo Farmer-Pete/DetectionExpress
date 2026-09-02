@@ -52,7 +52,9 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   DECISIONS_CAP,
+  GAME_SECONDS_PER_TICK,
   PROFILER_VERSION,
+  WAVE_DRAIN_MARGIN_TICKS,
 } from "./tuning";
 
 /**
@@ -198,11 +200,24 @@ export interface RunControllerDeps {
  * a config-level default tuned for one hunt would silently misscore any other
  * hunt whose Attacks forgot to set their own value.
  */
-const SCORER_CONFIG: ScorerConfig = {
+
+/**
+ * `retentionFloor`, strictly past the wave drain margin (GH126 second Codex review
+ * round, finding N1). `resolveWave` (`engine.ts`) settles a wave attack at
+ * `advanceTo(windowEnd + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK)`, then
+ * reads its outcome. The scorer's own `retireResolved` must never have deleted that
+ * attack by then, whatever `liveHorizon` is configured for the live-set gauge — so
+ * this floor sits at twice the drain margin: comfortably past it with room for the
+ * margin itself to grow before the floor would need revisiting.
+ */
+const SCORER_RETENTION_FLOOR = WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK * 2;
+
+export const SCORER_CONFIG: ScorerConfig = {
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
   decisionsCap: DECISIONS_CAP,
+  retentionFloor: SCORER_RETENTION_FLOOR,
 };
 
 function toErrorInfo(phase: string, error: unknown): RuleErrorInfo {

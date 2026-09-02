@@ -69,6 +69,18 @@ export interface ScorerConfig {
    * fold every outcome that ever resolved, not just what the log still retains.
    */
   decisionsCap?: number;
+  /**
+   * A floor (game seconds) under `liveHorizon`, for `retireResolved` only (GH126
+   * second Codex review round, finding N1). `retireResolved` retires a resolved
+   * Attack once `ts` passes `windowEnd + max(liveHorizon, retentionFloor)`, so a
+   * caller whose own drain-time read happens later than `liveHorizon` (but sooner
+   * than this floor) can never have the Attack retired out from under it, no matter
+   * how short `liveHorizon` is configured for the live-set gauge. Plain injected
+   * config, same as every other field here: `sim/` computes nothing about it and
+   * knows nothing of any caller's own margin math. Optional; omitted defaults to 0,
+   * which folds back to `liveHorizon` alone and changes no existing behavior.
+   */
+  retentionFloor?: number;
 }
 
 /** The reading the sampler publishes: the gauge value plus the global counts. */
@@ -360,6 +372,10 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
   }
 
   const liveHorizon = config.liveHorizon ?? DEFAULT_LIVE_HORIZON;
+  // The retirement-only floor under `liveHorizon` (N1): `sweepHorizon`/`dropWatchesForAttack`
+  // still use `liveHorizon` alone (the live-set gauge is unaffected), but `retireResolved`
+  // uses this wider margin so a caller's own drain-time read always lands before the delete.
+  const retentionHorizon = Math.max(liveHorizon, config.retentionFloor ?? 0);
 
   const counts: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
   const ring: Outcome[] = [];
@@ -440,20 +456,22 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
    * `closeExpired` and `scoreFinding` only ever act on a `pending` Attack, so
    * deleting a resolved one changes no scoring outcome — its `counts`/ring/log
    * contribution already landed at resolution and lives on independently. The
-   * `liveHorizon` margin also outlasts `sweepHorizon`'s own live-entry eviction,
-   * so no live watch or hit can still be referencing the attack's evidence by the
-   * time it retires. Iterating `attacksById.values()` while deleting the current
-   * entry is well-defined: a Map iterator never skips or revisits a key over a
-   * delete during iteration. A repeating chaos loop calls this every wave, so
-   * `attacksById`/`state`/`owner` stay bounded on an endless run instead of
-   * growing with every wave that ever fired.
+   * `retentionHorizon` margin (>= `liveHorizon`, GH126 second Codex review round
+   * finding N1) also outlasts `sweepHorizon`'s own live-entry eviction, so no live
+   * watch or hit can still be referencing the attack's evidence by the time it
+   * retires; a `retentionFloor` wider than `liveHorizon` only delays this delete
+   * further, so that invariant only strengthens. Iterating `attacksById.values()`
+   * while deleting the current entry is well-defined: a Map iterator never skips
+   * or revisits a key over a delete during iteration. A repeating chaos loop calls
+   * this every wave, so `attacksById`/`state`/`owner` stay bounded on an endless
+   * run instead of growing with every wave that ever fired.
    */
   function retireResolved(ts: number): void {
     for (const attack of attacksById.values()) {
       const outcome = state.get(attack.id);
       if (
         (outcome === "caught" || outcome === "missed") &&
-        ts > attack.window.endTs + liveHorizon
+        ts > attack.window.endTs + retentionHorizon
       ) {
         attacksById.delete(attack.id);
         state.delete(attack.id);

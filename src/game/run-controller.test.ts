@@ -10,8 +10,10 @@ import {
   type ProfilerWorkerLike,
   type RuleErrorInfo,
   type RunControllerDeps,
+  SCORER_CONFIG,
   type ServiceRateHandle,
 } from "./run-controller";
+import { GAME_SECONDS_PER_TICK, WAVE_DRAIN_MARGIN_TICKS } from "./tuning";
 
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
@@ -1019,6 +1021,19 @@ describe("run controller loader and profiler seam derive from the algorithm sour
     controller.run();
     await flush();
     expect(sources).toEqual(["export const detect = () => []"]);
+  });
+});
+
+// GH126 second Codex review round, finding N1: `resolveWave` (`engine.ts`) reads a
+// wave attack's outcome right after `advanceTo(wave.drainDeadline)`, where
+// `drainDeadline = windowEnd + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK`. The
+// scorer's `retireResolved` must never have deleted that attack by then, independent
+// of whatever `liveHorizon` is configured — hence `retentionFloor`, set here strictly
+// past the drain margin.
+describe("run controller scorer config: retentionFloor outlives the wave drain read (GH126 N1)", () => {
+  it("sets retentionFloor strictly past the wave drain margin, so a wave's outcome always outlives resolveWave's read", () => {
+    const drainMargin = WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK;
+    expect(SCORER_CONFIG.retentionFloor).toBeGreaterThan(drainMargin);
   });
 });
 

@@ -1007,6 +1007,75 @@ describe("scorer bounded memory: retiring a resolved attack (GH126 code-review f
   });
 });
 
+// GH126 second Codex review round, finding N1: `retireResolved` must never erase a
+// resolved attack's outcome before a caller's own drain-time read, no matter how
+// short `liveHorizon` is configured. `retentionFloor` (game seconds) sets a floor
+// under `liveHorizon` for retirement only — `sim/` still carries no knowledge of
+// `game/`'s wave-margin math; the caller (run-controller.ts) picks a floor
+// comfortably past its own drain margin and passes it in as a plain number.
+describe("scorer retentionFloor: retirement never outruns a caller's drain read (GH126 N1)", () => {
+  it("reports a fully caught wave as caught after advanceTo(drainDeadline), even with a liveHorizon shorter than the drain margin", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10, retentionFloor: 80 }));
+    for (const attackId of [1, 2, 3]) {
+      const evidenceId = 500 + attackId;
+      s.addAttack({
+        attackId,
+        entity: `victim-${attackId}`,
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 100,
+      });
+      s.bindEvidence(attackId, evidenceId);
+      s.record(one([evidenceId], 100), at(100)); // caught
+    }
+    // Mirrors `resolveWave`: `advanceTo(windowEnd + drainMargin)`, here 100 + 40 =
+    // 140. `liveHorizon` (10) alone would retire every attack at 110, well before
+    // this read; `retentionFloor` (80) holds them live until 180.
+    s.advanceTo(140);
+    for (const attackId of [1, 2, 3]) {
+      expect(s.outcomeOf(attackId)).toBe("caught");
+    }
+  });
+
+  it("still retires past windowEnd + retentionFloor across many resolved attacks, bounding memory", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10, retentionFloor: 80 }));
+    for (let attackId = 1; attackId <= 50; attackId++) {
+      const evidenceId = 1000 + attackId;
+      s.addAttack({
+        attackId,
+        entity: `victim-${attackId}`,
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 100,
+      });
+      s.bindEvidence(attackId, evidenceId);
+      s.record(one([evidenceId], 100), at(100)); // caught
+    }
+    s.advanceTo(140); // the drain read: every attack still retained (see test above)
+    expect(() =>
+      s.addAttack({
+        attackId: 1,
+        entity: "victim-1",
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 500,
+      }),
+    ).toThrow(/already registered/);
+    s.advanceTo(181); // windowEnd(100) + retentionFloor(80), strictly passed
+    for (let attackId = 1; attackId <= 50; attackId++) {
+      expect(() =>
+        s.addAttack({
+          attackId,
+          entity: `victim-${attackId}`,
+          reason: REASON,
+          threshold: 1,
+          windowEnd: 900,
+        }),
+      ).not.toThrow(); // every id freed: memory bounded, not accumulating
+    }
+  });
+});
+
 // Seam I (T10, GH34-35-PLAN.md 2.1): cited-event capture, resolvedAt, and the capped log.
 describe("scorer citedEvents, resolvedAt, and the capped log", () => {
   it("captures citedEvents for a caught decision via the bound resolver", () => {

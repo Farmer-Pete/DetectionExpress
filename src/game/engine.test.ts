@@ -2845,4 +2845,80 @@ describe("engine chaos wave matches its rebased planChaosWave oracle (GH126-PLAN
     }
     h.handle.stop();
   });
+
+  /**
+   * Replay one oracle attacker's own actor deterministically: `descriptor.build()`
+   * is the exact `Actor<WorldReading, WorldEnv>` shape `schedule.admit()` drives
+   * live, and `createPinAttacker`'s `act()` reads only `tick` (no rng, no env) —
+   * so this reconstructs the attacker's exact ordered kiosk readings by driving its
+   * OWN public interface, never by re-deriving `chaos-wave.ts`'s burst-timing
+   * formula by hand (which would make the comparison below tautological).
+   */
+  function replayAttackerReadings(descriptor: {
+    build(): Actor<WorldReading, WorldEnv>;
+  }): WorldReading[] {
+    const actor = descriptor.build();
+    const readings: WorldReading[] = [];
+    let tick = actor.start({ rng: () => 0 });
+    // A chaos-wave attacker's burst is always small (threshold..threshold+3 fails);
+    // this cap only guards a future actor change from looping forever.
+    for (let i = 0; tick !== "dormant" && i < 64; i++) {
+      const result = actor.act({ env: CAST_ENV, rng: () => 0, tick });
+      readings.push(...result.readings);
+      tick = result.nextTick;
+    }
+    return readings;
+  }
+
+  // Finding 7 (second Codex review round): the test above proves attacker count,
+  // actor ids, victims, evidence counts, and caught totals match, but never reads
+  // the scored stream itself. This companion compares the LIVE wave's scored
+  // attacker readings against the SAME rebased oracle, reading-for-reading:
+  // timestamps, ordering (array order, preserved by both the live world-log's push
+  // order and the oracle's own emission order), sensor, and every payload field.
+  // The oracle's readings carry no id at all; the live entries' `scoredEventId`
+  // (a GLOBAL dense id interleaved with baseline traffic, so it will NOT equal
+  // anything the oracle could name) is never read here — only `event.reading`, the
+  // raw sensor payload, is compared.
+  it("the live wave's scored attacker readings match the rebased oracle's, reading-for-reading", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: referenceTaskAlgorithm(),
+      checkpoints: [],
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+
+    await step(h.driver, 3);
+    const triggerTick = 3;
+    const waveId = h.handle.triggerWave();
+    expect(waveId).toBe(1);
+
+    const oracle = planChaosWave(
+      triggerTick + WAVE_TRIGGER_MARGIN_TICKS,
+      (index) => `wave-${waveId}-attacker-${index}`,
+      randomLcg(waveSeed(LEVEL_SEED, triggerTick)),
+    );
+
+    await step(h.driver, 195); // past the attack window and the drain deadline
+    expect(outcomes).toHaveLength(1);
+
+    const worldEvents = h.last()?.worldEvents ?? [];
+    for (const attacker of oracle.attackers) {
+      const liveReadings = worldEvents
+        .filter((event) => event.reading.sensor === "kiosk" && event.actorId === attacker.actorId)
+        .map((event) => event.reading);
+      const oracleReadings = replayAttackerReadings(attacker.attacker);
+      expect(liveReadings).toEqual(oracleReadings);
+    }
+    h.handle.stop();
+  });
 });
