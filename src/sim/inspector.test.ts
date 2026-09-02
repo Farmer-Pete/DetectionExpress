@@ -65,6 +65,18 @@ describe("createInspector watermark", () => {
     inspector.markProcessed();
     expect(inspector.snapshot().processed).toBe(3);
   });
+
+  // GH126 code-review fix 1: the wave-scoped queue-peak accumulator reads this
+  // every tick a wave is active, so it needs the watermark alone, with no ring
+  // clone. `processedCount()` must always agree with `snapshot().processed`.
+  it("processedCount reads the same watermark as snapshot().processed, with no ring clone", () => {
+    const inspector = createInspector({ ringSize: 10 });
+    expect(inspector.processedCount()).toBe(0);
+    inspector.markProcessed();
+    inspector.markProcessed();
+    expect(inspector.processedCount()).toBe(2);
+    expect(inspector.processedCount()).toBe(inspector.snapshot().processed);
+  });
 });
 
 describe("createInspector resolveEvents", () => {

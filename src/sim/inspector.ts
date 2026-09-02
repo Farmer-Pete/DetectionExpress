@@ -52,6 +52,14 @@ export interface Inspector extends TaskInspector {
    * deep-frozen at push, so returning references is safe.
    */
   resolveEvents(ids: readonly number[]): RingEvent[];
+  /**
+   * The processed watermark alone, with no ring clone (unlike `snapshot()`, which
+   * allocates a fresh events array on every call). The engine's wave-scoped
+   * queue-peak accumulator (GH126-PLAN.md, code-review fix 1) reads this once per
+   * game tick while a wave is active, so it needs the count without that allocation.
+   * Always equal to `snapshot().processed`.
+   */
+  processedCount(): number;
 }
 
 /** JSON-round-trip a value; a circular reference or BigInt falls back to `null`. */
@@ -108,6 +116,9 @@ export function createInspector(config: { ringSize: number }): Inspector {
       // filtering it preserves id order regardless of the order `ids` names them in.
       const wanted = new Set(ids);
       return ring.filter((event) => wanted.has(event.id));
+    },
+    processedCount() {
+      return processed;
     },
   };
 }

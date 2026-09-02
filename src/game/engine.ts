@@ -77,6 +77,7 @@ import {
   DOOR_DWELL_TICKS,
   FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
+  MAX_CHAOS_LEVEL,
   PUBLISH_HZ,
   QUEUE_CAP,
   RING_SIZE,
@@ -575,7 +576,21 @@ export function start(options: StartOptions): EngineHandle {
   // run-up the reused WAVE INCOMING warning counts down through; the loop
   // (`advanceChaosLoop`) triggers the wave when the lead-in elapses. Mid-cycle it only
   // retains — the loop applies the change at the next trigger (Q7).
+  //
+  // Code-review fix 6: inert outside endless mode (`waves`/`steady` have no chaos
+  // loop to drive; a call here must never mutate chaos state or start a no-op
+  // cooldown for them), and validated at this seam (ARCHITECTURE.md rule 9) against
+  // the supported `0..MAX_CHAOS_LEVEL` integer range. An out-of-range or non-integer
+  // level is IGNORED, not clamped: silently reinterpreting a bad caller value as the
+  // nearest valid level could start a real wave loop nobody asked for, while ignoring
+  // it is a safe no-op.
   const setChaosLevel = (level: number): void => {
+    if (scheduleMode !== "endless") {
+      return;
+    }
+    if (!Number.isInteger(level) || level < 0 || level > MAX_CHAOS_LEVEL) {
+      return;
+    }
     selectedChaosLevel = level;
     if (level > 0 && activeWave === null && chaosCooldownUntil === null) {
       chaosActiveLevel = level;
@@ -777,22 +792,16 @@ export function start(options: StartOptions): EngineHandle {
       let nextWaveId = 0;
       let nextAttackId = 0;
 
-      // Read whether a wave's attack resolved caught, off the scorer's own decision
-      // log, keyed by attackId (GH126-PLAN.md M2b). A caught or missed decision
-      // always exists by the time this runs: the attack was caught during the wave,
-      // or `resolveWave`'s `advanceTo` settled it missed just before. Absent (only if
-      // the log's cap trimmed it) reads as not caught.
-      const waveCaught = (attackId: number): boolean => {
-        for (const decision of options.scorer.decisions()) {
-          if (
-            (decision.outcome === "caught" || decision.outcome === "missed") &&
-            decision.attackId === attackId
-          ) {
-            return decision.outcome === "caught";
-          }
-        }
-        return false;
-      };
+      // Read whether a wave's attack resolved caught, off the scorer's authoritative
+      // `outcomeOf` (GH126-PLAN.md M2b; code-review fix 2). `decisions()` is capped
+      // (`ScorerConfig.decisionsCap`), so scanning it could let a noisy rule evict an
+      // early catch's decision before the wave resolves, wrongly reporting it
+      // missed/breach; `outcomeOf` reads the scorer's internal `state` map instead,
+      // which is never capped. A caught or missed outcome always exists by the time
+      // this runs: the attack was caught during the wave, or `resolveWave`'s
+      // `advanceTo` settled it missed just before.
+      const waveCaught = (attackId: number): boolean =>
+        options.scorer.outcomeOf(attackId) === "caught";
 
       // Resolve the wave at its drain watermark: settle a still-pending attack as
       // missed (the existing `closeExpired` path via `advanceTo`; a caught attack is
@@ -835,8 +844,17 @@ export function start(options: StartOptions): EngineHandle {
       // attacker and start the cooldown.
       const triggerWave = (): WaveId | null => {
         // Endless-mode only, one wave at a time (Q7). No-op after stop, without a
-        // scored ingress to offer into, or while a wave is still active.
-        if (stopped || scheduleMode !== "endless" || !scoredIngest || activeWave) {
+        // scored ingress to offer into, while a wave is still active, or during a
+        // pending cooldown (code-review fix 5): the cooldown-first machine reserves
+        // that gap as the lead-in run-up, and a manual call mid-cooldown must not
+        // bypass it and splice a second wave ahead of the loop's own trigger.
+        if (
+          stopped ||
+          scheduleMode !== "endless" ||
+          !scoredIngest ||
+          activeWave ||
+          chaosCooldownUntil !== null
+        ) {
           return null;
         }
         // A new wave begins: retire the prior wave's banner outcome (GH126-PLAN.md
@@ -931,6 +949,11 @@ export function start(options: StartOptions): EngineHandle {
               triggerWave();
             } else {
               chaosActiveLevel = 0; // the loop has stopped; report idle at level 0
+              // Code-review fix 4: with no successor wave to retire it, the banner
+              // would otherwise ride every snapshot forever through calm. `triggerWave`
+              // only clears it when the NEXT wave fires, so the level-0 stop clears it
+              // here instead, the one other place the outcome's "until" ends.
+              lastWaveOutcome = null;
             }
           }
           return;
@@ -1365,14 +1388,21 @@ export function start(options: StartOptions): EngineHandle {
         // because an active wave only ever exists alongside one (triggerWave's guard).
         if (activeWave && scoredIngest) {
           const wave = activeWave;
-          // The wave-scoped queue metric (finding 8, seam 12): the peak of
-          // `offered - processed` expressed as the live backlog — the ScoredIngress
-          // buffer PLUS every channel's contents, not only channel sizes. Reset to
-          // zero at wave start, so it measures this wave's window alone.
-          let backlog = scoredIngest.ingress.size;
-          for (const channel of channelMap.values()) {
-            backlog += channel.size;
-          }
+          // The wave-scoped queue metric (finding 8, seam 12; code-review fix 1): the
+          // EXACT offered-minus-processed in-flight watermark, not a sum of buffer and
+          // channel sizes. `nextScoredEventId` is the dense scored-event id, assigned
+          // at OFFER time (before Ingest even pulls it) — the true "offered" count.
+          // `inspector.processedCount()` advances only once Detect has scored an event
+          // (`tasks.ts` `runDetect`, right after `scorer.record`). Their difference is
+          // exactly the count of events anywhere in flight: buffered in
+          // `ScoredIngress`, sitting in or being pulled out of any channel, or being
+          // normalized/detected — and it correctly EXCLUDES an event Detect already
+          // scored even though it may still be sitting in the Detect->Sink channel,
+          // unlike the old channel-size sum, which could both miss an event a node was
+          // actively holding between an input pull and an output push AND wrongly
+          // count one Detect had already finished. Reset to zero at wave start (the
+          // `queuePeak: 0` in `triggerWave`), so it measures this wave's window alone.
+          const backlog = nextScoredEventId - inspector.processedCount();
           if (backlog > wave.queuePeak) {
             wave.queuePeak = backlog;
           }

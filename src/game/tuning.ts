@@ -430,3 +430,11 @@ export const QUEUE_CAP = 60;
  * cooldown phase is always sampled. Tunable; M3b's ladder pass revisits it.
  */
 export const CHAOS_COOLDOWN_TICKS = 180;
+
+/**
+ * The highest selectable chaos-ladder level (GH126-PLAN.md Q3: levels 0-5, only 0
+ * and 1 playable today). `setChaosLevel` (code-review fix 6) validates against
+ * this, so an out-of-range or non-integer level from a bad caller is ignored
+ * rather than silently starting a cooldown for a level the ladder does not have.
+ */
+export const MAX_CHAOS_LEVEL = 5;

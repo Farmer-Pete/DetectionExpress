@@ -92,7 +92,7 @@ export const chaosLevels: readonly ChaosLevel[] = [
   {
     level: 1,
     label: "First Cracks",
-    blurb: "One bad actor. One sensor. A quiet probe against the crowd.",
+    blurb: "A handful of bad actors fan out across the crowd. Quiet probes, one PIN at a time.",
     playable: true,
   },
   {

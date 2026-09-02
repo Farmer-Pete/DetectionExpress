@@ -58,9 +58,9 @@ body {
 /* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
    applied only inside the `prefers-reduced-motion: no-preference` block near
    the end of this file. The state-bearing animations (`heart`, driving
-   `.wave-readout-incoming`, `.findings-panel.urgent-pulse`, and the
-   `severityFill`-driven fill colors) also carry a static, unanimated form
-   outside that guard, so color and count changes still read with motion off.
+   `.wave-readout-incoming` and `.findings-panel.urgent-pulse`) also carry a
+   static, unanimated form outside that guard, so color and count changes
+   still read with motion off.
    The one-shot transients (`waveflash`, `shake`) are the opposite: they ARE
    the effect, so they intentionally have no static form to fall back to (see
    the "Wave juice animations" comment below, near the guard itself). Colors
@@ -178,100 +178,6 @@ body {
 
 .status-pill-failed {
   border-color: var(--threat);
-  color: var(--threat);
-}
-
-/* Metrics tab (GH124-PLAN.md Checkpoint 2): the four gauges that used to run
-   horizontally across the top strip, now stacked vertically to the ~460px side
-   panel's width, plus the caught/missed/false counts under Correctness. */
-.metrics-gauges {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 1rem;
-}
-
-.gauge {
-  width: 100%;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.7rem 0.9rem;
-}
-
-.gauge-label {
-  color: var(--dim);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-}
-
-/* One muted caption line under the label, explaining the metric (GH124). Compact
-   so the four-gauge stack still fits the ~460px Metrics tab. */
-.gauge-desc {
-  color: var(--dim);
-  font-size: 0.7rem;
-  line-height: 1.3;
-  margin-top: 0.15rem;
-}
-
-.gauge-value {
-  font-size: 1.7rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  line-height: 1.1;
-}
-
-.gauge-unit {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--dim);
-  margin-left: 0.15rem;
-}
-
-.gauge-track {
-  margin-top: 0.5rem;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--panel2);
-  overflow: hidden;
-}
-
-.gauge-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition:
-    width 0.12s linear,
-    background 0.2s linear;
-}
-
-/* Gauge pulse (#38 juice item 2). `Gauge`'s `pulse` prop adds this class; the
-   caller only sets it at danger severity (Hud's Queue gauge), so `currentcolor`
-   below is safely the threat hue. The pulse animation itself lives in the
-   reduced-motion guard near the end of this file; the fill's background,
-   already `severityFill`'s danger color, is the static form. */
-.gauge-fill-pulse {
-  color: var(--threat);
-}
-
-.gauge-counts {
-  display: flex;
-  gap: 0.6rem;
-  margin-top: 0.5rem;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.gauge-count-ok {
-  color: var(--ok);
-}
-
-.gauge-count-alert {
-  color: var(--alert);
-}
-
-.gauge-count-threat {
   color: var(--threat);
 }
 
@@ -2285,10 +2191,6 @@ body {
   }
 
   .wave-readout-incoming {
-    animation: heart 0.45s infinite;
-  }
-
-  .gauge-fill-pulse {
     animation: heart 0.45s infinite;
   }
 

@@ -283,6 +283,15 @@ export interface Scorer {
    * scores the finding that cites it, so evidence is owned before it is judged.
    */
   bindEvidence(attackId: number, globalEventId: number): void;
+  /**
+   * The authoritative outcome for `attackId`, read straight off the internal
+   * `state` map (GH126-PLAN.md, code-review fix 2). `decisions()` is capped
+   * (`ScorerConfig.decisionsCap`), so a noisy rule can evict an early catch's
+   * decision before a caller checks it; this accessor never misses one. Returns
+   * `"pending"` for an id never registered (or since retired, fix 3): both read
+   * as "nothing resolved to report," the same as a real pending Attack.
+   */
+  outcomeOf(attackId: number): "pending" | "caught" | "missed";
 }
 
 /** One resolved judgement, held in the rolling ring. */
@@ -420,6 +429,37 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
         resolve(attack, "missed");
         append(missDecision(attack));
         dropWatchesForAttack(attack.id);
+      }
+    }
+  }
+
+  /**
+   * Bounded memory (GH126-PLAN.md, code-review fix 3): delete a RESOLVED (caught
+   * or missed) Attack from `attacksById`/`state`, and its evidence ids from
+   * `owner`, once `ts` has passed its window close by `liveHorizon`. Both
+   * `closeExpired` and `scoreFinding` only ever act on a `pending` Attack, so
+   * deleting a resolved one changes no scoring outcome — its `counts`/ring/log
+   * contribution already landed at resolution and lives on independently. The
+   * `liveHorizon` margin also outlasts `sweepHorizon`'s own live-entry eviction,
+   * so no live watch or hit can still be referencing the attack's evidence by the
+   * time it retires. Iterating `attacksById.values()` while deleting the current
+   * entry is well-defined: a Map iterator never skips or revisits a key over a
+   * delete during iteration. A repeating chaos loop calls this every wave, so
+   * `attacksById`/`state`/`owner` stay bounded on an endless run instead of
+   * growing with every wave that ever fired.
+   */
+  function retireResolved(ts: number): void {
+    for (const attack of attacksById.values()) {
+      const outcome = state.get(attack.id);
+      if (
+        (outcome === "caught" || outcome === "missed") &&
+        ts > attack.window.endTs + liveHorizon
+      ) {
+        attacksById.delete(attack.id);
+        state.delete(attack.id);
+        for (const eventId of attack.eventIds) {
+          owner.delete(eventId);
+        }
       }
     }
   }
@@ -638,10 +678,12 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       findings.forEach((scored, index) => {
         scoreFinding(scored, env.ts, liveSeqs[index] ?? null);
       });
+      retireResolved(env.ts);
     },
     advanceTo(gameTs) {
       sweepHorizon(gameTs);
       closeExpired(gameTs);
+      retireResolved(gameTs);
     },
     finalize() {
       for (const attack of attacksById.values()) {
@@ -712,6 +754,9 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       }
       owner.set(globalEventId, attackId);
       attack.eventIds.push(globalEventId);
+    },
+    outcomeOf(attackId) {
+      return state.get(attackId) ?? "pending";
     },
   };
 }

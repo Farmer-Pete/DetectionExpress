@@ -1,3 +1,4 @@
+import { randomLcg } from "d3-random";
 import { describe, expect, it, vi } from "vitest";
 import { createAccountRider, initialAccountRiderPresence } from "../sim/actors/account-rider";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
@@ -20,6 +21,7 @@ import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
 import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
+import { planChaosWave } from "../sim/scenarios/pin-brute-force/chaos-wave";
 import {
   createPinAttacker,
   initialPinAttackerPresence,
@@ -31,6 +33,7 @@ import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
+import { waveSeed } from "../sim/wave-seed";
 import { distanceTable } from "../sim/world/distance";
 import {
   consoleNodeId,
@@ -70,9 +73,11 @@ import {
   GAME_SECONDS_PER_TICK,
   HOST_RELAY_TICKS,
   LEVEL_SEED,
+  MAX_CHAOS_LEVEL,
   OPERATOR_COMMAND_TICKS,
   QUEUE_CAP,
   RIDER_GOHOME_DWELL_TICKS,
+  WAVE_TRIGGER_MARGIN_TICKS,
   WAVE_WARN_TICKS,
 } from "./tuning";
 
@@ -1098,6 +1103,7 @@ describe("engine publishes the scorer's decision log", () => {
       liveFindings: () => Object.freeze([]),
       addAttack: () => undefined,
       bindEvidence: () => undefined,
+      outcomeOf: () => "pending",
     };
     const h = launch({ generator: () => null, scorer: fakeScorer, checkpoints: [] });
     await step(h.driver, CLOCK_HZ); // several publish ticks, decisionCount stays 0
@@ -2250,12 +2256,13 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
 
   function endlessHarness(opts: {
     algorithm: TaskAlgorithm;
+    scorer?: Scorer;
     onWaveOutcome?: (o: WaveOutcomeObservation) => void;
   }): Harness {
     return launch({
       scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
       scheduleMode: "endless",
-      scorer: createScorer([], SCORER_CONFIG),
+      scorer: opts.scorer ?? createScorer([], SCORER_CONFIG),
       algorithm: opts.algorithm,
       checkpoints: [], // endless: the checkpoint loop is inert, the run never ends
       scoredIngest: {
@@ -2351,6 +2358,53 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
     const second = h.handle.triggerWave();
     expect(first).not.toBeNull();
     expect(second).toBeNull(); // one wave at a time
+    h.handle.stop();
+  });
+
+  // GH126 code-review fix 5: `triggerWave`'s guard covered `activeWave` but not a
+  // pending `chaosCooldownUntil`, so calling it mid-cooldown bypassed the
+  // cooldown-first machine (Q7) and could splice a second wave in before the
+  // lead-in for the first had even elapsed.
+  it("no-ops during a chaos-loop cooldown, not only during an active wave (fix 5)", async () => {
+    const h = endlessHarness({ algorithm: idleAlgorithm });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1); // opens the lead-in cooldown; no wave yet
+    await step(h.driver, 4);
+    expect(h.last()?.chaosPhase.kind).toBe("cooldown");
+    expect(h.handle.triggerWave()).toBeNull(); // still in the lead-in: no-op
+    // The lead-in still elapses into exactly the loop's own wave, not a second one.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS);
+    expect(h.last()?.chaosPhase.kind).toBe("wave");
+    const ids = (h.last()?.actors ?? []).filter((a) => a.kind === "pin-attacker").map((a) => a.id);
+    expect(ids.every((id) => id.startsWith("wave-1-attacker-"))).toBe(true);
+    h.handle.stop();
+  });
+
+  // GH126 code-review fix 2: `waveCaught` must read the scorer's authoritative
+  // `outcomeOf`, not scan the capped decision log, where a noisy rule can evict an
+  // early catch before the wave resolves and wrongly report it missed/breach.
+  it("still resolves caught once the decision log is capped below the wave's own attacks (fix 2)", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      // A cap of 1: as soon as more than one attack in this 2-8 attacker wave gets
+      // caught, the earlier ones' decisions are evicted from `decisions()` well
+      // before the wave resolves at its drain watermark.
+      scorer: createScorer([], { ...SCORER_CONFIG, decisionsCap: 1 }),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    const waveId = h.handle.triggerWave();
+    expect(waveId).not.toBeNull();
+    await step(h.driver, 195);
+
+    expect(outcomes).toHaveLength(1);
+    const outcome = outcomes[0];
+    // Every attack still reads caught, even though the capped log (size 1) cannot
+    // possibly hold all of their decisions by the time the wave resolves.
+    expect(outcome?.allCaught).toBe(true);
+    expect(outcome?.caughtCount).toBe(outcome?.attackCount);
+    expect(outcome?.outcome).toBe("held");
     h.handle.stop();
   });
 
@@ -2545,6 +2599,250 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     await step(h.driver, CHAOS_COOLDOWN_TICKS + 260); // past resolve AND the cooldown that follows
     expect(outcomes).toHaveLength(1); // the loop is off, so no second wave
     expect(h.last()?.chaosPhase.kind).toBe("idle");
+    h.handle.stop();
+  });
+
+  // GH126 code-review fix 4: `lastWaveOutcome` used to clear only when the NEXT
+  // wave triggered, so a level-0 stop left the held/breach banner riding forever
+  // through calm once the loop went idle. It must clear the moment the final
+  // cooldown ends with nothing selected to trigger next.
+  it("clears the wave-outcome banner once the loop stops at level 0, not only on the next wave (fix 4)", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1);
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 195); // elapse the lead-in, run wave 1 to resolve
+    expect(outcomes).toHaveLength(1);
+    expect(h.last()?.waveOutcome?.waveId).toBe(1); // the banner rides the post-wave cooldown
+    h.handle.setChaosLevel(0); // stop: no successor wave will fire after this cooldown
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 10); // elapse the final cooldown
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    expect(h.last()?.waveOutcome).toBeNull(); // cleared at the level-0 stop, not left riding
+    h.handle.stop();
+  });
+});
+
+// GH126 code-review fix 6: `setChaosLevel` must be inert outside endless mode (no
+// cooldown, no snapshot change) and must validate the level is an integer in the
+// supported 0..5 range, ignoring anything else rather than starting a cooldown for
+// a level the ladder does not have.
+describe("engine setChaosLevel guards (GH126 code-review fix 6)", () => {
+  it("is inert in waves mode: no cooldown, the snapshot's chaos phase stays idle", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "waves",
+      checkpoints: deadlineAt(400),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    h.handle.stop();
+  });
+
+  it("is inert in steady mode: no cooldown, the snapshot's chaos phase stays idle", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "steady",
+      checkpoints: deadlineAt(400),
+    });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    h.handle.stop();
+  });
+
+  function endlessHarness(): Harness {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    return launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: idleAlgorithm,
+      checkpoints: [],
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+
+  it("ignores a level above the supported range, in endless mode", async () => {
+    const h = endlessHarness();
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(MAX_CHAOS_LEVEL + 1);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    h.handle.stop();
+  });
+
+  it("ignores a negative level, in endless mode", async () => {
+    const h = endlessHarness();
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(-1);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    h.handle.stop();
+  });
+
+  it("ignores a non-integer level, in endless mode", async () => {
+    const h = endlessHarness();
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1.5);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
+    h.handle.stop();
+  });
+
+  it("still accepts every level in the supported range, in endless mode", async () => {
+    const h = endlessHarness();
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(MAX_CHAOS_LEVEL);
+    await step(h.driver, 5);
+    expect(h.last()?.chaosPhase).toMatchObject({ selectedLevel: MAX_CHAOS_LEVEL });
+    h.handle.stop();
+  });
+});
+
+// GH126 code-review fix 1: the wave-scoped queue-peak metric must be the exact
+// offered-minus-processed in-flight watermark (the dense scored-event id, assigned
+// at OFFER time, minus the inspector's processed watermark), not
+// `ScoredIngress.size + channel sizes`, which omits an event a node is actively
+// holding between an input pull and an output push, and can include an event
+// Detect already scored but that is still sitting in the Detect->Sink channel.
+// `admitted`/`processed` are exposed on every snapshot and, in endless mode, are
+// exactly the pipeline's own offered/processed counters (every admission is a
+// scored event; nothing ambient ever crosses the boundary), so the peak the wave
+// reports can never fall below the largest `admitted - processed` any sampled
+// snapshot observed: since the true offered count is always >= `admitted`, the
+// true backlog at that same tick is always >= that snapshot's own
+// `admitted - processed`. A channel-size-only formula has no such guarantee.
+describe("engine wave queue-peak reflects true in-flight backlog (GH126 code-review fix 1)", () => {
+  it("the resolved wave's queuePeak is never smaller than the largest admitted-minus-processed backlog actually observed", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const outcomes: WaveOutcomeObservation[] = [];
+    // A slow governed rate: arrivals outrun Detect, so real backlog accumulates
+    // over many ticks instead of draining within the same tick it arrived.
+    const SLOW_RATE: ServiceRate = { num: 1, den: 4 };
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: referenceTaskAlgorithm(),
+      serviceRate: SLOW_RATE,
+      checkpoints: [],
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    expect(h.handle.triggerWave()).not.toBeNull();
+
+    let maxAdmittedMinusProcessed = 0;
+    // Drive well past the attack window and drain deadline, one tick at a time, so
+    // every intermediate snapshot is sampled (a single large `step` would only let
+    // us read the last one).
+    for (let i = 0; i < 400 && outcomes.length === 0; i++) {
+      await step(h.driver, 1);
+      const snap = h.last();
+      if (snap) {
+        const backlog = snap.admitted - snap.processed;
+        if (backlog > maxAdmittedMinusProcessed) {
+          maxAdmittedMinusProcessed = backlog;
+        }
+      }
+    }
+
+    expect(outcomes).toHaveLength(1);
+    const queuePeak = outcomes[0]?.queuePeak ?? -1;
+    // The slow rate guarantees real backlog built up: the lower-bound proxy itself
+    // must have observed events genuinely in flight at once (the publish rate is
+    // coarser than the engine's own per-tick peak tracking, so this proxy is a
+    // floor, not the exact peak).
+    expect(maxAdmittedMinusProcessed).toBeGreaterThan(0);
+    expect(queuePeak).toBeGreaterThanOrEqual(maxAdmittedMinusProcessed);
+    h.handle.stop();
+  });
+});
+
+// GH126 code-review fix 7 (Q11 per-wave parity): for a chaos wave triggered at a
+// fixed, known tick and seed, an independently composed oracle from the SAME
+// `planChaosWave` call the engine itself makes (same trigger tick, same
+// `waveSeed(runSeed, triggerTick)`) must describe exactly the wave the live engine
+// actually ran: the same victims, the same per-attacker fail-burst size, and a
+// resolution where every one of the oracle's attackers is caught. This is a test,
+// not a runtime guard: it proves the live chaos path agrees with an independently
+// rebased composition, the same spirit as the GH117 engine-parity suite but scoped
+// to one wave.
+describe("engine chaos wave matches its rebased planChaosWave oracle (GH126-PLAN.md Q11, fix 7)", () => {
+  it("the live wave's victims and fail-burst sizes match the oracle, and every oracle attacker is caught", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: referenceTaskAlgorithm(),
+      checkpoints: [],
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+
+    // A known, fixed trigger tick: step exactly 3 ticks, then trigger, mirroring
+    // every other M2b/M3a test's own harness rhythm.
+    await step(h.driver, 3);
+    const triggerTick = 3;
+    const waveId = h.handle.triggerWave();
+    expect(waveId).toBe(1); // the engine's own nextWaveId counter, first wave
+
+    // The independent oracle: the SAME seam (`planChaosWave`) the engine calls
+    // internally, given the SAME trigger tick, waveId-derived actor-id policy, and
+    // `waveSeed(runSeed, triggerTick)`-seeded RNG stream `triggerWave` itself uses.
+    const oracle = planChaosWave(
+      triggerTick + WAVE_TRIGGER_MARGIN_TICKS,
+      (index) => `wave-${waveId}-attacker-${index}`,
+      randomLcg(waveSeed(LEVEL_SEED, triggerTick)),
+    );
+
+    await step(h.driver, 195); // past the attack window and the drain deadline
+
+    expect(outcomes).toHaveLength(1);
+    const outcome = outcomes[0];
+    expect(outcome?.attackCount).toBe(oracle.attackers.length);
+    expect(outcome?.allCaught).toBe(true);
+    expect(outcome?.caughtCount).toBe(oracle.attackers.length);
+
+    // Same victims and same per-attacker fail-burst size, read off the world log
+    // (every scored kiosk reading the live wave actually emitted, keyed by the
+    // attacker's actorId — the same identity the oracle's `actorIdFor` mints).
+    const worldEvents = h.last()?.worldEvents ?? [];
+    for (const attacker of oracle.attackers) {
+      const readings = worldEvents.filter(
+        (event) => event.reading.sensor === "kiosk" && event.actorId === attacker.actorId,
+      );
+      expect(readings).toHaveLength(attacker.evidenceCount);
+      for (const event of readings) {
+        const reading = event.reading;
+        expect(reading.sensor === "kiosk" && reading.reading.account).toBe(attacker.victim);
+      }
+    }
+    // Every attacker actually appeared, live, under exactly the oracle's id.
+    const liveActorIds = new Set(worldEvents.map((event) => event.actorId));
+    for (const attacker of oracle.attackers) {
+      expect(liveActorIds.has(attacker.actorId)).toBe(true);
+    }
     h.handle.stop();
   });
 });
