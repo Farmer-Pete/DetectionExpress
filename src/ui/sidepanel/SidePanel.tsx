@@ -5,6 +5,12 @@
  * owns `open`/`tab`, the pause protocol, and the Apply-on-success wiring; this
  * component only renders the given tab and reports clicks and key presses back up.
  *
+ * The chaos ladder's own live values (GH126-PLAN.md M3b) are the one exception: this
+ * is the ladder's mount site, so it reads the selected level, the live chaos phase,
+ * and the `setChaosLevel` action straight off the store, one narrow selector per
+ * value (ARCHITECTURE.md), and hands them to `ChaosLadder` as props. `ChaosLadder`
+ * itself stays presentational and store-free.
+ *
  * It is a real modal dialog, styled on `IntroOverlay`'s and `TraceOverlay`'s pattern
  * (`src/ui/focus.ts`): `role="dialog"`, `aria-modal="true"`, its own dim backdrop that
  * dismisses on an outside click (a gesture STARTING inside the dialog never does, even
@@ -36,6 +42,7 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { defaultEntry } from "../../game/registry";
+import { useGameStore } from "../../game/store";
 import { AlgorithmEditor } from "../AlgorithmEditor";
 import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
@@ -73,6 +80,13 @@ export function SidePanel({
 }: SidePanelProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
+
+  // The chaos ladder's live wiring (GH126-PLAN.md M3b): one narrow selector per
+  // value (ARCHITECTURE.md), read here since this is the ladder's mount site.
+  // `ChaosLadder` itself stays presentational, taking these as props.
+  const chaosLevel = useGameStore((state) => state.chaosLevel);
+  const chaosPhase = useGameStore((state) => state.snapshot.chaosPhase);
+  const setChaosLevel = useGameStore((state) => state.setChaosLevel);
 
   // Move focus into the dialog on mount, onto its first control; restore it on
   // unmount to whatever triggered the open, or the fallback if that trigger is gone.
@@ -184,7 +198,13 @@ export function SidePanel({
           className="sidepanel-body"
           hidden={tab !== "chaos"}
         >
-          <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+          <ChaosLadder
+            levels={chaosLevels}
+            liveScenario={liveScenario}
+            selectedLevel={chaosLevel}
+            phase={chaosPhase}
+            onSelectLevel={setChaosLevel}
+          />
         </div>
         <div
           role="tabpanel"

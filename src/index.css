@@ -1346,22 +1346,33 @@ body {
   overflow: hidden;
 }
 
-/* The "simulation ended" overlay (GH117 decision 5): shown over the map region once
-   the scored run concludes, so a frozen terminal frame reads as concluded, not stuck. */
-.metro-ended-overlay {
+/* The wave-outcome banner (GH126-PLAN.md M3b): shown over the map region while a
+   resolved wave's held/breach reading is fresh (SimSnapshot.waveOutcome), from the
+   wave's resolution through the cooldown gap, then cleared on the next trigger.
+   Replaces the retired "simulation ended" won/lost overlay: the endless baseline
+   never concludes, so this is a per-wave reading, not a terminal one. */
+.wave-outcome-banner {
   position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(10, 20, 26, 0.6);
-  color: var(--ink);
+  inset: auto 0 0;
+  margin: 0 auto 1rem;
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
   font-weight: 700;
   font-size: 0.85rem;
   text-align: center;
-  border-radius: 6px;
   pointer-events: none;
+}
+
+.wave-outcome-banner-held {
+  background: color-mix(in srgb, var(--ok) 24%, rgba(10, 20, 26, 0.75));
+  color: var(--ink);
+}
+
+.wave-outcome-banner-breach {
+  background: color-mix(in srgb, var(--threat) 30%, rgba(10, 20, 26, 0.75));
+  color: var(--ink);
 }
 
 .metro-map {
@@ -1909,6 +1920,29 @@ body {
   box-shadow: 0 0 14px color-mix(in srgb, var(--a1) 20%, transparent);
 }
 
+/* Locked rungs (levels 2-5, GH126-PLAN.md M3): visually muted, and the radio input
+   carries `disabled`, so neither a click nor keyboard nav can select them. */
+.chaos-level-locked {
+  opacity: 0.6;
+}
+
+/* The rung matching the store's current `chaosLevel` (GH126-PLAN.md M3b). */
+.chaos-level-selected {
+  border-color: var(--a1);
+  background: color-mix(in srgb, var(--a1) 10%, var(--panel2));
+}
+
+.chaos-ladder-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.chaos-level-locked .chaos-ladder-option {
+  cursor: not-allowed;
+}
+
 .chaos-ladder-rung {
   /* --ink over --panel2 clears WCAG AA (about 5.8:1); --dim did not. */
   color: var(--ink);
@@ -1937,6 +1971,25 @@ body {
      The orange accent stays present on the card's border and glow. */
   color: var(--ink);
   font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.chaos-ladder-locked-note {
+  margin: 0.4rem 0 0;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+/* The running-cycle indicator (GH126-PLAN.md M3b): wave active or the cooldown gap,
+   read from the snapshot's `chaosPhase`. Hidden entirely while idle. */
+.chaos-ladder-phase {
+  margin: 0 0 0.8rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--a1) 14%, var(--panel2));
+  color: var(--ink);
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -2335,25 +2388,4 @@ body {
   100% {
     opacity: 0;
   }
-}
-
-/* TEMPORARY (GH126-PLAN.md M2b): the hand trigger for one chaos wave. Parked in a
-   bottom corner, out of the way, until M3 replaces it with the chaos-ladder rung. */
-.dev-trigger-wave {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 40;
-  padding: 6px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: #fff;
-  background: #7a2e2e;
-  border: 1px solid #c0554f;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0.85;
-}
-.dev-trigger-wave:hover {
-  opacity: 1;
 }

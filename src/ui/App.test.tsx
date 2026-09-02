@@ -27,6 +27,7 @@ beforeEach(() => {
     selection: null,
     decisionSelection: null,
     mapDialogStack: [],
+    snapshot: emptySnapshot(),
   });
   markIntroSeen();
 });
@@ -112,6 +113,17 @@ describe("App shell", () => {
   it("has no Metrics opener in the Topbar", () => {
     render(<App createPipelineController={() => stubController()} />);
     expect(screen.queryByRole("button", { name: "Metrics" })).toBeNull();
+  });
+
+  it("has no dev chaos-wave trigger button (GH126-PLAN.md M3b retires it)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByRole("button", { name: /trigger chaos wave/i })).toBeNull();
+  });
+
+  it("renders no won/lost end screen, even once the run concludes (GH126-PLAN.md M3b retires it)", () => {
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), status: "won" } });
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByText(/simulation ended/i)).toBeNull();
   });
 
   it("has no side panel on screen at rest", () => {

@@ -1,12 +1,22 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { referenceSource } from "../../game/engine-source";
 import { useGameStore } from "../../game/store";
+import { emptySnapshot } from "../../sim/snapshot";
 import { SidePanel } from "./SidePanel";
 
 beforeEach(() => {
-  useGameStore.setState({ runPending: false, error: null });
+  useGameStore.setState({
+    runPending: false,
+    error: null,
+    chaosLevel: 0,
+    snapshot: emptySnapshot(),
+  });
   useGameStore.getState().setAlgorithmSource(referenceSource);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
@@ -116,6 +126,30 @@ describe("SidePanel", () => {
   it("renders the chaos ladder in the chaos tab", () => {
     renderPanel({ tab: "chaos" });
     expect(screen.getByRole("heading", { name: /chaos ladder/i })).toBeDefined();
+  });
+
+  it("wires the chaos ladder to the store: indicates the selected level and calling onSelectLevel writes it back", () => {
+    useGameStore.setState({ chaosLevel: 1 });
+    const setChaosLevel = vi.spyOn(useGameStore.getState(), "setChaosLevel");
+    renderPanel({ tab: "chaos" });
+
+    const level1Radio = screen.getByRole("radio", { name: /level 1/i });
+    expect(level1Radio).toHaveProperty("checked", true);
+
+    fireEvent.click(screen.getByRole("radio", { name: /level 0/i }));
+    expect(setChaosLevel).toHaveBeenCalledWith(0);
+  });
+
+  it("shows the chaos ladder's wave-phase indicator from the snapshot's chaosPhase", () => {
+    useGameStore.setState({
+      chaosLevel: 1,
+      snapshot: {
+        ...emptySnapshot(),
+        chaosPhase: { kind: "wave", selectedLevel: 1, activeLevel: 1 },
+      },
+    });
+    renderPanel({ tab: "chaos" });
+    expect(screen.getByText(/wave active/i)).toBeDefined();
   });
 
   it("renders the algorithm editor in the algorithm tab, with no download button", () => {

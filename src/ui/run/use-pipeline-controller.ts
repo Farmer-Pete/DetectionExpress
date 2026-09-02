@@ -12,7 +12,7 @@
  */
 
 import type { RefObject } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
@@ -55,14 +55,6 @@ export interface UsePipelineControllerArgs {
 export function usePipelineController({ createController }: UsePipelineControllerArgs): {
   /** The live pipeline controller ref. */
   controllerRef: RefObject<RunController | null>;
-  /**
-   * TEMPORARY (GH126-PLAN.md M2b): fire one chaos wave on the live engine by hand.
-   * Reads `controllerRef.current` at call time (a safe no-op with no controller) and
-   * delegates to `RunController.triggerWave`, which itself no-ops outside endless mode
-   * or during a wave's cooldown. M3 replaces the hand trigger with the real
-   * chaos-ladder rung wired through `SidePanel`.
-   */
-  triggerWave: () => void;
 } {
   const controllerRef = useRef<RunController | null>(null);
 
@@ -117,21 +109,16 @@ export function usePipelineController({ createController }: UsePipelineControlle
     controllerRef.current?.setSpeed(speed);
   }, [speed]);
 
-  // The same reflection for the chaos-ladder level (GH126-PLAN.md M3a). A ladder
-  // selection (M3b's rungs) flows here; an engine swap is handled by the controller
-  // reapplying its retained level on startEngine, which this effect misses because the
-  // store value did not change. The M3b ladder UI is wired separately; this is only the
-  // store -> controller reflection.
+  // The same reflection for the chaos-ladder level (GH126-PLAN.md M3a). The
+  // chaos-ladder rung, wired through `SidePanel` (GH126-PLAN.md M3b), calls the
+  // store's `setChaosLevel` on a click; this effect only mirrors the store value
+  // into the controller. An engine swap is handled by the controller reapplying its
+  // retained level on startEngine, which this effect misses because the store value
+  // did not change.
   const chaosLevel = useGameStore((s) => s.chaosLevel);
   useEffect(() => {
     controllerRef.current?.setChaosLevel(chaosLevel);
   }, [chaosLevel]);
 
-  // TEMPORARY hand trigger (GH126-PLAN.md M2b). Stable identity so a consumer button
-  // needs no per-render callback. M3 wires the ladder rung here instead.
-  const triggerWave = useCallback(() => {
-    controllerRef.current?.triggerWave();
-  }, []);
-
-  return { controllerRef, triggerWave };
+  return { controllerRef };
 }
