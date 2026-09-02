@@ -24,8 +24,10 @@
  */
 
 import type { RefObject } from "react";
+import { sensorCatalogueEntry } from "../game/sensor-catalogue";
 import type { MapSelection } from "../game/store";
 import type { SensorCode } from "../sim/world/layout";
+import { SENSOR_ID } from "../sim/world/layout";
 import { world } from "../sim/world/world";
 import { sensorIcon } from "./icons/sensor-icons";
 import { MetroMap } from "./MetroMap";
@@ -43,19 +45,33 @@ const lineRank = (id: string): number => {
 /** The four lines, for the legend, in the map's draw order. */
 const LEGEND_LINES = world.lines.slice().sort((a, b) => lineRank(a.id) - lineRank(b.id));
 
-/** The nine sensors, for the legend: code and name. The icon and color token come
-    from `sensorIcon` (the single source of truth), not a second table here. */
-const LEGEND_SENSORS: readonly { code: SensorCode; name: string }[] = [
-  { code: "K", name: "account kiosk (Z0)" },
-  { code: "G", name: "fare gate (Z0->Z1)" },
-  { code: "V", name: "ticket machine (Z0)" },
-  { code: "C", name: "platform camera (Z0/Z1)" },
-  { code: "R", name: "door reader (Z1-Z4)" },
-  { code: "D", name: "door contact (Z1-Z4)" },
-  { code: "T", name: "train tracker (Z1/Z3)" },
-  { code: "N", name: "network relay (Z2-Z4)" },
-  { code: "O", name: "control console (Z4)" },
+/** The nine sensors, for the legend: code and its curated zone-range annotation
+ *  (e.g. "Z0->Z1"). This suffix is hand-curated presentation — note fare-gate uses
+ *  "->" while platform-camera uses "/" for the same zones — and isn't derivable
+ *  from the data, so it stays a hardcoded per-code string. The display NAME itself
+ *  comes from `sensor-catalogue` (the single source of truth, GH127-PLAN.md M2) via
+ *  `legendSensorName` below, not from a second name table here. The icon and color
+ *  token come from `sensorIcon` (also the single source of truth for those). */
+const LEGEND_SENSORS: readonly { code: SensorCode; zones: string }[] = [
+  { code: "K", zones: "Z0" },
+  { code: "G", zones: "Z0->Z1" },
+  { code: "V", zones: "Z0" },
+  { code: "C", zones: "Z0/Z1" },
+  { code: "R", zones: "Z1-Z4" },
+  { code: "D", zones: "Z1-Z4" },
+  { code: "T", zones: "Z1/Z3" },
+  { code: "N", zones: "Z2-Z4" },
+  { code: "O", zones: "Z4" },
 ];
+
+/** A legend row's display text: the sensor's unified catalogue name plus its
+ *  curated zone-range annotation, e.g. "Ticket vending machine (Z0)". Looks the
+ *  name up by the code's canonical `sensors.data` id (`SENSOR_ID`, `layout.ts`) so
+ *  the legend can never drift from the device cards and log again. */
+function legendSensorName(sensor: { code: SensorCode; zones: string }): string {
+  const { name } = sensorCatalogueEntry(SENSOR_ID[sensor.code]);
+  return `${name} (${sensor.zones})`;
+}
 
 /** The Lines column: one swatch-and-name row per line, in the map's draw order. */
 function LinesColumn() {
@@ -120,7 +136,7 @@ function SensorsColumn() {
             <span className="metro-chip-swatch">
               <Icon size={13} color={token} strokeWidth={2.5} />
             </span>
-            {sensor.name}
+            {legendSensorName(sensor)}
           </div>
         );
       })}

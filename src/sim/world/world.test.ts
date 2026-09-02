@@ -1,37 +1,43 @@
 import { describe, expect, it } from "vitest";
-import worldJson from "../../../docs/world/world.json";
-import { doorGrade, parseWorld, world, zoneTrustLevel } from "./world";
+import {
+  assertWorldConsistent,
+  doorGrade,
+  lineName,
+  placeName,
+  siteName,
+  stationName,
+  trainName,
+  world,
+  zoneName,
+  zoneTrustLevel,
+} from "./world";
+import { worldData } from "./world.data";
 
 /**
- * A fresh, mutable deep copy of the real world data, typed loosely so a test can
- * break one invariant at a time. `parseWorld` takes `unknown`, so the mutated copy
- * flows in without a type assertion.
+ * A fresh, mutable deep copy of the real world data. `JSON.parse` returns `any`,
+ * so the result stays loosely typed and a test can mutate one invariant at a time;
+ * `any` then assigns straight into `assertWorldConsistent`'s `World` parameter with
+ * no cast, since a referential break is exactly what the compiler cannot catch.
  */
 function cloneWorld() {
-  return JSON.parse(JSON.stringify(worldJson));
+  return JSON.parse(JSON.stringify(worldData));
 }
 
-describe("parseWorld", () => {
-  it("accepts the real world.json", () => {
-    expect(() => parseWorld(worldJson)).not.toThrow();
-  });
-
-  it("throws on a missing top-level field", () => {
-    const bad = cloneWorld();
-    delete bad.doors;
-    expect(() => parseWorld(bad)).toThrow(/top-level field/);
+describe("assertWorldConsistent", () => {
+  it("accepts the real world", () => {
+    expect(() => assertWorldConsistent(world)).not.toThrow();
   });
 
   it("throws on a duplicate station id", () => {
     const bad = cloneWorld();
     bad.stations[1].id = bad.stations[0].id;
-    expect(() => parseWorld(bad)).toThrow(/duplicate station id/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate station id/);
   });
 
   it("throws on a location id that collides across stations and a site", () => {
     const bad = cloneWorld();
     bad.sites[0].id = bad.stations[0].id;
-    expect(() => parseWorld(bad)).toThrow(/duplicate location id/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate location id/);
   });
 
   it("throws on a non-reciprocal connection", () => {
@@ -39,7 +45,7 @@ describe("parseWorld", () => {
     // har <-> mkt on red is 3 minutes each way; drop mkt's edge back to har.
     const market = bad.stations.find((s: { id: string }) => s.id === "mkt");
     market.connections = market.connections.filter((c: { to: string }) => c.to !== "har");
-    expect(() => parseWorld(bad)).toThrow(/reciprocal edge/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/reciprocal edge/);
   });
 
   it("throws on an unequal reciprocal weight", () => {
@@ -47,7 +53,7 @@ describe("parseWorld", () => {
     const market = bad.stations.find((s: { id: string }) => s.id === "mkt");
     const edge = market.connections.find((c: { to: string }) => c.to === "har");
     edge.minutes = 9;
-    expect(() => parseWorld(bad)).toThrow(/unequal weights/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/unequal weights/);
   });
 
   it("throws on a non-positive travel time", () => {
@@ -62,7 +68,22 @@ describe("parseWorld", () => {
         }
       }
     }
-    expect(() => parseWorld(bad)).toThrow(/non-positive travel time/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/non-positive travel time/);
+  });
+
+  it("throws on a non-finite travel time", () => {
+    const bad = cloneWorld();
+    for (const station of bad.stations) {
+      for (const connection of station.connections) {
+        if (
+          (station.id === "har" && connection.to === "mkt") ||
+          (station.id === "mkt" && connection.to === "har")
+        ) {
+          connection.minutes = Number.NaN;
+        }
+      }
+    }
+    expect(() => assertWorldConsistent(bad)).toThrow(/non-finite travel time/);
   });
 
   it("throws on a disconnected station graph", () => {
@@ -73,13 +94,13 @@ describe("parseWorld", () => {
     end.connections = [];
     const riverside = bad.stations.find((s: { id: string }) => s.id === "riv");
     riverside.connections = riverside.connections.filter((c: { to: string }) => c.to !== "end");
-    expect(() => parseWorld(bad)).toThrow(/not fully connected/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/not fully connected/);
   });
 
   it("throws on a door whose location does not resolve", () => {
     const bad = cloneWorld();
     bad.doors[0].location = "nowhere";
-    expect(() => parseWorld(bad)).toThrow(/does not resolve for locationType/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/does not resolve for locationType/);
   });
 
   it("throws on a door zone not present at its location", () => {
@@ -89,44 +110,44 @@ describe("parseWorld", () => {
       (d: { location: string; name: string }) => d.location === "dep" && d.name === "STORE",
     );
     store.zone = "z4";
-    expect(() => parseWorld(bad)).toThrow(/is not present at/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/is not present at/);
   });
 
   it("throws on a duplicate door key", () => {
     const bad = cloneWorld();
     bad.doors.push({ location: "dep", locationType: "site", name: "STORE", zone: "z3" });
-    expect(() => parseWorld(bad)).toThrow(/duplicate door key/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate door key/);
   });
 
   it("throws on a duplicate zone id", () => {
     const bad = cloneWorld();
     bad.zones[1].id = bad.zones[0].id;
-    expect(() => parseWorld(bad)).toThrow(/duplicate zone id/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate zone id/);
   });
 
   it("throws on a duplicate line id", () => {
     const bad = cloneWorld();
     bad.lines[1].id = bad.lines[0].id;
-    expect(() => parseWorld(bad)).toThrow(/duplicate line id/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate line id/);
   });
 
   it("throws on a duplicate site id", () => {
     const bad = cloneWorld();
     bad.sites[1].id = bad.sites[0].id;
-    expect(() => parseWorld(bad)).toThrow(/duplicate site id/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/duplicate site id/);
   });
 
   it("throws when a line and a station disagree on membership", () => {
     const bad = cloneWorld();
     // Red still names Harbor, but Harbor no longer names red.
     bad.stations.find((s: { id: string }) => s.id === "har").lines = [];
-    expect(() => parseWorld(bad)).toThrow(/disagree on membership/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/disagree on membership/);
   });
 
   it("throws on a connection to an unknown station", () => {
     const bad = cloneWorld();
     bad.stations.find((s: { id: string }) => s.id === "har").connections[0].to = "zzz";
-    expect(() => parseWorld(bad)).toThrow(/connects to unknown station/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/connects to unknown station/);
   });
 
   it("throws on a connection whose line does not contain both endpoints", () => {
@@ -135,7 +156,7 @@ describe("parseWorld", () => {
     bad.stations
       .find((s: { id: string }) => s.id === "har")
       .connections.push({ to: "cen", line: "green", minutes: 3 });
-    expect(() => parseWorld(bad)).toThrow(/does not contain both/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/does not contain both/);
   });
 
   it("throws when a line's ordered stations skip an edge", () => {
@@ -149,57 +170,38 @@ describe("parseWorld", () => {
       "riv",
       "end",
     ];
-    expect(() => parseWorld(bad)).toThrow(/no matching edge/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/no matching edge/);
   });
 
   it("throws on a site whose nearestStation does not resolve", () => {
     const bad = cloneWorld();
     bad.sites[0].nearestStation = "zzz";
-    expect(() => parseWorld(bad)).toThrow(/nearestStation .*does not resolve/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/nearestStation .*does not resolve/);
   });
 
   it("throws on a zonesPresent entry that names an unknown zone", () => {
     const bad = cloneWorld();
     bad.sites[0].zonesPresent.push("z9");
-    expect(() => parseWorld(bad)).toThrow(/site .* names unknown zone/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/site .* names unknown zone/);
   });
 
   it("throws on a door that names a zone no world zone defines", () => {
     const bad = cloneWorld();
     // z9 is not a defined zone at all, distinct from a defined-but-not-present zone.
     bad.doors[0].zone = "z9";
-    expect(() => parseWorld(bad)).toThrow(/door .* names unknown zone/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/door .* names unknown zone/);
   });
 
   it("throws on a zone trustLevel that is not an integer in [0, 4]", () => {
     const bad = cloneWorld();
     bad.zones[0].trustLevel = 2.5;
-    expect(() => parseWorld(bad)).toThrow(/trustLevel must be an integer/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/trustLevel must be an integer/);
   });
 
   it("throws on a zone id outside the ^z[0-4]$ domain", () => {
     const bad = cloneWorld();
     bad.zones[0].id = "z9";
-    expect(() => parseWorld(bad)).toThrow(/zone id "z9" must match/);
-  });
-
-  it("throws on an unknown site type", () => {
-    const bad = cloneWorld();
-    bad.sites[0].type = "banana";
-    expect(() => parseWorld(bad)).toThrow(/unknown type/);
-  });
-
-  it("throws on a control center whose type is not control-center", () => {
-    const bad = cloneWorld();
-    bad.controlCenter.type = "banana";
-    expect(() => parseWorld(bad)).toThrow(/control-center/);
-  });
-
-  it("throws on a boxed Boolean where a primitive boolean is required", () => {
-    const bad = cloneWorld();
-    // A boxed Boolean would slip past a tag-only check; the guard rejects it.
-    bad.lines[0].loop = new Boolean(true);
-    expect(() => parseWorld(bad)).toThrow(/wrong type/);
+    expect(() => assertWorldConsistent(bad)).toThrow(/zone id "z9" must match/);
   });
 });
 
@@ -244,5 +246,78 @@ describe("world singleton", () => {
   it("is the validated real world", () => {
     expect(world.stations.length).toBeGreaterThan(0);
     expect(world.doors.length).toBe(7);
+  });
+});
+
+describe("stationName", () => {
+  it("returns the station's real name", () => {
+    expect(stationName("cen")).toBe("Central");
+    expect(stationName("riv")).toBe("Riverside");
+  });
+
+  it("throws on an unknown station", () => {
+    expect(() => stationName("nope")).toThrow(/unknown station/);
+  });
+});
+
+describe("siteName", () => {
+  it("returns the site's real name", () => {
+    expect(siteName("dep")).toBe("Eastyard Depot");
+    expect(siteName("sub")).toBe("Riverside Substation");
+  });
+
+  it("throws on an unknown site", () => {
+    expect(() => siteName("nope")).toThrow(/unknown site/);
+  });
+});
+
+describe("lineName", () => {
+  it("returns the line's real name", () => {
+    expect(lineName("red")).toBe("Red Line");
+    expect(lineName("circle")).toBe("Circle Line");
+  });
+
+  it("throws on an unknown line", () => {
+    expect(() => lineName("purple")).toThrow(/unknown line/);
+  });
+});
+
+describe("zoneName", () => {
+  it("returns the zone's real name", () => {
+    expect(zoneName("z0")).toBe("Public");
+    expect(zoneName("z4")).toBe("Control");
+  });
+
+  it("throws on an unknown zone", () => {
+    expect(() => zoneName("z9")).toThrow(/unknown zone/);
+  });
+});
+
+describe("placeName", () => {
+  it("resolves a station id", () => {
+    expect(placeName("cen")).toBe("Central");
+  });
+
+  it("resolves a site id", () => {
+    expect(placeName("dep")).toBe("Eastyard Depot");
+  });
+
+  it("resolves the control-center id", () => {
+    expect(placeName("occ")).toBe("Operations Control Center");
+  });
+
+  it("falls back to the raw id when it names no place", () => {
+    expect(placeName("nope")).toBe("nope");
+  });
+});
+
+describe("trainName", () => {
+  it("returns the train's line's authored trainName", () => {
+    expect(trainName("T1")).toBe("Red Line train");
+    expect(trainName("T2")).toBe("Blue Line train");
+  });
+
+  it("throws on an unknown train id", () => {
+    expect(() => trainName("T9")).toThrow(/unknown train/);
   });
 });

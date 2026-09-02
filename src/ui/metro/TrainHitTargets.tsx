@@ -13,7 +13,7 @@
  * re-render would visibly lag the 60 Hz canvas; this loop is what keeps the hit
  * target locked to the drawn train every frame.
  *
- * The four train ids are fixed fixtures of `world.json` (one per line), so the set of
+ * The four train ids are fixed fixtures of the world data (one per line), so the set of
  * rects never changes across a run; only their position does.
  */
 import { useEffect, useRef } from "react";
@@ -22,7 +22,7 @@ import { useGameStore } from "../../game/store";
 import { CLOCK_HZ } from "../../game/tuning";
 import { metroLayout } from "../../sim/world/layout";
 import { trainIdForLine } from "../../sim/world/timetable";
-import { world } from "../../sim/world/world";
+import { trainName, world } from "../../sim/world/world";
 import { renderSpeed } from "./interpolate";
 import { trainPlacement } from "./train-placement";
 
@@ -106,7 +106,7 @@ export function TrainHitTargets({ onSelect }: TrainHitTargetsProps) {
           height={HIT_H}
           role="button"
           tabIndex={0}
-          aria-label={`Open ${id}`}
+          aria-label={`Open ${trainName(id)}`}
           onClick={() => onSelect({ kind: "train", actorId: id })}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {

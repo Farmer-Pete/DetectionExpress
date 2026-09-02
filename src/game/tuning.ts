@@ -347,7 +347,7 @@ export const ACCOUNT_DWELL_TICKS = 10;
 /**
  * The whole-unit amount a low card rider tops up at a station TVM, chosen comfortably
  * above the most expensive single trip so one top-up always restores enough to ride
- * again. The `sensors.json` example tops up 100.
+ * again. The `sensors.data.ts` example tops up 100.
  */
 export const TVM_TOPUP_AMOUNT = 100;
 

@@ -44,7 +44,7 @@ bonus.
 - **Parallel authoring by discovery, not central edits.** Each scenario folder
   exports one `index.ts` of `{ scenario, buildRule, corpus }`. A registry in
   `src/game/` gathers them with `import.meta.glob` and joins each to its
-  `docs/world/scenarios.json` entry by id. No central file grows with each scenario.
+  `src/game/scenarios.data.ts` entry by id. No central file grows with each scenario.
   The glob lives in `game/`, so `sim/` stays free of bundler magic.
 
 - **Compose streams by merging runs.** `mergeRuns` feeds many scenarios to the
@@ -79,7 +79,7 @@ bonus.
   authoring this ADR's decision describes. GH118 later removed that local-IDE
   implementation outright: the resolver and the HMR plugin are gone with the rest
   of the local-IDE path.
-- A drift guard test binds `docs/world/scenarios.json`, the registered scenarios,
+- A drift guard test binds `src/game/scenarios.data.ts`, the registered scenarios,
   and the engine rules together, so the names cannot drift again.
 
 ## Scope of the first ticket (GH42)

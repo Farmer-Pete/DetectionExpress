@@ -60,6 +60,19 @@ describe("MetroView", () => {
     expect(screen.getByText("pin attacker")).toBeDefined();
   });
 
+  it("names sensors in the Sensors key from the unified sensor-catalogue, not a stale local table", () => {
+    render(<MetroView onSelect={() => {}} />);
+    // Unified names (sensor-catalogue / sensors.data.ts), each with its curated
+    // zone-range annotation kept intact.
+    expect(screen.getByText("Ticket vending machine (Z0)")).toBeDefined();
+    expect(screen.getByText("Control console (Z4)")).toBeDefined();
+    expect(screen.getByText("Door contact sensor (Z1-Z4)")).toBeDefined();
+    // The old, pre-M2 names this legend used to show on its own must be gone.
+    expect(screen.queryByText("ticket machine (Z0)")).toBeNull();
+    expect(screen.queryByText("control console (Z4)")).toBeNull();
+    expect(screen.queryByText("door contact (Z1-Z4)")).toBeNull();
+  });
+
   it("renders no event log (retired: it duplicated the pipeline log and findings)", () => {
     render(<MetroView onSelect={() => {}} />);
     expect(screen.queryByText("Event log")).toBeNull();

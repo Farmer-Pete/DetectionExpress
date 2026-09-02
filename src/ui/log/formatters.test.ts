@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { WorldLogEvent } from "../../sim/world-log";
-import { formatRow, toLogRow } from "./formatters";
+import type { SensorKind, WorldLogEvent } from "../../sim/world-log";
+import { formatRow, sensorLabel, toLogRow } from "./formatters";
 
 describe("formatRow", () => {
   it("maps a kiosk-v1 OK reading to who/where/result and an ok tone", () => {
@@ -104,6 +104,32 @@ describe("formatRow", () => {
   });
 });
 
+describe("sensorLabel", () => {
+  // The single source of truth is `sensors.data.ts`; four of these names differ from
+  // the old hardcoded `SENSOR_LABEL` table it retires (GH127-PLAN.md M2 wiring table).
+  // Keyed as a `Record<SensorKind, string>` rather than a loose array so a new
+  // `SensorKind` arm is a `tsc` error here, not a silent gap in this table.
+  const cases: Record<SensorKind, string> = {
+    kiosk: "Account kiosk",
+    "fare-gate": "Fare gate",
+    tvm: "Ticket vending machine",
+    "platform-camera": "Platform camera",
+    "door-reader": "Door reader",
+    "door-contact": "Door contact sensor",
+    "train-tracker": "Train tracker",
+    "network-relay": "Network relay",
+    "occ-console": "Control console",
+  };
+
+  // biome-ignore lint/nursery/noUnsafeTypeAssertion: `cases` above is typed `Record<SensorKind, string>`, so tsc already guarantees these keys are exactly the `SensorKind` members; `Object.entries`'s built-in signature just widens them to `string` on the way out.
+  it.each(Object.entries(cases) as [SensorKind, string][])(
+    "labels %s as %s, the sensors.data name",
+    (sensor, name) => {
+      expect(sensorLabel(sensor)).toBe(name);
+    },
+  );
+});
+
 /** A minimal `WorldLogEvent` for `sensor`, its `reading`, with everything else a
  *  reasonable default. Only `id`/`ts`/`sensor`/`reading` vary across the cases below. */
 function worldEvent(
@@ -150,7 +176,7 @@ describe("toLogRow", () => {
     expect(row).toMatchObject({ result: "WRONG_PIN", tone: "bad" });
   });
 
-  it("maps a fare-gate ok reading to PERMIT and an ok tone", () => {
+  it("maps a fare-gate ok reading to PERMIT and an ok tone, resolving the station id", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -167,7 +193,8 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(row).toMatchObject({ who: "card-1", where: "cen", result: "PERMIT", tone: "ok" });
+    // `card` is telemetry, so it stays raw; `station` is a world id, so it resolves.
+    expect(row).toMatchObject({ who: "card-1", where: "Central", result: "PERMIT", tone: "ok" });
   });
 
   it("marks a fare-gate reject reading with a bad tone", () => {
@@ -190,7 +217,7 @@ describe("toLogRow", () => {
     expect(row).toMatchObject({ result: "REJECT", tone: "bad" });
   });
 
-  it("maps a tvm top-up to a +amount result and an ok tone", () => {
+  it("maps a tvm top-up to a +amount result and an ok tone, resolving the station id", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -206,10 +233,10 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(row).toMatchObject({ who: "c1", where: "cen", result: "+100", tone: "ok" });
+    expect(row).toMatchObject({ who: "c1", where: "Central", result: "+100", tone: "ok" });
   });
 
-  it("maps a train-tracker arrival/departure to ARRIVED/DEPARTED with a neutral tone", () => {
+  it("maps a train-tracker arrival/departure to ARRIVED/DEPARTED, resolving the train and station ids", () => {
     const arr = toLogRow(
       worldEvent({
         reading: {
@@ -218,7 +245,12 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(arr).toMatchObject({ who: "T1", where: "cen", result: "ARRIVED", tone: "neutral" });
+    expect(arr).toMatchObject({
+      who: "Red Line train (T1)",
+      where: "Central",
+      result: "ARRIVED",
+      tone: "neutral",
+    });
 
     const dep = toLogRow(
       worldEvent({
@@ -231,7 +263,7 @@ describe("toLogRow", () => {
     expect(dep).toMatchObject({ result: "DEPARTED" });
   });
 
-  it("maps a door-reader grant to GRANTED with an ok tone", () => {
+  it("maps a door-reader grant to GRANTED, resolving the site id, with an ok tone", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -240,10 +272,16 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(row).toMatchObject({ who: "B1", where: "dep", result: "GRANTED", tone: "ok" });
+    // `badge` is telemetry, so it stays raw; `site` is a world id, so it resolves.
+    expect(row).toMatchObject({
+      who: "B1",
+      where: "Eastyard Depot",
+      result: "GRANTED",
+      tone: "ok",
+    });
   });
 
-  it("maps door-contact open/close with no `who` (no actor) and a neutral tone", () => {
+  it("maps door-contact open/close with no `who` (no actor), resolving the site id", () => {
     const open = toLogRow(
       worldEvent({
         reading: {
@@ -252,7 +290,12 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(open).toMatchObject({ who: "", where: "dep", result: "OPENED", tone: "neutral" });
+    expect(open).toMatchObject({
+      who: "",
+      where: "Eastyard Depot",
+      result: "OPENED",
+      tone: "neutral",
+    });
 
     const close = toLogRow(
       worldEvent({
@@ -265,7 +308,7 @@ describe("toLogRow", () => {
     expect(close).toMatchObject({ result: "CLOSED" });
   });
 
-  it("maps platform-camera to a persons-in-view result with a neutral tone", () => {
+  it("maps platform-camera to a persons-in-view result, resolving the station id", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -274,10 +317,10 @@ describe("toLogRow", () => {
         },
       }),
     );
-    expect(row).toMatchObject({ who: "", where: "cen", result: "3 in view", tone: "neutral" });
+    expect(row).toMatchObject({ who: "", where: "Central", result: "3 in view", tone: "neutral" });
   });
 
-  it("maps occ-console to an operator/host/command-target row with a neutral tone", () => {
+  it("maps occ-console to an operator/host/command-target row, keeping operator and host raw", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -286,6 +329,7 @@ describe("toLogRow", () => {
         },
       }),
     );
+    // `operator` and `host` are telemetry, per the hard rule: they stay raw.
     expect(row).toMatchObject({
       who: "red.disp",
       where: "OCC-1",
@@ -294,7 +338,7 @@ describe("toLogRow", () => {
     });
   });
 
-  it("maps network-relay to a byte-count result with a neutral tone", () => {
+  it("maps network-relay to a byte-count result, keeping host and dest raw", () => {
     const row = toLogRow(
       worldEvent({
         reading: {
@@ -303,6 +347,7 @@ describe("toLogRow", () => {
         },
       }),
     );
+    // `host` and `dest` are telemetry, per the hard rule: they stay raw.
     expect(row).toMatchObject({
       who: "YARD-NET-1",
       where: "core",

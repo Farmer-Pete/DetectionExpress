@@ -25,7 +25,7 @@ export interface LineTimetable {
   readonly line: string;
   /** True when the line loops; its stops already return to the start. */
   readonly loop: boolean;
-  /** The ordered stops along the line, from `world.json`'s station order. */
+  /** The ordered stops along the line, from the world data's station order. */
   readonly stops: readonly string[];
   /** The platform dwell in whole ticks, uniform across stops. */
   readonly dwellTicks: number;
@@ -39,7 +39,7 @@ export interface LineTimetable {
 export interface Timetable {
   /** The schedule for one line. Throws on an unknown line. */
   line(lineId: string): LineTimetable;
-  /** Every line's schedule, in `world.json` order. */
+  /** Every line's schedule, in world-data order. */
   lines(): readonly LineTimetable[];
 }
 
@@ -121,6 +121,21 @@ export function trainIdForLine(world: World, lineId: string): string {
     throw new Error(`trainIdForLine: unknown line "${lineId}".`);
   }
   return `T${index + 1}`;
+}
+
+/**
+ * The inverse of `trainIdForLine`: the line a train id belongs to. Finds the line whose
+ * own `trainIdForLine` derivation equals `trainId`, so the two never drift. Every train
+ * id ever placed on screen (hit targets, selection, rider presence) is itself a
+ * `trainIdForLine` derivation, so a valid id always inverts; throws on an unknown one,
+ * mirroring `trainIdForLine`'s own contract.
+ */
+export function lineIdForTrain(world: World, trainId: string): string {
+  const line = world.lines.find((candidate) => trainIdForLine(world, candidate.id) === trainId);
+  if (line === undefined) {
+    throw new Error(`lineIdForTrain: unknown train "${trainId}".`);
+  }
+  return line.id;
 }
 
 /**

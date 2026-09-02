@@ -797,18 +797,28 @@ body {
 }
 
 .place-device-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
   margin: 0 0 1rem;
   padding: 0;
   list-style: none;
 }
 
+/* Very narrow screens drop the device grid to a single column; the dialog is
+   capped at 560px, so a wider screen keeps two columns and never more. */
+@media (max-width: 480px) {
+  .place-device-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 .place-device-card {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  align-content: start;
+  gap: 0.15rem 0.5rem;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -821,10 +831,17 @@ body {
   color: var(--ink);
 }
 
-.place-device-detail {
+.place-device-description {
   /* Text brightened from --dim (3.09:1 on --panel2) to clear WCAG AA (4.75:1). */
   color: color-mix(in srgb, var(--dim) 55%, var(--ink));
   font-size: 0.72rem;
+  flex-basis: 100%;
+}
+
+.place-device-vendors {
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.68rem;
+  flex-basis: 100%;
 }
 
 .place-device-state {
@@ -834,6 +851,55 @@ body {
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* The place/train dialog's narrative flavor block (GH127-PLAN.md M3): the world
+   data's own `description`, never generated, rendered under the header for a
+   station, a site, the control center, or a train (sourced from its line). */
+.place-description {
+  margin: 0 0 1rem;
+  padding: 0.1rem 0 0.1rem 0.7rem;
+  border-left: 2px solid var(--a1);
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* The zone section (GH127-PLAN.md M3, decision B): a site's or the control
+   center's dominant zone, read through the carried `zoneId`. The numeric trust
+   level still lives on the header's Zone badge; this adds the name and its
+   who-belongs / security-parallel flavor. Stations carry no zone, so they render
+   no zone section at all. */
+.place-zone-card {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  margin: 0 0 1rem;
+}
+
+.place-zone-name {
+  margin-bottom: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.place-zone-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.place-zone-kv dt {
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+}
+
+.place-zone-kv dd {
+  margin: 0;
+  color: var(--ink);
 }
 
 /* The ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4): actors AGGREGATED by
@@ -911,6 +977,15 @@ body {
 .place-log-stream {
   max-height: 12rem;
   margin: 0 0 0.2rem;
+}
+
+/* The event dialog's sensor description subtitle (GH127-PLAN.md M3): the
+   `sensors.data` description, read through `sensor-catalogue`, never generated. It
+   never touches the Raw/Normalized `EventJsonSection` blocks below it. */
+.event-description {
+  margin: 0 0 1rem;
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.8rem;
 }
 
 /* The event dialog's "otherwise" branch (GH124-PLAN.md Checkpoint 5): the raw

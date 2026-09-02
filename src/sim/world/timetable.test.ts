@@ -9,7 +9,7 @@ import { createSchedule, minutesToTicks } from "../actors/actor";
 import { createTrain } from "../actors/train";
 import type { WorldEnv } from "../world-reading";
 import { distanceTable } from "./distance";
-import { buildTimetable, nextService, trainIdForLine } from "./timetable";
+import { buildTimetable, lineIdForTrain, nextService, trainIdForLine } from "./timetable";
 import { world } from "./world";
 
 const timetable = buildTimetable(world);
@@ -167,6 +167,18 @@ describe("trainIdForLine", () => {
 
   it("throws on an unknown line", () => {
     expect(() => trainIdForLine(world, "purple")).toThrow(/unknown line/);
+  });
+});
+
+describe("lineIdForTrain", () => {
+  it("inverts trainIdForLine for every real train id", () => {
+    for (const line of world.lines) {
+      expect(lineIdForTrain(world, trainIdForLine(world, line.id))).toBe(line.id);
+    }
+  });
+
+  it("throws on a train id no line derives", () => {
+    expect(() => lineIdForTrain(world, "T9")).toThrow(/unknown train/);
   });
 });
 

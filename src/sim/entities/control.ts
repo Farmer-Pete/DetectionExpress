@@ -5,7 +5,7 @@
  * roster of authorized operators, their OCC consoles, the routine control-room commands
  * they issue, the site network hosts, and the internal destinations those hosts talk to.
  *
- * Every value is a genuine normalized value in the `sensors.json` domain (the console
+ * Every value is a genuine normalized value in the sensor-data domain (the console
  * example is `operator: "green.disp", host: "OCC-3", command: "EXPORT"`; the relay
  * example is `host: "BOARD-4", dest`, `bytes`), NOT invented flavor text (view notes
  * hazard 4). The commands are ordinary control-floor operations — a status check on a
@@ -59,7 +59,7 @@ export interface ControlReference {
 
 /**
  * The authorized consoles: one per line dispatcher, each a `line.disp` login on its own
- * control-floor host. The operator names follow the `sensors.json` `"green.disp"` style.
+ * control-floor host. The operator names follow the sensor data's `"green.disp"` style.
  */
 const CONSOLES: readonly Console[] = [
   { operator: "red.disp", host: "OCC-1" },
@@ -81,7 +81,7 @@ const COMMANDS: readonly ConsoleCommand[] = [
   { command: "EXPORT", target: "TIMETABLE" },
 ];
 
-/** The site network hosts, one per staff site (matches `world.json`'s dep/sig/sub). */
+/** The site network hosts, one per staff site (matches the world data's dep/sig/sub). */
 const HOSTS: readonly SiteHost[] = [
   { site: "dep", host: "YARD-NET-1" },
   { site: "sig", host: "SIG-NET-1" },
@@ -91,7 +91,7 @@ const HOSTS: readonly SiteHost[] = [
 /**
  * The benign internal destinations. A relay on the backbone links a site to the control
  * center, so benign traffic goes to internal OCC-core and control services, never an
- * external address (the `sensors.json` `"ext-9.211"` example is a wire illustration; a
+ * external address (the sensor data's `"ext-9.211"` example is a wire illustration; a
  * benign backbone transfer stays inside the control network).
  */
 const DESTINATIONS: readonly string[] = [
@@ -101,7 +101,7 @@ const DESTINATIONS: readonly string[] = [
   "signal-svc.20",
 ];
 
-/** Benign relay transfers: small whole-byte payloads (the `sensors.json` example is 512). */
+/** Benign relay transfers: small whole-byte payloads (the sensor data example is 512). */
 const BYTE_RANGE: ByteRange = { min: 128, max: 1024 };
 
 /** The single curated control-room reference the world controller puts in `env.control`. */
