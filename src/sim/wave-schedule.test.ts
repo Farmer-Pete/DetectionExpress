@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLOCK_HZ, PUBLISH_HZ } from "../game/tuning";
+import { CLOCK_HZ, PUBLISH_HZ, WAVE_RATES } from "../game/tuning";
 import type { Wave } from "./scenario";
 import { assertWaveFields, assertWaveScheduleOrdered } from "./wave-schedule";
 
@@ -235,5 +235,33 @@ describe("assertWaveScheduleOrdered: mode-gated successor gap (GH124-PLAN.md Che
 
     const badField: Wave[] = [{ startTick: -1, durationTicks: 5, eventsPerTick: 1 }];
     expect(() => assertWaveScheduleOrdered(badField, "steady")).toThrow();
+  });
+});
+
+describe('assertWaveScheduleOrdered: "steady" mode rejects a fractional eventsPerTick (CodeRabbit #2)', () => {
+  it("rejects contiguous steady waves at a fractional rate, since the per-wave accumulator reset would break the gapless stream", () => {
+    // Two contiguous 3-tick waves at 0.5/tick would admit ticks [1, 4] instead
+    // of the seamless [1, 3, 5]: exactly the seam this guard exists to forbid.
+    const fractional: Wave[] = [
+      { startTick: 0, durationTicks: 3, eventsPerTick: 0.5 },
+      { startTick: 3, durationTicks: 3, eventsPerTick: 0.5 },
+    ];
+    expect(() => assertWaveScheduleOrdered(fractional, "steady")).toThrow();
+  });
+
+  it('accepts a fractional eventsPerTick in "waves" mode, where per-wave rates are not required to be contiguous or equal', () => {
+    const fractional: Wave[] = [{ startTick: 0, durationTicks: 5, eventsPerTick: 0.7 }];
+    expect(() => assertWaveScheduleOrdered(fractional, "waves")).not.toThrow();
+  });
+
+  it("accepts the real steady schedule's integer rate (WAVE_RATES[0])", () => {
+    const rate = WAVE_RATES[0];
+    if (rate === undefined) throw new Error("WAVE_RATES must carry at least one rate");
+    expect(Number.isInteger(rate)).toBe(true); // the shipped steady schedule relies on this
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: rate },
+      { startTick: 5, durationTicks: 5, eventsPerTick: rate },
+    ];
+    expect(() => assertWaveScheduleOrdered(waves, "steady")).not.toThrow();
   });
 });
