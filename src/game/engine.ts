@@ -16,6 +16,7 @@
  * rate, and the checkpoints are all injected by the run controller, so `sim/` stays
  * pure and the engine never builds them or reads a sensor field itself.
  */
+import { randomLcg } from "d3-random";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import {
   type Actor,
@@ -34,12 +35,21 @@ import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/grap
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
 import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
+import { PIN_BRUTE_FORCE_REASON } from "../sim/scenarios/pin-brute-force/attacks";
+import { planChaosWave } from "../sim/scenarios/pin-brute-force/chaos-wave";
 import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
-import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
+import type {
+  ChaosPhase,
+  FailureReason,
+  RunStatus,
+  SimSnapshot,
+  WaveOutcome,
+} from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
-import { type WaveReading, waveStateAt } from "../sim/wave-state";
+import { waveSeed } from "../sim/wave-seed";
+import { chaosWaveReading, type WaveReading, waveStateAt } from "../sim/wave-state";
 import {
   cameraNodeId,
   consoleNodeId,
@@ -61,14 +71,19 @@ import { createDoorReducer } from "./door-reducer";
 import {
   CAMERA_WINDOW_TICKS,
   CHANNEL_CAP,
+  CHAOS_COOLDOWN_TICKS,
   CLOCK_HZ,
   CORRECTNESS_FLOOR,
   DOOR_DWELL_TICKS,
   FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
+  MAX_CHAOS_LEVEL,
   PUBLISH_HZ,
+  QUEUE_CAP,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
+  WAVE_DRAIN_MARGIN_TICKS,
+  WAVE_TRIGGER_MARGIN_TICKS,
   WAVE_WARN_TICKS,
   WORLD_LOG_RING_SIZE,
 } from "./tuning";
@@ -81,6 +96,53 @@ import {
  * today; the admission filter reads it in a later step), and the `initialPresence`
  * to seed its `ActorView` with before its first `act()`. Mirrors `WorldFixture`.
  */
+/**
+ * A triggered chaos wave's id (GH126-PLAN.md M2b, finding 5). Minted from a
+ * monotonic counter on the engine handle, never reused, distinct in role from the
+ * dense scored event id and from the scorer's `attackId`.
+ */
+export type WaveId = number;
+
+/** Whether a resolved wave was held or breached. */
+type WaveOutcomeKind = "held" | "breach";
+
+/**
+ * A resolved chaos wave, reported once at its drain watermark. Structurally the
+ * snapshot's `WaveOutcome` (GH126-PLAN.md M3a): the engine now folds it into every
+ * published snapshot AND still hands it to the TEST-ONLY `onWaveOutcome` observer and
+ * logs it to the console. The alias keeps the existing observer name while the view
+ * type lives in `sim/snapshot.ts`.
+ */
+export type WaveOutcomeObservation = WaveOutcome;
+
+/**
+ * The live state of the one active chaos wave (GH126-PLAN.md M2b, Q7: one wave at a
+ * time). Non-null between `triggerWave` and the drain watermark; its non-null-ness IS
+ * the cooldown that makes a second trigger a no-op.
+ */
+interface ActiveWaveAttack {
+  /** This attack's scorer key, minted from the global monotonic counter. */
+  attackId: number;
+  /** `wave-<WaveId>-attacker-<i>`: the admitted attacker whose fails are this attack's evidence. */
+  actorId: string;
+  /** How many fails this attacker emits; every one is bound as evidence (`evidenceCount`). */
+  expectedEvidence: number;
+  /** The bound global scored ids for this attacker, in offer order; the last is its highest. */
+  collectedEvidence: number[];
+}
+
+interface ActiveWave {
+  waveId: WaveId;
+  /** The wave's 2 to 8 attacks, each on its own victim and actor (`planChaosWave`). */
+  attacks: ActiveWaveAttack[];
+  /** The shared detection-window close, in game seconds (all attacks share one window). */
+  windowEnd: number;
+  /** `windowEnd` plus the drain margin: the earliest game-seconds the wave may resolve. */
+  drainDeadline: number;
+  /** The running peak of the in-flight backlog over the wave window. */
+  queuePeak: number;
+}
+
 export interface ScenarioCastMember {
   actor: Actor<WorldReading, WorldEnv>;
   kind: ActorView["kind"];
@@ -225,6 +287,13 @@ export interface StartOptions {
    * Inert in production — the run controller never passes it.
    */
   onCheckpoint?: (observation: CheckpointObservation) => void;
+  /**
+   * TEST-ONLY: observe a chaos wave's resolution at its drain watermark
+   * (GH126-PLAN.md M2b). Inert in production — the run controller never passes it;
+   * the engine's own minimal exposure is a console log. M3 adds the store fields and
+   * the banner.
+   */
+  onWaveOutcome?: (observation: WaveOutcomeObservation) => void;
 }
 
 /** A running engine. `stop` tears it down; `whenStopped` settles for tests. */
@@ -236,6 +305,22 @@ export interface EngineHandle {
   resume: () => void;
   /** Change the run's pace: multiply the live clock's rate. A no-op after stop. */
   setSpeed: (multiplier: number) => void;
+  /**
+   * Splice one bounded chaos wave into the running clock (GH126-PLAN.md M2b). It
+   * captures the live tick, rebases and admits the attacker, and registers its
+   * attack, all without ever stopping the engine. Returns the minted `WaveId`, or
+   * `null` when it is a no-op: outside endless mode, with no scored ingress, after
+   * stop, or while a wave is already active (the cooldown, Q7).
+   */
+  triggerWave: () => WaveId | null;
+  /**
+   * Select the chaos ladder's repeating LEVEL (GH126-PLAN.md M3a, Q7). The engine
+   * retains the level. `0` stops the loop after the current cycle finishes (the
+   * in-flight wave and its cooldown are never interrupted). A level > 0 selected while
+   * the engine is idle starts a cycle now; selected mid-cycle it is retained and takes
+   * effect at the NEXT trigger. A safe no-op after stop and outside endless mode.
+   */
+  setChaosLevel: (level: number) => void;
   whenStopped: Promise<void>;
 }
 
@@ -301,7 +386,25 @@ interface MapView {
   getWorldEvents: () => readonly WorldLogEvent[];
 }
 
-/** The wave reading `"steady"` mode always publishes: calm, forever, no matter the ticks. */
+/**
+ * The chaos-loop view the sampler folds into each snapshot (GH126-PLAN.md M3a). The
+ * chaos loop owns the authoritative state (selected level, active wave, cooldown, and
+ * the last resolved outcome); these two getters bundle it into the view-only snapshot
+ * types so the sampler reads one consistent view per publish. With no chaos loop
+ * running (no cast, or a non-endless run) the defaults read idle at level 0 with no
+ * outcome, so scoring and the wave/steady parity are untouched.
+ */
+interface ChaosView {
+  getPhase: () => ChaosPhase;
+  getOutcome: () => WaveOutcome | null;
+}
+
+/**
+ * The wave reading `"steady"` and `"endless"` mode always publish: calm, forever,
+ * no matter the ticks. `"endless"` (GH126-PLAN.md M1) carries no waves at all, so
+ * `waveStateAt` would have nothing to derive a phase from anyway; this constant
+ * makes that explicit rather than relying on an empty-array coincidence.
+ */
 const STEADY_WAVE_READING: WaveReading = {
   phase: "calm",
   index: null,
@@ -318,6 +421,7 @@ function makeSampler(
   run: RunState,
   waves: readonly Wave[],
   map: MapView,
+  chaos: ChaosView,
   scheduleMode: ScheduleMode,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
@@ -363,6 +467,10 @@ function makeSampler(
     }
 
     const ring = inspector.snapshot();
+    // GH126-PLAN.md M3a/M3b: read the chaos phase once, then reuse it for both the
+    // view-only `chaosPhase` field and the endless-mode `wave` bridge below, so both
+    // report the SAME phase in a publish.
+    const chaosPhase = chaos.getPhase();
     setSnapshot({
       queued,
       throughput,
@@ -376,8 +484,16 @@ function makeSampler(
       decisions,
       events: ring.events,
       processed: ring.processed,
+      // `steady` stays permanently calm. `endless` carries no static wave schedule, so
+      // the reading is bridged from the chaos loop (GH126-PLAN.md M3b): calm/incoming
+      // through each lead-in, then active during the wave, driving the existing WAVE
+      // INCOMING readout, `.waveflash`, `.shake`, and announcements. `waves` is unchanged.
       wave:
-        scheduleMode === "steady" ? STEADY_WAVE_READING : waveStateAt(now, waves, WAVE_WARN_TICKS),
+        scheduleMode === "steady"
+          ? STEADY_WAVE_READING
+          : scheduleMode === "endless"
+            ? chaosWaveReading(chaosPhase, WAVE_WARN_TICKS)
+            : waveStateAt(now, waves, WAVE_WARN_TICKS),
       scheduleMode,
       // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
       // living metro — scenario cast plus ambient life — into one authoritative view the
@@ -389,6 +505,10 @@ function makeSampler(
       crowds: map.getCrowds(),
       nowTick: map.getNowTick(),
       worldEvents: map.getWorldEvents(),
+      // GH126-PLAN.md M3a: the view-only chaos-loop state, folded in each publish.
+      // Never enters scoring.
+      chaosPhase,
+      waveOutcome: chaos.getOutcome(),
     });
   };
 }
@@ -415,6 +535,68 @@ export function start(options: StartOptions): EngineHandle {
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
   let publish: ((force: boolean) => void) | null = null;
+  // The chaos-wave trigger (GH126-PLAN.md M2b). Assigned inside the `if (cast)`
+  // branch, where the schedule, scorer, and scored ingress it needs all live. With
+  // no cast (a legacy scored-only run) it stays this no-op, so the handle's
+  // `triggerWave` is always safe to call.
+  let triggerWaveImpl: () => WaveId | null = () => null;
+  // GH126-PLAN.md M3a: the repeating chaos-level loop's state, in the outer scope so
+  // the sampler's `chaosView` (below) reads it and the handle's `setChaosLevel` writes
+  // it, while the loop, `triggerWave`, and `resolveWave` (inside the `if (cast)` branch)
+  // drive it. Defaults keep a non-endless or cast-less run permanently idle: level 0,
+  // no wave, no cooldown, no outcome — so scoring and the wave/steady parity are
+  // untouched. `selectedChaosLevel` is retained across cycles; `chaosActiveLevel` is the
+  // per-cycle level captured at each trigger (Q7: a mid-cycle level change does not move
+  // the in-flight wave). `activeWave` non-null IS the wave phase; a non-null
+  // `chaosCooldownUntil` (a game tick) IS the cooldown phase. `lastWaveOutcome` rides
+  // from a wave's resolve until the next wave triggers.
+  let selectedChaosLevel = 0;
+  let chaosActiveLevel = 0;
+  let activeWave: ActiveWave | null = null;
+  let chaosCooldownUntil: number | null = null;
+  let lastWaveOutcome: WaveOutcome | null = null;
+  // The sampler's window onto the chaos state above. Read every publish; derives the
+  // phase from `activeWave`/`chaosCooldownUntil` and reports the retained outcome.
+  const chaosView: ChaosView = {
+    getPhase: (): ChaosPhase => {
+      if (activeWave !== null) {
+        return { kind: "wave", selectedLevel: selectedChaosLevel, activeLevel: chaosActiveLevel };
+      }
+      if (chaosCooldownUntil !== null) {
+        const cooldownRemaining = Math.max(0, chaosCooldownUntil - (clock?.now() ?? 0));
+        return { kind: "cooldown", selectedLevel: selectedChaosLevel, cooldownRemaining };
+      }
+      return { kind: "idle", selectedLevel: selectedChaosLevel };
+    },
+    getOutcome: (): WaveOutcome | null => lastWaveOutcome,
+  };
+  // The handle's `setChaosLevel` (GH126-PLAN.md M3a/M3b). Retains the level; when it is
+  // > 0 and the engine is idle (no wave, no cooldown), it opens a COOLDOWN LEAD-IN now
+  // rather than triggering a wave immediately (Q7, cooldown-first). The lead-in is the
+  // run-up the reused WAVE INCOMING warning counts down through; the loop
+  // (`advanceChaosLoop`) triggers the wave when the lead-in elapses. Mid-cycle it only
+  // retains — the loop applies the change at the next trigger (Q7).
+  //
+  // Code-review fix 6: inert outside endless mode (`waves`/`steady` have no chaos
+  // loop to drive; a call here must never mutate chaos state or start a no-op
+  // cooldown for them), and validated at this seam (ARCHITECTURE.md rule 9) against
+  // the supported `0..MAX_CHAOS_LEVEL` integer range. An out-of-range or non-integer
+  // level is IGNORED, not clamped: silently reinterpreting a bad caller value as the
+  // nearest valid level could start a real wave loop nobody asked for, while ignoring
+  // it is a safe no-op.
+  const setChaosLevel = (level: number): void => {
+    if (scheduleMode !== "endless") {
+      return;
+    }
+    if (!Number.isInteger(level) || level < 0 || level > MAX_CHAOS_LEVEL) {
+      return;
+    }
+    selectedChaosLevel = level;
+    if (level > 0 && activeWave === null && chaosCooldownUntil === null) {
+      chaosActiveLevel = level;
+      chaosCooldownUntil = (clock?.now() ?? 0) + CHAOS_COOLDOWN_TICKS;
+    }
+  };
   let stopped = false;
   let admitted = 0; // real Events pushed out of Ingest
   let completed = 0; // Events drained at the Sink
@@ -602,6 +784,186 @@ export function start(options: StartOptions): EngineHandle {
         }
       }
 
+      // GH126-PLAN.md M2b/M3a: the monotonic id counters that mint each wave's WaveId
+      // and scorer attackId. The `activeWave` slot itself lives in the outer scope (so
+      // the sampler's chaosView reads it); non-null it IS the wave phase (Q7). The
+      // counters never reuse a value (finding 5); the attackId is a scorer key, a
+      // separate namespace from the dense scored event id.
+      let nextWaveId = 0;
+      let nextAttackId = 0;
+
+      // Read whether a wave's attack resolved caught, off the scorer's authoritative
+      // `outcomeOf` (GH126-PLAN.md M2b; code-review fix 2). `decisions()` is capped
+      // (`ScorerConfig.decisionsCap`), so scanning it could let a noisy rule evict an
+      // early catch's decision before the wave resolves, wrongly reporting it
+      // missed/breach; `outcomeOf` reads the scorer's internal `state` map instead,
+      // which is never capped. A caught or missed outcome always exists by the time
+      // this runs: the attack was caught during the wave, or `resolveWave`'s
+      // `advanceTo` settled it missed just before.
+      const waveCaught = (attackId: number): boolean =>
+        options.scorer.outcomeOf(attackId) === "caught";
+
+      // Resolve the wave at its drain watermark: settle a still-pending attack as
+      // missed (the existing `closeExpired` path via `advanceTo`; a caught attack is
+      // already resolved, so this is a no-op for it), read caught-vs-missed and the
+      // queue peak, then start the cooldown gap (GH126-PLAN.md M3a). NEVER
+      // `finishOutcome`, `stop`, or close the ingress: the engine runs on into calm.
+      // The retained `lastWaveOutcome` rides in every snapshot until the NEXT wave
+      // triggers (`triggerWave` clears it) — a simple, bounded window the M3b banner
+      // reads across the cooldown gap.
+      const resolveWave = (wave: ActiveWave, resolvedTick: number): void => {
+        options.scorer.advanceTo(wave.drainDeadline);
+        const caughtCount = wave.attacks.filter((attack) => waveCaught(attack.attackId)).length;
+        const attackCount = wave.attacks.length;
+        const allCaught = caughtCount === attackCount;
+        const outcomeKind: WaveOutcomeKind =
+          allCaught && wave.queuePeak <= QUEUE_CAP ? "held" : "breach";
+        activeWave = null; // end the wave phase; every attacker is already dormant
+        // Open the calm cooldown gap: the loop holds here until this tick passes, then
+        // triggers the next wave at the currently selected level (or stops at level 0).
+        chaosCooldownUntil = resolvedTick + CHAOS_COOLDOWN_TICKS;
+        const outcome: WaveOutcome = {
+          waveId: wave.waveId,
+          outcome: outcomeKind,
+          attackCount,
+          caughtCount,
+          allCaught,
+          queuePeak: wave.queuePeak,
+        };
+        lastWaveOutcome = outcome; // published from now until the next wave triggers
+        console.info(
+          `Detection Express: chaos wave ${wave.waveId} resolved ${outcomeKind} ` +
+            `(${caughtCount}/${attackCount} attacks caught, queue peak ${wave.queuePeak}).`,
+        );
+        options.onWaveOutcome?.(outcome);
+      };
+
+      // Splice one chaos wave into the running clock (GH126-PLAN.md M2b "Target
+      // architecture"). In strict order: capture the live tick, mint the ids, plan
+      // the rebased wave, register the attack BEFORE any evidence, then admit the
+      // attacker and start the cooldown.
+      const triggerWave = (): WaveId | null => {
+        // Endless-mode only, one wave at a time (Q7). No-op after stop, without a
+        // scored ingress to offer into, while a wave is still active, or during a
+        // pending cooldown (code-review fix 5): the cooldown-first machine reserves
+        // that gap as the lead-in run-up, and a manual call mid-cooldown must not
+        // bypass it and splice a second wave ahead of the loop's own trigger.
+        if (
+          stopped ||
+          scheduleMode !== "endless" ||
+          !scoredIngest ||
+          activeWave ||
+          chaosCooldownUntil !== null
+        ) {
+          return null;
+        }
+        // A new wave begins: retire the prior wave's banner outcome (GH126-PLAN.md
+        // M3a). It has ridden every snapshot through the cooldown gap; from here the
+        // snapshot carries the live wave phase instead.
+        lastWaveOutcome = null;
+        // The trigger tick, captured atomically from the live clock, not a UI
+        // snapshot (finding 4). The admit frontier is `clock.now() + 1` after this
+        // tick's `foldTick`, so the attacker's start sits a margin past it.
+        const triggerTick = clock?.now() ?? 0;
+        const waveId: WaveId = ++nextWaveId;
+        const startTick = triggerTick + WAVE_TRIGGER_MARGIN_TICKS;
+        const plan = planChaosWave(
+          startTick,
+          (index) => `wave-${waveId}-attacker-${index}`,
+          randomLcg(waveSeed(cast.runSeed, triggerTick)),
+        );
+
+        // Admit each planned attacker in order. Per attacker: mint a unique global
+        // attackId, register the pending attack BEFORE any evidence is offered or
+        // scored (findings 1, 6, N2), then admit and seed its view. The scorer's
+        // default matches by reason, so `entity` is informational and `windowEnd`
+        // drives the miss; every attack shares the one window.
+        const attacks: ActiveWaveAttack[] = [];
+        for (const planned of plan.attackers) {
+          const attackId = ++nextAttackId;
+          options.scorer.addAttack({
+            attackId,
+            entity: planned.victim,
+            reason: PIN_BRUTE_FORCE_REASON,
+            threshold: plan.threshold,
+            windowEnd: plan.window.endTs,
+          });
+
+          const admission: Admission<WorldReading, WorldEnv> = {
+            actor: planned.attacker.build(),
+            kind: planned.attacker.kind,
+            initialPresence: planned.attacker.initialPresence,
+          };
+          const firstTick = schedule.admit(admission);
+          provenanceById.set(planned.actorId, "scored-scenario");
+          seedView(
+            planned.actorId,
+            planned.attacker.kind,
+            planned.attacker.initialPresence(firstTick),
+            "scored-scenario",
+          );
+
+          attacks.push({
+            attackId,
+            actorId: planned.actorId,
+            expectedEvidence: planned.evidenceCount,
+            collectedEvidence: [],
+          });
+        }
+
+        activeWave = {
+          waveId,
+          attacks,
+          windowEnd: plan.window.endTs,
+          drainDeadline: plan.window.endTs + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK,
+          queuePeak: 0,
+        };
+        return waveId;
+      };
+      triggerWaveImpl = triggerWave;
+
+      // The repeating chaos-level loop (GH126-PLAN.md M3a/M3b, Q7), driven once per tick
+      // from `foldTick`. It is COOLDOWN-FIRST: a lead-in cooldown precedes every wave,
+      // including the first, so the reused WAVE INCOMING warning always has a run-up.
+      // Precedence, in order:
+      //   1. a wave is in flight   -> hold (never interrupt it).
+      //   2. a cooldown is pending -> hold until it elapses, then read the CURRENT
+      //      selected level: > 0 triggers the wave now (the lead-in has run), 0 stops
+      //      (stay calm).
+      //   3. otherwise idle        -> a selected level > 0 opens a lead-in cooldown
+      //      (NOT an immediate trigger); the wave fires when that cooldown elapses via
+      //      branch 2. `setChaosLevel` normally opens this lead-in already, so this is a
+      //      safety net for any idle-with-level state the loop reaches on its own.
+      // `triggerWave` no-ops if a wave is somehow active, but this gate keeps the loop
+      // from ever double-triggering. Today only level 1 is selectable (the UI locks
+      // 2-5, M3b), but the loop is level-general so higher levels slot in later.
+      const advanceChaosLoop = (tick: number): void => {
+        if (activeWave !== null) {
+          return;
+        }
+        if (chaosCooldownUntil !== null) {
+          if (tick >= chaosCooldownUntil) {
+            chaosCooldownUntil = null;
+            if (selectedChaosLevel > 0) {
+              chaosActiveLevel = selectedChaosLevel;
+              triggerWave();
+            } else {
+              chaosActiveLevel = 0; // the loop has stopped; report idle at level 0
+              // Code-review fix 4: with no successor wave to retire it, the banner
+              // would otherwise ride every snapshot forever through calm. `triggerWave`
+              // only clears it when the NEXT wave fires, so the level-0 stop clears it
+              // here instead, the one other place the outcome's "until" ends.
+              lastWaveOutcome = null;
+            }
+          }
+          return;
+        }
+        if (selectedChaosLevel > 0) {
+          chaosActiveLevel = selectedChaosLevel;
+          chaosCooldownUntil = tick + CHAOS_COOLDOWN_TICKS;
+        }
+      };
+
       // The OCC node id an occ-console command flash lands on (the console reading is
       // OCC-only and carries no location of its own).
       const occId = cast.env.world.controlCenter.id;
@@ -760,6 +1122,19 @@ export function start(options: StartOptions): EngineHandle {
           // actually offered under.
           if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
             const scoredEventId = nextScoredEventId++;
+            // GH126-PLAN.md M2b, evidence bind (finding 1): a reading from one of the
+            // active wave's attackers is that attack's evidence, so bind its global
+            // dense id to the attack the moment it is offered — before Detect scores
+            // the finding that cites it. The wave now holds several attackers, so match
+            // by actorId. The attack was registered at trigger, so `owner` is populated
+            // before the finding is judged, and it scores caught.
+            if (activeWave) {
+              const attack = activeWave.attacks.find((a) => a.actorId === timed.actorId);
+              if (attack) {
+                options.scorer.bindEvidence(attack.attackId, scoredEventId);
+                attack.collectedEvidence.push(scoredEventId);
+              }
+            }
             scoredIngest.ingress.offer(scoredIngest.toEvent(timed, scoredEventId));
             captureWorldEvent(reading, reading.reading.ts, timed.actorId, true, scoredEventId);
           } else {
@@ -937,19 +1312,34 @@ export function start(options: StartOptions): EngineHandle {
         }
       };
 
-      // Admit each ambient spawner's due births at the frontier and seed each view,
-      // tagging every admission `"ambient"`. Each spawner is capped by its own live count.
-      // Ticked at the post-advance frontier so an admission lands at or after it.
+      // Admit each ambient spawner's due births at the frontier and seed each view.
+      // Each spawner is capped by its own live count. Ticked at the post-advance
+      // frontier so an admission lands at or after it.
+      //
+      // GH126-PLAN.md M1, seam 5: under `"endless"` (the baseline), an account-rider
+      // admission is tagged `"scored-scenario"`, not `"ambient"`, so its kiosk
+      // readings cross the scoring boundary above and enter the baseline's scored
+      // pipeline — there is no scenario cast in baseline mode to score off instead.
+      // A plain rider or staff admission always stays `"ambient"`: visual only,
+      // never scored. Outside `"endless"` (a blueprint-driven `"waves"`/`"steady"`
+      // run), every ambient admission stays `"ambient"` exactly as before: that
+      // scenario's own cast members already carry `"scored-scenario"` provenance,
+      // and promoting the ambient account rider too would double-score against the
+      // precomposed run the parity guards check against (GH117-PLAN.md guard 1).
       const spawnTransients = (frontier: number): void => {
         const admit = (admissions: readonly Admission<WorldReading, WorldEnv>[]): void => {
           for (const admission of admissions) {
             const firstTick = schedule.admit(admission);
-            provenanceById.set(admission.actor.id, "ambient");
+            const provenance: ActorProvenance =
+              admission.kind === "account-rider" && scheduleMode === "endless"
+                ? "scored-scenario"
+                : "ambient";
+            provenanceById.set(admission.actor.id, provenance);
             seedView(
               admission.actor.id,
               admission.kind,
               admission.initialPresence(firstTick),
-              "ambient",
+              provenance,
             );
           }
         };
@@ -992,6 +1382,60 @@ export function start(options: StartOptions): EngineHandle {
         if (scoredIngest && tick >= scoredIngest.lastScoredTick) {
           scoredIngest.ingress.close();
         }
+
+        // GH126-PLAN.md M2b: while a chaos wave is active, peak its in-flight
+        // backlog, then resolve it at the drain watermark. Guarded on `scoredIngest`
+        // because an active wave only ever exists alongside one (triggerWave's guard).
+        if (activeWave && scoredIngest) {
+          const wave = activeWave;
+          // The wave-scoped queue metric (finding 8, seam 12; code-review fix 1): the
+          // EXACT offered-minus-processed in-flight watermark, not a sum of buffer and
+          // channel sizes. `nextScoredEventId` is the dense scored-event id, assigned
+          // at OFFER time (before Ingest even pulls it) — the true "offered" count.
+          // `inspector.processedCount()` advances only once Detect has scored an event
+          // (`tasks.ts` `runDetect`, right after `scorer.record`). Their difference is
+          // exactly the count of events anywhere in flight: buffered in
+          // `ScoredIngress`, sitting in or being pulled out of any channel, or being
+          // normalized/detected — and it correctly EXCLUDES an event Detect already
+          // scored even though it may still be sitting in the Detect->Sink channel,
+          // unlike the old channel-size sum, which could both miss an event a node was
+          // actively holding between an input pull and an output push AND wrongly
+          // count one Detect had already finished. Reset to zero at wave start (the
+          // `queuePeak: 0` in `triggerWave`), so it measures this wave's window alone.
+          const backlog = nextScoredEventId - inspector.processedCount();
+          if (backlog > wave.queuePeak) {
+            wave.queuePeak = backlog;
+          }
+          // Resolve once EVERY attacker's fails have all been offered and bound, Detect
+          // has processed the wave's last evidence id across all attacks (`completed` is
+          // a dense FIFO count, so `completed > lastId` means that id cleared the
+          // pipeline), and the drain deadline passed. A queued-evidence case is never
+          // resolved early.
+          let totalExpected = 0;
+          let totalCollected = 0;
+          let lastId = -1;
+          for (const attack of wave.attacks) {
+            totalExpected += attack.expectedEvidence;
+            totalCollected += attack.collectedEvidence.length;
+            const attackLast = attack.collectedEvidence[attack.collectedEvidence.length - 1];
+            if (attackLast !== undefined && attackLast > lastId) {
+              lastId = attackLast;
+            }
+          }
+          if (
+            totalCollected >= totalExpected &&
+            lastId >= 0 &&
+            completed > lastId &&
+            tick * GAME_SECONDS_PER_TICK >= wave.drainDeadline
+          ) {
+            resolveWave(wave, tick);
+          }
+        }
+
+        // GH126-PLAN.md M3a: drive the repeating chaos-level loop, after the
+        // resolve check above so a wave that just resolved this tick is already in
+        // the cooldown phase (never re-triggered on the same tick).
+        advanceChaosLoop(tick);
       };
 
       // Tick zero: prime the schedule once at startup, before the clock loop, with
@@ -1075,6 +1519,7 @@ export function start(options: StartOptions): EngineHandle {
       },
       options.waves,
       mapView,
+      chaosView,
       scheduleMode,
     );
 
@@ -1155,6 +1600,8 @@ export function start(options: StartOptions): EngineHandle {
       pause: () => clock?.pause(),
       resume: () => clock?.resume(),
       setSpeed: (multiplier: number) => clock?.setSpeed(multiplier),
+      triggerWave: () => triggerWaveImpl(),
+      setChaosLevel,
       whenStopped,
     };
   } catch (error) {

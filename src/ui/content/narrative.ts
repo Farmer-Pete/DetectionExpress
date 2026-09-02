@@ -1,7 +1,8 @@
 /**
  * The single source of the onboarding prose. This is UI copy, not simulation
  * logic, so it lives in `ui/`. It holds the intro overlay text, the Hire Me pitch,
- * the five-level chaos ladder, and the source repo link. No React. Each type is
+ * the chaos ladder (levels 0 through 5, GH126-PLAN.md M3), and the source repo
+ * link. No React. Each type is
  * consumed by a component through its props, so the values reach the screen and
  * Knip stays clean.
  *
@@ -16,8 +17,9 @@
  */
 import type { ScenarioRegistryEntry } from "../../game/registry";
 
-/** A ladder rung: one level of rising chaos. Used by the exported content types. */
-type ChaosLevelNumber = 1 | 2 | 3 | 4 | 5;
+/** A ladder rung: one level of rising chaos. Used by the exported content types.
+ *  0 is the calm baseline (no attack); 1 through 5 escalate (GH126-PLAN.md M3, Q3). */
+type ChaosLevelNumber = 0 | 1 | 2 | 3 | 4 | 5;
 
 /** The intro overlay copy: premise, invitation, and the action and link labels. */
 export interface IntroCopy {
@@ -82,9 +84,15 @@ export const hireMe: HireMeCopy = {
 
 export const chaosLevels: readonly ChaosLevel[] = [
   {
+    level: 0,
+    label: "No chaos",
+    blurb: "The metro runs clean. Benign riders only, no attackers.",
+    playable: true,
+  },
+  {
     level: 1,
     label: "First Cracks",
-    blurb: "One bad actor. One sensor. A quiet probe against the crowd.",
+    blurb: "A handful of bad actors fan out across the crowd. Quiet probes, one PIN at a time.",
     playable: true,
   },
   {

@@ -19,6 +19,47 @@ export type RunStatus = "running" | "won" | "failed";
 /** Why a run failed, or null while it runs or when it wins. */
 export type FailureReason = "queue" | "correctness" | null;
 
+/**
+ * The chaos ladder's live phase (GH126-PLAN.md M3a), a VIEW-ONLY copy the sampler
+ * folds into every snapshot for the HUD. It never enters scoring. The ladder is a
+ * repeating LEVEL selector (Q7): level 0 is calm (the loop off), a level > 0 runs a
+ * repeating wave -> cooldown -> wave cycle.
+ *
+ * - `idle`: no cycle running (selected level 0, or a level-0 stop that finished).
+ * - `wave`: one chaos wave is in flight, at `activeLevel`.
+ * - `cooldown`: the calm gap after a wave resolved, with `cooldownRemaining` ticks
+ *   left before the loop triggers the next wave (or stops, if the level is now 0).
+ */
+export interface ChaosPhase {
+  kind: "idle" | "wave" | "cooldown";
+  /** The retained selected level (0-5). 0 means the loop is off. */
+  selectedLevel: number;
+  /** The in-flight wave's level. Present only in the `wave` phase. */
+  activeLevel?: number | undefined;
+  /** Ticks left in the cooldown gap. Present only in the `cooldown` phase. */
+  cooldownRemaining?: number | undefined;
+}
+
+/**
+ * A resolved chaos wave's banner reading (GH126-PLAN.md M3a, Q6), VIEW-ONLY and never
+ * scored. Published on the tick the wave resolves and carried until the next wave
+ * triggers, so the M3b banner has a stable, bounded window to read it. Null while no
+ * outcome is fresh. `outcome` is "held" when every attack was caught AND the wave-scoped
+ * queue peak stayed at or under `QUEUE_CAP`; otherwise "breach".
+ */
+export interface WaveOutcome {
+  waveId: number;
+  outcome: "held" | "breach";
+  /** How many attacks the wave launched (its 2 to 8 attackers). */
+  attackCount: number;
+  /** How many resolved caught (vs missed at the drain watermark). */
+  caughtCount: number;
+  /** Whether every attack resolved caught: `caughtCount === attackCount`. */
+  allCaught: boolean;
+  /** The wave-window peak of the in-flight backlog (ingress buffer plus channels). */
+  queuePeak: number;
+}
+
 export interface SimSnapshot {
   /** Total Queue: the sum of every channel's buffered size. */
   queued: number;
@@ -92,6 +133,17 @@ export interface SimSnapshot {
    * and every place dialog's scoped log both read this one ring.
    */
   worldEvents: readonly WorldLogEvent[];
+  /**
+   * The chaos ladder's live phase (GH126-PLAN.md M3a). View-only: the sampler folds
+   * the engine's chaos-loop state here for the HUD; it never enters scoring. Defaults
+   * to idle at level 0.
+   */
+  chaosPhase: ChaosPhase;
+  /**
+   * The freshest resolved wave's held/breach banner (GH126-PLAN.md M3a), or null.
+   * View-only; published on resolve and carried until the next wave triggers.
+   */
+  waveOutcome: WaveOutcome | null;
 }
 
 /** The reading before the first sample: empty, calm, and perfectly correct. */
@@ -117,5 +169,7 @@ export function emptySnapshot(): SimSnapshot {
     crowds: Object.freeze([]),
     nowTick: 0,
     worldEvents: Object.freeze([]),
+    chaosPhase: { kind: "idle", selectedLevel: 0 },
+    waveOutcome: null,
   };
 }

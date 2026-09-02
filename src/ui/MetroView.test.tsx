@@ -86,32 +86,35 @@ describe("MetroView", () => {
   });
 });
 
-describe("MetroView simulation-ended overlay", () => {
-  it("shows nothing while the run is running", () => {
-    useGameStore.setState({ snapshot: { ...emptySnapshot(), status: "running" } });
+describe("MetroView wave outcome banner (GH126-PLAN.md M3b, replaces the retired won/lost end screen)", () => {
+  it("shows nothing while no wave outcome is fresh", () => {
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), waveOutcome: null } });
     render(<MetroView onSelect={() => {}} />);
-    expect(screen.queryByRole("status", { name: /simulation ended/i })).toBeNull();
+    expect(screen.queryByRole("status", { name: /threat contained|breach/i })).toBeNull();
   });
 
-  it("shows a won outcome once the run concludes", () => {
+  it("shows a held wave outcome with the caught-of-total count", () => {
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        waveOutcome: {
+          waveId: 1,
+          outcome: "held",
+          attackCount: 5,
+          caughtCount: 5,
+          allCaught: true,
+          queuePeak: 3,
+        },
+      },
+    });
+    render(<MetroView onSelect={() => {}} />);
+    expect(screen.getByText(/threat contained/i)).toBeDefined();
+    expect(screen.getByText(/5\/5/)).toBeDefined();
+  });
+
+  it("renders no won/lost end screen (retired: the endless baseline never reaches won or lost)", () => {
     useGameStore.setState({ snapshot: { ...emptySnapshot(), status: "won" } });
     render(<MetroView onSelect={() => {}} />);
-    expect(screen.getByText(/simulation ended.*won/i)).toBeDefined();
-  });
-
-  it("shows the failure reason once the run fails on the queue", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "queue" },
-    });
-    render(<MetroView onSelect={() => {}} />);
-    expect(screen.getByText(/queue overflowed/i)).toBeDefined();
-  });
-
-  it("shows the failure reason once the run fails on correctness", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "correctness" },
-    });
-    render(<MetroView onSelect={() => {}} />);
-    expect(screen.getByText(/correctness too low/i)).toBeDefined();
+    expect(screen.queryByText(/simulation ended/i)).toBeNull();
   });
 });

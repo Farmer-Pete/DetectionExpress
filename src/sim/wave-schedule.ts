@@ -221,6 +221,12 @@ function assertSteadyContiguousEqualRate(waves: readonly Wave[]): void {
  * docstring), so all three are rejected here rather than left as latent
  * traps. Every OTHER check still runs in steady mode — fields, order, and
  * no-overlap are unconditional regardless of arrival shape.
+ *
+ * `"endless"` mode (GH126-PLAN.md M1) runs neither `assertSuccessorGap` nor
+ * `assertSteadyContiguousEqualRate`: `buildSchedule("endless")` always hands
+ * back an empty wave list, so neither check has anything to say, and an
+ * endless caller is never rejected for lacking a successor gap or a steady
+ * rate it was never meant to carry.
  */
 export function assertWaveScheduleOrdered(
   waves: readonly Wave[],
@@ -233,7 +239,7 @@ export function assertWaveScheduleOrdered(
   assertNoOverlap(waves);
   if (mode === "steady") {
     assertSteadyContiguousEqualRate(waves);
-  } else {
+  } else if (mode !== "endless") {
     assertSuccessorGap(waves);
   }
 }

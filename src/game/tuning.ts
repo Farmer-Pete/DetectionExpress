@@ -190,14 +190,6 @@ export const CORRECTNESS_FLOOR = 50;
 export const WAVE_WARN_TICKS = 30;
 
 /**
- * The shared severity ramp's thresholds (`src/ui/hud/severity.ts`), promoted to
- * tuning constants so #40 can tune them. Generic names, not "queue"-specific:
- * the ramp also colors the Compute gauge.
- */
-export const SEVERITY_WARN_FRAC = 0.5;
-export const SEVERITY_DANGER_FRAC = 0.8;
-
-/**
  * The live-hit count at which the findings panel throbs (`FindingsPanel.tsx`
  * gains the `urgent` border-pulse class at or above this count).
  */
@@ -352,9 +344,6 @@ export const ACCOUNT_ARRIVAL_MAX_TICKS = 40;
 /** Ticks an account rider lingers `at` the kiosk after signing in, before it despawns (> 0). */
 export const ACCOUNT_DWELL_TICKS = 10;
 
-/** How many distinct accounts the seeded pool mints; each account rider draws one. */
-export const ACCOUNT_POOL = 12;
-
 /**
  * The whole-unit amount a low card rider tops up at a station TVM, chosen comfortably
  * above the most expensive single trip so one top-up always restores enough to ride
@@ -392,3 +381,60 @@ export const HOST_RELAY_TICKS = 12;
  * `k * CONTROL_LAUNCH_PHASE_TICKS`.
  */
 export const CONTROL_LAUNCH_PHASE_TICKS = 4;
+
+/**
+ * GH126-PLAN.md M2b — chaos-wave injection into the endless engine. A triggered
+ * wave splices one bounded attack into the running clock, scores it, then returns
+ * to calm without ever stopping. These constants set its rebase margins and the
+ * held/breach queue bar.
+ */
+
+/**
+ * Ticks of headroom between the captured trigger tick and the attacker's start, so
+ * its `start()` sits at or past the schedule's admit frontier (`clock.now() + 1`
+ * after the trigger tick's `foldTick`). One tick would clear the frontier; a small
+ * margin leaves room and lets the attacker's arrival presence show before its first
+ * fail.
+ */
+export const WAVE_TRIGGER_MARGIN_TICKS = 2;
+
+/**
+ * Ticks past the wave attack's detection-window close before the engine resolves
+ * the wave at its drain watermark. It waits for Detect to process the wave's last
+ * evidence AND for this deadline, then `advanceTo` settles a still-pending attack as
+ * missed. Mirrors the burst clearance `chaos-wave.ts` already leaves after the last
+ * fail.
+ */
+export const WAVE_DRAIN_MARGIN_TICKS = 20;
+
+/**
+ * The wave-scoped queue bar (GH126-PLAN.md Q6, finding 8). A wave is "held" only
+ * when its attack is caught AND the wave-window peak of the in-flight backlog
+ * (`ScoredIngress` buffer plus channel contents) stayed at or under this. Above it,
+ * even a caught attack reads "breach": the rule kept up on accuracy but not on
+ * throughput. First-draft value, comfortably under `CHANNEL_CAP`; M3's ladder tuning
+ * revisits it.
+ */
+export const QUEUE_CAP = 60;
+
+/**
+ * GH126-PLAN.md M3a/M3b — the lead-in cooldown before every chaos wave, in ticks. The
+ * repeating chaos-level loop is COOLDOWN-FIRST: selecting a level (or resolving a wave)
+ * opens this calm gap, then the next wave triggers when it elapses. So it doubles as
+ * the run-up the reused "WAVE INCOMING" warning counts down through: the endless
+ * sampler derives `snapshot.wave` from the chaos phase, showing "next wave in Ns" for
+ * most of the gap and flipping to "WAVE INCOMING" over the last `WAVE_WARN_TICKS` (30)
+ * ticks. At `CLOCK_HZ` (60) this ~3 real seconds gives the countdown room to read and
+ * clearly exceeds `WAVE_WARN_TICKS`, so most of the lead-in shows the countdown and the
+ * final ~0.5s shows the warning. Comfortably longer than the publish stride, so the
+ * cooldown phase is always sampled. Tunable; M3b's ladder pass revisits it.
+ */
+export const CHAOS_COOLDOWN_TICKS = 180;
+
+/**
+ * The highest selectable chaos-ladder level (GH126-PLAN.md Q3: levels 0-5, only 0
+ * and 1 playable today). `setChaosLevel` (code-review fix 6) validates against
+ * this, so an out-of-range or non-integer level from a bad caller is ignored
+ * rather than silently starting a cooldown for a level the ladder does not have.
+ */
+export const MAX_CHAOS_LEVEL = 5;

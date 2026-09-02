@@ -805,6 +805,277 @@ describe("scorer liveFindings citedEvents (freeze-on-raise)", () => {
   });
 });
 
+// GH126-PLAN.md M2a seams 6, 7, 9, 13: the dynamic scorer seam. `addAttack`
+// registers a pending attack with no evidence yet; `bindEvidence` binds owner
+// ids as they arrive. Both grow the same internal attack set `scoreFinding` and
+// `closeExpired` already iterate, so a dynamically added attack is scored exactly
+// like a constructor-seeded one, with no new code path.
+describe("scorer dynamic attacks (addAttack / bindEvidence, GH126-PLAN.md M2a)", () => {
+  it("seam 6: credits a finding whose attack was registered, then had its evidence bound, reproducing the real offer order", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 50), at(50));
+    expect(s.reading()).toMatchObject({ caught: 1, missed: 0, falseAlerts: 0 });
+  });
+
+  it("seam 6: a finding citing unbound ids scores false, not caught, until bindEvidence runs", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.record(one([10, 11], 50), at(50)); // no bindEvidence yet
+    expect(s.reading()).toMatchObject({ caught: 0, falseAlerts: 1 });
+  });
+
+  it("seam 6: bindEvidence throws for an unregistered attack id", () => {
+    const s = createScorer([], cfg());
+    expect(() => s.bindEvidence(999, 10)).toThrow(/not registered/);
+  });
+
+  it("seam 7: addAttack throws on a duplicate attack id", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 2, windowEnd: 100 });
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "b", reason: REASON, threshold: 2, windowEnd: 200 }),
+    ).toThrow(/already registered/);
+  });
+
+  it("seam 7: two waves' attacks stay distinct, each crediting its own finding", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "wave-1", reason: REASON, threshold: 2, windowEnd: 100 });
+    s.addAttack({ attackId: 2, entity: "wave-2", reason: REASON, threshold: 2, windowEnd: 200 });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.bindEvidence(2, 20);
+    s.bindEvidence(2, 21);
+    s.record(one([10, 11], 50), at(50));
+    s.record(one([20, 21], 60), at(60));
+    expect(s.reading()).toMatchObject({ caught: 2, missed: 0, falseAlerts: 0 });
+  });
+
+  it("seam 9: advanceTo resolves a pending added attack as missed only once its window passes", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.advanceTo(100); // not strictly past endTs yet: stays pending
+    expect(s.reading().missed).toBe(0);
+    s.advanceTo(101); // past endTs now: resolves missed
+    expect(s.reading().missed).toBe(1);
+  });
+
+  it("seam 9: bound evidence still catches an added attack right up to its window's close", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 100), at(100)); // exactly at endTs: not expired yet
+    expect(s.reading()).toMatchObject({ caught: 1, missed: 0 });
+  });
+
+  it("seam 13: addAttack rejects a non-positive or non-integer threshold", () => {
+    const s = createScorer([], cfg());
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 0, windowEnd: 100 }),
+    ).toThrow(/threshold must be a positive integer/);
+    expect(() =>
+      s.addAttack({ attackId: 2, entity: "a", reason: REASON, threshold: 1.5, windowEnd: 100 }),
+    ).toThrow(/threshold must be a positive integer/);
+  });
+
+  it("addAttack runs no distinct-evidence-vs-threshold check: a high threshold with zero evidence never throws at registration", () => {
+    const s = createScorer([], cfg());
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 5, windowEnd: 100 }),
+    ).not.toThrow();
+  });
+});
+
+// GH126 code-review fix 2: `waveCaught` must not read the capped decision log, where a
+// noisy rule can evict an early catch before the wave resolves. `outcomeOf` is the
+// authoritative accessor, straight off the internal `state` map.
+describe("scorer outcomeOf (GH126 code-review fix 2)", () => {
+  it("reports pending, then caught, straight from state", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 2, windowEnd: 100 });
+    expect(s.outcomeOf(1)).toBe("pending");
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 50), at(50));
+    expect(s.outcomeOf(1)).toBe("caught");
+  });
+
+  it("reports missed once a pending attack's window closes with no credit", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 2, windowEnd: 100 });
+    s.advanceTo(101);
+    expect(s.outcomeOf(1)).toBe("missed");
+  });
+
+  it("reports pending for an id never registered", () => {
+    const s = createScorer([], cfg());
+    expect(s.outcomeOf(999)).toBe("pending");
+  });
+
+  it("stays accurate once decisionsCap has evicted the attack's own decision from the log", () => {
+    const s = createScorer([], cfg({ decisionsCap: 1 }));
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 2, windowEnd: 100 });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 50), at(50)); // caught; its decision fills the log's one slot
+    // Flood the log with a second decision so decisionsCap: 1 evicts the first.
+    s.addAttack({ attackId: 2, entity: "b", reason: REASON, threshold: 2, windowEnd: 200 });
+    s.advanceTo(201); // resolves attack 2 missed, appending a decision that evicts attack 1's
+    expect(s.decisions().some((d) => "attackId" in d && d.attackId === 1)).toBe(false);
+    expect(s.outcomeOf(1)).toBe("caught"); // still accurate off `state`, not the capped log
+  });
+});
+
+// GH126 code-review fix 3: endless-mode memory must stay bounded. A resolved attack
+// retires (drops from `attacksById`/`state`, its evidence ids from `owner`) once game
+// time has passed its window end by the live horizon, so a repeating chaos loop never
+// grows these maps without bound. `addAttack`'s duplicate-id guard is the public,
+// black-box witness: it throws only while an id is still tracked.
+describe("scorer bounded memory: retiring a resolved attack (GH126 code-review fix 3)", () => {
+  it("retires a resolved attack once time passes its window end plus the live horizon, freeing its id", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10 }));
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 1, windowEnd: 100 });
+    s.bindEvidence(1, 501);
+    s.record(one([501], 100), at(100)); // caught
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 1, windowEnd: 500 }),
+    ).toThrow(/already registered/); // not yet retired
+    s.advanceTo(111); // windowEnd(100) + liveHorizon(10), strictly passed
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 1, windowEnd: 500 }),
+    ).not.toThrow(); // retired: the id is free again
+  });
+
+  it("never retires a still-pending attack, no matter how far time advances", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10 }));
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 5, windowEnd: 1000 });
+    s.advanceTo(500);
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 1, windowEnd: 2000 }),
+    ).toThrow(/already registered/); // still pending: never retired
+  });
+
+  it("does not change the running counts a retired attack already contributed", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10 }));
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 1, windowEnd: 100 });
+    s.bindEvidence(1, 501);
+    s.record(one([501], 100), at(100)); // caught
+    s.advanceTo(200); // retires attack 1
+    expect(s.reading().caught).toBe(1);
+  });
+
+  it("a finite run's running counts are unaffected once retirement fires far later, even though outcomeOf then forgets the id", () => {
+    const seeded: Attack[] = [attack(1, "a", 0, 50, [10, 11])];
+    const s = createScorer(seeded, cfg({ liveHorizon: 10 }));
+    s.record(one([10, 11], 40), at(40)); // caught, inside the window
+    // The scoring outcome already landed in the running counts and the decision log
+    // at resolution; retiring the attack's own bookkeeping later cannot revise it.
+    s.advanceTo(1000); // far past window end (50) + liveHorizon (10): retires attack 1
+    expect(s.reading()).toMatchObject({ caught: 1, missed: 0, falseAlerts: 0 });
+    expect(asCaught(s.decisions()[0]).attackId).toBe(1);
+    // Retired means forgotten, by design (the interface's documented contract): once
+    // gone, outcomeOf reads it the same as never-registered, "pending" — a caller
+    // querying an attack this stale has no legitimate reason to ask again.
+    expect(s.outcomeOf(1)).toBe("pending");
+  });
+});
+
+// GH126 second Codex review round, finding N1: `retireResolved` must never erase a
+// resolved attack's outcome before a caller's own drain-time read, no matter how
+// short `liveHorizon` is configured. `retentionFloor` (game seconds) sets a floor
+// under `liveHorizon` for retirement only — `sim/` still carries no knowledge of
+// `game/`'s wave-margin math; the caller (run-controller.ts) picks a floor
+// comfortably past its own drain margin and passes it in as a plain number.
+describe("scorer retentionFloor: retirement never outruns a caller's drain read (GH126 N1)", () => {
+  it("reports a fully caught wave as caught after advanceTo(drainDeadline), even with a liveHorizon shorter than the drain margin", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10, retentionFloor: 80 }));
+    for (const attackId of [1, 2, 3]) {
+      const evidenceId = 500 + attackId;
+      s.addAttack({
+        attackId,
+        entity: `victim-${attackId}`,
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 100,
+      });
+      s.bindEvidence(attackId, evidenceId);
+      s.record(one([evidenceId], 100), at(100)); // caught
+    }
+    // Mirrors `resolveWave`: `advanceTo(windowEnd + drainMargin)`, here 100 + 40 =
+    // 140. `liveHorizon` (10) alone would retire every attack at 110, well before
+    // this read; `retentionFloor` (80) holds them live until 180.
+    s.advanceTo(140);
+    for (const attackId of [1, 2, 3]) {
+      expect(s.outcomeOf(attackId)).toBe("caught");
+    }
+  });
+
+  it("still retires past windowEnd + retentionFloor across many resolved attacks, bounding memory", () => {
+    const s = createScorer([], cfg({ liveHorizon: 10, retentionFloor: 80 }));
+    for (let attackId = 1; attackId <= 50; attackId++) {
+      const evidenceId = 1000 + attackId;
+      s.addAttack({
+        attackId,
+        entity: `victim-${attackId}`,
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 100,
+      });
+      s.bindEvidence(attackId, evidenceId);
+      s.record(one([evidenceId], 100), at(100)); // caught
+    }
+    s.advanceTo(140); // the drain read: every attack still retained (see test above)
+    expect(() =>
+      s.addAttack({
+        attackId: 1,
+        entity: "victim-1",
+        reason: REASON,
+        threshold: 1,
+        windowEnd: 500,
+      }),
+    ).toThrow(/already registered/);
+    s.advanceTo(181); // windowEnd(100) + retentionFloor(80), strictly passed
+    for (let attackId = 1; attackId <= 50; attackId++) {
+      expect(() =>
+        s.addAttack({
+          attackId,
+          entity: `victim-${attackId}`,
+          reason: REASON,
+          threshold: 1,
+          windowEnd: 900,
+        }),
+      ).not.toThrow(); // every id freed: memory bounded, not accumulating
+    }
+  });
+});
+
 // Seam I (T10, GH34-35-PLAN.md 2.1): cited-event capture, resolvedAt, and the capped log.
 describe("scorer citedEvents, resolvedAt, and the capped log", () => {
   it("captures citedEvents for a caught decision via the bound resolver", () => {

@@ -27,6 +27,13 @@ function loggingController(log: string[]): RunController {
     setSpeed(speed) {
       log.push(`setSpeed:${speed}`);
     },
+    triggerWave() {
+      log.push("triggerWave");
+      return null;
+    },
+    setChaosLevel(level) {
+      log.push(`setChaosLevel:${level}`);
+    },
     dispose() {
       log.push("dispose");
     },
@@ -34,7 +41,7 @@ function loggingController(log: string[]): RunController {
 }
 
 beforeEach(() => {
-  useGameStore.setState({ transport: { frozen: false, speed: 1 } });
+  useGameStore.setState({ transport: { frozen: false, speed: 1 }, chaosLevel: 0 });
 });
 
 afterEach(() => {
@@ -42,19 +49,27 @@ afterEach(() => {
 });
 
 describe("usePipelineController", () => {
-  it("builds a fresh controller and runs it on mount, seeded from the store transport", () => {
-    useGameStore.setState({ transport: { frozen: true, speed: 2 } });
+  it("builds a fresh controller and runs it on mount, seeded from the store transport and chaos level", () => {
+    useGameStore.setState({ transport: { frozen: true, speed: 2 }, chaosLevel: 1 });
     const log: string[] = [];
     const createController = () => loggingController(log);
     const { result } = renderHook(() => usePipelineController({ createController }));
 
-    // The ref is live and the build order is exactly run(), then the transport seed:
-    // setFrozen, then setSpeed. The two transport-reflector effects also run once on
+    // The ref is live and the build order is exactly run(), then the seed:
+    // setFrozen, setSpeed, setChaosLevel. The three reflector effects also run once on
     // mount (their dependency arrays always fire on the first render), reapplying the
     // same seeded values right after — that duplication is the pre-extraction
     // behavior, not something this hook introduces.
     expect(result.current.controllerRef.current).not.toBeNull();
-    expect(log).toEqual(["run", "setFrozen:true", "setSpeed:2", "setFrozen:true", "setSpeed:2"]);
+    expect(log).toEqual([
+      "run",
+      "setFrozen:true",
+      "setSpeed:2",
+      "setChaosLevel:1",
+      "setFrozen:true",
+      "setSpeed:2",
+      "setChaosLevel:1",
+    ]);
   });
 
   it("disposes on unmount", () => {
@@ -79,6 +94,21 @@ describe("usePipelineController", () => {
       useGameStore.setState({ transport: { frozen: true, speed: 2 } });
     });
     expect(log).toEqual(["setFrozen:true", "setSpeed:2"]);
+  });
+
+  it("reflects later store chaosLevel changes into the controller", () => {
+    const log: string[] = [];
+    const createController = () => loggingController(log);
+    renderHook(() => usePipelineController({ createController }));
+    log.length = 0; // drop the mount-time seed calls (and their reflector echo)
+
+    act(() => {
+      useGameStore.getState().setChaosLevel(1);
+    });
+    act(() => {
+      useGameStore.getState().setChaosLevel(0);
+    });
+    expect(log).toEqual(["setChaosLevel:1", "setChaosLevel:0"]);
   });
 
   it("builds a fresh controller per epoch under strict-mode double invoke", () => {

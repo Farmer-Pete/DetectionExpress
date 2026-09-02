@@ -1,13 +1,16 @@
 /**
- * The embedded metro map region (GH117 Part F): the map, a "simulation ended"
- * overlay over it once the run concludes, and the key (Lines, Actors, Sensors) as a
- * sibling of the map inside `.metro-view`. `MetroKey` renders once; `.metro-view`'s
- * CSS grid (src/index.css) is what moves it — below the map as a row of columns on
- * narrow screens, a left rail of stacked sections at or above the 720px breakpoint.
- * It sits inline in `App`'s page flow between `Hud` and `InspectorShell`, sized to a
- * bounded box rather than filling the viewport — the pipeline transport (freeze,
- * 0.5x/1x/2x) is the one clock now, so this component owns no header, no counts, and
- * no speed control.
+ * The embedded metro map region (GH117 Part F): the map, the transient wave-outcome
+ * banner over it (`WaveOutcomeBanner`, GH126-PLAN.md M3b), and the key (Lines,
+ * Actors, Sensors) as a sibling of the map inside `.metro-view`. The banner replaces
+ * the earlier "simulation ended" won/lost overlay: the endless baseline never
+ * concludes (GH126-PLAN.md), so a per-wave held/breach reading is the outcome that
+ * matters now, not a terminal one. `MetroKey` renders once; `.metro-view`'s CSS grid
+ * (src/index.css) is what moves it — below the map as a row of columns on narrow
+ * screens, a left rail of stacked sections at or above the 720px breakpoint. It sits
+ * inline in `App`'s page flow between `Hud` and `InspectorShell`, sized to a bounded
+ * box rather than filling the viewport — the pipeline transport (freeze, 0.5x/1x/2x)
+ * is the one clock now, so this component owns no header, no counts, and no speed
+ * control.
  *
  * Every live value is read through a per-field `useGameStore` selector, so a snapshot
  * update re-renders only the panel that reads the changed field, not the whole view
@@ -23,13 +26,12 @@
 import type { RefObject } from "react";
 import { sensorCatalogueEntry } from "../game/sensor-catalogue";
 import type { MapSelection } from "../game/store";
-import { useGameStore } from "../game/store";
-import type { FailureReason, RunStatus } from "../sim/snapshot";
 import type { SensorCode } from "../sim/world/layout";
 import { SENSOR_ID } from "../sim/world/layout";
 import { world } from "../sim/world/world";
 import { sensorIcon } from "./icons/sensor-icons";
 import { MetroMap } from "./MetroMap";
+import { WaveOutcomeBanner } from "./wave/WaveOutcomeBanner";
 
 /** The map's line draw order; any line not listed sorts last. */
 const LINE_ORDER: readonly string[] = ["red", "blue", "green", "circle"];
@@ -157,37 +159,6 @@ function MetroKey() {
   );
 }
 
-/** The one-line outcome the overlay reads, mirroring `Hud`'s own outcome copy. */
-function outcomeText(status: RunStatus, reason: FailureReason) {
-  if (status === "won") {
-    return "Simulation ended — won";
-  }
-  return reason === "queue"
-    ? "Simulation ended — failed: queue overflowed"
-    : reason === "correctness"
-      ? "Simulation ended — failed: correctness too low"
-      : "Simulation ended — failed";
-}
-
-/**
- * A small overlay over the map region once the scored run concludes (GH117 decision
- * 5): the engine has already stopped stepping, so the map beneath it is a frozen
- * terminal frame, and this names the outcome rather than leaving it silently static.
- * Renders nothing while the run is still running.
- */
-function EndedOverlay() {
-  const status = useGameStore((state) => state.snapshot.status);
-  const failureReason = useGameStore((state) => state.snapshot.failureReason);
-  if (status === "running") {
-    return null;
-  }
-  return (
-    <div className="metro-ended-overlay" role="status">
-      {outcomeText(status, failureReason)}
-    </div>
-  );
-}
-
 interface MetroViewProps {
   /** Lifted selection handler (GH124-PLAN.md Checkpoint 4), forwarded to `MetroMap`. */
   onSelect: (selection: MapSelection) => void;
@@ -205,7 +176,7 @@ export function MetroView({ onSelect, mapRegionRef }: MetroViewProps) {
           each placed by `.metro-view`'s CSS grid areas — no width check here. */}
       <div className="metro-map-region" ref={mapRegionRef} tabIndex={-1}>
         <MetroMap onSelect={onSelect} />
-        <EndedOverlay />
+        <WaveOutcomeBanner />
       </div>
       <MetroKey />
     </div>

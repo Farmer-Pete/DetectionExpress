@@ -40,6 +40,10 @@ function stubController(): RunController {
     run() {},
     setFrozen() {},
     setSpeed() {},
+    triggerWave() {
+      return null;
+    },
+    setChaosLevel() {},
     dispose() {},
   };
 }

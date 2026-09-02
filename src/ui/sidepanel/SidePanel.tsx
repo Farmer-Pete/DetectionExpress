@@ -1,10 +1,15 @@
 /**
  * The side panel: a right-edge overlay that carries the panels the pipeline view
- * used to stack below the fold (GH118-PLAN.md), plus the four HUD gauges
- * (GH124-PLAN.md Checkpoint 2) — the chaos ladder, the Algorithm editor, and
- * Metrics — behind an accessible tab strip. Purely presentational: `use-side-panel.tsx`
+ * used to stack below the fold (GH118-PLAN.md) — the chaos ladder and the
+ * Algorithm editor — behind an accessible tab strip. Purely presentational: `use-side-panel.tsx`
  * owns `open`/`tab`, the pause protocol, and the Apply-on-success wiring; this
  * component only renders the given tab and reports clicks and key presses back up.
+ *
+ * The chaos ladder's own live values (GH126-PLAN.md M3b) are the one exception: this
+ * is the ladder's mount site, so it reads the selected level, the live chaos phase,
+ * and the `setChaosLevel` action straight off the store, one narrow selector per
+ * value (ARCHITECTURE.md), and hands them to `ChaosLadder` as props. `ChaosLadder`
+ * itself stays presentational and store-free.
  *
  * It is a real modal dialog, styled on `IntroOverlay`'s and `TraceOverlay`'s pattern
  * (`src/ui/focus.ts`): `role="dialog"`, `aria-modal="true"`, its own dim backdrop that
@@ -37,20 +42,19 @@
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { defaultEntry } from "../../game/registry";
+import { useGameStore } from "../../game/store";
 import { AlgorithmEditor } from "../AlgorithmEditor";
 import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
-import { Hud } from "../hud/Hud";
 
-export type SidePanelTab = "chaos" | "algorithm" | "metrics";
+export type SidePanelTab = "chaos" | "algorithm";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 const TABS: ReadonlyArray<{ id: SidePanelTab; label: string }> = [
   { id: "chaos", label: "Chaos ladder" },
   { id: "algorithm", label: "Algorithm" },
-  { id: "metrics", label: "Metrics" },
 ];
 
 export interface SidePanelProps {
@@ -76,6 +80,13 @@ export function SidePanel({
 }: SidePanelProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
+
+  // The chaos ladder's live wiring (GH126-PLAN.md M3b): one narrow selector per
+  // value (ARCHITECTURE.md), read here since this is the ladder's mount site.
+  // `ChaosLadder` itself stays presentational, taking these as props.
+  const chaosLevel = useGameStore((state) => state.chaosLevel);
+  const chaosPhase = useGameStore((state) => state.snapshot.chaosPhase);
+  const setChaosLevel = useGameStore((state) => state.setChaosLevel);
 
   // Move focus into the dialog on mount, onto its first control; restore it on
   // unmount to whatever triggered the open, or the fallback if that trigger is gone.
@@ -187,7 +198,13 @@ export function SidePanel({
           className="sidepanel-body"
           hidden={tab !== "chaos"}
         >
-          <ChaosLadder levels={chaosLevels} liveScenario={liveScenario} />
+          <ChaosLadder
+            levels={chaosLevels}
+            liveScenario={liveScenario}
+            selectedLevel={chaosLevel}
+            phase={chaosPhase}
+            onSelectLevel={setChaosLevel}
+          />
         </div>
         <div
           role="tabpanel"
@@ -197,15 +214,6 @@ export function SidePanel({
           hidden={tab !== "algorithm"}
         >
           <AlgorithmEditor onRun={onApply} />
-        </div>
-        <div
-          role="tabpanel"
-          id="sidepanel-tabpanel-metrics"
-          aria-labelledby="sidepanel-tab-metrics"
-          className="sidepanel-body"
-          hidden={tab !== "metrics"}
-        >
-          <Hud />
         </div>
       </div>
     </div>

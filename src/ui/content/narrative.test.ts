@@ -31,19 +31,25 @@ function allProse(): string {
 }
 
 describe("narrative content", () => {
-  it("holds exactly five chaos levels, sorted by level, with unique labels", () => {
-    expect(chaosLevels).toHaveLength(5);
+  it("holds exactly six chaos levels (0 through 5), sorted by level, with unique labels", () => {
+    expect(chaosLevels).toHaveLength(6);
     const levels = chaosLevels.map((level) => level.level);
-    expect(levels).toEqual([1, 2, 3, 4, 5]);
+    expect(levels).toEqual([0, 1, 2, 3, 4, 5]);
     const labels = new Set(chaosLevels.map((level) => level.label));
-    expect(labels.size).toBe(5);
+    expect(labels.size).toBe(6);
   });
 
-  it("names the top level Nightmare and marks only Level 1 playable", () => {
-    expect(chaosLevels[4]?.label).toBe("Nightmare");
+  it("names the top level Nightmare and marks only levels 0 and 1 playable", () => {
+    expect(chaosLevels[5]?.label).toBe("Nightmare");
     const playable = chaosLevels.filter((level) => level.playable);
-    expect(playable).toHaveLength(1);
-    expect(playable[0]?.level).toBe(1);
+    expect(playable.map((level) => level.level)).toEqual([0, 1]);
+  });
+
+  it("names level 0 as the calm, no-chaos rung", () => {
+    const level0 = chaosLevels[0];
+    expect(level0?.level).toBe(0);
+    expect(level0?.playable).toBe(true);
+    expect(level0?.blurb.length).toBeGreaterThan(0);
   });
 
   it("describes the one live scenario", () => {

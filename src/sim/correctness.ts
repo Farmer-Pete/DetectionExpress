@@ -69,6 +69,18 @@ export interface ScorerConfig {
    * fold every outcome that ever resolved, not just what the log still retains.
    */
   decisionsCap?: number;
+  /**
+   * A floor (game seconds) under `liveHorizon`, for `retireResolved` only (GH126
+   * second Codex review round, finding N1). `retireResolved` retires a resolved
+   * Attack once `ts` passes `windowEnd + max(liveHorizon, retentionFloor)`, so a
+   * caller whose own drain-time read happens later than `liveHorizon` (but sooner
+   * than this floor) can never have the Attack retired out from under it, no matter
+   * how short `liveHorizon` is configured for the live-set gauge. Plain injected
+   * config, same as every other field here: `sim/` computes nothing about it and
+   * knows nothing of any caller's own margin math. Optional; omitted defaults to 0,
+   * which folds back to `liveHorizon` alone and changes no existing behavior.
+   */
+  retentionFloor?: number;
 }
 
 /** The reading the sampler publishes: the gauge value plus the global counts. */
@@ -248,6 +260,50 @@ export interface Scorer {
    * default) resolves every id to nothing, so `citedEvents` is simply empty.
    */
   bindEventResolver(resolve: (ids: readonly number[]) => RingEvent[]): void;
+  /**
+   * Register a pending Attack with NO evidence ids yet (GH126-PLAN.md M2a "the
+   * dynamic scorer seam"). Throws on a duplicate `attackId`, and calls
+   * `assertValidThreshold` on the given threshold. Does NOT run the distinct-
+   * evidence-vs-threshold check `createScorer` runs on a constructor-seeded
+   * Attack: there is no evidence yet to count. That check moves to the caller's
+   * own compose seam, where it knows the evidence count up front (e.g. a chaos
+   * wave's `planChaosWave` asserts its fail count `>= threshold` at plan time). The
+   * caller registers the attack before admitting the attacker
+   * that will emit its evidence, so a finding scored after registration is
+   * matched against a real pending Attack rather than falling through to false.
+   */
+  addAttack(input: {
+    attackId: number;
+    /** The Attack's subject; read by the entity-match path. */
+    entity: string;
+    /** The pattern this Attack proves; read by the reason-match path. */
+    reason: AlertReason;
+    /** Distinct cited ids an Alert must share with this Attack to credit it. */
+    threshold: number;
+    /**
+     * Game seconds the Attack's window closes at. `closeExpired`/`advanceTo`
+     * resolve it missed once a later timestamp strictly passes this, exactly as
+     * for a constructor-seeded Attack's `window.endTs`.
+     */
+    windowEnd: number;
+  }): void;
+  /**
+   * Bind one Event id as evidence for `attackId`: `owner[globalEventId] =
+   * attackId`, so `scoreFinding`'s `hitsFor` counts it toward that Attack's
+   * threshold. Throws if `attackId` was never registered (by the constructor or
+   * `addAttack`). The caller binds each fail's id as it is offered, before Detect
+   * scores the finding that cites it, so evidence is owned before it is judged.
+   */
+  bindEvidence(attackId: number, globalEventId: number): void;
+  /**
+   * The authoritative outcome for `attackId`, read straight off the internal
+   * `state` map (GH126-PLAN.md, code-review fix 2). `decisions()` is capped
+   * (`ScorerConfig.decisionsCap`), so a noisy rule can evict an early catch's
+   * decision before a caller checks it; this accessor never misses one. Returns
+   * `"pending"` for an id never registered (or since retired, fix 3): both read
+   * as "nothing resolved to report," the same as a real pending Attack.
+   */
+  outcomeOf(attackId: number): "pending" | "caught" | "missed";
 }
 
 /** One resolved judgement, held in the rolling ring. */
@@ -284,8 +340,16 @@ const DEFAULT_LIVE_HORIZON = 240;
 
 export function createScorer(attacks: readonly Attack[], config: ScorerConfig): Scorer {
   const state = new Map<number, AttackState>();
-  // eventId -> the Attack that owns it, built once from Ground truth.
+  // eventId -> the Attack that owns it, built once from Ground truth, and grown by
+  // `bindEvidence` as a dynamically added Attack's evidence arrives.
   const owner = new Map<number, number>();
+  // The growable attack set (GH126-PLAN.md M2a "the dynamic scorer seam"): every
+  // constructor-seeded Attack, in order, plus every `addAttack`-registered one
+  // appended after. A `Map` preserves insertion order, so `scoreFinding`'s "first
+  // pending" tie-break and `closeExpired`/`finalize`'s iteration order are exactly
+  // the original `for (const attack of attacks)` order for every existing caller,
+  // with a dynamically added attack simply appearing after them.
+  const attacksById = new Map<number, Attack>();
   for (const attack of attacks) {
     // The scorer seam: a bad threshold fails loudly here, before it can silently
     // under- or over-credit an Alert.
@@ -304,9 +368,14 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     for (const eventId of attack.eventIds) {
       owner.set(eventId, attack.id);
     }
+    attacksById.set(attack.id, attack);
   }
 
   const liveHorizon = config.liveHorizon ?? DEFAULT_LIVE_HORIZON;
+  // The retirement-only floor under `liveHorizon` (N1): `sweepHorizon`/`dropWatchesForAttack`
+  // still use `liveHorizon` alone (the live-set gauge is unaffected), but `retireResolved`
+  // uses this wider margin so a caller's own drain-time read always lands before the delete.
+  const retentionHorizon = Math.max(liveHorizon, config.retentionFloor ?? 0);
 
   const counts: Counts = { caught: 0, missed: 0, falseAlerts: 0 };
   const ring: Outcome[] = [];
@@ -371,11 +440,44 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
 
   /** Close every pending Attack whose window ended strictly before `ts`. */
   function closeExpired(ts: number): void {
-    for (const attack of attacks) {
+    for (const attack of attacksById.values()) {
       if (state.get(attack.id) === "pending" && attack.window.endTs < ts) {
         resolve(attack, "missed");
         append(missDecision(attack));
         dropWatchesForAttack(attack.id);
+      }
+    }
+  }
+
+  /**
+   * Bounded memory (GH126-PLAN.md, code-review fix 3): delete a RESOLVED (caught
+   * or missed) Attack from `attacksById`/`state`, and its evidence ids from
+   * `owner`, once `ts` has passed its window close by `liveHorizon`. Both
+   * `closeExpired` and `scoreFinding` only ever act on a `pending` Attack, so
+   * deleting a resolved one changes no scoring outcome — its `counts`/ring/log
+   * contribution already landed at resolution and lives on independently. The
+   * `retentionHorizon` margin (>= `liveHorizon`, GH126 second Codex review round
+   * finding N1) also outlasts `sweepHorizon`'s own live-entry eviction, so no live
+   * watch or hit can still be referencing the attack's evidence by the time it
+   * retires; a `retentionFloor` wider than `liveHorizon` only delays this delete
+   * further, so that invariant only strengthens. Iterating `attacksById.values()`
+   * while deleting the current entry is well-defined: a Map iterator never skips
+   * or revisits a key over a delete during iteration. A repeating chaos loop calls
+   * this every wave, so `attacksById`/`state`/`owner` stay bounded on an endless
+   * run instead of growing with every wave that ever fired.
+   */
+  function retireResolved(ts: number): void {
+    for (const attack of attacksById.values()) {
+      const outcome = state.get(attack.id);
+      if (
+        (outcome === "caught" || outcome === "missed") &&
+        ts > attack.window.endTs + retentionHorizon
+      ) {
+        attacksById.delete(attack.id);
+        state.delete(attack.id);
+        for (const eventId of attack.eventIds) {
+          owner.delete(eventId);
+        }
       }
     }
   }
@@ -535,7 +637,7 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     const alert = finding.alert;
     const hits = hitsFor(alert.eventIds);
     const useEntity = config.entityMatch === true && scored.entity !== undefined;
-    for (const attack of attacks) {
+    for (const attack of attacksById.values()) {
       if (state.get(attack.id) !== "pending") {
         continue;
       }
@@ -594,13 +696,15 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
       findings.forEach((scored, index) => {
         scoreFinding(scored, env.ts, liveSeqs[index] ?? null);
       });
+      retireResolved(env.ts);
     },
     advanceTo(gameTs) {
       sweepHorizon(gameTs);
       closeExpired(gameTs);
+      retireResolved(gameTs);
     },
     finalize() {
-      for (const attack of attacks) {
+      for (const attack of attacksById.values()) {
         if (state.get(attack.id) === "pending") {
           resolve(attack, "missed");
           append(missDecision(attack));
@@ -637,6 +741,40 @@ export function createScorer(attacks: readonly Attack[], config: ScorerConfig): 
     },
     bindEventResolver(resolve) {
       resolveEvents = resolve;
+    },
+    addAttack(input) {
+      if (attacksById.has(input.attackId)) {
+        throw new Error(`addAttack: attack ${input.attackId} was already registered.`);
+      }
+      const pending: Attack = {
+        id: input.attackId,
+        entity: input.entity,
+        reason: input.reason,
+        // No real start is known at registration; `windowEnd` doubles as both
+        // bounds. Only `endTs` drives any scoring decision (`closeExpired`); a
+        // wave-attack `MissedDecision.window` reporting a point window is
+        // informational-only, never read by scoring logic.
+        window: { startTs: input.windowEnd, endTs: input.windowEnd },
+        eventIds: [],
+        threshold: input.threshold,
+      };
+      // The scorer seam: a bad threshold fails loudly here, exactly as for a
+      // constructor-seeded Attack. No distinct-evidence check: there is no
+      // evidence yet, by design (see the Scorer interface doc).
+      assertValidThreshold(pending);
+      attacksById.set(pending.id, pending);
+      state.set(pending.id, "pending");
+    },
+    bindEvidence(attackId, globalEventId) {
+      const attack = attacksById.get(attackId);
+      if (attack === undefined) {
+        throw new Error(`bindEvidence: attack ${attackId} is not registered.`);
+      }
+      owner.set(globalEventId, attackId);
+      attack.eventIds.push(globalEventId);
+    },
+    outcomeOf(attackId) {
+      return state.get(attackId) ?? "pending";
     },
   };
 }

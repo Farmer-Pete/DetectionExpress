@@ -58,9 +58,9 @@ body {
 /* Wave juice keyframes (#38, GH38+40-PLAN.md Part 2). Every keyframe below is
    applied only inside the `prefers-reduced-motion: no-preference` block near
    the end of this file. The state-bearing animations (`heart`, driving
-   `.wave-readout-incoming`, `.findings-panel.urgent-pulse`, and the
-   `severityFill`-driven fill colors) also carry a static, unanimated form
-   outside that guard, so color and count changes still read with motion off.
+   `.wave-readout-incoming` and `.findings-panel.urgent-pulse`) also carry a
+   static, unanimated form outside that guard, so color and count changes
+   still read with motion off.
    The one-shot transients (`waveflash`, `shake`) are the opposite: they ARE
    the effect, so they intentionally have no static form to fall back to (see
    the "Wave juice animations" comment below, near the guard itself). Colors
@@ -178,100 +178,6 @@ body {
 
 .status-pill-failed {
   border-color: var(--threat);
-  color: var(--threat);
-}
-
-/* Metrics tab (GH124-PLAN.md Checkpoint 2): the four gauges that used to run
-   horizontally across the top strip, now stacked vertically to the ~460px side
-   panel's width, plus the caught/missed/false counts under Correctness. */
-.metrics-gauges {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 1rem;
-}
-
-.gauge {
-  width: 100%;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.7rem 0.9rem;
-}
-
-.gauge-label {
-  color: var(--dim);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-}
-
-/* One muted caption line under the label, explaining the metric (GH124). Compact
-   so the four-gauge stack still fits the ~460px Metrics tab. */
-.gauge-desc {
-  color: var(--dim);
-  font-size: 0.7rem;
-  line-height: 1.3;
-  margin-top: 0.15rem;
-}
-
-.gauge-value {
-  font-size: 1.7rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  line-height: 1.1;
-}
-
-.gauge-unit {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--dim);
-  margin-left: 0.15rem;
-}
-
-.gauge-track {
-  margin-top: 0.5rem;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--panel2);
-  overflow: hidden;
-}
-
-.gauge-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition:
-    width 0.12s linear,
-    background 0.2s linear;
-}
-
-/* Gauge pulse (#38 juice item 2). `Gauge`'s `pulse` prop adds this class; the
-   caller only sets it at danger severity (Hud's Queue gauge), so `currentcolor`
-   below is safely the threat hue. The pulse animation itself lives in the
-   reduced-motion guard near the end of this file; the fill's background,
-   already `severityFill`'s danger color, is the static form. */
-.gauge-fill-pulse {
-  color: var(--threat);
-}
-
-.gauge-counts {
-  display: flex;
-  gap: 0.6rem;
-  margin-top: 0.5rem;
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.gauge-count-ok {
-  color: var(--ok);
-}
-
-.gauge-count-alert {
-  color: var(--alert);
-}
-
-.gauge-count-threat {
   color: var(--threat);
 }
 
@@ -1421,22 +1327,33 @@ body {
   overflow: hidden;
 }
 
-/* The "simulation ended" overlay (GH117 decision 5): shown over the map region once
-   the scored run concludes, so a frozen terminal frame reads as concluded, not stuck. */
-.metro-ended-overlay {
+/* The wave-outcome banner (GH126-PLAN.md M3b): shown over the map region while a
+   resolved wave's held/breach reading is fresh (SimSnapshot.waveOutcome), from the
+   wave's resolution through the cooldown gap, then cleared on the next trigger.
+   Replaces the retired "simulation ended" won/lost overlay: the endless baseline
+   never concludes, so this is a per-wave reading, not a terminal one. */
+.wave-outcome-banner {
   position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(10, 20, 26, 0.6);
-  color: var(--ink);
+  inset: auto 0 0;
+  margin: 0 auto 1rem;
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
   font-weight: 700;
   font-size: 0.85rem;
   text-align: center;
-  border-radius: 6px;
   pointer-events: none;
+}
+
+.wave-outcome-banner-held {
+  background: color-mix(in srgb, var(--ok) 24%, rgba(10, 20, 26, 0.75));
+  color: var(--ink);
+}
+
+.wave-outcome-banner-breach {
+  background: color-mix(in srgb, var(--threat) 30%, rgba(10, 20, 26, 0.75));
+  color: var(--ink);
 }
 
 .metro-map {
@@ -1984,6 +1901,29 @@ body {
   box-shadow: 0 0 14px color-mix(in srgb, var(--a1) 20%, transparent);
 }
 
+/* Locked rungs (levels 2-5, GH126-PLAN.md M3): visually muted, and the radio input
+   carries `disabled`, so neither a click nor keyboard nav can select them. */
+.chaos-level-locked {
+  opacity: 0.6;
+}
+
+/* The rung matching the store's current `chaosLevel` (GH126-PLAN.md M3b). */
+.chaos-level-selected {
+  border-color: var(--a1);
+  background: color-mix(in srgb, var(--a1) 10%, var(--panel2));
+}
+
+.chaos-ladder-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.chaos-level-locked .chaos-ladder-option {
+  cursor: not-allowed;
+}
+
 .chaos-ladder-rung {
   /* --ink over --panel2 clears WCAG AA (about 5.8:1); --dim did not. */
   color: var(--ink);
@@ -2012,6 +1952,25 @@ body {
      The orange accent stays present on the card's border and glow. */
   color: var(--ink);
   font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.chaos-ladder-locked-note {
+  margin: 0.4rem 0 0;
+  color: var(--dim);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+/* The running-cycle indicator (GH126-PLAN.md M3b): wave active or the cooldown gap,
+   read from the snapshot's `chaosPhase`. Hidden entirely while idle. */
+.chaos-ladder-phase {
+  margin: 0 0 0.8rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--a1) 14%, var(--panel2));
+  color: var(--ink);
+  font-size: 0.82rem;
   font-weight: 700;
 }
 
@@ -2307,10 +2266,6 @@ body {
   }
 
   .wave-readout-incoming {
-    animation: heart 0.45s infinite;
-  }
-
-  .gauge-fill-pulse {
     animation: heart 0.45s infinite;
   }
 

@@ -82,6 +82,29 @@ describe("ScoredIngress state transitions", () => {
   });
 });
 
+// GH126-PLAN.md finding 8 / seam 12: `size` exposes the buffered-but-unpumped count
+// for the ingress's own backlog getter and for the tests below. The engine's
+// wave-scoped queue metric no longer reads it directly — it computes the exact
+// offered-minus-processed watermark instead (`nextScoredEventId -
+// inspector.processedCount()`, `engine.ts`) — but this getter still needs covering
+// on its own terms.
+describe("ScoredIngress size (the buffered backlog, GH126 seam 12)", () => {
+  it("counts offered events still buffered, and drops to zero once pump drains them", async () => {
+    const ingress = new ScoredIngress();
+    expect(ingress.size).toBe(0);
+
+    ingress.offer(ev(0, 0));
+    ingress.offer(ev(1, 2));
+    ingress.offer(ev(2, 4));
+    expect(ingress.size).toBe(3); // three offered, none pumped yet
+
+    ingress.close();
+    const out = new Channel<PipeMessage>(10);
+    await ingress.pump(out, idleClock, noAdmit);
+    expect(ingress.size).toBe(0); // fully drained
+  });
+});
+
 describe("ScoredIngress backpressure", () => {
   it("blocks pump on a full channel and fires onAdmit only after the channel accepts", async () => {
     const out = new Channel<PipeMessage>(1);

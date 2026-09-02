@@ -26,18 +26,21 @@ import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { GeneratedRun, Scenario, ScheduleMode } from "../sim/scenario";
+import { buildSchedule } from "../sim/schedule";
 import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldEnv } from "../sim/world-reading";
 import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
 import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
+import { buildBaselineCast } from "./baseline-cast";
 import {
   type AmbientCast,
   type EngineHandle,
   type ScenarioCast,
   type StartOptions,
   start as startDefault,
+  type WaveId,
 } from "./engine";
 import { tabHidden } from "./profiler/guard";
 import { profile, spawnProfilerWorker } from "./profiler/profile";
@@ -49,7 +52,10 @@ import {
   CORRECTNESS_W_FP,
   CORRECTNESS_WINDOW,
   DECISIONS_CAP,
+  GAME_SECONDS_PER_TICK,
+  MAX_CHAOS_LEVEL,
   PROFILER_VERSION,
+  WAVE_DRAIN_MARGIN_TICKS,
 } from "./tuning";
 
 /**
@@ -107,6 +113,21 @@ export interface RunController {
    * engine live.
    */
   setSpeed(speed: Speed): void;
+  /**
+   * Trigger one chaos wave on the live engine (GH126-PLAN.md M2b). Delegates to the
+   * engine handle's `triggerWave`, which is itself a no-op outside endless mode or
+   * while a wave is already active (the cooldown, Q7). A safe no-op with no engine
+   * live. Returns the minted `WaveId`, or `null` when nothing was triggered.
+   */
+  triggerWave(): WaveId | null;
+  /**
+   * Select the chaos ladder's repeating level (GH126-PLAN.md M3a, Q7). The controller
+   * retains the level, delegates to the live engine handle when one exists, and
+   * reapplies it on the next start, so any fresh engine inherits the current selection.
+   * Level 0 is calm (the loop off); a level > 0 runs the repeating wave loop. Safe with
+   * no engine live.
+   */
+  setChaosLevel(level: number): void;
   /** Permanent teardown. A later load or completion sees this and does nothing. */
   dispose(): void;
 }
@@ -180,11 +201,24 @@ export interface RunControllerDeps {
  * a config-level default tuned for one hunt would silently misscore any other
  * hunt whose Attacks forgot to set their own value.
  */
-const SCORER_CONFIG: ScorerConfig = {
+
+/**
+ * `retentionFloor`, strictly past the wave drain margin (GH126 second Codex review
+ * round, finding N1). `resolveWave` (`engine.ts`) settles a wave attack at
+ * `advanceTo(windowEnd + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK)`, then
+ * reads its outcome. The scorer's own `retireResolved` must never have deleted that
+ * attack by then, whatever `liveHorizon` is configured for the live-set gauge — so
+ * this floor sits at twice the drain margin: comfortably past it with room for the
+ * margin itself to grow before the floor would need revisiting.
+ */
+const SCORER_RETENTION_FLOOR = WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK * 2;
+
+export const SCORER_CONFIG: ScorerConfig = {
   window: CORRECTNESS_WINDOW,
   wFn: CORRECTNESS_W_FN,
   wFp: CORRECTNESS_W_FP,
   decisionsCap: DECISIONS_CAP,
+  retentionFloor: SCORER_RETENTION_FLOOR,
 };
 
 function toErrorInfo(phase: string, error: unknown): RuleErrorInfo {
@@ -462,6 +496,10 @@ export function createRunController(deps: RunControllerDeps): RunController {
   // Default speed 1, so a normal startup runs at the base rate.
   let frozen = false;
   let speed: Speed = 1;
+  // The retained chaos-ladder level (GH126-PLAN.md M3a). Source of truth: startEngine
+  // reapplies it to every fresh engine, so a hot-reload or Apply inherits the current
+  // selection. Default 0 (calm, the loop off).
+  let chaosLevel = 0;
 
   const run = async (): Promise<void> => {
     if (disposed) {
@@ -541,36 +579,56 @@ export function createRunController(deps: RunControllerDeps): RunController {
       // or replaced, so a failed dry-run never orphans the running engine.
       let phase = "setup";
       try {
-        // Build the blueprint once when the scenario provides one (GH117 Part B). The
-        // scorer and generator come from its precomposed run — byte for byte what
-        // `generate(seed)` returns — and the same blueprint yields the live cast + env.
-        // A scenario without a blueprint falls back to `generate` and runs with no cast.
+        // GH126-PLAN.md M1: under "endless" the app runs the calm baseline, never a
+        // Scenario's Attack. It skips `buildBlueprint`/`scenario.generate` entirely —
+        // there is no attack to plan — and instead runs `buildBaselineCast`'s
+        // empty-member scenario cast, ambient life, and never-closing scored ingress,
+        // with zero attacks in the scorer and no waves or checkpoints (finding 9).
+        //
+        // Outside "endless" (this build's own dev/test paths, "waves"/"steady"), the
+        // blueprint drives a live cast exactly as before (GH117 Part B): the scorer
+        // and generator come from its precomposed run — byte for byte what
+        // `generate(seed)` returns — and the same blueprint yields the live cast +
+        // env. A scenario without a blueprint falls back to `generate` and runs with
+        // no cast.
         const scheduleMode: ScheduleMode = deps.scheduleMode ?? "waves";
-        const blueprint = deps.buildBlueprint?.(seed, scheduleMode) ?? null;
-        const generated: GeneratedRun = blueprint
-          ? {
-              events: [...blueprint.precomposed.events],
-              attacks: [...blueprint.precomposed.attacks],
-              checkpoints: [...blueprint.checkpoints],
-              waves: [...blueprint.waves],
-            }
-          : deps.scenario.generate(seed); // fresh per run
+        let generated: GeneratedRun;
+        let mapCast: { scenarioCast: ScenarioCast; ambientCast: AmbientCast } | undefined;
+        let scoredIngest: StartOptions["scoredIngest"];
+        if (scheduleMode === "endless") {
+          const { waves, checkpoints } = buildSchedule("endless");
+          generated = { events: [], attacks: [], checkpoints, waves };
+          const baseline = buildBaselineCast(seed);
+          mapCast = { scenarioCast: baseline.scenarioCast, ambientCast: baseline.ambientCast };
+          scoredIngest = baseline.scoredIngest;
+        } else {
+          const blueprint = deps.buildBlueprint?.(seed, scheduleMode) ?? null;
+          generated = blueprint
+            ? {
+                events: [...blueprint.precomposed.events],
+                attacks: [...blueprint.precomposed.attacks],
+                checkpoints: [...blueprint.checkpoints],
+                waves: [...blueprint.waves],
+              }
+            : deps.scenario.generate(seed); // fresh per run
+          mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
+          // GH117 Part C: when a blueprint drives a live cast, score off the live
+          // stepped stream, not the pre-generated `generator`. The engine offers each
+          // scored reading into this ingress and closes it at `lastScoredTick`;
+          // `generator` stays wired as the no-blueprint fallback. Guard 2 proves the
+          // two agree.
+          scoredIngest = blueprint
+            ? {
+                ingress: new ScoredIngress(),
+                toEvent: blueprint.toEvent,
+                lastScoredTick: blueprint.lastScoredTick,
+              }
+            : undefined;
+        }
         const scorer = createScorer(generated.attacks, SCORER_CONFIG);
         let index = 0;
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
-        const mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
-        // GH117 Part C: when a blueprint drives a live cast, score off the live stepped
-        // stream, not the pre-generated `generator`. The engine offers each scored
-        // reading into this ingress and closes it at `lastScoredTick`; `generator`
-        // stays wired as the no-blueprint fallback. Guard 2 proves the two agree.
-        const scoredIngest = blueprint
-          ? {
-              ingress: new ScoredIngress(),
-              toEvent: blueprint.toEvent,
-              lastScoredTick: blueprint.lastScoredTick,
-            }
-          : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
@@ -603,6 +661,10 @@ export function createRunController(deps: RunControllerDeps): RunController {
             handle.pause();
           }
           handle.setSpeed(speed);
+          // Reapply the retained chaos level, so a fresh engine inherits the current
+          // ladder selection (GH126-PLAN.md M3a). Endless-only at the engine, so a
+          // non-endless run just retains it.
+          handle.setChaosLevel(chaosLevel);
         } catch (reapplyError) {
           handle.stop();
           throw reapplyError;
@@ -665,12 +727,33 @@ export function createRunController(deps: RunControllerDeps): RunController {
     engine?.setSpeed(next);
   };
 
+  // Delegate to the live engine handle. Safe with no engine live (returns null), and
+  // the handle itself no-ops outside endless mode or during a wave's cooldown.
+  const triggerWave = (): WaveId | null => engine?.triggerWave() ?? null;
+
+  // Validate before retaining, mirroring `setSpeed` above: the engine itself ignores
+  // a non-integer or out-of-range level (`engine.ts`'s own `setChaosLevel` guard), so
+  // without this check an invalid value would still overwrite a valid retained level
+  // here, then get lost (never reapplied) on the next `run()`. Ignore invalid values
+  // rather than throw, since the engine's guard is itself a silent ignore, not a
+  // throw. Then, when a clock is live, apply it at once. With no engine live it just
+  // stores the value; startEngine reapplies it on the next start.
+  const setChaosLevel = (level: number): void => {
+    if (!Number.isInteger(level) || level < 0 || level > MAX_CHAOS_LEVEL) {
+      return;
+    }
+    chaosLevel = level;
+    engine?.setChaosLevel(level);
+  };
+
   return {
     run: () => {
       void run();
     },
     setFrozen,
     setSpeed,
+    triggerWave,
+    setChaosLevel,
     dispose,
   };
 }

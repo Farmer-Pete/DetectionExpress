@@ -26,10 +26,14 @@ function buildController(): RunController {
     // The app's one scenario is pin-brute-force, so its blueprint drives the map cast
     // (GH117 Part B). A later step collapses the pipeline and metro controllers into one.
     buildBlueprint,
-    // The app default (GH124-PLAN.md Checkpoint 3): a steady, gapless arrival stream
-    // with no incoming waves. Reversible per run, not a global flag — a caller that
-    // wants the original ramp back passes "waves" here instead.
-    scheduleMode: "steady",
+    // The app default (GH126-PLAN.md M1): an endless calm baseline, no waves, no
+    // checkpoints, no attack. The run controller runs the baseline cast under this
+    // mode, ignoring `buildBlueprint` entirely (GH126-PLAN.md M1's "no attacker
+    // blueprint"). `buildBlueprint` stays wired below for a later chaos-wave trigger
+    // (GH126-PLAN.md M2) to reuse. Reversible per run, not a global flag — a caller
+    // that wants the original ramp or the gapless steady stream passes "waves" or
+    // "steady" here instead.
+    scheduleMode: "endless",
     getGraph,
     // The in-game editor's source string.
     getAlgorithmSource: () => useGameStore.getState().source,
@@ -68,6 +72,11 @@ export function usePipelineController({ createController }: UsePipelineControlle
     // the panel still shows frozen/2x.
     active.setFrozen(useGameStore.getState().transport.frozen);
     active.setSpeed(useGameStore.getState().transport.speed);
+    // Seed the retained chaos-ladder level too (GH126-PLAN.md M3a), mirroring the
+    // transport seed above: the reflection effect below is keyed on [chaosLevel], so it
+    // does not re-fire on a view change, and without this seed a fresh engine would run
+    // at level 0 while the store still holds the player's selection.
+    active.setChaosLevel(useGameStore.getState().chaosLevel);
     return () => {
       active.dispose();
       if (controllerRef.current === active) {
@@ -99,6 +108,17 @@ export function usePipelineController({ createController }: UsePipelineControlle
   useEffect(() => {
     controllerRef.current?.setSpeed(speed);
   }, [speed]);
+
+  // The same reflection for the chaos-ladder level (GH126-PLAN.md M3a). The
+  // chaos-ladder rung, wired through `SidePanel` (GH126-PLAN.md M3b), calls the
+  // store's `setChaosLevel` on a click; this effect only mirrors the store value
+  // into the controller. An engine swap is handled by the controller reapplying its
+  // retained level on startEngine, which this effect misses because the store value
+  // did not change.
+  const chaosLevel = useGameStore((s) => s.chaosLevel);
+  useEffect(() => {
+    controllerRef.current?.setChaosLevel(chaosLevel);
+  }, [chaosLevel]);
 
   return { controllerRef };
 }

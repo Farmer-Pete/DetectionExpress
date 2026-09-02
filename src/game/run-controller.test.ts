@@ -10,8 +10,10 @@ import {
   type ProfilerWorkerLike,
   type RuleErrorInfo,
   type RunControllerDeps,
+  SCORER_CONFIG,
   type ServiceRateHandle,
 } from "./run-controller";
+import { GAME_SECONDS_PER_TICK, MAX_CHAOS_LEVEL, WAVE_DRAIN_MARGIN_TICKS } from "./tuning";
 
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
@@ -58,6 +60,8 @@ function fakeHandle(whenStopped: Promise<void> = Promise.resolve()): EngineHandl
     pause: () => undefined,
     resume: () => undefined,
     setSpeed: () => undefined,
+    triggerWave: () => null,
+    setChaosLevel: () => undefined,
     whenStopped,
   };
 }
@@ -93,6 +97,8 @@ function spyHandle(whenStopped: Promise<void> = new Promise(() => undefined)): {
     pause: () => undefined,
     resume: () => undefined,
     setSpeed: () => undefined,
+    triggerWave: () => null,
+    setChaosLevel: () => undefined,
     whenStopped,
   };
   return {
@@ -315,6 +321,42 @@ describe("run controller", () => {
     expect(seen[0]?.scheduleMode).toBe("steady");
   });
 
+  it('runs the baseline cast under "endless": no waves, no checkpoints, an empty-member scenarioCast, and a never-closing scoredIngest, without ever calling buildBlueprint or scenario.generate (GH126-PLAN.md M1)', async () => {
+    const seen: StartOptions[] = [];
+    let blueprintCalls = 0;
+    let generateCalls = 0;
+    const trackedScenario: Scenario = {
+      id: "test",
+      generate: () => {
+        generateCalls += 1;
+        return emptyRun;
+      },
+    };
+    const controller = createRunController(
+      baseDeps({
+        scenario: trackedScenario,
+        scheduleMode: "endless",
+        buildBlueprint: (seed, mode) => {
+          blueprintCalls += 1;
+          return buildRealBlueprint(seed, mode);
+        },
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen[0]?.scheduleMode).toBe("endless");
+    expect(seen[0]?.checkpoints).toEqual([]);
+    expect(seen[0]?.waves).toEqual([]);
+    expect(seen[0]?.scenarioCast?.members).toEqual([]);
+    expect(seen[0]?.scoredIngest?.lastScoredTick).toBe(Number.POSITIVE_INFINITY);
+    expect(blueprintCalls).toBe(0); // no attack blueprint: the baseline plans no Attack
+    expect(generateCalls).toBe(0); // no scenario batch generation either
+  });
+
   it("injects the profiled service rate into start (M2)", async () => {
     const seen: StartOptions[] = [];
     const controller = createRunController(
@@ -440,6 +482,8 @@ describe("run controller", () => {
               pause: () => undefined,
               resume: () => undefined,
               setSpeed: () => undefined,
+              triggerWave: () => null,
+              setChaosLevel: () => undefined,
               whenStopped: new Promise(() => undefined),
             };
             return handle;
@@ -655,6 +699,8 @@ describe("run controller", () => {
       pause: () => calls.push("pause"),
       resume: () => calls.push("resume"),
       setSpeed: () => undefined,
+      triggerWave: () => null,
+      setChaosLevel: () => undefined,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -684,6 +730,8 @@ describe("run controller", () => {
             pause: () => pauses.push(index),
             resume: () => undefined,
             setSpeed: () => undefined,
+            triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -704,6 +752,8 @@ describe("run controller", () => {
       pause: () => undefined,
       resume: () => undefined,
       setSpeed: (m) => speeds.push(m),
+      triggerWave: () => null,
+      setChaosLevel: () => undefined,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -719,6 +769,110 @@ describe("run controller", () => {
     expect(() => controller.setSpeed(2)).not.toThrow();
   });
 
+  it("delegates triggerWave to the live engine handle and returns its WaveId", async () => {
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      setSpeed: () => undefined,
+      triggerWave: () => 7,
+      setChaosLevel: () => undefined,
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    expect(controller.triggerWave()).toBe(7);
+  });
+
+  it("triggerWave is a safe no-op that returns null when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(controller.triggerWave()).toBeNull();
+  });
+
+  it("delegates setChaosLevel to the live engine handle", async () => {
+    const levels: number[] = [];
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      setSpeed: () => undefined,
+      triggerWave: () => null,
+      setChaosLevel: (level) => levels.push(level),
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    levels.length = 0; // drop the reapply from startEngine; measure the explicit call
+    controller.setChaosLevel(1);
+    expect(levels).toEqual([1]);
+  });
+
+  it("setChaosLevel is a safe no-op when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(() => controller.setChaosLevel(1)).not.toThrow();
+  });
+
+  it("reapplies the retained chaos level on the next startEngine, so a replacement run inherits it", async () => {
+    const levels: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: () => undefined,
+            triggerWave: () => null,
+            setChaosLevel: (level) => levels.push(level),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first start reapplies the default level 0
+    await flush();
+    controller.setChaosLevel(1); // retained
+    controller.run(); // a replacement run reapplies the retained level
+    await flush();
+    expect(levels).toEqual([0, 1, 1]); // start 0 default, explicit 1, then start reapply 1
+  });
+
+  it("ignores a non-integer or out-of-range chaos level before it retains it", async () => {
+    const levels: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: () => undefined,
+            triggerWave: () => null,
+            setChaosLevel: (level) => levels.push(level),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first start reapplies the default level 0
+    await flush();
+    controller.setChaosLevel(1); // valid: retained
+    controller.setChaosLevel(2.5); // invalid: non-integer, ignored
+    controller.setChaosLevel(MAX_CHAOS_LEVEL + 1); // invalid: out of range, ignored
+    controller.setChaosLevel(-1); // invalid: out of range, ignored
+    controller.run(); // a replacement run reapplies the retained level, still 1
+    await flush();
+    expect(levels).toEqual([0, 1, 1]); // neither invalid call ever overwrote or reapplied
+  });
+
   it("rejects a speed outside 0.5|1|2 before it retains it", async () => {
     const speeds: number[] = [];
     let call = 0;
@@ -732,6 +886,8 @@ describe("run controller", () => {
             pause: () => undefined,
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
+            triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -762,6 +918,8 @@ describe("run controller", () => {
             pause: () => undefined,
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
+            triggerWave: () => null,
+            setChaosLevel: () => undefined,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -790,6 +948,8 @@ describe("run controller", () => {
           setSpeed: () => {
             throw new Error("setSpeed boom");
           },
+          triggerWave: () => null,
+          setChaosLevel: () => undefined,
           whenStopped: new Promise(() => undefined),
         }),
       }),
@@ -892,6 +1052,19 @@ describe("run controller loader and profiler seam derive from the algorithm sour
     controller.run();
     await flush();
     expect(sources).toEqual(["export const detect = () => []"]);
+  });
+});
+
+// GH126 second Codex review round, finding N1: `resolveWave` (`engine.ts`) reads a
+// wave attack's outcome right after `advanceTo(wave.drainDeadline)`, where
+// `drainDeadline = windowEnd + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK`. The
+// scorer's `retireResolved` must never have deleted that attack by then, independent
+// of whatever `liveHorizon` is configured — hence `retentionFloor`, set here strictly
+// past the drain margin.
+describe("run controller scorer config: retentionFloor outlives the wave drain read (GH126 N1)", () => {
+  it("sets retentionFloor strictly past the wave drain margin, so a wave's outcome always outlives resolveWave's read", () => {
+    const drainMargin = WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK;
+    expect(SCORER_CONFIG.retentionFloor).toBeGreaterThan(drainMargin);
   });
 });
 
