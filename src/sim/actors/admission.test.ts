@@ -163,3 +163,28 @@ describe("admitArrivals: bad input throws", () => {
     ).toThrow();
   });
 });
+
+describe('admitArrivals: "steady" mode (GH124-PLAN.md Checkpoint 3)', () => {
+  it('rejects a gap-0 successor by default, the same as "waves"', () => {
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 10, eventsPerTick: 5 },
+      { startTick: 10, durationTicks: 10, eventsPerTick: 5 },
+    ];
+    expect(() => admitArrivals(waves)).toThrow();
+    expect(() => admitArrivals(waves, "waves")).toThrow();
+  });
+
+  it('accepts a gap-0 successor and admits the contiguous stream when mode is "steady"', () => {
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 4, eventsPerTick: 5 },
+      { startTick: 4, durationTicks: 4, eventsPerTick: 5 },
+    ];
+    const arrivals = admitArrivals(waves, "steady");
+    // No seam at the boundary: every tick across both waves admits exactly the rate,
+    // since a whole integer rate's accumulator is back at zero by each wave's end.
+    expect(arrivals).toEqual([
+      0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6,
+      6, 6, 6, 6, 7, 7, 7, 7, 7,
+    ]);
+  });
+});

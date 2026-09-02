@@ -29,7 +29,7 @@ import {
   type ScenarioSpec,
 } from "../../compose-scenario";
 import { kioskV1, type RawKioskV1 } from "../../endpoints/kiosk/formats/kiosk-v1";
-import type { GeneratedRun, Scenario } from "../../scenario";
+import type { GeneratedRun, Scenario, ScheduleMode } from "../../scenario";
 import { assertThresholdInWindow } from "../../separability";
 import { world } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
@@ -111,7 +111,7 @@ function benignCast(
   attacker: PinAttackerCast,
 ): ActorDescriptor<WorldReading, WorldEnv>[] {
   const victims = new Set(attacker.plans.map((plan) => plan.account));
-  const slotTicks = admitArrivals(ctx.waves);
+  const slotTicks = admitArrivals(ctx.waves, ctx.scheduleMode);
   const visits = slotTicks.map((tick) => ({
     tick,
     account: pickSeeded(attacker.pools.accounts, ctx.rng),
@@ -237,11 +237,19 @@ function generate(seed: number, partition?: number): GeneratedRun {
 
 /**
  * Build this scenario's immutable blueprint from a seed (GH117-PLAN.md "Part A").
- * Not part of the public `Scenario` interface: it is read by the test parity sweep
- * today, and by a live consumer in a later step, not by `generate`'s callers.
+ * Not part of the public `Scenario` interface: it is read by the test parity sweep,
+ * and by the live app through `use-pipeline-controller.ts` -> `run-controller.ts`
+ * (GH124-PLAN.md Checkpoint 3), not by `generate`'s callers.
+ *
+ * `mode` defaults to `"waves"`, the original climbing ramp, so every existing
+ * caller is unaffected. The live app passes `"steady"` explicitly.
  */
-export function buildBlueprint(seed: number, partition?: number): ScenarioBlueprint<AttackPlan> {
-  return buildScenarioBlueprint(spec, seed, partition);
+export function buildBlueprint(
+  seed: number,
+  mode: ScheduleMode = "waves",
+  partition?: number,
+): ScenarioBlueprint<AttackPlan> {
+  return buildScenarioBlueprint(spec, seed, mode, partition);
 }
 
 export const pinBruteForce: Scenario = {

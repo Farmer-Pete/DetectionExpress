@@ -2,7 +2,7 @@
  * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md,
  * GH118-PLAN.md). It holds only the `mapShown` toggle, the wave shake, the
  * modal-open derivation, the two panel refs shared with
- * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the two Topbar button refs
+ * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the three Topbar button refs
  * shared with the side panel; everything else is composed from a hook or a
  * component that owns its own lifecycle and its own tests:
  *
@@ -27,15 +27,29 @@
  *   the two side-panel openers, the "How this works" reopen button (wired to
  *   `useIntroOverlay`'s `reopenRef` and `onReopen`), and Hire Me.
  *
+ * The four HUD gauges moved into the side panel's Metrics tab (GH124-PLAN.md
+ * Checkpoint 2), so this file no longer mounts `Hud` in the main column; only the
+ * run-status pill (`StatusPill`, read by `Topbar`) stays in the top bar. The pending
+ * side-panel-tab dispatch below (see "The intro transition") now switches over all
+ * three tabs instead of treating "not chaos" as "algorithm".
+ *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
- * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open` — and hands it in
- * along with all three overlays, `IntroOverlay`, `TraceOverlay`, and the side panel,
- * as `ModalHost`'s `overlays` prop. All three render as siblings of the inert shell,
- * so a screen reader's browse mode and the keyboard cannot reach shell content
- * behind any of them. `openChaos`/`openAlgorithm` are mutually exclusive with the
- * trace overlay (`useSidePanel`'s own concern), so the shell never stacks two dim
- * backdrops.
+ * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open || stackOpen` —
+ * and hands it in along with all five overlays, `IntroOverlay`, `TraceOverlay`,
+ * `PlaceDialog` (GH124-PLAN.md Checkpoint 4), `EventDialog` (Checkpoint 5), and the
+ * side panel, as `ModalHost`'s `overlays` prop. `PlaceDialog` and `EventDialog` are
+ * both always mounted, but share one bounded stack (`mapDialogStack`, store.ts) and
+ * each self-selects rendering off its TOP entry, so only one of the two is ever
+ * actually on screen — pushing a second dialog from within the first (its "Open
+ * place" link, or a scoped-log row) swaps which of the two renders without emptying
+ * the stack, so a "‹ Back" control in the newly-topmost dialog can pop back to the
+ * one underneath. All five overlays render as siblings of the inert shell, so a
+ * screen reader's browse mode and the keyboard cannot reach shell content behind any
+ * of them. `openChaos`/`openAlgorithm` are mutually exclusive with the trace overlay
+ * (`useSidePanel`'s own concern), and `onMapSelect`/`onEventSelect` below enforce the
+ * same exclusivity against the whole map/event stack, so the shell never stacks a
+ * third dim backdrop behind it.
  *
  * `App` also publishes `modalOpen` to the store as `overlayOpen`, with
  * `useLayoutEffect` (not a passive effect) so it lands in the same commit as
@@ -58,10 +72,14 @@
  *
  * The intro button that triggered this is unmounted before the panel could restore
  * focus to it, so the panel falls back to a stable Topbar button instead:
- * `chaosButtonRef`/`algorithmButtonRef` are handed to both `Topbar` (which attaches
- * them to its two openers) and `useSidePanel` (which forwards whichever one matches
- * the active tab as `SidePanel`'s `fallbackFocusRef`), the same fallback-focus
- * pattern `TraceOverlay` already uses.
+ * `chaosButtonRef`/`algorithmButtonRef`/`metricsButtonRef` are handed to both
+ * `Topbar` (which attaches them to its three openers) and `useSidePanel` (which
+ * forwards whichever one matches the active tab as `SidePanel`'s
+ * `fallbackFocusRef`), the same fallback-focus pattern `TraceOverlay` already uses.
+ * The intro itself only ever requests "chaos" or "algorithm" (it has no Metrics
+ * action), but the pending-tab switch below still covers "metrics" so the dispatch
+ * stays correct if that ever changes, rather than silently falling through to
+ * Algorithm.
  *
  * ## Pause ownership (GH118-PLAN.md)
  * The pause runs through the store's `transport.frozen`, not a direct controller
@@ -84,16 +102,18 @@
  * instant a run concludes, instead of running out its own timer over a frozen
  * frame. A fresh run re-arms the edge once it starts running again.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
+import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
-import { Hud } from "./hud/Hud";
 import { useIntroOverlay } from "./intro/use-intro-overlay";
+import { EventDialog } from "./log/EventDialog";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
+import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
 import { type SidePanelTab, useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
@@ -122,11 +142,33 @@ export function App({ createPipelineController }: AppProps = {}) {
   // Shared with DecisionsPanel (which renders it) and TraceOverlay (which reads it as
   // the decision-mode focus fallback, GH34-35-PLAN.md decision 14).
   const decisionsPanelRef = useRef<HTMLElement>(null);
-  // Shared with Topbar (which attaches them to its two openers) and useSidePanel
+  // Shared with MetroView (which attaches it to the map region) and PlaceDialog
+  // (which reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 4 — the
+  // same fallback-focus pattern as findingsPanelRef/decisionsPanelRef above).
+  const metroMapRegionRef = useRef<HTMLDivElement>(null);
+  // Shared with InspectorShell (which forwards it to LogPanel) and EventDialog (which
+  // reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 5 — the same
+  // fallback-focus pattern as the refs above).
+  const logPanelRef = useRef<HTMLDivElement>(null);
+  // Shared with BOTH PlaceDialog and EventDialog (GH124 follow-up, the dialog
+  // navigation stack): the element that triggered the current map/event dialog-stack
+  // session's very first, "outside", open — captured and consumed by
+  // `useMapDialogFocus` (`dialog-stack-focus.ts`), not by either dialog component on
+  // its own, since only ONE shared ref can survive a push swapping which of the two
+  // dialogs is actually mounted.
+  const mapDialogRootTriggerRef = useRef<Element | null>(null);
+  // Paired with the ref above (same capture instant, same lifetime): the ROOT
+  // session's own fallback-focus ref (`metroMapRegionRef` for a map-rooted session,
+  // `logPanelRef` for an event-rooted one), so a full close restores to the fallback
+  // of whichever dialog opened the session rather than whichever one is on top when
+  // it closes — see `dialog-stack-focus.ts`.
+  const mapDialogRootFallbackRef = useRef<RefObject<HTMLElement | null> | null>(null);
+  // Shared with Topbar (which attaches them to its three openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
   const chaosButtonRef = useRef<HTMLButtonElement>(null);
   const algorithmButtonRef = useRef<HTMLButtonElement>(null);
+  const metricsButtonRef = useRef<HTMLButtonElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -148,6 +190,23 @@ export function App({ createPipelineController }: AppProps = {}) {
   const selection = useGameStore((s) => s.selection);
   const decisionSelection = useGameStore((s) => s.decisionSelection);
   const traceOpen = selection !== null || decisionSelection !== null;
+
+  // The place/event dialog stack (GH124-PLAN.md Checkpoints 4-5, restructured for
+  // Back navigation): `mapDialogStack.length > 0` IS "a place or event dialog is
+  // open", mirroring `traceOpen` above — one flag covers both dialogs now, since a
+  // push (from inside either one) leaves the stack non-empty exactly like a fresh
+  // "outside" open does. Unlike the trace dialog, opening it never freezes the engine
+  // (PlaceDialog's/EventDialog's own concern, not App's) — it only feeds `modalOpen`
+  // below, so the shell still goes inert while it is up. `PlaceDialog`/`EventDialog`
+  // each self-select which one renders off the stack's top entry, so App only needs
+  // the three "outside" openers (a map click, a main-log-row click) and the
+  // stack-non-empty flag; the "inside" pushers (`openPlaceFromEvent`,
+  // `openEventFromPlace`) live entirely inside the two dialogs.
+  const mapDialogStack = useGameStore((s) => s.mapDialogStack);
+  const stackOpen = mapDialogStack.length > 0;
+  const selectMapNode = useGameStore((s) => s.selectMapNode);
+  const selectMapTrain = useGameStore((s) => s.selectMapTrain);
+  const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
 
   // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
   // requests a side-panel tab records it here instead of opening the panel
@@ -180,12 +239,50 @@ export function App({ createPipelineController }: AppProps = {}) {
     controllerRef,
     chaosFocusRef: chaosButtonRef,
     algorithmFocusRef: algorithmButtonRef,
+    metricsFocusRef: metricsButtonRef,
   });
+
+  // No-op while another overlay is already open (mirrors useSidePanel's own openWith
+  // exclusivity check): the shell being inert already blocks a real pointer/keyboard
+  // click from reaching the map, but this guard is what actually enforces "only one
+  // dialog stack at a time" against any path that is not gated by inert. Both this and
+  // `onEventSelect` below guard on the SAME `stackOpen` flag now (a map click and a
+  // main-log-row click are both "outside" openers, only reachable while the stack is
+  // empty — see `mapDialogStack`'s doc comment in store.ts), so the two stay
+  // consistent (a Codex review once caught the event opener going unguarded here).
+  const onMapSelect = useCallback(
+    (next: MapSelection) => {
+      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
+        return;
+      }
+      if (next.kind === "node") {
+        selectMapNode(next.id);
+      } else {
+        selectMapTrain(next.actorId);
+      }
+    },
+    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectMapNode, selectMapTrain],
+  );
+
+  // The event opener's guard, mirroring `onMapSelect` above. Forwarded to `LogPanel`
+  // (via `InspectorShell`'s `onSelectEvent` prop) so a row click routes through this
+  // guard instead of calling the store directly.
+  const onEventSelect = useCallback(
+    (id: number) => {
+      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
+        return;
+      }
+      selectWorldEvent(id);
+    },
+    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectWorldEvent],
+  );
 
   // Complete the intro transition: once the intro has actually closed, act on
   // whatever tab a dismiss recorded (see the module doc's "The intro transition").
   // A no-op on every other render, since `pendingPanelTabRef` only ever holds a
-  // value between an intro dismiss and this effect's next run.
+  // value between an intro dismiss and this effect's next run. A switch over all
+  // three tabs, not an if/else that treats "not chaos" as "algorithm" — the bug
+  // that shipped before GH124-PLAN.md Checkpoint 2 added the metrics tab.
   useEffect(() => {
     if (intro.introOpen) {
       return;
@@ -195,14 +292,20 @@ export function App({ createPipelineController }: AppProps = {}) {
       return;
     }
     pendingPanelTabRef.current = null;
-    if (tab === "chaos") {
-      sidePanel.openChaos();
-    } else {
-      sidePanel.openAlgorithm();
+    switch (tab) {
+      case "chaos":
+        sidePanel.openChaos();
+        break;
+      case "algorithm":
+        sidePanel.openAlgorithm();
+        break;
+      case "metrics":
+        sidePanel.openMetrics();
+        break;
     }
-  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm]);
+  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm, sidePanel.openMetrics]);
 
-  const modalOpen = intro.introOpen || traceOpen || sidePanel.open;
+  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || stackOpen;
 
   // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
   // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
@@ -221,18 +324,20 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   return (
     // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
-    // (GH105-PLAN.md). `modalOpen` covers all three overlays, so the shell goes
-    // inert while ANY of the intro, the trace dialog, or the side panel is open, and
-    // a screen reader's browse mode and the keyboard cannot reach shell content
-    // behind any of them. The shake class lands on the shell class it manages, not
-    // the outer `.app` wrapper, so its transform never turns into a containing block
-    // for an overlay's `position: fixed` backdrop (F006). `shellExtraClass` ANDs
-    // `shaking` with `status === "running"`, so an in-flight shake clears
-    // immediately if the run concludes mid-animation, instead of running out its own
-    // timer over a frozen frame (CodeRabbit review). All three overlays are
-    // ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
+    // (GH105-PLAN.md). `modalOpen` covers all five overlays, so the shell goes
+    // inert while ANY of the intro, the trace dialog, the place dialog, the event
+    // dialog, or the side panel is open, and a screen reader's browse mode and the
+    // keyboard cannot reach shell content behind any of them. The shake class lands
+    // on the shell class it manages, not the outer `.app` wrapper, so its transform
+    // never turns into a containing block for an overlay's `position: fixed` backdrop
+    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"`, so an
+    // in-flight shake clears immediately if the run concludes mid-animation, instead
+    // of running out its own timer over a frozen frame (CodeRabbit review). All five
+    // overlays are ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
     // `TraceOverlay` unconditionally (it renders null itself when neither selection
-    // is set), and the side panel when `sidePanel.open`.
+    // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
+    // unless it is the KIND named by `mapDialogStack`'s top entry), and the side
+    // panel when `sidePanel.open`.
     <ModalHost
       modalOpen={modalOpen}
       shellExtraClass={shaking && status === "running" ? "shake" : undefined}
@@ -242,6 +347,16 @@ export function App({ createPipelineController }: AppProps = {}) {
           <TraceOverlay
             fallbackFocusRef={findingsPanelRef}
             decisionsFallbackFocusRef={decisionsPanelRef}
+          />
+          <PlaceDialog
+            fallbackFocusRef={metroMapRegionRef}
+            rootTriggerRef={mapDialogRootTriggerRef}
+            rootFallbackFocusRef={mapDialogRootFallbackRef}
+          />
+          <EventDialog
+            fallbackFocusRef={logPanelRef}
+            rootTriggerRef={mapDialogRootTriggerRef}
+            rootFallbackFocusRef={mapDialogRootFallbackRef}
           />
           {sidePanel.sidePanel}
         </>
@@ -254,12 +369,17 @@ export function App({ createPipelineController }: AppProps = {}) {
         onReopen={intro.onReopen}
         onOpenChaos={sidePanel.openChaos}
         onOpenAlgorithm={sidePanel.openAlgorithm}
+        onOpenMetrics={sidePanel.openMetrics}
         chaosButtonRef={chaosButtonRef}
         algorithmButtonRef={algorithmButtonRef}
+        metricsButtonRef={metricsButtonRef}
       />
-      <Hud />
-      {mapShown ? <MetroView /> : null}
-      <InspectorShell findingsPanelRef={findingsPanelRef} />
+      {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
+      <InspectorShell
+        findingsPanelRef={findingsPanelRef}
+        logPanelRef={logPanelRef}
+        onSelectEvent={onEventSelect}
+      />
       <DecisionsPanel panelRef={decisionsPanelRef} />
     </ModalHost>
   );

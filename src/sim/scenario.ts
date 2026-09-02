@@ -8,6 +8,17 @@ import type { Attack } from "./attack";
 import type { PipeEvent } from "./event";
 
 /**
+ * How the run's benign arrival stream is shaped (GH124-PLAN.md Checkpoint 3).
+ * `"waves"` is the original ramp: `WAVE_RATES` climbing wave over wave, each
+ * pair separated by a drain gap wide enough for the successor's `incoming` cue.
+ * `"steady"` swaps that ramp for one gapless constant stream at the calm
+ * baseline rate, with no incoming cue and no interim checkpoints. Both still
+ * carry exactly `WAVE_COUNT` waves, since `planAttacks()` plans one attack
+ * batch per wave regardless of the arrival shape underneath it.
+ */
+export type ScheduleMode = "waves" | "steady";
+
+/**
  * One arrival wave: benign volume climbs per wave. Rates are Events per tick;
  * fractional emission uses a carried accumulator, not per-Event rounding. Waves
  * are half-open `[startTick, startTick + durationTicks)` and never overlap.

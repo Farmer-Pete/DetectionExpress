@@ -25,7 +25,7 @@ import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
-import type { GeneratedRun, Scenario } from "../sim/scenario";
+import type { GeneratedRun, Scenario, ScheduleMode } from "../sim/scenario";
 import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
@@ -122,7 +122,14 @@ export interface RunControllerDeps {
    * live cast plus env the engine steps for the map. Omitted, the controller falls back
    * to `generate` and runs with no cast — scoring is identical either way.
    */
-  buildBlueprint?: (seed: number) => ScenarioBlueprint<{ id: number }>;
+  buildBlueprint?: (seed: number, mode?: ScheduleMode) => ScenarioBlueprint<{ id: number }>;
+  /**
+   * The arrival shape (GH124-PLAN.md Checkpoint 3) this controller runs with,
+   * forwarded to `buildBlueprint` and to the engine's `StartOptions.scheduleMode`.
+   * Defaults to `"waves"`, the original ramp, so a caller that omits it (every
+   * existing test) is unaffected. The app's real controller passes `"steady"`.
+   */
+  scheduleMode?: ScheduleMode;
   getGraph: () => { nodes: GraphNode[]; edges: GraphEdge[] };
   /**
    * The in-game editor's source string. The controller derives the loader, the
@@ -538,7 +545,8 @@ export function createRunController(deps: RunControllerDeps): RunController {
         // scorer and generator come from its precomposed run — byte for byte what
         // `generate(seed)` returns — and the same blueprint yields the live cast + env.
         // A scenario without a blueprint falls back to `generate` and runs with no cast.
-        const blueprint = deps.buildBlueprint?.(seed) ?? null;
+        const scheduleMode: ScheduleMode = deps.scheduleMode ?? "waves";
+        const blueprint = deps.buildBlueprint?.(seed, scheduleMode) ?? null;
         const generated: GeneratedRun = blueprint
           ? {
               events: [...blueprint.precomposed.events],
@@ -576,6 +584,7 @@ export function createRunController(deps: RunControllerDeps): RunController {
           serviceRate,
           checkpoints: generated.checkpoints,
           waves: generated.waves,
+          scheduleMode,
           ...(mapCast
             ? { scenarioCast: mapCast.scenarioCast, ambientCast: mapCast.ambientCast }
             : {}),

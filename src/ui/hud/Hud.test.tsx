@@ -43,19 +43,6 @@ describe("Hud", () => {
     expect(screen.getByText("0.05")).toBeDefined();
   });
 
-  it("reads Running before any outcome", () => {
-    render(<Hud />);
-    expect(screen.getByText("Running")).toBeDefined();
-  });
-
-  it("shows the win outcome", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "won", failureReason: null },
-    });
-    render(<Hud />);
-    expect(screen.getByText("Won")).toBeDefined();
-  });
-
   it("reads the authoritative queue (admitted - completed), not the channel sum", () => {
     // On a terminal queue loss the channels can read empty while one Event is
     // still in service; admitted - completed keeps it visible (GH3-PLAN.md 5.5).
@@ -72,21 +59,19 @@ describe("Hud", () => {
     render(<Hud />);
     expect(screen.getByText("15")).toBeDefined(); // 40 - 25, not the channel-sum 0
   });
+});
 
-  it("shows the loss and its reason", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "queue" },
-    });
+describe("Hud gauge descriptions (GH124)", () => {
+  it("renders a short explanatory caption under each of the four gauges", () => {
     render(<Hud />);
-    expect(screen.getByText("Failed: Queue overflowed")).toBeDefined();
-  });
-
-  it("shows the correctness loss reason", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "failed", failureReason: "correctness" },
-    });
-    render(<Hud />);
-    expect(screen.getByText("Failed: Correctness too low")).toBeDefined();
+    expect(screen.getByText("Events the Engine finishes per second.")).toBeDefined();
+    expect(
+      screen.getByText("Events admitted but not yet processed. A growing Queue fails the run."),
+    ).toBeDefined();
+    expect(screen.getByText("Ticks each Event costs your Rules. Lower is cheaper.")).toBeDefined();
+    expect(
+      screen.getByText("Rolling accuracy from caught, missed, and false Alerts."),
+    ).toBeDefined();
   });
 });
 

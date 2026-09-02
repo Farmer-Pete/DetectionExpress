@@ -27,6 +27,13 @@
  * into the cast context: a scenario's casts read it to draw from a partitioned,
  * seed-independent identity namespace instead of the run's own seeded rng, so two
  * runs generated for different partitions draw disjoint entities.
+ *
+ * `mode` (GH124-PLAN.md Checkpoint 3) threads the arrival shape into the same
+ * cast context: `buildSchedule(mode)` builds either the climbing `"waves"` ramp
+ * or the gapless `"steady"` stream, and `ScenarioCastContext.scheduleMode`
+ * carries it to any cast builder that validates its own waves (a benign cast
+ * calling `admitArrivals`). Defaults to `"waves"`, so every existing caller of
+ * `buildScenarioBlueprint`/`composeScenario` is unaffected.
  */
 import { randomLcg } from "d3-random";
 import type { Actor, ActorDescriptor, TimedReading } from "./actors/actor";
@@ -34,7 +41,7 @@ import { instantiateActors, runActors } from "./actors/actor";
 import { composeEvent, composeRun } from "./actors/compose";
 import type { Attack } from "./attack";
 import type { PipeEvent } from "./event";
-import type { Checkpoint, GeneratedRun, Wave } from "./scenario";
+import type { Checkpoint, GeneratedRun, ScheduleMode, Wave } from "./scenario";
 import { buildSchedule } from "./schedule";
 import { distanceTable } from "./world/distance";
 import { buildTimetable } from "./world/timetable";
@@ -46,6 +53,13 @@ export interface ScenarioCastContext {
   rng: () => number;
   waves: readonly Wave[];
   checkpoints: readonly Checkpoint[];
+  /**
+   * The arrival shape `waves` was built with (GH124-PLAN.md Checkpoint 3). A
+   * cast builder that calls `admitArrivals` forwards this straight through, so
+   * `assertWaveScheduleOrdered`'s successor-gap check stays in sync with the
+   * shape the schedule actually has.
+   */
+  scheduleMode: ScheduleMode;
   /** The composable-streams partition (GH42-PLAN.md), set only when this run is one of several merged runs. */
   partition?: number;
 }
@@ -136,6 +150,8 @@ export interface ScenarioBlueprint<Plan extends { id: number }> {
   readonly lastScoredTick: number;
   readonly waves: readonly Wave[];
   readonly checkpoints: readonly Checkpoint[];
+  /** The arrival shape `waves`/`checkpoints` were built with (GH124-PLAN.md Checkpoint 3). */
+  readonly scheduleMode: ScheduleMode;
   /** The scorer's Attack manifest and the test parity oracle. Not a live source. */
   readonly precomposed: {
     readonly events: readonly PipeEvent[];
@@ -166,16 +182,18 @@ export function buildScenarioBlueprint<
 >(
   spec: ScenarioSpec<Rec, Plan, Attacker>,
   seed: number,
+  mode: ScheduleMode = "waves",
   partition?: number,
 ): ScenarioBlueprint<Plan> {
   const rng = randomLcg(seed);
-  const { waves, checkpoints } = buildSchedule();
+  const { waves, checkpoints } = buildSchedule(mode);
   // Built with a spread, not a `partition: undefined` literal: `exactOptionalPropertyTypes`
   // distinguishes an omitted key from one explicitly set to `undefined`.
   const ctx: ScenarioCastContext = {
     rng,
     waves,
     checkpoints,
+    scheduleMode: mode,
     ...(partition === undefined ? {} : { partition }),
   };
 
@@ -242,6 +260,7 @@ export function buildScenarioBlueprint<
     lastScoredTick,
     waves,
     checkpoints,
+    scheduleMode: mode,
     precomposed: { events, attacks },
     instantiate,
   };
@@ -250,14 +269,16 @@ export function buildScenarioBlueprint<
 /**
  * Plan the whole run from a seed. Deterministic: the same seed always returns the
  * same run. A thin wrapper over `buildScenarioBlueprint`: the precomposed run IS
- * the blueprint's own, so this stays byte for byte what it always returned.
+ * the blueprint's own, so this stays byte for byte what it always returned. Always
+ * builds the `"waves"` ramp: this is the legacy batch path (band tests, the
+ * winnability sweep, `mergeRuns`), never the live app's `"steady"` default.
  */
 export function composeScenario<
   Rec,
   Plan extends { id: number },
   Attacker extends ScenarioAttackerCast<Plan>,
 >(spec: ScenarioSpec<Rec, Plan, Attacker>, seed: number, partition?: number): GeneratedRun {
-  const blueprint = buildScenarioBlueprint(spec, seed, partition);
+  const blueprint = buildScenarioBlueprint(spec, seed, "waves", partition);
   return {
     events: [...blueprint.precomposed.events],
     attacks: [...blueprint.precomposed.attacks],

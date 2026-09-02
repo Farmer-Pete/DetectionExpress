@@ -9,6 +9,7 @@
 import { isRawGatekeepGate } from "../../sim/endpoints/fare-gate/gatekeep";
 import { isRawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { JsonValue } from "../../sim/finding";
+import type { SensorKind, WorldLogEvent } from "../../sim/world-log";
 
 export interface RowView {
   /** Subject: account or card. */
@@ -76,4 +77,121 @@ export function formatClock(ts: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/** A human label per canonical sensor kind, for the event dialog's header. */
+const SENSOR_LABEL: Record<SensorKind, string> = {
+  kiosk: "Kiosk",
+  "fare-gate": "Fare gate",
+  tvm: "TVM",
+  "platform-camera": "Platform camera",
+  "door-reader": "Door reader",
+  "door-contact": "Door contact",
+  "train-tracker": "Train tracker",
+  "network-relay": "Network relay",
+  "occ-console": "OCC console",
+};
+
+/** A canonical sensor kind's display label. Exhaustive; a future sensor arm is a
+ *  `tsc` error, not a blank label. */
+export function sensorLabel(sensor: SensorKind): string {
+  return SENSOR_LABEL[sensor];
+}
+
+/** One unified-log row: the fields `LogPanel` and `PlaceDialog`'s scoped log render. */
+export interface LogRow {
+  /** The world-log ring's own id (`WorldLogEvent.id`), never a scored pipeline id. */
+  id: number;
+  ts: number;
+  sensor: SensorKind;
+  who: string;
+  where: string;
+  result: string;
+  tone: "ok" | "bad" | "neutral";
+}
+
+/**
+ * Turn one `WorldLogEvent` into its unified-log row (GH124-PLAN.md Checkpoint 5):
+ * extends `formatRow`'s per-endpoint idea from the two scored wire formats to every
+ * sensor kind the world ring carries. Exhaustive over `WorldReading["sensor"]` via the
+ * switch below, so a future sensor arm is a `tsc` error here, never a silently blank
+ * row. Pure and total; never throws.
+ */
+export function toLogRow(ev: WorldLogEvent): LogRow {
+  const base = { id: ev.id, ts: ev.ts, sensor: ev.sensor };
+  const reading = ev.reading;
+  switch (reading.sensor) {
+    case "kiosk": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: r.account,
+        where: r.terminal,
+        result: r.outcome === "success" ? "OK" : "WRONG_PIN",
+        tone: r.outcome === "fail" ? "bad" : "ok",
+      };
+    }
+    case "fare-gate": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: r.card,
+        where: r.station,
+        result: r.result === "ok" ? "PERMIT" : "REJECT",
+        tone: r.result === "reject" ? "bad" : "ok",
+      };
+    }
+    case "tvm": {
+      const r = reading.reading;
+      return { ...base, who: r.card, where: r.station, result: `+${r.amount}`, tone: "ok" };
+    }
+    case "train-tracker": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: r.train,
+        where: r.station,
+        result: r.event === "arr" ? "ARRIVED" : "DEPARTED",
+        tone: "neutral",
+      };
+    }
+    case "door-reader": {
+      const r = reading.reading;
+      return { ...base, who: r.badge, where: r.site, result: "GRANTED", tone: "ok" };
+    }
+    case "door-contact": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: "",
+        where: r.site,
+        result: r.event === "open" ? "OPENED" : "CLOSED",
+        tone: "neutral",
+      };
+    }
+    case "platform-camera": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: "",
+        where: r.station,
+        result: `${r.persons} in view`,
+        tone: "neutral",
+      };
+    }
+    case "occ-console": {
+      const r = reading.reading;
+      return {
+        ...base,
+        who: r.operator,
+        where: r.host,
+        result: `${r.command} ${r.target}`,
+        tone: "neutral",
+      };
+    }
+    case "network-relay": {
+      const r = reading.reading;
+      return { ...base, who: r.host, where: r.dest, result: `${r.bytes}B`, tone: "neutral" };
+    }
+  }
 }

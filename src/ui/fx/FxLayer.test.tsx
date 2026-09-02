@@ -107,18 +107,32 @@ function requireEl(selector: string): Element {
 }
 
 interface HarnessProps {
+  /** The world-log row ids: one row each, keyed for `data-testid` so a test can grab a
+   *  row by its own id. */
   logRowIds: readonly number[];
+  /** The scored pipeline event id per row, positional with `logRowIds`. A separate
+   *  namespace from the row id (GH124-PLAN.md Checkpoint 5); when omitted, each row's
+   *  scored id is its own row id, the common case where the two coincide. Pass it to
+   *  prove FxLayer anchors on `data-scored-event-id`, not the row's testid id. */
+  scoredEventIds?: readonly number[];
   findingSeqs: readonly number[];
   clock: FxClock;
 }
 
-/** The minimal DOM FxLayer measures: a log panel with rows, a findings panel with rows. */
-function Harness({ logRowIds, findingSeqs, clock }: HarnessProps) {
+/** The minimal DOM FxLayer measures: a log panel with rows, a findings panel with rows.
+ *  `data-scored-event-id` is what FxLayer actually anchors on (a scored pipeline event
+ *  id); `data-testid` keys on the row's own id, so the tests below can still grab a row
+ *  by its id even when the two namespaces diverge. */
+function Harness({ logRowIds, scoredEventIds, findingSeqs, clock }: HarnessProps) {
   return (
     <>
       <div className="log-stream">
-        {logRowIds.map((id) => (
-          <div key={id} data-testid={`log-row-${id}`} />
+        {logRowIds.map((rowId, index) => (
+          <div
+            key={rowId}
+            data-testid={`log-row-${rowId}`}
+            data-scored-event-id={scoredEventIds?.[index] ?? rowId}
+          />
         ))}
       </div>
       <div className="findings-panel">
@@ -363,6 +377,21 @@ describe("FxLayer anchor clamping", () => {
     publish([liveFinding({ seq: 1, eventIds: [10] })]);
     const comet = screen.getByTestId("fx-comet");
     expect(cometTo(comet)).toEqual({ x: 20, y: 200 }); // clamped to the panel's visible bottom edge
+  });
+
+  it("anchors a comet on the scored-event id, not the world-log row id, when they differ", () => {
+    const clock = new ManualFxClock();
+    // The row's own id (99) and the scored pipeline event id (10) are separate
+    // namespaces. FxLayer must find the row by `data-scored-event-id`, so a comet
+    // anchors on this row even though its testid id is 99, not 10.
+    render(<Harness logRowIds={[99]} scoredEventIds={[10]} findingSeqs={[1]} clock={clock} />);
+    stubRect(requireEl(".log-stream"), rect(0, 0, 200, 200));
+    stubRect(requireEl(".findings-panel"), rect(0, 0, 200, 200));
+    stubRect(screen.getByTestId("log-row-99"), rect(5, 5, 15, 15));
+    stubRect(requireEl("[data-finding-seq='1']"), rect(40, 50, 60, 70));
+    publish([liveFinding({ seq: 1, eventIds: [10] })]);
+    const comet = screen.getByTestId("fx-comet");
+    expect(cometFrom(comet)).toEqual({ x: 10, y: 10 }); // the scored-event row's own center
   });
 });
 

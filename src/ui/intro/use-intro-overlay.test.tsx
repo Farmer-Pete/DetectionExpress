@@ -10,13 +10,10 @@ import { isValidElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { introCopy } from "../content/narrative";
 import { hasSeenIntro, markIntroSeen } from "../onboarding-storage";
+import type { SidePanelTab } from "../sidepanel/use-side-panel";
 import { useIntroOverlay } from "./use-intro-overlay";
 
-function Harness({
-  onRequestPanel,
-}: {
-  onRequestPanel?: (tab: "chaos" | "algorithm") => void;
-} = {}) {
+function Harness({ onRequestPanel }: { onRequestPanel?: (tab: SidePanelTab) => void } = {}) {
   const intro = useIntroOverlay({ onRequestPanel });
   return (
     <div>

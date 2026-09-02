@@ -26,6 +26,10 @@ function buildController(): RunController {
     // The app's one scenario is pin-brute-force, so its blueprint drives the map cast
     // (GH117 Part B). A later step collapses the pipeline and metro controllers into one.
     buildBlueprint,
+    // The app default (GH124-PLAN.md Checkpoint 3): a steady, gapless arrival stream
+    // with no incoming waves. Reversible per run, not a global flag — a caller that
+    // wants the original ramp back passes "waves" here instead.
+    scheduleMode: "steady",
     getGraph,
     // The in-game editor's source string.
     getAlgorithmSource: () => useGameStore.getState().source,

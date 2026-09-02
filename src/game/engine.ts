@@ -33,13 +33,13 @@ import type { PipeEvent, PipeMessage } from "../sim/event";
 import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/graph";
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
-import type { Checkpoint, Wave } from "../sim/scenario";
+import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
 import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
-import { waveStateAt } from "../sim/wave-state";
+import { type WaveReading, waveStateAt } from "../sim/wave-state";
 import {
   cameraNodeId,
   consoleNodeId,
@@ -51,7 +51,8 @@ import {
   relayNodeId,
   tvmNodeId,
 } from "../sim/world/layout";
-import type { Presence } from "../sim/world/presence";
+import type { MapNodeId, Presence } from "../sim/world/presence";
+import { createWorldLog, type WorldLog, type WorldLogEvent } from "../sim/world-log";
 import type { WorldEnv, WorldReading } from "../sim/world-reading";
 import type { ActorView, CrowdView, DoorView, FlashEvent } from "../sim/world-snapshot";
 import { type CameraGrant, createCameraReducer } from "./camera-reducer";
@@ -69,6 +70,7 @@ import {
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
   WAVE_WARN_TICKS,
+  WORLD_LOG_RING_SIZE,
 } from "./tuning";
 
 /**
@@ -185,6 +187,15 @@ export interface StartOptions {
   /** The wave boundaries the sampler reads to publish `snapshot.wave` each tick. */
   waves: Wave[];
   /**
+   * The arrival shape `waves`/`checkpoints` were built with (GH124-PLAN.md
+   * Checkpoint 3). Defaults to `"waves"`, the original climbing ramp: startup
+   * validation (`assertWaveScheduleOrdered`) and the sampler both read it, so a
+   * `"steady"` run's gap-0 waves pass validation and the sampler publishes
+   * `calm` for the whole run instead of deriving `incoming`/`active` off a
+   * schedule shape steady never intends the UI to read as a wave cue.
+   */
+  scheduleMode?: ScheduleMode;
+  /**
    * The instantiated scenario cast the engine steps on its own single Clock to
    * publish map presence and wrong-PIN / sign-in flashes (GH117-PLAN.md "Part B").
    * Optional: omitted, the engine runs exactly as before — scoring always runs off
@@ -287,7 +298,16 @@ interface MapView {
   getNowTick: () => number;
   getDoors: () => readonly DoorView[];
   getCrowds: () => readonly CrowdView[];
+  getWorldEvents: () => readonly WorldLogEvent[];
 }
+
+/** The wave reading `"steady"` mode always publishes: calm, forever, no matter the ticks. */
+const STEADY_WAVE_READING: WaveReading = {
+  phase: "calm",
+  index: null,
+  ticksUntilNext: null,
+  eventsPerTick: null,
+};
 
 function makeSampler(
   clock: Clock,
@@ -298,6 +318,7 @@ function makeSampler(
   run: RunState,
   waves: readonly Wave[],
   map: MapView,
+  scheduleMode: ScheduleMode,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
@@ -355,7 +376,9 @@ function makeSampler(
       decisions,
       events: ring.events,
       processed: ring.processed,
-      wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
+      wave:
+        scheduleMode === "steady" ? STEADY_WAVE_READING : waveStateAt(now, waves, WAVE_WARN_TICKS),
+      scheduleMode,
       // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
       // living metro — scenario cast plus ambient life — into one authoritative view the
       // sampler reads here: presence, every sensor's flashes, the door and crowd reducer
@@ -365,6 +388,7 @@ function makeSampler(
       doors: map.getDoors(),
       crowds: map.getCrowds(),
       nowTick: map.getNowTick(),
+      worldEvents: map.getWorldEvents(),
     });
   };
 }
@@ -377,8 +401,9 @@ export function start(options: StartOptions): EngineHandle {
   }
 
   const graph = options.getGraph();
+  const scheduleMode: ScheduleMode = options.scheduleMode ?? "waves";
   validateLinearChain(graph.nodes, graph.edges); // throws before allocation
-  assertWaveScheduleOrdered(options.waves); // throws before allocation
+  assertWaveScheduleOrdered(options.waves, scheduleMode); // throws before allocation
   // scoredIngest only ever offers or closes inside the `if (cast)` branch below, so
   // without a scenarioCast nothing ever calls ingress.offer/close: Ingest parks on
   // take() forever, admitted stays 0, and a queued === 0 terminal checkpoint reports a
@@ -493,12 +518,17 @@ export function start(options: StartOptions): EngineHandle {
     let latestDoors: readonly DoorView[] = [];
     let latestCrowds: readonly CrowdView[] = [];
     let mapNowTick = 0;
+    // GH124-PLAN.md Checkpoint 5: the bounded world-event ring, declared unconditionally
+    // (like the inspector below) so `worldEvents` reads empty with no cast attached,
+    // exactly as the other map fields do.
+    const worldLog: WorldLog = createWorldLog(WORLD_LOG_RING_SIZE);
     const mapView: MapView = {
       getActors: () => [...views.values()],
       getFlashes: () => [...mapFlashes],
       getNowTick: () => mapNowTick,
       getDoors: () => latestDoors.map((door) => ({ ...door })),
       getCrowds: () => latestCrowds.map((crowd) => ({ ...crowd })),
+      getWorldEvents: () => worldLog.snapshot(),
     };
 
     // The cast stepper, on this same single Clock. Scoring is untouched — it always
@@ -583,6 +613,81 @@ export function start(options: StartOptions): EngineHandle {
       const liveOfKind = (kind: ActorView["kind"]): number =>
         [...views.values()].filter((view) => view.kind === kind).length;
 
+      // GH124-PLAN.md Checkpoint 5: the place and (when it has one) the chip node a
+      // reading's world-log row keys on. Exhaustive over `WorldReading["sensor"]`, so a
+      // future sensor arm is a tsc error here, not a silent gap in the log. Mirrors the
+      // node ids `applyStep`'s flash chain already raises flashes on, plus the two
+      // reducer-only arms (door-contact, platform-camera) below.
+      const worldLogPlace = (
+        reading: WorldReading,
+      ): { placeId: MapNodeId; chipNode?: MapNodeId } => {
+        switch (reading.sensor) {
+          case "kiosk":
+            return {
+              placeId: reading.reading.station,
+              chipNode: kioskNodeId(reading.reading.station),
+            };
+          case "fare-gate":
+            return {
+              placeId: reading.reading.station,
+              chipNode: gateNodeId(reading.reading.station),
+            };
+          case "train-tracker":
+            // T chips exist only at a depot or a signal cabin, not at a station, so a
+            // train row keys off `placeId` alone (GH124-PLAN.md Checkpoint 5).
+            return { placeId: reading.reading.station };
+          case "door-reader":
+            return { placeId: reading.reading.site, chipNode: readerNodeId(reading.reading.site) };
+          case "tvm":
+            return {
+              placeId: reading.reading.station,
+              chipNode: tvmNodeId(reading.reading.station),
+            };
+          case "occ-console":
+            return { placeId: occId, chipNode: consoleNodeId(occId) };
+          case "network-relay":
+            return { placeId: reading.reading.site, chipNode: relayNodeId(reading.reading.site) };
+          case "door-contact":
+            return { placeId: reading.reading.site, chipNode: contactNodeId(reading.reading.site) };
+          case "platform-camera":
+            return {
+              placeId: reading.reading.station,
+              chipNode: cameraNodeId(reading.reading.station),
+            };
+        }
+      };
+
+      // GH124-PLAN.md Checkpoint 5, safe-capture rules: build and push one
+      // `WorldLogEvent`, never throwing. Called only AFTER the existing scored
+      // offer/predicate block below has already run (so it can never race or
+      // duplicate `toEvent`/`nextScoredEventId`), so a throw here can never unwind
+      // past a scored offer that already succeeded. `actorId` is set only when the
+      // reading came from a live actor (reducer-synthesized door-contact and
+      // platform-camera readings omit it).
+      const captureWorldEvent = (
+        reading: WorldReading,
+        ts: number,
+        actorId: string | undefined,
+        scored: boolean,
+        scoredEventId: number | undefined,
+      ): void => {
+        try {
+          const place = worldLogPlace(reading);
+          worldLog.push({
+            ts,
+            sensor: reading.sensor,
+            placeId: place.placeId,
+            ...(place.chipNode !== undefined ? { chipNode: place.chipNode } : {}),
+            ...(actorId !== undefined ? { actorId } : {}),
+            reading,
+            scored,
+            ...(scoredEventId !== undefined ? { scoredEventId } : {}),
+          });
+        } catch (error) {
+          console.error("Detection Express: world-log capture threw:", error);
+        }
+      };
+
       let nextFlashId = 0;
       // Fold one step: raise a flash per reading on its sensor's chip, overlay the
       // presence deltas, then evict the actors that went dormant. A kiosk fail is a
@@ -647,14 +752,43 @@ export function start(options: StartOptions): EngineHandle {
           // ambient kiosk reading already raised its flash above but never enters the
           // channels, so it can never bump the dense id or `admitted`. The id runs in
           // emission order, matching the precomposed run parity guard 1 pins.
+          //
+          // GH124-PLAN.md Checkpoint 5, safe-capture rules: the world-log capture reads
+          // `nextScoredEventId` but never increments it, and runs strictly AFTER this
+          // block's own single `toEvent`/`offer` call — never before, never twice — so a
+          // scored row's `scoredEventId` always matches the id this same reading was
+          // actually offered under.
           if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
-            scoredIngest.ingress.offer(scoredIngest.toEvent(timed, nextScoredEventId++));
+            const scoredEventId = nextScoredEventId++;
+            scoredIngest.ingress.offer(scoredIngest.toEvent(timed, scoredEventId));
+            captureWorldEvent(reading, reading.reading.ts, timed.actorId, true, scoredEventId);
+          } else {
+            captureWorldEvent(reading, reading.reading.ts, timed.actorId, false, undefined);
           }
         }
         for (const [id, presence] of step.presences) {
           const view = views.get(id);
           if (view !== undefined) {
             views.set(id, { ...view, presence });
+          }
+        }
+        // GH124-PLAN.md Checkpoint 4 Part 2: overlay the tick's destination deltas the
+        // same way `presences` does above, in its own loop since it is its own delta
+        // map. `destinations` uses `MapNodeId | null`, not `MapNodeId | undefined`, so
+        // an explicit clear (`null`) is a real delta this loop applies — by dropping
+        // the key entirely, never by assigning it `undefined` (an `exactOptionalPropertyTypes`
+        // violation: `ActorView.destination` being unset and being present-but-undefined
+        // are not the same type here).
+        for (const [id, destination] of step.destinations) {
+          const view = views.get(id);
+          if (view === undefined) {
+            continue;
+          }
+          if (destination === null) {
+            const { destination: _cleared, ...rest } = view;
+            views.set(id, rest);
+          } else {
+            views.set(id, { ...view, destination });
           }
         }
         // Evict the dormant actor from both registries, or provenanceById grows with
@@ -686,12 +820,41 @@ export function start(options: StartOptions): EngineHandle {
             node: contactNodeId(event.location),
             atTick: tick,
           });
+          // GH124-PLAN.md Checkpoint 5, capture site 2: a reducer-synthesized
+          // door-contact reading, one per open/close event, no actorId (the door
+          // reducer is an engine projection, not an actor). Always unscored: only a
+          // kiosk reading can ever cross the #117 boundary.
+          captureWorldEvent(
+            {
+              sensor: "door-contact",
+              reading: {
+                ts: tick * GAME_SECONDS_PER_TICK,
+                site: event.location,
+                door: event.door,
+                event: event.event,
+              },
+            },
+            tick * GAME_SECONDS_PER_TICK,
+            undefined,
+            false,
+            undefined,
+          );
         }
         const openNodes = new Set(
           doorReducer.openDoors().map((door) => contactNodeId(door.location)),
         );
         latestDoors = [...openNodes].map((node) => ({ node, open: true }));
       };
+
+      // GH124-PLAN.md Checkpoint 5, camera on-change tracking: the last per-gate total
+      // this reduceCamera call itself logged, so a tick whose window sum is unchanged
+      // logs nothing. A gate that drops out of the reducer's output (its window emptied)
+      // logs exactly one zero, the moment it disappears, then nothing further — this map
+      // still holding it at zero is what suppresses every later re-log.
+      const previousCameraTotals = new Map<
+        string,
+        { station: string; grants: number; persons: number }
+      >();
 
       // Run the camera reducer for one tick over that tick's fare-gate grants, AFTER the
       // door reducer, so the fixed source order (actor, door, camera) holds. It counts the
@@ -711,6 +874,67 @@ export function start(options: StartOptions): EngineHandle {
           persons: count.persons,
           grants: count.grants,
         }));
+
+        // GH124-PLAN.md Checkpoint 5, capture site 3: log a gate's windowed count only
+        // when it changed, including the change TO zero on grant expiry. Never log a
+        // tick's rolling total just because it repeats unchanged.
+        const seenGates = new Set<string>();
+        for (const count of counts) {
+          seenGates.add(count.gate);
+          const previous = previousCameraTotals.get(count.gate);
+          if (
+            previous === undefined ||
+            previous.grants !== count.grants ||
+            previous.persons !== count.persons
+          ) {
+            captureWorldEvent(
+              {
+                sensor: "platform-camera",
+                reading: {
+                  ts: tick * GAME_SECONDS_PER_TICK,
+                  station: count.station,
+                  gate: count.gate,
+                  grants: count.grants,
+                  persons: count.persons,
+                },
+              },
+              tick * GAME_SECONDS_PER_TICK,
+              undefined,
+              false,
+              undefined,
+            );
+          }
+          previousCameraTotals.set(count.gate, {
+            station: count.station,
+            grants: count.grants,
+            persons: count.persons,
+          });
+        }
+        // A gate the reducer no longer reports (its window emptied): log one zero, the
+        // instant it disappears, then stay silent — the map now holds it at zero, so the
+        // `previous === undefined` branch above never fires for it again.
+        for (const [gate, previous] of previousCameraTotals) {
+          if (seenGates.has(gate) || (previous.grants === 0 && previous.persons === 0)) {
+            continue;
+          }
+          captureWorldEvent(
+            {
+              sensor: "platform-camera",
+              reading: {
+                ts: tick * GAME_SECONDS_PER_TICK,
+                station: previous.station,
+                gate,
+                grants: 0,
+                persons: 0,
+              },
+            },
+            tick * GAME_SECONDS_PER_TICK,
+            undefined,
+            false,
+            undefined,
+          );
+          previousCameraTotals.set(gate, { station: previous.station, grants: 0, persons: 0 });
+        }
       };
 
       // Admit each ambient spawner's due births at the frontier and seed each view,
@@ -851,6 +1075,7 @@ export function start(options: StartOptions): EngineHandle {
       },
       options.waves,
       mapView,
+      scheduleMode,
     );
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it

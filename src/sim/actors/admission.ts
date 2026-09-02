@@ -9,7 +9,7 @@
  *
  * Deterministic and pure. No rng: the accumulator alone fixes the ticks.
  */
-import type { Wave } from "../scenario";
+import type { ScheduleMode, Wave } from "../scenario";
 import { assertWaveScheduleOrdered } from "../wave-schedule";
 
 /**
@@ -39,12 +39,24 @@ function assertRateCap(wave: Wave, index: number): void {
  * tick. So a whole rate admits exactly `eventsPerTick` arrivals per tick, and a
  * fractional rate spreads its cumulative count evenly instead of rounding per tick
  * (the behavior the legacy kiosk draft loop had before GH102 moved it here).
+ *
+ * `mode` defaults to `"waves"` and is forwarded to `assertWaveScheduleOrdered`
+ * unchanged (GH124-PLAN.md Checkpoint 3): `"steady"` skips the successor-gap
+ * check, so a caller passing contiguous, gap-0, equal-rate waves gets one
+ * gapless constant arrival stream back instead of a thrown error. The
+ * accumulator resets at each wave's start either way, but only a whole
+ * integer rate is guaranteed to cross back to zero by a wave's end; a
+ * fractional rate would leave a nonzero carry that the reset silently drops,
+ * putting a seam at the boundary instead of a gapless stream. That is why
+ * `"steady"` mode requires every `eventsPerTick` to be an integer:
+ * `assertWaveScheduleOrdered` rejects a fractional rate there before this
+ * loop ever runs, so a contiguous steady wave reaching it is always whole.
  */
-export function admitArrivals(waves: readonly Wave[]): number[] {
+export function admitArrivals(waves: readonly Wave[], mode: ScheduleMode = "waves"): number[] {
   // Field validity, chronological order, and no-overlap all live in the shared
   // helper now (F002); thrown messages come from there, which is fine since this
   // module's own tests use bare `.toThrow()`.
-  assertWaveScheduleOrdered(waves);
+  assertWaveScheduleOrdered(waves, mode);
   waves.forEach((wave, index) => {
     assertRateCap(wave, index);
   });

@@ -43,6 +43,7 @@ interface Step {
   tick: number;
   readings: { reading: WorldReading; actorId: string }[];
   presence: ReturnType<ReturnType<typeof createSchedule>["advanceTo"]>["presences"];
+  destination: ReturnType<ReturnType<typeof createSchedule>["advanceTo"]>["destinations"];
 }
 
 /** Step one live rider one tick at a time to the horizon, collecting each non-empty step. */
@@ -51,7 +52,7 @@ function stepThrough(config: RiderTripConfig, runSeed: number): Step[] {
   const steps: Step[] = [];
   for (let tick = 0; tick < HORIZON; tick++) {
     const step = schedule.advanceTo(tick + 1);
-    if (step.readings.length > 0 || step.presences.size > 0) {
+    if (step.readings.length > 0 || step.presences.size > 0 || step.destinations.size > 0) {
       steps.push({
         tick,
         readings: step.readings.map((timed) => ({
@@ -59,6 +60,7 @@ function stepThrough(config: RiderTripConfig, runSeed: number): Step[] {
           actorId: timed.actorId,
         })),
         presence: step.presences,
+        destination: step.destinations,
       });
     }
   }
@@ -294,6 +296,53 @@ describe("createWorldRider coupled to trains", () => {
         tick: step.tick,
         readings: step.readings.map((r) => r.reading),
         presence: step.presence.get("C09"),
+      }));
+    expect(run()).toEqual(run());
+  });
+});
+
+describe("createWorldRider destination (GH124-PLAN.md Checkpoint 4 Part 1/2)", () => {
+  // FEASIBILITY: a rider `at` its origin, waiting to board, HAS already chosen a
+  // destination — `core.step` commits to one the moment it returns `enter`, before
+  // the rider ever reports the `at` presence the wait shows on the map. So the wait
+  // step below carries a `destination` delta alongside its `at` presence, not just a
+  // presence with no further information.
+  it("reports the chosen destination the moment it commits to a trip, while still waiting to board", () => {
+    const steps = stepThrough(base, 4242);
+    const wait = steps[0];
+    const board = steps[1];
+    const alight = steps[2];
+
+    // The wait step (station "at", no tap yet) already carries a destination delta.
+    const waitDestination = wait?.destination.get("C09");
+    expect(waitDestination).toBeDefined();
+
+    // The tap-out reading names the real destination the rider arrives at; it must
+    // match what the wait step already reported, so the view never guessed wrong.
+    const alightReading = alight?.readings[0]?.reading;
+    if (alightReading?.sensor !== "fare-gate") {
+      throw new Error("expected a fare-gate tap-out");
+    }
+    expect(waitDestination).toBe(alightReading.reading.station);
+
+    // The board step (tap-in, now onTrain) needs no destination delta of its own —
+    // nothing changed since the wait step set it — but the destination is still
+    // correct information for the whole ride, so a snapshot of any tick in between
+    // holds the same value the wait step reported.
+    expect(board?.destination.has("C09")).toBe(false);
+  });
+
+  it("clears the destination once the trip ends (the tap-out into the go-home dwell)", () => {
+    const steps = stepThrough(base, 4242);
+    const alight = steps[2];
+    expect(alight?.destination.get("C09")).toBeNull();
+  });
+
+  it("is deterministic: a seed reproduces the same destination deltas", () => {
+    const run = () =>
+      stepThrough(base, 4242).map((step) => ({
+        tick: step.tick,
+        destination: step.destination.get("C09"),
       }));
     expect(run()).toEqual(run());
   });

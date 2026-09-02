@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CLOCK_HZ, PUBLISH_HZ } from "../game/tuning";
+import { CLOCK_HZ, PUBLISH_HZ, WAVE_RATES } from "../game/tuning";
 import type { Wave } from "./scenario";
+import { buildSchedule } from "./schedule";
 import { assertWaveFields, assertWaveScheduleOrdered } from "./wave-schedule";
 
 /** The minimum successor drain gap the guard enforces (see `wave-schedule.ts`). */
@@ -199,5 +200,104 @@ describe("assertWaveScheduleOrdered", () => {
       { startTick: 10 + MIN_SUCCESSOR_GAP_TICKS, durationTicks: 5, eventsPerTick: 2 },
     ];
     expect(() => assertWaveScheduleOrdered(waves)).not.toThrow();
+  });
+});
+
+describe("assertWaveScheduleOrdered: mode-gated successor gap (GH124-PLAN.md Checkpoint 3)", () => {
+  const touching: Wave[] = [
+    { startTick: 0, durationTicks: 10, eventsPerTick: 5 },
+    { startTick: 10, durationTicks: 5, eventsPerTick: 5 }, // gap 0
+  ];
+
+  it('rejects touching boundaries by default (mode omitted, same as "waves")', () => {
+    expect(() => assertWaveScheduleOrdered(touching)).toThrow();
+  });
+
+  it('rejects touching boundaries when mode is explicitly "waves"', () => {
+    expect(() => assertWaveScheduleOrdered(touching, "waves")).toThrow();
+  });
+
+  it('accepts touching, gap-0 boundaries when mode is "steady"', () => {
+    expect(() => assertWaveScheduleOrdered(touching, "steady")).not.toThrow();
+  });
+
+  it('still rejects chronological, overlap, and field violations in "steady" mode', () => {
+    const outOfOrder: Wave[] = [
+      { startTick: 20, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+    ];
+    expect(() => assertWaveScheduleOrdered(outOfOrder, "steady")).toThrow();
+
+    const overlapping: Wave[] = [
+      { startTick: 0, durationTicks: 10, eventsPerTick: 1 },
+      { startTick: 5, durationTicks: 10, eventsPerTick: 1 },
+    ];
+    expect(() => assertWaveScheduleOrdered(overlapping, "steady")).toThrow();
+
+    const badField: Wave[] = [{ startTick: -1, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(badField, "steady")).toThrow();
+  });
+});
+
+describe('assertWaveScheduleOrdered: "steady" mode rejects a fractional eventsPerTick (CodeRabbit #2)', () => {
+  it("rejects contiguous steady waves at a fractional rate, since the per-wave accumulator reset would break the gapless stream", () => {
+    // Two contiguous 3-tick waves at 0.5/tick would admit ticks [1, 4] instead
+    // of the seamless [1, 3, 5]: exactly the seam this guard exists to forbid.
+    const fractional: Wave[] = [
+      { startTick: 0, durationTicks: 3, eventsPerTick: 0.5 },
+      { startTick: 3, durationTicks: 3, eventsPerTick: 0.5 },
+    ];
+    expect(() => assertWaveScheduleOrdered(fractional, "steady")).toThrow();
+  });
+
+  it('accepts a fractional eventsPerTick in "waves" mode, where per-wave rates are not required to be contiguous or equal', () => {
+    const fractional: Wave[] = [{ startTick: 0, durationTicks: 5, eventsPerTick: 0.7 }];
+    expect(() => assertWaveScheduleOrdered(fractional, "waves")).not.toThrow();
+  });
+
+  it("accepts the real steady schedule's integer rate (WAVE_RATES[0])", () => {
+    const rate = WAVE_RATES[0];
+    if (rate === undefined) throw new Error("WAVE_RATES must carry at least one rate");
+    expect(Number.isInteger(rate)).toBe(true); // the shipped steady schedule relies on this
+    const waves: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: rate },
+      { startTick: 5, durationTicks: 5, eventsPerTick: rate },
+    ];
+    expect(() => assertWaveScheduleOrdered(waves, "steady")).not.toThrow();
+  });
+});
+
+describe('assertWaveScheduleOrdered: "steady" mode rejects a gapped or mixed-rate schedule (CodeRabbit #3)', () => {
+  it("rejects a steady schedule with a gap between waves, even though each wave's own fields and rate are fine", () => {
+    // Isolated per-wave checks (integer rate) can't catch this: nothing about
+    // either wave alone is wrong, only their spacing. See
+    // assertSteadyContiguousEqualRate in wave-schedule.ts.
+    const gapped: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 2 },
+      { startTick: 6, durationTicks: 5, eventsPerTick: 2 }, // gap 1, not contiguous
+    ];
+    expect(() => assertWaveScheduleOrdered(gapped, "steady")).toThrow();
+  });
+
+  it("rejects a steady schedule where waves are contiguous but at different integer rates", () => {
+    const mixedRate: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 2 },
+      { startTick: 5, durationTicks: 5, eventsPerTick: 3 }, // contiguous, but not equal-rate
+    ];
+    expect(() => assertWaveScheduleOrdered(mixedRate, "steady")).toThrow();
+  });
+
+  it("accepts a hand-built contiguous, equal-rate, integer-rate steady schedule", () => {
+    const clean: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 4 },
+      { startTick: 5, durationTicks: 5, eventsPerTick: 4 },
+      { startTick: 10, durationTicks: 5, eventsPerTick: 4 },
+    ];
+    expect(() => assertWaveScheduleOrdered(clean, "steady")).not.toThrow();
+  });
+
+  it("accepts the real shipped steady schedule from buildSchedule('steady')", () => {
+    const { waves } = buildSchedule("steady");
+    expect(() => assertWaveScheduleOrdered(waves, "steady")).not.toThrow();
   });
 });

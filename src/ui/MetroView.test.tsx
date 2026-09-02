@@ -31,34 +31,42 @@ beforeEach(() => {
 
 describe("MetroView", () => {
   it("renders the Lines, Actors, and Sensors key sections", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText("Lines")).toBeDefined();
     expect(screen.getByText("Actors")).toBeDefined();
     expect(screen.getByText("Sensors")).toBeDefined();
   });
 
   it("renders the key markup exactly once (CSS repositions it, JS never duplicates it)", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getAllByText("Lines")).toHaveLength(1);
   });
 
   it("lists a train row in the Actors key column", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText("train")).toBeDefined();
   });
 
+  it("renders one lucide icon per sensor kind in the legend, not a bare colored square", () => {
+    const { container } = render(<MetroView onSelect={() => {}} />);
+    const icons = container.querySelectorAll(".metro-chip-swatch svg.lucide");
+    expect(icons).toHaveLength(9);
+    // Spot-check one mapping: the kiosk row draws the Monitor icon.
+    expect(container.querySelector(".metro-chip-swatch svg.lucide-monitor")).not.toBeNull();
+  });
+
   it("lists a pin attacker row in the Actors key column", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText("pin attacker")).toBeDefined();
   });
 
   it("renders no event log (retired: it duplicated the pipeline log and findings)", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.queryByText("Event log")).toBeNull();
   });
 
   it("renders no header, counts, or speed control (retired to the pipeline transport)", () => {
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.queryByText("LIVING METRO")).toBeNull();
     expect(screen.queryByRole("slider")).toBeNull();
     expect(screen.queryByRole("button", { name: /pause|play/i })).toBeNull();
@@ -68,13 +76,13 @@ describe("MetroView", () => {
 describe("MetroView simulation-ended overlay", () => {
   it("shows nothing while the run is running", () => {
     useGameStore.setState({ snapshot: { ...emptySnapshot(), status: "running" } });
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.queryByRole("status", { name: /simulation ended/i })).toBeNull();
   });
 
   it("shows a won outcome once the run concludes", () => {
     useGameStore.setState({ snapshot: { ...emptySnapshot(), status: "won" } });
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText(/simulation ended.*won/i)).toBeDefined();
   });
 
@@ -82,7 +90,7 @@ describe("MetroView simulation-ended overlay", () => {
     useGameStore.setState({
       snapshot: { ...emptySnapshot(), status: "failed", failureReason: "queue" },
     });
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText(/queue overflowed/i)).toBeDefined();
   });
 
@@ -90,7 +98,7 @@ describe("MetroView simulation-ended overlay", () => {
     useGameStore.setState({
       snapshot: { ...emptySnapshot(), status: "failed", failureReason: "correctness" },
     });
-    render(<MetroView />);
+    render(<MetroView onSelect={() => {}} />);
     expect(screen.getByText(/correctness too low/i)).toBeDefined();
   });
 });

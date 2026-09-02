@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../../game/store";
-import type { RingEvent } from "../../sim/inspector";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
+import type { WorldLogEvent } from "../../sim/world-log";
 import { LogPanel } from "./LogPanel";
 
 /** Publish a snapshot carrying only the given wave reading; everything else stays empty. */
@@ -15,20 +15,56 @@ function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status
   useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });
 }
 
-function kioskEvent(id: number, overrides: Partial<RingEvent> = {}): RingEvent {
+function kioskEvent(id: number, overrides: Partial<WorldLogEvent> = {}): WorldLogEvent {
   return {
     id,
     ts: id * 2,
-    endpoint: "kiosk-v1",
-    raw: { t: id * 2, acct: `acct-${id}`, term: `term-${id}`, res: "OK" },
-    normalized: { acct: `acct-${id}`, term: `term-${id}`, res: "OK" },
+    sensor: "kiosk",
+    placeId: "cen",
+    chipNode: "cen:kiosk",
+    actorId: `patron-${id}`,
+    reading: {
+      sensor: "kiosk",
+      reading: {
+        ts: id * 2,
+        account: `acct-${id}`,
+        station: "cen",
+        terminal: "K1",
+        outcome: "success",
+      },
+    },
+    scored: false,
     ...overrides,
   };
 }
 
-function setSnapshot(events: RingEvent[], processed: number, admitted: number): void {
+function fareGateEvent(id: number, overrides: Partial<WorldLogEvent> = {}): WorldLogEvent {
+  return {
+    id,
+    ts: id * 2,
+    sensor: "fare-gate",
+    placeId: "cen",
+    chipNode: "cen:gate",
+    reading: {
+      sensor: "fare-gate",
+      reading: {
+        ts: id * 2,
+        card: `card-${id}`,
+        station: "cen",
+        line: "red",
+        direction: "in",
+        result: "ok",
+        balance: 50,
+      },
+    },
+    scored: false,
+    ...overrides,
+  };
+}
+
+function setSnapshot(worldEvents: WorldLogEvent[]): void {
   useGameStore.setState({
-    snapshot: { ...emptySnapshot(), events, processed, admitted },
+    snapshot: { ...emptySnapshot(), worldEvents },
   });
 }
 
@@ -43,7 +79,7 @@ beforeEach(() => {
 
 describe("LogPanel", () => {
   it("renders rows newest first, highest id at the top", () => {
-    setSnapshot([kioskEvent(0), kioskEvent(1), kioskEvent(2)], 0, 3);
+    setSnapshot([kioskEvent(0), kioskEvent(1), kioskEvent(2)]);
     render(<LogPanel />);
     const rows = screen.getAllByTestId(/^log-row-/);
     expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
@@ -53,72 +89,48 @@ describe("LogPanel", () => {
     ]);
   });
 
-  it("dims rows with id >= processed and renders earlier rows normal", () => {
-    setSnapshot([kioskEvent(0), kioskEvent(1), kioskEvent(2)], 1, 3);
+  it("renders a row for every sensor kind, not just the scored kiosk stream", () => {
+    setSnapshot([kioskEvent(0), fareGateEvent(1)]);
     render(<LogPanel />);
-    expect(screen.getByTestId("log-row-0").className).not.toMatch(/log-row-pending/);
-    expect(screen.getByTestId("log-row-1").className).toMatch(/log-row-pending/);
-    expect(screen.getByTestId("log-row-2").className).toMatch(/log-row-pending/);
+    expect(screen.getByTestId("log-row-0")).toBeDefined();
+    expect(screen.getByTestId("log-row-1")).toBeDefined();
   });
 
-  it("marks the visible row whose id equals processed as the cursor", () => {
-    setSnapshot([kioskEvent(0), kioskEvent(1), kioskEvent(2)], 1, 3);
+  it("renders no queue bar, cursor, or sticky 'engine N behind' bar", () => {
+    setSnapshot([kioskEvent(0)]);
     render(<LogPanel />);
-    expect(screen.getByTestId("log-row-1").className).toMatch(/log-row-cursor/);
-    expect(screen.getByTestId("log-row-0").className).not.toMatch(/log-row-cursor/);
-    expect(screen.getByTestId("log-row-2").className).not.toMatch(/log-row-cursor/);
-  });
-
-  it("shows no cursor and no sticky bar when caught up (processed === admitted)", () => {
-    setSnapshot([kioskEvent(0), kioskEvent(1)], 2, 2);
-    render(<LogPanel />);
+    expect(document.querySelector(".queue-bar")).toBeNull();
     expect(document.querySelector(".log-row-cursor")).toBeNull();
     expect(screen.queryByTestId("log-sticky")).toBeNull();
+    expect(screen.queryByTestId("queue-bar-fill")).toBeNull();
   });
 
-  it("shows the sticky bar when the queue is deeper than the visible ring", () => {
-    // The ring only kept the newest events; processed (0) fell off long ago.
-    const events = [kioskEvent(1000), kioskEvent(1001), kioskEvent(1002)];
-    setSnapshot(events, 0, 1006);
+  it("selects the world event by its own id when a row is clicked", () => {
+    setSnapshot([kioskEvent(0), fareGateEvent(1)]);
     render(<LogPanel />);
-    expect(screen.getByTestId("log-sticky").textContent).toContain("1006");
+    fireEvent.click(screen.getByTestId("log-row-1"));
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 1 }]);
   });
 
-  it("shows the sticky bar when the ring is empty but the queue is positive", () => {
-    setSnapshot([], 0, 5);
+  it("carries data-scored-event-id only on a scored row, keyed by scoredEventId (not the world id)", () => {
+    setSnapshot([
+      kioskEvent(5, { scored: true, scoredEventId: 42 }),
+      fareGateEvent(6), // unscored: never carries the attribute
+    ]);
     render(<LogPanel />);
-    expect(screen.getByTestId("log-sticky").textContent).toContain("5");
-  });
-
-  it("shows the sticky bar when the ring is non-empty but no event matches processed yet", () => {
-    const events = [kioskEvent(5), kioskEvent(6), kioskEvent(7)];
-    setSnapshot(events, 4, 8);
-    render(<LogPanel />);
-    expect(screen.getByTestId("log-sticky").textContent).toContain("4");
-  });
-
-  it("sizes the queue bar width from admitted - processed, up to the full-scale max", () => {
-    setSnapshot([], 0, 25); // half of LOG_QUEUE_MAX (50)
-    const { rerender } = render(<LogPanel />);
-    const fill = screen.getByTestId("queue-bar-fill");
-    expect(fill.style.width).toBe("50%");
-
-    setSnapshot([], 0, 200); // far past LOG_QUEUE_MAX, clamps to 100%
-    rerender(<LogPanel />);
-    expect(screen.getByTestId("queue-bar-fill").style.width).toBe("100%");
-  });
-
-  it("shows the plain queue count alongside the bar", () => {
-    setSnapshot([], 10, 35);
-    render(<LogPanel />);
-    expect(screen.getByText("25 queued")).toBeDefined();
+    expect(screen.getByTestId("log-row-5").getAttribute("data-scored-event-id")).toBe("42");
+    expect(screen.getByTestId("log-row-6").hasAttribute("data-scored-event-id")).toBe(false);
   });
 });
 
 describe("LogPanel cited-row flash", () => {
-  it("carries log-row-cited and the inline hunt color for a row with a flash entry", () => {
-    setSnapshot([kioskEvent(0), kioskEvent(1)], 0, 2);
-    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-2)", gen: 1 }]);
+  it("carries log-row-cited and the inline hunt color for a scored row's flash, keyed by scoredEventId", () => {
+    setSnapshot([
+      kioskEvent(0, { scored: true, scoredEventId: 100 }),
+      kioskEvent(1, { scored: true, scoredEventId: 101 }),
+    ]);
+    // Keyed by scoredEventId (101), a different number from either row's world id.
+    useGameStore.getState().spawnFlashes([{ eventId: 101, colorVar: "var(--hunt-2)", gen: 1 }]);
     render(<LogPanel />);
     const flashed = screen.getByTestId("log-row-1");
     expect(flashed.className).toMatch(/log-row-cited/);
@@ -126,12 +138,22 @@ describe("LogPanel cited-row flash", () => {
     expect(screen.getByTestId("log-row-0").className).not.toMatch(/log-row-cited/);
   });
 
+  it("never flashes an unscored row, even if its world id collides with a flash key", () => {
+    // The fare-gate row's world id (101) equals the flash's scored-id key: a row with no
+    // scoredEventId must still never flash, proving the lookup keys off scoredEventId,
+    // never the world id.
+    setSnapshot([fareGateEvent(101)]);
+    useGameStore.getState().spawnFlashes([{ eventId: 101, colorVar: "var(--hunt-2)", gen: 1 }]);
+    render(<LogPanel />);
+    expect(screen.getByTestId("log-row-101").className).not.toMatch(/log-row-cited/);
+  });
+
   it("remounts the flash when a re-spawn carries a higher gen", () => {
-    setSnapshot([kioskEvent(1)], 0, 1);
-    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-1)", gen: 1 }]);
+    setSnapshot([kioskEvent(1, { scored: true, scoredEventId: 9 })]);
+    useGameStore.getState().spawnFlashes([{ eventId: 9, colorVar: "var(--hunt-1)", gen: 1 }]);
     const { rerender } = render(<LogPanel />);
     const first = screen.getByTestId("log-row-1");
-    useGameStore.getState().spawnFlashes([{ eventId: 1, colorVar: "var(--hunt-3)", gen: 2 }]);
+    useGameStore.getState().spawnFlashes([{ eventId: 9, colorVar: "var(--hunt-3)", gen: 2 }]);
     rerender(<LogPanel />);
     const second = screen.getByTestId("log-row-1");
     expect(second).not.toBe(first); // a higher gen remounted the node
@@ -276,6 +298,19 @@ describe("LogPanel wave readout (#38 juice item 1)", () => {
     expect(screen.queryByText(/next wave in/)).toBeNull();
     expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
   });
+
+  it("shows no readout for a steady run: the sampler publishes this same calm, null-index reading for the whole run (GH124-PLAN.md Checkpoint 3)", () => {
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
+        scheduleMode: "steady",
+      },
+    });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
 });
 
 describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)", () => {
@@ -395,20 +430,6 @@ describe("LogPanel wave readout accessibility (GH38 review round 1, fix 2)", () 
   });
 });
 
-describe("LogPanel queue-bar danger pulse (#38 juice item 2)", () => {
-  it("adds the pulse class at danger severity", () => {
-    setSnapshot([], 0, 45); // 45 / LOG_QUEUE_MAX(50) = 0.9, past SEVERITY_DANGER_FRAC (0.8)
-    render(<LogPanel />);
-    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
-  });
-
-  it("omits the pulse class below danger severity", () => {
-    setSnapshot([], 0, 10); // 10 / 50 = 0.2
-    render(<LogPanel />);
-    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
-  });
-});
-
 describe("LogPanel wave flash (one-shot on incoming -> active)", () => {
   it("adds .waveflash to the log column on the edge, then clears it after the animation", () => {
     vi.useFakeTimers();
@@ -523,23 +544,5 @@ describe("LogPanel animated cues gate on run conclusion (GH38 review round 3, F0
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("LogPanel queue-bar danger pulse gates on run conclusion (GH38 review round 3, F004+F006)", () => {
-  it("omits the pulse class at danger severity once the run has failed", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "failed" },
-    });
-    render(<LogPanel />);
-    expect(screen.getByTestId("queue-bar-fill").className).not.toMatch(/queue-bar-danger/);
-  });
-
-  it("keeps the pulse class at danger severity while the run is running", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), admitted: 45, processed: 0, status: "running" },
-    });
-    render(<LogPanel />);
-    expect(screen.getByTestId("queue-bar-fill").className).toMatch(/queue-bar-danger/);
   });
 });

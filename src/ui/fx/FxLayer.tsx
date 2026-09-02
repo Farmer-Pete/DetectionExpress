@@ -8,11 +8,16 @@
  * React-owned row.
  *
  * Positions are measured at spawn time from `getBoundingClientRect()` on
- * `data-testid="log-row-<id>"` rows and `data-finding-seq` finding rows, intersected
+ * `data-scored-event-id="<id>"` rows and `data-finding-seq` finding rows, intersected
  * with their panel's visible rect (`.log-stream`, `.findings-panel`), per the
  * deterministic fallback rules in GH37-PLAN.md "Off-screen and missing anchors": a
  * mounted but off-screen anchor clamps into the panel; a missing one falls back to
  * the panel's bottom edge (top edge for a miss, which never has a row to anchor on).
+ * `data-scored-event-id` is a scored pipeline event id — the SAME namespace
+ * `eventIds` on a finding/decision already names — a separate namespace from a log
+ * row's own `data-testid` world-log id (GH124-PLAN.md Checkpoint 5): only a scored
+ * kiosk row ever carries the attribute, so anchoring still lands on the right row
+ * after the log re-sourced onto the wider world-event ring.
  *
  * FX pacing is a `requestAnimationFrame` loop plus CSS keyframes, never sim ticks or
  * `setInterval` (ARCHITECTURE rule 8): the clock here is wall time, render-side only,
@@ -158,7 +163,7 @@ function resolveAnchor(
 
 const LOG_PANEL_SELECTOR = ".log-stream";
 const FINDINGS_PANEL_SELECTOR = ".findings-panel";
-const logRowSelector = (eventId: number): string => `[data-testid="log-row-${eventId}"]`;
+const logRowSelector = (eventId: number): string => `[data-scored-event-id="${eventId}"]`;
 const findingRowSelector = (seq: number): string => `[data-finding-seq="${seq}"]`;
 
 // ---- overlay item types ----

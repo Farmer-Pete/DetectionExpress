@@ -10,6 +10,7 @@ beforeEach(() => {
     transport: { frozen: false, speed: 1 },
     selection: null,
     decisionSelection: null,
+    mapDialogStack: [],
     runPending: false,
     error: null,
   });
@@ -70,6 +71,23 @@ describe("useSidePanel", () => {
     expect(result.current.tab).toBe("algorithm");
   });
 
+  it("openMetrics opens the panel on the metrics tab", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openMetrics());
+    expect(result.current.open).toBe(true);
+    expect(result.current.tab).toBe("metrics");
+    expect(result.current.sidePanel).not.toBeNull();
+  });
+
+  it("openMetrics is a no-op while a finding trace is open", () => {
+    useGameStore.setState({ selection: { seq: 1 } });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openMetrics());
+    expect(result.current.open).toBe(false);
+  });
+
   it("close() closes the panel", () => {
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
@@ -119,6 +137,38 @@ describe("useSidePanel", () => {
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
     act(() => result.current.openAlgorithm());
+    expect(result.current.open).toBe(false);
+  });
+
+  it("openChaos is a no-op while the place dialog is open (GH124-PLAN.md Checkpoint 4, Codex review gap)", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
+    });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openChaos());
+    expect(result.current.open).toBe(false);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("openAlgorithm is a no-op while the event dialog is open (GH124-PLAN.md Checkpoint 5, Codex review gap)", () => {
+    useGameStore.setState({ mapDialogStack: [{ kind: "event", id: 5 }] });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openAlgorithm());
+    expect(result.current.open).toBe(false);
+  });
+
+  it("openMetrics is a no-op while the map/event dialog stack holds more than one entry (a pushed dialog)", () => {
+    useGameStore.setState({
+      mapDialogStack: [
+        { kind: "place", selection: { kind: "train", actorId: "T1" } },
+        { kind: "event", id: 5 },
+      ],
+    });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openMetrics());
     expect(result.current.open).toBe(false);
   });
 

@@ -6,6 +6,7 @@ import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import type { WorldLogEvent } from "../sim/world-log";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
@@ -23,9 +24,36 @@ beforeEach(() => {
     runPending: false,
     transport: { frozen: false, speed: 1 },
     overlayOpen: false,
+    selection: null,
+    decisionSelection: null,
+    mapDialogStack: [],
   });
   markIntroSeen();
 });
+
+/** A fare-gate world-log event at Central (`cen`), for the log-row-click tests below. */
+function fareGateEvent(id: number): WorldLogEvent {
+  return {
+    id,
+    ts: id * 2,
+    sensor: "fare-gate",
+    placeId: "cen",
+    chipNode: "cen:gate",
+    reading: {
+      sensor: "fare-gate",
+      reading: {
+        ts: id * 2,
+        card: `card-${id}`,
+        station: "cen",
+        line: "red",
+        direction: "in",
+        result: "ok",
+        balance: 50,
+      },
+    },
+    scored: false,
+  };
+}
 
 /** A no-op controller so the test never touches the real loader or engine. */
 function stubController(): RunController & {
@@ -63,13 +91,31 @@ function stubController(): RunController & {
 }
 
 describe("App shell", () => {
-  it("renders the heading and both gauges", () => {
-    render(<App createPipelineController={() => stubController()} />);
+  it("renders the heading and the run-status pill", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
+    expect(container.querySelector(".status-pill")?.textContent).toBe("Running");
+  });
+
+  it("has no gauge strip on screen at rest: the four gauges live in the Metrics side-panel tab (GH124-PLAN.md Checkpoint 2)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByText("Throughput")).toBeNull();
+    expect(screen.queryByText("Queue")).toBeNull();
+  });
+
+  it("opens the side panel on the metrics tab, gauges included, from the Topbar's Metrics button", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /metrics/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Queue")).toBeDefined();
+    expect(screen.getByText("Compute")).toBeDefined();
+    expect(screen.getByText("Correctness")).toBeDefined();
   });
 
   it("has no side panel on screen at rest", () => {
@@ -198,6 +244,308 @@ describe("App side panel (GH118-PLAN.md)", () => {
   });
 });
 
+describe("App place dialog (GH124-PLAN.md Checkpoint 4)", () => {
+  it("opens a station's place dialog on click, inerts the shell, and does not freeze the engine", () => {
+    const controller = stubController();
+    render(<App createPipelineController={() => controller} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    expect(controller.frozenCalls).not.toContain(true);
+  });
+
+  it("Escape closes the place dialog and lifts the shell's inert state", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Central" }), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("re-renders the open dialog live as the snapshot changes, unlike the frozen trace/side-panel overlays", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          actors: [
+            {
+              id: "R1",
+              kind: "rider",
+              presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 10 },
+            },
+          ],
+        },
+      });
+    });
+
+    // The aggregated ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4) shows the
+    // activity phrase and a count, never a raw actor id.
+    expect(screen.getByText("waiting for a train")).toBeDefined();
+  });
+
+  it("is mutually exclusive with the side panel: a map click while it is open never also opens the place dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("is mutually exclusive with the trace dialog: a map click while a finding/decision is selected never also opens the place dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ selection: { seq: 1 } });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+});
+
+// The event opener (a LogPanel row click) is guarded the same way the map opener
+// (onMapSelect) already was, closing the asymmetry a Codex review flagged: before
+// this fix, a log-row click routed straight to the store's selectWorldEvent with no
+// App-level guard at all, so it could stack the event dialog on top of the side panel
+// or the place dialog even though the map opener already blocked the equivalent case.
+describe("App event dialog opener guard (GH124-PLAN.md Checkpoint 5, consistency fix)", () => {
+  it("is mutually exclusive with the side panel: a log-row click while it is open never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("is mutually exclusive with the place dialog: a log-row click while it is open never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    // The click is blocked, so the place dialog already on the stack stays exactly
+    // as it was — this is NOT a push (a main-log-row click is an "outside" opener,
+    // only reachable while the stack starts empty).
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+  });
+
+  it("is mutually exclusive with the intro overlay: a log-row click while it is open never also opens the event dialog", () => {
+    localStorage.clear(); // show the intro overlay on this render (beforeEach marks it seen)
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("is mutually exclusive with the trace dialog: a log-row click while a finding/decision is selected never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({
+        selection: { seq: 1 },
+        snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] },
+      });
+    });
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("opens the event dialog on a log-row click when no other modal is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+  });
+});
+
+// The navigation stack (GH124 follow-up): the "Open place" link inside EventDialog and
+// a scoped-log row inside PlaceDialog used to perform an ATOMIC SWAP — closing the
+// dialog the player came from with no way back. They now PUSH onto a shared bounded
+// stack instead, so a "‹ Back" control in the newly-topmost dialog returns to the one
+// underneath, while the × button always closes the whole stack regardless of depth.
+describe("App map/event dialog navigation stack (GH124 follow-up: Back)", () => {
+  it("'Open place' inside the event dialog pushes the place dialog on top; Back returns to the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByTestId("log-row-5"));
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open place" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "event", id: 5 },
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(screen.getByRole("dialog")).toBeDefined(); // the event dialog is back
+  });
+
+  it("a scoped-log row inside the place dialog pushes the event dialog on top; Back returns to the place dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+
+    fireEvent.click(screen.getByTestId("place-log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+      { kind: "event", id: 5 },
+    ]);
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+  });
+
+  it("the × button on a pushed dialog closes the WHOLE stack, not just the top entry, and lifts the shell's inert state", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByTestId("log-row-5"));
+    fireEvent.click(screen.getByRole("button", { name: "Open place" }));
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+  });
+
+  it("Back moves focus into the now-topmost dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    fireEvent.click(screen.getByTestId("place-log-row-5"));
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    const placeDialog = screen.getByRole("dialog", { name: "Central" });
+    expect(document.activeElement).toBe(placeDialog);
+  });
+
+  it("closing the whole stack via × restores focus to the very first (outermost) trigger, across a push", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    // The main log row (a real `<button>`) focuses itself on click (LogPanel.tsx),
+    // the same stand-in a real browser click would produce.
+    const logRow = screen.getByTestId("log-row-5");
+    fireEvent.click(logRow); // opens the event dialog: the root of this session
+
+    fireEvent.click(screen.getByRole("button", { name: "Open place" })); // pushes the place dialog on top
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(document.activeElement).toBe(logRow);
+  });
+
+  it("restores focus to an SVG station control that rooted the stack, across a push", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    // The map's station control is an SVG `<g>` (MetroMap.tsx). A keyboard user tabs to
+    // it, focusing it, then activates it; an `SVGElement` satisfies the widened
+    // focus-restore guard, so a full close returns focus here even across a pushed dialog.
+    const station = screen.getByRole("button", { name: "Central" });
+    station.focus();
+    fireEvent.click(station); // opens the place dialog: the root of this session
+    expect(document.activeElement).not.toBe(station); // focus moved into the dialog
+
+    fireEvent.click(screen.getByTestId("place-log-row-5")); // pushes the event dialog on top
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(document.activeElement).toBe(station);
+  });
+
+  it("closing an event-rooted stack that pushed a place restores focus to the event's own fallback (the log panel), not the place dialog's, when the trigger is gone", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    const logRow = screen.getByTestId("log-row-5");
+    fireEvent.click(logRow); // opens the event dialog: the root of this session
+
+    fireEvent.click(screen.getByRole("button", { name: "Open place" })); // pushes the place dialog on top
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    logRow.remove(); // the root trigger leaves the DOM while the place dialog is on top
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" })); // closes via the PLACE dialog's × button
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    // Restores to the EVENT dialog's own fallback (the log panel) — the fallback
+    // captured when the event dialog rooted the session — not the PLACE dialog's own
+    // fallback (the map region), even though the place dialog is the one that was
+    // actually on top, and whose × button was actually clicked, when the stack closed
+    // (GH124 follow-up: bug fix).
+    expect(document.activeElement).toBe(document.querySelector(".log-panel"));
+    expect(document.activeElement).not.toBe(document.querySelector(".metro-map-region"));
+  });
+});
+
 describe("App onboarding", () => {
   // Record the anchor id each scrollIntoView lands on, so a test asserts the target.
   let scrollTargets: string[];
@@ -323,16 +671,15 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
     expect(pipes[0]?.runs).toBe(1);
   });
 
-  it("renders the Hud, the map region, and the inspector shell together, map between Hud and the inspector", () => {
+  it("renders the map region and the inspector shell together, map before the inspector (the gauge strip moved into the Metrics side-panel tab)", () => {
     const { container } = render(<App createPipelineController={() => stubController()} />);
-    expect(container.querySelector(".hud")).not.toBeNull();
     expect(container.querySelector(".metro-view")).not.toBeNull();
     expect(container.querySelector(".inspector-shell")).not.toBeNull();
     // querySelectorAll returns matches in document order, so this list IS the order.
-    const classes = [...container.querySelectorAll(".hud, .metro-view, .inspector-shell")].map(
+    const classes = [...container.querySelectorAll(".metro-view, .inspector-shell")].map(
       (el) => el.className,
     );
-    expect(classes).toEqual(["hud", "metro-view", "inspector-shell"]);
+    expect(classes).toEqual(["metro-view", "inspector-shell"]);
   });
 
   it("shows the map region by default and hides it on toggle, without touching the pipeline loop", () => {
@@ -346,13 +693,16 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
         }}
       />,
     );
-    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
+    // role="group", not role="img" (GH124-PLAN.md Checkpoint 4): an image's
+    // descendants are not exposed as interactive controls, which would make every
+    // station/site/train button on the map unreachable to assistive tech.
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
-    expect(screen.queryByRole("img", { name: "Metro network map" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Metro network map" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
-    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
 
     // Never rebuilt or disposed across either toggle: the one engine keeps running.
     expect(pipes).toHaveLength(1);

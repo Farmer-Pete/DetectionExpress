@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Checkpoint, GeneratedRun, Scenario, Wave } from "../sim/scenario";
+import type { Checkpoint, GeneratedRun, Scenario, ScheduleMode, Wave } from "../sim/scenario";
+import { buildBlueprint as buildRealBlueprint } from "../sim/scenarios/pin-brute-force/scenario";
 import type { ServiceRate } from "../sim/service-governor";
 import type { SimSnapshot } from "../sim/snapshot";
 import type { LoadedAlgorithm } from "./algorithm";
@@ -272,6 +273,46 @@ describe("run controller", () => {
     await flush();
     expect(seen).toHaveLength(1);
     expect(seen[0]?.waves).toBe(waves); // the same array, untouched
+  });
+
+  it('defaults scheduleMode to "waves" in start when omitted from deps (GH124-PLAN.md Checkpoint 3)', async () => {
+    const seen: StartOptions[] = [];
+    const controller = createRunController(
+      baseDeps({
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen[0]?.scheduleMode).toBe("waves");
+  });
+
+  it("passes deps.scheduleMode into start, and into buildBlueprint, unchanged", async () => {
+    const seen: StartOptions[] = [];
+    const blueprintModesSeen: (ScheduleMode | undefined)[] = [];
+    const controller = createRunController(
+      baseDeps({
+        scheduleMode: "steady",
+        // Delegates to the real pin-brute-force blueprint builder (not a hand
+        // stub) so buildMapCast's env/world plumbing stays valid; only the mode
+        // it was called with is observed here.
+        buildBlueprint: (seed, mode) => {
+          blueprintModesSeen.push(mode);
+          return buildRealBlueprint(seed, mode);
+        },
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(blueprintModesSeen).toEqual(["steady"]);
+    expect(seen[0]?.scheduleMode).toBe("steady");
   });
 
   it("injects the profiled service rate into start (M2)", async () => {

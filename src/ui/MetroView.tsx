@@ -13,11 +13,20 @@
  * update re-renders only the panel that reads the changed field, not the whole view
  * (ARCHITECTURE rule 4). The map's hot path (moving actors, flashes) is the canvas
  * layer, not React.
+ *
+ * GH124-PLAN.md Checkpoint 4: `onSelect` and `mapRegionRef` pass straight through to
+ * `MetroMap`/the map region — App owns the actual selection state (the store's
+ * `mapDialogStack`) and the place dialog's focus-restore fallback, so this component
+ * stays a thin relay for both, the same way it already relays nothing else of its own.
  */
 
+import type { RefObject } from "react";
+import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
 import type { FailureReason, RunStatus } from "../sim/snapshot";
+import type { SensorCode } from "../sim/world/layout";
 import { world } from "../sim/world/world";
+import { sensorIcon } from "./icons/sensor-icons";
 import { MetroMap } from "./MetroMap";
 
 /** The map's line draw order; any line not listed sorts last. */
@@ -32,17 +41,18 @@ const lineRank = (id: string): number => {
 /** The four lines, for the legend, in the map's draw order. */
 const LEGEND_LINES = world.lines.slice().sort((a, b) => lineRank(a.id) - lineRank(b.id));
 
-/** The nine sensors, for the legend: code, color token, and name. */
-const LEGEND_SENSORS: readonly { code: string; color: string; name: string }[] = [
-  { code: "K", color: "var(--s-kiosk)", name: "account kiosk (Z0)" },
-  { code: "G", color: "var(--s-gate)", name: "fare gate (Z0->Z1)" },
-  { code: "V", color: "var(--s-tvm)", name: "ticket machine (Z0)" },
-  { code: "C", color: "var(--s-cam)", name: "platform camera (Z0/Z1)" },
-  { code: "R", color: "var(--s-reader)", name: "door reader (Z1-Z4)" },
-  { code: "D", color: "var(--s-contact)", name: "door contact (Z1-Z4)" },
-  { code: "T", color: "var(--s-train)", name: "train tracker (Z1/Z3)" },
-  { code: "N", color: "var(--s-relay)", name: "network relay (Z2-Z4)" },
-  { code: "O", color: "var(--s-console)", name: "control console (Z4)" },
+/** The nine sensors, for the legend: code and name. The icon and color token come
+    from `sensorIcon` (the single source of truth), not a second table here. */
+const LEGEND_SENSORS: readonly { code: SensorCode; name: string }[] = [
+  { code: "K", name: "account kiosk (Z0)" },
+  { code: "G", name: "fare gate (Z0->Z1)" },
+  { code: "V", name: "ticket machine (Z0)" },
+  { code: "C", name: "platform camera (Z0/Z1)" },
+  { code: "R", name: "door reader (Z1-Z4)" },
+  { code: "D", name: "door contact (Z1-Z4)" },
+  { code: "T", name: "train tracker (Z1/Z3)" },
+  { code: "N", name: "network relay (Z2-Z4)" },
+  { code: "O", name: "control console (Z4)" },
 ];
 
 /** The Lines column: one swatch-and-name row per line, in the map's draw order. */
@@ -96,19 +106,22 @@ function ActorsColumn() {
   );
 }
 
-/** The Sensors column: one chip-and-name row per sensor. */
+/** The Sensors column: one icon-and-name row per sensor, tinted with its color token. */
 function SensorsColumn() {
   return (
     <div className="metro-key-col">
       <div className="metro-key-head">Sensors</div>
-      {LEGEND_SENSORS.map((sensor) => (
-        <div className="metro-key-row" key={sensor.code}>
-          <span className="metro-chip-swatch" style={{ background: sensor.color }}>
-            {sensor.code}
-          </span>
-          {sensor.name}
-        </div>
-      ))}
+      {LEGEND_SENSORS.map((sensor) => {
+        const { Icon, token } = sensorIcon(sensor.code);
+        return (
+          <div className="metro-key-row" key={sensor.code}>
+            <span className="metro-chip-swatch">
+              <Icon size={13} color={token} strokeWidth={2.5} />
+            </span>
+            {sensor.name}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -159,14 +172,23 @@ function EndedOverlay() {
   );
 }
 
-export function MetroView() {
+interface MetroViewProps {
+  /** Lifted selection handler (GH124-PLAN.md Checkpoint 4), forwarded to `MetroMap`. */
+  onSelect: (selection: MapSelection) => void;
+  /** The map region's ref, for the place dialog's focus-restore fallback (App owns
+   *  the ref; `tabIndex={-1}` here makes it programmatically focusable without
+   *  joining the Tab order, mirroring `DecisionsPanel.tsx`'s own panel ref). */
+  mapRegionRef?: RefObject<HTMLDivElement | null> | undefined;
+}
+
+export function MetroView({ onSelect, mapRegionRef }: MetroViewProps) {
   return (
     <div className="metro-view">
       {/* Two grid children, not overlays: the map region (so the full map, Harbor to
           World's End, and every site, is never hidden under a panel) and the key,
           each placed by `.metro-view`'s CSS grid areas — no width check here. */}
-      <div className="metro-map-region">
-        <MetroMap />
+      <div className="metro-map-region" ref={mapRegionRef} tabIndex={-1}>
+        <MetroMap onSelect={onSelect} />
         <EndedOverlay />
       </div>
       <MetroKey />

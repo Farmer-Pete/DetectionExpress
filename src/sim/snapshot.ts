@@ -5,7 +5,9 @@
  */
 import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
+import type { ScheduleMode } from "./scenario";
 import type { WaveReading } from "./wave-state";
+import type { WorldLogEvent } from "./world-log";
 // `ActorView`, `FlashEvent`, `DoorView`, and `CrowdView` stay defined in
 // `world-snapshot.ts` for now (GH117 Part E, to minimize churn); import them from
 // there directly.
@@ -58,6 +60,12 @@ export interface SimSnapshot {
    */
   wave: WaveReading;
   /**
+   * The run's arrival shape (GH124-PLAN.md Checkpoint 3): `"waves"` is the
+   * original climbing ramp, `"steady"` is the gapless constant stream the app
+   * defaults to.
+   */
+  scheduleMode: ScheduleMode;
+  /**
    * Live actors the embedded map draws, with semantic presence (GH117 Part E). Empty
    * until the engine steps the cast onto this snapshot; the current producer still
    * publishes `[]`.
@@ -75,6 +83,15 @@ export interface SimSnapshot {
    * engine wires it.
    */
   nowTick: number;
+  /**
+   * The bounded world-event ring (GH124-PLAN.md Checkpoint 5): every sensor's raw
+   * reading, oldest first, capped at `WORLD_LOG_RING_SIZE`. A separate structure
+   * from `events` (the scored inspector ring): this covers every sensor kind, not
+   * just the scored kiosk stream, and keys on its own id namespace
+   * (`WorldLogEvent.id`), never a scored pipeline event id. The unified log panel
+   * and every place dialog's scoped log both read this one ring.
+   */
+  worldEvents: readonly WorldLogEvent[];
 }
 
 /** The reading before the first sample: empty, calm, and perfectly correct. */
@@ -93,10 +110,12 @@ export function emptySnapshot(): SimSnapshot {
     events: [],
     processed: 0,
     wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
+    scheduleMode: "waves",
     actors: Object.freeze([]),
     flashes: Object.freeze([]),
     doors: Object.freeze([]),
     crowds: Object.freeze([]),
     nowTick: 0,
+    worldEvents: Object.freeze([]),
   };
 }

@@ -15,7 +15,7 @@
  */
 import { randomLcg } from "d3-random";
 import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
-import type { Presence } from "../world/presence";
+import type { MapNodeId, Presence } from "../world/presence";
 import type { ActorView } from "../world-snapshot";
 
 /** The seeded input an actor reads to choose its first tick. */
@@ -39,6 +39,15 @@ interface ActResult<Reading> {
    * path (`runActors`) reads only `readings` and `nextTick`, so it ignores this.
    */
   presence?: Presence;
+  /**
+   * The actor's chosen trip destination after this transition (GH124-PLAN.md
+   * Checkpoint 4 Part 2), view-only like `presence`. Mirrors `presence`'s
+   * delta semantics with one addition: `undefined` leaves the view's destination
+   * unchanged (most transitions never touch it), a `MapNodeId` sets it, and an
+   * explicit `null` clears it — an actor whose trip has ended (or not yet chosen
+   * one) must be able to drop a stale destination, not just leave one unset.
+   */
+  destination?: MapNodeId | null;
 }
 
 /**
@@ -71,6 +80,12 @@ export interface TimedReading<Reading> {
 export interface StepResult<Reading> {
   readings: TimedReading<Reading>[];
   presences: Map<string, Presence>;
+  /**
+   * Destination deltas (GH124-PLAN.md Checkpoint 4 Part 2), keyed like `presences`
+   * but over `MapNodeId | null`: a `null` value is a delta too — it clears the
+   * view's destination — so it is never omitted the way "no change" is.
+   */
+  destinations: Map<string, MapNodeId | null>;
   dormant: string[];
 }
 
@@ -458,6 +473,7 @@ export function createSchedule<Reading, Env>(
     }
     const readings: TimedReading<Reading>[] = [];
     const presences = new Map<string, Presence>();
+    const destinations = new Map<string, MapNodeId | null>();
     const dormant: string[] = [];
 
     // Pop the earliest due record while it sits strictly below the horizon. The heap
@@ -480,6 +496,9 @@ export function createSchedule<Reading, Env>(
       if (result.presence !== undefined) {
         presences.set(record.actor.id, result.presence);
       }
+      if (result.destination !== undefined) {
+        destinations.set(record.actor.id, result.destination);
+      }
       const next = result.nextTick;
       if (next !== "dormant" && (!Number.isInteger(next) || next <= bestTick)) {
         throw new Error(
@@ -496,7 +515,7 @@ export function createSchedule<Reading, Env>(
     }
 
     frontier = horizon;
-    return { readings, presences, dormant };
+    return { readings, presences, destinations, dormant };
   };
 
   const admit = (admission: Admission<Reading, Env>): number => {

@@ -14,6 +14,8 @@ interface GaugeProps {
   fill: string;
   /** Decimal places for the readout. Omitted rounds to a whole number. */
   digits?: number;
+  /** A short muted caption explaining what the metric means. Omitted renders nothing. */
+  description?: string;
   /**
    * Adds a heartbeat pulse to the fill (#38 juice item 2). Reduced-motion-guarded
    * in CSS; the fill's danger color already carries the severity, so the pulse
@@ -34,6 +36,7 @@ export function Gauge(props: GaugeProps) {
   return (
     <div className="gauge">
       <div className="gauge-label">{props.label}</div>
+      {props.description !== undefined && <div className="gauge-desc">{props.description}</div>}
       <div className="gauge-value">
         {readout}
         <span className="gauge-unit">{props.unit}</span>

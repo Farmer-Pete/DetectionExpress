@@ -9,6 +9,7 @@ import {
   WAVE_RATES,
   WAVE_WARN_TICKS,
 } from "../game/tuning";
+import { admitArrivals } from "./actors/admission";
 import { buildSchedule } from "./schedule";
 
 describe("buildSchedule", () => {
@@ -72,5 +73,55 @@ describe("buildSchedule", () => {
     expect(Math.min(WAVE_WARN_TICKS, DRAIN_GAP_TICKS)).toBeGreaterThanOrEqual(
       CLOCK_HZ / PUBLISH_HZ,
     );
+  });
+});
+
+describe('buildSchedule("steady") (GH124-PLAN.md Checkpoint 3)', () => {
+  it("emits WAVE_COUNT contiguous waves at the calm baseline rate", () => {
+    const { waves } = buildSchedule("steady");
+    expect(waves.length).toBe(WAVE_COUNT);
+    expect(waves[0]?.startTick).toBe(INTRO_TICKS);
+    let prevEnd = INTRO_TICKS;
+    for (const wave of waves) {
+      expect(wave.eventsPerTick).toBe(WAVE_RATES[0]);
+      expect(wave.durationTicks).toBe(WAVE_DURATION_TICKS);
+      expect(wave.startTick).toBe(prevEnd); // gap 0: contiguous, not merely non-overlapping
+      prevEnd = wave.startTick + wave.durationTicks;
+    }
+  });
+
+  it("emits one terminal checkpoint, a drain allowance past the last arrival", () => {
+    const { waves, checkpoints } = buildSchedule("steady");
+    const lastWave = waves.at(-1);
+    expect(checkpoints.length).toBe(1);
+    expect(checkpoints[0]?.clearsThroughWave).toBe(WAVE_COUNT - 1);
+    expect(checkpoints[0]?.atTick).toBe(
+      (lastWave?.startTick ?? 0) + (lastWave?.durationTicks ?? 0) + DRAIN_GAP_TICKS,
+    );
+  });
+
+  it("does not throw despite gap-0 successors (assertSuccessorGap is mode-gated)", () => {
+    const { waves } = buildSchedule("steady");
+    expect(() => admitArrivals(waves, "steady")).not.toThrow();
+  });
+
+  it("turns into one gapless constant arrival stream: every tick from the first wave's start through the last wave's end admits the baseline rate", () => {
+    const { waves } = buildSchedule("steady");
+    const arrivals = admitArrivals(waves, "steady");
+    const first = waves[0];
+    const last = waves.at(-1);
+    if (!first || !last) throw new Error("expected at least one steady wave");
+    const rate = WAVE_RATES[0] ?? 0;
+    const totalTicks = last.startTick + last.durationTicks - first.startTick;
+    expect(arrivals.length).toBe(totalTicks * rate);
+    for (let tick = first.startTick; tick < first.startTick + totalTicks; tick++) {
+      const countAtTick = arrivals.filter((t) => t === tick).length;
+      expect(countAtTick).toBe(rate);
+    }
+  });
+
+  it("still gives planAttacks() a plan-per-wave contract: exactly WAVE_COUNT waves", () => {
+    const { waves } = buildSchedule("steady");
+    expect(waves.length).toBe(WAVE_COUNT);
   });
 });

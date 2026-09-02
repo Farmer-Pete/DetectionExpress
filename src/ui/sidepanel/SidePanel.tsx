@@ -1,7 +1,8 @@
 /**
- * The side panel: a right-edge overlay that carries the two panels the pipeline view
- * used to stack below the fold (GH118-PLAN.md) — the chaos ladder and the Algorithm
- * editor — behind an accessible tab strip. Purely presentational: `use-side-panel.tsx`
+ * The side panel: a right-edge overlay that carries the panels the pipeline view
+ * used to stack below the fold (GH118-PLAN.md), plus the four HUD gauges
+ * (GH124-PLAN.md Checkpoint 2) — the chaos ladder, the Algorithm editor, and
+ * Metrics — behind an accessible tab strip. Purely presentational: `use-side-panel.tsx`
  * owns `open`/`tab`, the pause protocol, and the Apply-on-success wiring; this
  * component only renders the given tab and reports clicks and key presses back up.
  *
@@ -40,14 +41,16 @@ import { AlgorithmEditor } from "../AlgorithmEditor";
 import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
+import { Hud } from "../hud/Hud";
 
-export type SidePanelTab = "chaos" | "algorithm";
+export type SidePanelTab = "chaos" | "algorithm" | "metrics";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 const TABS: ReadonlyArray<{ id: SidePanelTab; label: string }> = [
   { id: "chaos", label: "Chaos ladder" },
   { id: "algorithm", label: "Algorithm" },
+  { id: "metrics", label: "Metrics" },
 ];
 
 export interface SidePanelProps {
@@ -194,6 +197,15 @@ export function SidePanel({
           hidden={tab !== "algorithm"}
         >
           <AlgorithmEditor onRun={onApply} />
+        </div>
+        <div
+          role="tabpanel"
+          id="sidepanel-tabpanel-metrics"
+          aria-labelledby="sidepanel-tab-metrics"
+          className="sidepanel-body"
+          hidden={tab !== "metrics"}
+        >
+          <Hud />
         </div>
       </div>
     </div>

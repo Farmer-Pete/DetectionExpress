@@ -1,7 +1,8 @@
 /**
- * The side panel's controller: the chaos ladder and Algorithm editor tabs, moved off
- * the main column and behind a right-edge overlay (GH118-PLAN.md). It owns `open` and
- * `tab`, the two intake actions `openChaos`/`openAlgorithm`, the dismiss action
+ * The side panel's controller: the chaos ladder, Algorithm editor, and Metrics tabs,
+ * moved off the main column and behind a right-edge overlay (GH118-PLAN.md;
+ * Metrics added in GH124-PLAN.md Checkpoint 2). It owns `open` and `tab`, the three
+ * intake actions `openChaos`/`openAlgorithm`/`openMetrics`, the dismiss action
  * `close`, and the panel-owned Apply protocol `onApply`. It returns the ready-to-mount
  * `sidePanel` node, mirroring `useIntroOverlay`'s shape: `SidePanel` is only ever
  * mounted while `open` is true, so `SidePanel`'s own mount/unmount lifecycle IS the
@@ -28,18 +29,23 @@
  * unfreezes; a set error leaves the panel open, showing the error line
  * `AlgorithmEditor` already renders, and clears the intent either way.
  *
- * Overlay exclusivity (GH118-PLAN.md): `openChaos`/`openAlgorithm` no-op while the
- * trace overlay is open (`selection`/`decisionSelection`), so the shell never stacks
- * two dim backdrops. The intro transition is App's concern: App records the tab an
- * intro action requested, closes the intro, then calls `openChaos`/`openAlgorithm`
- * itself once the intro has actually closed.
+ * Overlay exclusivity (GH118-PLAN.md, extended by GH124-PLAN.md Checkpoints 4-5):
+ * `openChaos`/`openAlgorithm`/`openMetrics` no-op while ANY other modal is open — the
+ * trace overlay (`selection`/`decisionSelection`) or the map/event dialog stack
+ * (`mapDialogStack`, non-empty) — so the shell never stacks two dim backdrops.
+ * `App.tsx` returns the guard: its own map/event openers no-op while `sidePanel.open`
+ * is true, the same way this hook no-ops against the store's fields, so the three-way
+ * exclusivity (trace, the map/event stack, side panel) holds from every direction.
+ * The intro transition is App's concern: App records the tab an intro action
+ * requested, closes the intro, then calls `openChaos`/`openAlgorithm` itself once the
+ * intro has actually closed.
  *
  * Focus fallback for that intro path (GH118-PLAN.md): the intro button that
  * triggered the open is unmounted by the time the panel closes, so `SidePanel`'s own
  * focus-restore effect falls back to `fallbackFocusRef`. `chaosFocusRef`/
- * `algorithmFocusRef` are App's two Topbar button refs; this hook forwards whichever
- * one matches the active tab, mirroring the fallback-focus refs `TraceOverlay`
- * already takes.
+ * `algorithmFocusRef`/`metricsFocusRef` are App's three Topbar button refs; this hook
+ * forwards whichever one matches the active tab, mirroring the fallback-focus refs
+ * `TraceOverlay` already takes.
  */
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { RunController } from "../../game/run-controller";
@@ -58,6 +64,9 @@ export interface UseSidePanelArgs {
    *  gone on unmount (the intro's "Edit the Engine" path). Typically the Topbar
    *  Algorithm button's ref. */
   algorithmFocusRef?: RefObject<HTMLElement | null> | undefined;
+  /** Focus-restore fallback for the metrics tab, for when the trigger element is
+   *  gone on unmount. Typically the Topbar Metrics button's ref. */
+  metricsFocusRef?: RefObject<HTMLElement | null> | undefined;
 }
 
 export interface SidePanelController {
@@ -65,10 +74,15 @@ export interface SidePanelController {
   open: boolean;
   /** The active tab. */
   tab: SidePanelTab;
-  /** Open on the chaos tab. No-op while the trace overlay is open. */
+  /** Open on the chaos tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
   openChaos: () => void;
-  /** Open on the algorithm tab. No-op while the trace overlay is open. */
+  /** Open on the algorithm tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
   openAlgorithm: () => void;
+  /** Open on the metrics tab. No-op while the trace dialog or the map/event dialog
+   *  stack is open. */
+  openMetrics: () => void;
   /** Dismiss (Esc, backdrop, or the X button): restores the freeze saved on open. */
   close: () => void;
   /** The Algorithm tab's Apply: runs the source, closes only on success. */
@@ -81,12 +95,14 @@ export function useSidePanel({
   controllerRef,
   chaosFocusRef,
   algorithmFocusRef,
+  metricsFocusRef,
 }: UseSidePanelArgs): SidePanelController {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<SidePanelTab>("chaos");
 
   const selection = useGameStore((state) => state.selection);
   const decisionSelection = useGameStore((state) => state.decisionSelection);
+  const mapDialogStack = useGameStore((state) => state.mapDialogStack);
   const setFrozen = useGameStore((state) => state.setFrozen);
   const runPending = useGameStore((state) => state.runPending);
   const error = useGameStore((state) => state.error);
@@ -101,8 +117,8 @@ export function useSidePanel({
 
   const openWith = useCallback(
     (nextTab: SidePanelTab): void => {
-      if (selection !== null || decisionSelection !== null) {
-        return; // exclusive with the trace overlay: never stack two dim backdrops
+      if (selection !== null || decisionSelection !== null || mapDialogStack.length > 0) {
+        return; // exclusive with the trace dialog and the map/event stack: never stack two dim backdrops
       }
       if (!holdsFreezeRef.current) {
         savedFrozenRef.current = useGameStore.getState().transport.frozen;
@@ -112,11 +128,12 @@ export function useSidePanel({
       setTab(nextTab);
       setOpen(true);
     },
-    [selection, decisionSelection, setFrozen],
+    [selection, decisionSelection, mapDialogStack, setFrozen],
   );
 
   const openChaos = useCallback(() => openWith("chaos"), [openWith]);
   const openAlgorithm = useCallback(() => openWith("algorithm"), [openWith]);
+  const openMetrics = useCallback(() => openWith("metrics"), [openWith]);
 
   // The panel-owned Apply intent (decision 5): `onApply` sets it, the falling-edge
   // effect below clears it (on success or failure), and `close()` clears it too, so a
@@ -184,15 +201,18 @@ export function useSidePanel({
     };
   }, [setFrozen]);
 
+  const fallbackFocusRef =
+    tab === "chaos" ? chaosFocusRef : tab === "algorithm" ? algorithmFocusRef : metricsFocusRef;
+
   const sidePanel = open ? (
     <SidePanel
       tab={tab}
       onSelectTab={setTab}
       onClose={close}
       onApply={onApply}
-      fallbackFocusRef={tab === "chaos" ? chaosFocusRef : algorithmFocusRef}
+      fallbackFocusRef={fallbackFocusRef}
     />
   ) : null;
 
-  return { open, tab, openChaos, openAlgorithm, close, onApply, sidePanel };
+  return { open, tab, openChaos, openAlgorithm, openMetrics, close, onApply, sidePanel };
 }

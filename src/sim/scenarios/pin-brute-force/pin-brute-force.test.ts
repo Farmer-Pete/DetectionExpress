@@ -16,7 +16,7 @@ import type { PipeEvent } from "../../event";
 import type { GeneratedRun } from "../../scenario";
 import { buildSchedule } from "../../schedule";
 import { buildReferenceAlgorithm } from "./reference";
-import { pinBruteForce } from "./scenario";
+import { buildBlueprint, pinBruteForce } from "./scenario";
 import { ATTACKS_PER_WAVE, PIN_BRUTE_FORCE_THRESHOLD, PIN_BRUTE_FORCE_WINDOW_S } from "./tuning";
 
 /** The total attackers across all waves; the globally distinct victim count. */
@@ -327,5 +327,32 @@ describe("fairness invariants stay under the M2 wave data (M3 seam 15)", () => {
         expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
       }
     }
+  });
+});
+
+describe('buildBlueprint("steady") (GH124-PLAN.md Checkpoint 3)', () => {
+  it('builds cleanly off a gap-0 contiguous schedule: no throw despite the successor-gap shape assertWaveScheduleOrdered rejects in "waves" mode', () => {
+    expect(() => buildBlueprint(LEVEL_SEED, "steady")).not.toThrow();
+  });
+
+  it("carries the steady schedule's contiguous waves and single terminal checkpoint through", () => {
+    const blueprint = buildBlueprint(LEVEL_SEED, "steady");
+    expect(blueprint.scheduleMode).toBe("steady");
+    expect(blueprint.checkpoints.length).toBe(1);
+    expect(blueprint.waves).toEqual(buildSchedule("steady").waves);
+  });
+
+  it("still plans a valid, separable attack across every wave: exactly VICTIM_COUNT attacks, each over threshold", () => {
+    const blueprint = buildBlueprint(LEVEL_SEED, "steady");
+    expect(blueprint.precomposed.attacks.length).toBe(VICTIM_COUNT);
+    for (const attack of blueprint.precomposed.attacks) {
+      expect(attack.eventIds.length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
+    }
+  });
+
+  it('defaults to "waves" mode when scheduleMode is omitted, unchanged from before this checkpoint', () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    expect(blueprint.scheduleMode).toBe("waves");
+    expect(blueprint.waves).toEqual(buildSchedule().waves);
   });
 });
