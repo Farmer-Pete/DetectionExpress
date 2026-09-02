@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Wave } from "./scenario";
-import { waveStateAt } from "./wave-state";
+import type { ChaosPhase } from "./snapshot";
+import { chaosWaveReading, waveStateAt } from "./wave-state";
 
 const ONE_WAVE: Wave[] = [{ startTick: 10, durationTicks: 5, eventsPerTick: 2 }];
 
@@ -149,6 +150,74 @@ describe("waveStateAt: multi-wave index and countdown values", () => {
       phase: "incoming",
       index: 2,
       ticksUntilNext: 1,
+      eventsPerTick: null,
+    });
+  });
+});
+
+// GH126-PLAN.md M3b: the endless run carries no static wave schedule, so the sampler
+// bridges the repeating chaos loop into the same WaveReading shape through this pure
+// helper. It lights the existing WAVE INCOMING readout, .waveflash, .shake, and
+// screen-reader announcements for chaos waves with no UI rewrite.
+describe("chaosWaveReading: bridges the chaos loop into a WaveReading (GH126-PLAN.md M3b)", () => {
+  it("reads active while a chaos wave is in flight", () => {
+    const phase: ChaosPhase = { kind: "wave", selectedLevel: 1, activeLevel: 1 };
+    expect(chaosWaveReading(phase, 30)).toEqual({
+      phase: "active",
+      index: 0,
+      ticksUntilNext: null,
+      eventsPerTick: null,
+    });
+  });
+
+  it("reads calm with a countdown early in a lead-in cooldown (beyond the warn window)", () => {
+    const phase: ChaosPhase = { kind: "cooldown", selectedLevel: 1, cooldownRemaining: 120 };
+    expect(chaosWaveReading(phase, 30)).toEqual({
+      phase: "calm",
+      index: 0,
+      ticksUntilNext: 120,
+      eventsPerTick: null,
+    });
+  });
+
+  it("reads incoming once the lead-in falls within the warn window", () => {
+    const phase: ChaosPhase = { kind: "cooldown", selectedLevel: 1, cooldownRemaining: 20 };
+    expect(chaosWaveReading(phase, 30)).toEqual({
+      phase: "incoming",
+      index: 0,
+      ticksUntilNext: 20,
+      eventsPerTick: null,
+    });
+  });
+
+  it("reads incoming exactly at the warn-window edge (cooldownRemaining === warnTicks)", () => {
+    const phase: ChaosPhase = { kind: "cooldown", selectedLevel: 1, cooldownRemaining: 30 };
+    expect(chaosWaveReading(phase, 30).phase).toBe("incoming");
+  });
+
+  it("reads calm one tick outside the warn window", () => {
+    const phase: ChaosPhase = { kind: "cooldown", selectedLevel: 1, cooldownRemaining: 31 };
+    expect(chaosWaveReading(phase, 30).phase).toBe("calm");
+  });
+
+  it("reads calm (no wave coming) when idle", () => {
+    const phase: ChaosPhase = { kind: "idle", selectedLevel: 0 };
+    expect(chaosWaveReading(phase, 30)).toEqual({
+      phase: "calm",
+      index: null,
+      ticksUntilNext: null,
+      eventsPerTick: null,
+    });
+  });
+
+  it("reads calm during a cooldown that will stop at level 0 (no wave coming)", () => {
+    // A level-0 stop: the metro is in its final cooldown but no wave follows, so the
+    // warning must stay dark even though a cooldown is pending.
+    const phase: ChaosPhase = { kind: "cooldown", selectedLevel: 0, cooldownRemaining: 15 };
+    expect(chaosWaveReading(phase, 30)).toEqual({
+      phase: "calm",
+      index: null,
+      ticksUntilNext: null,
       eventsPerTick: null,
     });
   });

@@ -2412,12 +2412,22 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     h.handle.stop();
   });
 
-  it("setChaosLevel(1) from idle triggers a wave and publishes the wave phase", async () => {
+  it("setChaosLevel(1) from idle starts a lead-in cooldown, NOT an immediate wave (cooldown-first)", async () => {
     const h = endlessHarness({ algorithm: idleAlgorithm });
     await step(h.driver, 3);
     expect(h.last()?.chaosPhase.kind).toBe("idle");
     h.handle.setChaosLevel(1);
-    await step(h.driver, 4); // let the sampler publish the admitted attackers
+    await step(h.driver, 4); // give the loop a few ticks; still inside the lead-in
+    // Cooldown-first: a lead-in precedes the FIRST wave, so no attacker exists yet.
+    const leadIn = h.last()?.chaosPhase;
+    expect(leadIn?.kind).toBe("cooldown");
+    expect(leadIn?.selectedLevel).toBe(1);
+    expect(leadIn?.cooldownRemaining).toBeGreaterThan(0);
+    expect(leadIn?.cooldownRemaining).toBeLessThanOrEqual(CHAOS_COOLDOWN_TICKS);
+    expect(attackers(h)).toHaveLength(0);
+
+    // The wave triggers only once the lead-in elapses.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS);
     const phase = h.last()?.chaosPhase;
     expect(phase?.kind).toBe("wave");
     expect(phase?.selectedLevel).toBe(1);
@@ -2428,16 +2438,37 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     h.handle.stop();
   });
 
-  it("resolves a wave into a cooldown gap, then triggers the NEXT wave after CHAOS_COOLDOWN_TICKS", async () => {
+  it("drives snapshot.wave calm -> incoming -> active across a lead-in and its wave (M3b bridge)", async () => {
+    const h = endlessHarness({ algorithm: idleAlgorithm });
+    await step(h.driver, 3);
+    h.handle.setChaosLevel(1); // opens the lead-in
+    // Early in the lead-in: calm, with a countdown well beyond the warn window.
+    await step(h.driver, 4);
+    const early = h.last()?.wave;
+    expect(early?.phase).toBe("calm");
+    expect(early?.ticksUntilNext ?? 0).toBeGreaterThan(WAVE_WARN_TICKS);
+
+    // Step to inside the warn window: the reading flips to "WAVE INCOMING".
+    await step(h.driver, CHAOS_COOLDOWN_TICKS - WAVE_WARN_TICKS);
+    expect(h.last()?.wave.phase).toBe("incoming");
+
+    // Past the lead-in: the wave is active.
+    await step(h.driver, WAVE_WARN_TICKS + 8);
+    expect(h.last()?.wave.phase).toBe("active");
+    h.handle.stop();
+  });
+
+  it("resolves a wave into a lead-in cooldown, then triggers the NEXT wave after it elapses", async () => {
     const outcomes: WaveOutcomeObservation[] = [];
     const h = endlessHarness({
       algorithm: referenceTaskAlgorithm(),
       onWaveOutcome: (o) => outcomes.push(o),
     });
     await step(h.driver, 3);
-    h.handle.setChaosLevel(1); // triggers wave 1 at ~tick 3
-    // Drive past wave 1's resolve (~170 ticks after trigger) but not past the cooldown.
-    await step(h.driver, 195);
+    h.handle.setChaosLevel(1); // opens the lead-in; wave 1 triggers when it elapses
+    // Elapse the lead-in AND run wave 1 to its resolve (~170 ticks after trigger),
+    // landing inside the post-wave lead-in for wave 2.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 195);
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]?.waveId).toBe(1);
     const cooldown = h.last()?.chaosPhase;
@@ -2449,7 +2480,7 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     expect(h.last()?.waveOutcome?.waveId).toBe(1);
     expect(attackers(h)).toHaveLength(0); // calm: every attacker went dormant
 
-    // Past the cooldown, the loop triggers wave 2 at the still-selected level 1.
+    // Past the lead-in, the loop triggers wave 2 at the still-selected level 1.
     await step(h.driver, CHAOS_COOLDOWN_TICKS + 15);
     expect(h.last()?.chaosPhase.kind).toBe("wave");
     expect(h.last()?.waveOutcome).toBeNull(); // a new wave retired the prior banner
@@ -2465,13 +2496,13 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
       onWaveOutcome: (o) => outcomes.push(o),
     });
     await step(h.driver, 3);
-    h.handle.setChaosLevel(1); // wave 1 triggers
-    await step(h.driver, 12);
+    h.handle.setChaosLevel(1); // opens the lead-in
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 12); // elapse the lead-in, land inside wave 1
     expect(h.last()?.chaosPhase.kind).toBe("wave"); // in flight
     h.handle.setChaosLevel(0); // retained; must NOT interrupt the in-flight wave
 
     // The in-flight wave still resolves once, then the loop stops after its cooldown.
-    await step(h.driver, 230);
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 260);
     expect(outcomes).toHaveLength(1); // exactly one wave ran; no re-trigger
     expect(h.last()?.chaosPhase).toEqual({ kind: "idle", selectedLevel: 0 });
     expect(attackers(h)).toHaveLength(0);
@@ -2490,7 +2521,8 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     });
     await step(h.driver, 3);
     h.handle.setChaosLevel(1);
-    await step(h.driver, 195); // wave 1 resolved; now in the cooldown gap
+    // Elapse the lead-in, run wave 1 to resolve, and land in the post-wave cooldown gap.
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 195);
     expect(h.last()?.chaosPhase.kind).toBe("cooldown");
     h.handle.setChaosLevel(0); // during cooldown: retained, applies at the next trigger
 
@@ -2510,7 +2542,7 @@ describe("engine chaos-level loop (GH126-PLAN.md M3a)", () => {
     });
     await step(h.driver, 3);
     expect(h.handle.triggerWave()).not.toBeNull(); // manual splice, selectedLevel still 0
-    await step(h.driver, 260); // past resolve AND the cooldown that follows
+    await step(h.driver, CHAOS_COOLDOWN_TICKS + 260); // past resolve AND the cooldown that follows
     expect(outcomes).toHaveLength(1); // the loop is off, so no second wave
     expect(h.last()?.chaosPhase.kind).toBe("idle");
     h.handle.stop();

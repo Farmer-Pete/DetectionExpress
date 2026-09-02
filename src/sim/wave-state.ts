@@ -5,6 +5,7 @@
  * total: no wall-clock, no DOM.
  */
 import type { Wave } from "./scenario";
+import type { ChaosPhase } from "./snapshot";
 
 /** Where a tick sits relative to the wave schedule. */
 export type WavePhase = "calm" | "incoming" | "active";
@@ -62,5 +63,35 @@ export function waveStateAt(tick: number, waves: readonly Wave[], warnTicks: num
   }
   // No active wave and no wave still to come: either `waves` is empty, or every
   // wave has already ended.
+  return { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null };
+}
+
+/**
+ * The wave reading derived from the repeating chaos loop's phase, for endless mode
+ * (GH126-PLAN.md M3b, Q7). The endless run carries no static `waves` schedule, so the
+ * sampler bridges the chaos loop into the SAME `WaveReading` the `waves`-mode sampler
+ * publishes. This lights the existing `LogPanel` readout, `.waveflash`, App `.shake`,
+ * and the screen-reader "wave incoming"/"wave arrived" announcements for chaos waves
+ * with no UI rewrite. Pure and total, like `waveStateAt`, so it is unit-testable
+ * without the engine.
+ *
+ * The chaos loop is COOLDOWN-FIRST: a lead-in cooldown precedes every wave. So:
+ * - a wave in flight reads `active` (nominal `index` 0, no `eventsPerTick` — a chaos
+ *   wave carries no single benign baseline rate);
+ * - a lead-in cooldown with a wave truly coming (`selectedLevel > 0`) reads `calm`
+ *   ("next wave in Ns") until `cooldownRemaining` falls within `warnTicks`, then
+ *   `incoming` ("WAVE INCOMING"), mirroring `waveStateAt`'s pre-wave shape;
+ * - anything else — idle, or the final cooldown of a level-0 stop where no wave
+ *   follows — reads `calm` with a null index, so the warning stays dark.
+ */
+export function chaosWaveReading(phase: ChaosPhase, warnTicks: number): WaveReading {
+  if (phase.kind === "wave") {
+    return { phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: null };
+  }
+  if (phase.kind === "cooldown" && phase.selectedLevel > 0) {
+    const ticksUntilNext = phase.cooldownRemaining ?? 0;
+    const wavePhase: WavePhase = ticksUntilNext <= warnTicks ? "incoming" : "calm";
+    return { phase: wavePhase, index: 0, ticksUntilNext, eventsPerTick: null };
+  }
   return { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null };
 }

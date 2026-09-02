@@ -49,7 +49,7 @@ import type {
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
 import { waveSeed } from "../sim/wave-seed";
-import { type WaveReading, waveStateAt } from "../sim/wave-state";
+import { chaosWaveReading, type WaveReading, waveStateAt } from "../sim/wave-state";
 import {
   cameraNodeId,
   consoleNodeId,
@@ -466,6 +466,10 @@ function makeSampler(
     }
 
     const ring = inspector.snapshot();
+    // GH126-PLAN.md M3a/M3b: read the chaos phase once, then reuse it for both the
+    // view-only `chaosPhase` field and the endless-mode `wave` bridge below, so both
+    // report the SAME phase in a publish.
+    const chaosPhase = chaos.getPhase();
     setSnapshot({
       queued,
       throughput,
@@ -479,10 +483,16 @@ function makeSampler(
       decisions,
       events: ring.events,
       processed: ring.processed,
+      // `steady` stays permanently calm. `endless` carries no static wave schedule, so
+      // the reading is bridged from the chaos loop (GH126-PLAN.md M3b): calm/incoming
+      // through each lead-in, then active during the wave, driving the existing WAVE
+      // INCOMING readout, `.waveflash`, `.shake`, and announcements. `waves` is unchanged.
       wave:
-        scheduleMode === "steady" || scheduleMode === "endless"
+        scheduleMode === "steady"
           ? STEADY_WAVE_READING
-          : waveStateAt(now, waves, WAVE_WARN_TICKS),
+          : scheduleMode === "endless"
+            ? chaosWaveReading(chaosPhase, WAVE_WARN_TICKS)
+            : waveStateAt(now, waves, WAVE_WARN_TICKS),
       scheduleMode,
       // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
       // living metro — scenario cast plus ambient life — into one authoritative view the
@@ -496,7 +506,7 @@ function makeSampler(
       worldEvents: map.getWorldEvents(),
       // GH126-PLAN.md M3a: the view-only chaos-loop state, folded in each publish.
       // Never enters scoring.
-      chaosPhase: chaos.getPhase(),
+      chaosPhase,
       waveOutcome: chaos.getOutcome(),
     });
   };
@@ -559,16 +569,17 @@ export function start(options: StartOptions): EngineHandle {
     },
     getOutcome: (): WaveOutcome | null => lastWaveOutcome,
   };
-  // The handle's `setChaosLevel` (GH126-PLAN.md M3a). Retains the level; when it is > 0
-  // and the engine is idle (no wave, no cooldown), it starts a cycle now by capturing
-  // the per-cycle level and triggering. Mid-cycle it only retains — the loop applies it
-  // at the next trigger (Q7). `triggerWaveImpl` is itself endless-only and no-ops after
-  // stop, so this is safe on any run.
+  // The handle's `setChaosLevel` (GH126-PLAN.md M3a/M3b). Retains the level; when it is
+  // > 0 and the engine is idle (no wave, no cooldown), it opens a COOLDOWN LEAD-IN now
+  // rather than triggering a wave immediately (Q7, cooldown-first). The lead-in is the
+  // run-up the reused WAVE INCOMING warning counts down through; the loop
+  // (`advanceChaosLoop`) triggers the wave when the lead-in elapses. Mid-cycle it only
+  // retains — the loop applies the change at the next trigger (Q7).
   const setChaosLevel = (level: number): void => {
     selectedChaosLevel = level;
     if (level > 0 && activeWave === null && chaosCooldownUntil === null) {
       chaosActiveLevel = level;
-      triggerWaveImpl();
+      chaosCooldownUntil = (clock?.now() ?? 0) + CHAOS_COOLDOWN_TICKS;
     }
   };
   let stopped = false;
@@ -893,12 +904,18 @@ export function start(options: StartOptions): EngineHandle {
       };
       triggerWaveImpl = triggerWave;
 
-      // The repeating chaos-level loop (GH126-PLAN.md M3a, Q7), driven once per tick
-      // from `foldTick`. Precedence, in order:
-      //   1. a wave is in flight  -> hold (never interrupt it).
+      // The repeating chaos-level loop (GH126-PLAN.md M3a/M3b, Q7), driven once per tick
+      // from `foldTick`. It is COOLDOWN-FIRST: a lead-in cooldown precedes every wave,
+      // including the first, so the reused WAVE INCOMING warning always has a run-up.
+      // Precedence, in order:
+      //   1. a wave is in flight   -> hold (never interrupt it).
       //   2. a cooldown is pending -> hold until it elapses, then read the CURRENT
-      //      selected level: > 0 starts the next cycle at it, 0 stops (stay calm).
-      //   3. otherwise idle        -> a selected level > 0 starts a cycle now.
+      //      selected level: > 0 triggers the wave now (the lead-in has run), 0 stops
+      //      (stay calm).
+      //   3. otherwise idle        -> a selected level > 0 opens a lead-in cooldown
+      //      (NOT an immediate trigger); the wave fires when that cooldown elapses via
+      //      branch 2. `setChaosLevel` normally opens this lead-in already, so this is a
+      //      safety net for any idle-with-level state the loop reaches on its own.
       // `triggerWave` no-ops if a wave is somehow active, but this gate keeps the loop
       // from ever double-triggering. Today only level 1 is selectable (the UI locks
       // 2-5, M3b), but the loop is level-general so higher levels slot in later.
@@ -920,7 +937,7 @@ export function start(options: StartOptions): EngineHandle {
         }
         if (selectedChaosLevel > 0) {
           chaosActiveLevel = selectedChaosLevel;
-          triggerWave();
+          chaosCooldownUntil = tick + CHAOS_COOLDOWN_TICKS;
         }
       };
 
