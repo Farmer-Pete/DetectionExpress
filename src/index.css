@@ -891,18 +891,27 @@ body {
 }
 
 .place-device-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
   margin: 0 0 1rem;
   padding: 0;
   list-style: none;
 }
 
+/* Very narrow screens drop the device grid to a single column; the dialog is
+   capped at 560px, so a wider screen keeps two columns and never more. */
+@media (max-width: 480px) {
+  .place-device-list {
+    grid-template-columns: 1fr;
+  }
+}
+
 .place-device-card {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  align-content: start;
   gap: 0.15rem 0.5rem;
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--line);
