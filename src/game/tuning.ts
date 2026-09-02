@@ -352,9 +352,6 @@ export const ACCOUNT_ARRIVAL_MAX_TICKS = 40;
 /** Ticks an account rider lingers `at` the kiosk after signing in, before it despawns (> 0). */
 export const ACCOUNT_DWELL_TICKS = 10;
 
-/** How many distinct accounts the seeded pool mints; each account rider draws one. */
-export const ACCOUNT_POOL = 12;
-
 /**
  * The whole-unit amount a low card rider tops up at a station TVM, chosen comfortably
  * above the most expensive single trip so one top-up always restores enough to ride

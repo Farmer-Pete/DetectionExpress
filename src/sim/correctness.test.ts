@@ -805,6 +805,114 @@ describe("scorer liveFindings citedEvents (freeze-on-raise)", () => {
   });
 });
 
+// GH126-PLAN.md M2a seams 6, 7, 9, 13: the dynamic scorer seam. `addAttack`
+// registers a pending attack with no evidence yet; `bindEvidence` binds owner
+// ids as they arrive. Both grow the same internal attack set `scoreFinding` and
+// `closeExpired` already iterate, so a dynamically added attack is scored exactly
+// like a constructor-seeded one, with no new code path.
+describe("scorer dynamic attacks (addAttack / bindEvidence, GH126-PLAN.md M2a)", () => {
+  it("seam 6: credits a finding whose attack was registered, then had its evidence bound, reproducing the real offer order", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 50), at(50));
+    expect(s.reading()).toMatchObject({ caught: 1, missed: 0, falseAlerts: 0 });
+  });
+
+  it("seam 6: a finding citing unbound ids scores false, not caught, until bindEvidence runs", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.record(one([10, 11], 50), at(50)); // no bindEvidence yet
+    expect(s.reading()).toMatchObject({ caught: 0, falseAlerts: 1 });
+  });
+
+  it("seam 6: bindEvidence throws for an unregistered attack id", () => {
+    const s = createScorer([], cfg());
+    expect(() => s.bindEvidence(999, 10)).toThrow(/not registered/);
+  });
+
+  it("seam 7: addAttack throws on a duplicate attack id", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 2, windowEnd: 100 });
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "b", reason: REASON, threshold: 2, windowEnd: 200 }),
+    ).toThrow(/already registered/);
+  });
+
+  it("seam 7: two waves' attacks stay distinct, each crediting its own finding", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({ attackId: 1, entity: "wave-1", reason: REASON, threshold: 2, windowEnd: 100 });
+    s.addAttack({ attackId: 2, entity: "wave-2", reason: REASON, threshold: 2, windowEnd: 200 });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.bindEvidence(2, 20);
+    s.bindEvidence(2, 21);
+    s.record(one([10, 11], 50), at(50));
+    s.record(one([20, 21], 60), at(60));
+    expect(s.reading()).toMatchObject({ caught: 2, missed: 0, falseAlerts: 0 });
+  });
+
+  it("seam 9: advanceTo resolves a pending added attack as missed only once its window passes", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.advanceTo(100); // not strictly past endTs yet: stays pending
+    expect(s.reading().missed).toBe(0);
+    s.advanceTo(101); // past endTs now: resolves missed
+    expect(s.reading().missed).toBe(1);
+  });
+
+  it("seam 9: bound evidence still catches an added attack right up to its window's close", () => {
+    const s = createScorer([], cfg());
+    s.addAttack({
+      attackId: 1,
+      entity: "wave-victim",
+      reason: REASON,
+      threshold: 2,
+      windowEnd: 100,
+    });
+    s.bindEvidence(1, 10);
+    s.bindEvidence(1, 11);
+    s.record(one([10, 11], 100), at(100)); // exactly at endTs: not expired yet
+    expect(s.reading()).toMatchObject({ caught: 1, missed: 0 });
+  });
+
+  it("seam 13: addAttack rejects a non-positive or non-integer threshold", () => {
+    const s = createScorer([], cfg());
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 0, windowEnd: 100 }),
+    ).toThrow(/threshold must be a positive integer/);
+    expect(() =>
+      s.addAttack({ attackId: 2, entity: "a", reason: REASON, threshold: 1.5, windowEnd: 100 }),
+    ).toThrow(/threshold must be a positive integer/);
+  });
+
+  it("addAttack runs no distinct-evidence-vs-threshold check: a high threshold with zero evidence never throws at registration", () => {
+    const s = createScorer([], cfg());
+    expect(() =>
+      s.addAttack({ attackId: 1, entity: "a", reason: REASON, threshold: 5, windowEnd: 100 }),
+    ).not.toThrow();
+  });
+});
+
 // Seam I (T10, GH34-35-PLAN.md 2.1): cited-event capture, resolvedAt, and the capped log.
 describe("scorer citedEvents, resolvedAt, and the capped log", () => {
   it("captures citedEvents for a caught decision via the bound resolver", () => {

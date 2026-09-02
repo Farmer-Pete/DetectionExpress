@@ -10,6 +10,7 @@
  * equivalent cast. It reads no wall clock and no React (ARCHITECTURE rule 8, ADR-0007).
  */
 
+import { BENIGN_ACCOUNT_NAMESPACE } from "../sim/actors/account-namespace";
 import {
   type AccountRiderSpawner,
   createAccountRiderSpawner,
@@ -98,6 +99,11 @@ export function buildAmbientSpawners(world: World, seed: number): AmbientSpawner
   return {
     spawner: createRiderSpawner({ seed, world, target: TARGET_RIDERS }),
     staffSpawner: createStaffSpawner({ seed, world, target: STAFF_TARGET }),
-    accountSpawner: createAccountRiderSpawner({ seed, world, target: ACCOUNT_RIDER_TARGET }),
+    accountSpawner: createAccountRiderSpawner({
+      seed,
+      world,
+      target: ACCOUNT_RIDER_TARGET,
+      benignAccounts: BENIGN_ACCOUNT_NAMESPACE,
+    }),
   };
 }

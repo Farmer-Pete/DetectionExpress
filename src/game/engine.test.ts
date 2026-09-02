@@ -1091,6 +1091,8 @@ describe("engine publishes the scorer's decision log", () => {
       decisionCount: () => log.length,
       decisions: () => Object.freeze([...log]),
       liveFindings: () => Object.freeze([]),
+      addAttack: () => undefined,
+      bindEvidence: () => undefined,
     };
     const h = launch({ generator: () => null, scorer: fakeScorer, checkpoints: [] });
     await step(h.driver, CLOCK_HZ); // several publish ticks, decisionCount stays 0
