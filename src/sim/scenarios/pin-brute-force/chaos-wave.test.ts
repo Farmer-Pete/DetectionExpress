@@ -9,6 +9,7 @@ import { buildTimetable } from "../../world/timetable";
 import { world } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
 import {
+  CHAOS_WAVE_MARGIN_TICKS,
   CHAOS_WAVE_MAX_ATTACKERS,
   CHAOS_WAVE_MIN_ATTACKERS,
   type ChaosWaveAttacker,
@@ -126,6 +127,16 @@ describe("planChaosWave", () => {
         expect(fail.ts).toBeGreaterThanOrEqual(plan.window.startTs);
         expect(fail.ts).toBeLessThanOrEqual(plan.window.endTs);
       }
+    }
+  });
+
+  it("leaves CHAOS_WAVE_MARGIN_TICKS of clearance after each burst's last fail", () => {
+    const plan = planChaosWave(1000, idFor, randomLcg(7));
+    const marginTs = CHAOS_WAVE_MARGIN_TICKS * GAME_SECONDS_PER_TICK;
+    for (const planned of plan.attackers) {
+      const fails = runAttacker(planned, plan.window);
+      const lastFailTs = Math.max(...fails.map((fail) => fail.ts));
+      expect(lastFailTs).toBeLessThanOrEqual(plan.window.endTs - marginTs);
     }
   });
 

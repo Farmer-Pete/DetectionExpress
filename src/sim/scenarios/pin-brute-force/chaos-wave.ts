@@ -30,9 +30,10 @@ import { PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "./tuning";
 /**
  * Ticks of clearance the burst's detection window leaves after its last fail, so
  * the window strictly contains the burst with room to spare. Mirrors `attacks.ts`'s
- * own `BURST_MARGIN_TICKS`.
+ * own `BURST_MARGIN_TICKS`. Exported so the test can assert the margin directly
+ * rather than hardcoding its value.
  */
-const CHAOS_WAVE_MARGIN_TICKS = 20;
+export const CHAOS_WAVE_MARGIN_TICKS = 20;
 
 /** The fewest attackers one chaos wave launches. */
 export const CHAOS_WAVE_MIN_ATTACKERS = 2;
@@ -101,11 +102,14 @@ export function planChaosWave(
   }
 
   // The one window every attacker shares: same start and span for the whole wave.
+  // The window itself spans the FULL detection window; only the burst's fail spread
+  // (`burstSpanTicks`, below) is shortened, so the last fail lands with
+  // `CHAOS_WAVE_MARGIN_TICKS` of clearance before the window closes.
   const startTick = triggerTick + ARRIVE_LEAD_TICKS;
-  const spanTicks = SCAN_WINDOW_TICKS - CHAOS_WAVE_MARGIN_TICKS;
+  const burstSpanTicks = SCAN_WINDOW_TICKS - CHAOS_WAVE_MARGIN_TICKS;
   const window = {
     startTs: startTick * GAME_SECONDS_PER_TICK,
-    endTs: (startTick + spanTicks) * GAME_SECONDS_PER_TICK,
+    endTs: (startTick + SCAN_WINDOW_TICKS) * GAME_SECONDS_PER_TICK,
   };
 
   const attackers: ChaosWaveAttacker[] = [];
@@ -133,11 +137,11 @@ export function planChaosWave(
           `${PIN_BRUTE_FORCE_THRESHOLD}, so no Alert could ever catch it.`,
       );
     }
-    if (spanTicks < burst - 1) {
+    if (burstSpanTicks < burst - 1) {
       throw new RangeError("planChaosWave: the detection window is too short for the burst.");
     }
 
-    const gap = burst > 1 ? spanTicks / (burst - 1) : 0;
+    const gap = burst > 1 ? burstSpanTicks / (burst - 1) : 0;
     const failTimestamps: number[] = [];
     for (let k = 0; k < burst; k++) {
       const tick = startTick + Math.round(k * gap);
