@@ -55,7 +55,14 @@ export function Hud() {
   const running = status === "running";
   return (
     <div className="metrics-gauges">
-      <Gauge label="Throughput" value={throughput} max={20} unit="/s" fill="var(--a1)" />
+      <Gauge
+        label="Throughput"
+        value={throughput}
+        max={20}
+        unit="/s"
+        fill="var(--a1)"
+        description="Events the Engine finishes per second."
+      />
       <Gauge
         label="Queue"
         value={queued}
@@ -63,6 +70,7 @@ export function Hud() {
         unit=""
         fill={severityFill(queued / QUEUE_MAX)}
         pulse={running && severityLevel(queued / QUEUE_MAX) === "danger"}
+        description="Events admitted but not yet processed. A growing Queue fails the run."
       />
       <Gauge
         label="Compute"
@@ -71,8 +79,16 @@ export function Hud() {
         unit=""
         digits={2}
         fill={severityFill(compute / COMPUTE_MAX)}
+        description="Ticks each Event costs your Rules. Lower is cheaper."
       />
-      <Gauge label="Correctness" value={rolling} max={100} unit="" fill={correctnessFill(rolling)}>
+      <Gauge
+        label="Correctness"
+        value={rolling}
+        max={100}
+        unit=""
+        fill={correctnessFill(rolling)}
+        description="Rolling accuracy from caught, missed, and false Alerts."
+      >
         <div className="gauge-counts">
           <span className="gauge-count gauge-count-ok">{caught} caught</span>
           <span className="gauge-count gauge-count-threat">{missed} missed</span>

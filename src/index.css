@@ -206,6 +206,15 @@ body {
   letter-spacing: 0.09em;
 }
 
+/* One muted caption line under the label, explaining the metric (GH124). Compact
+   so the four-gauge stack still fits the ~460px Metrics tab. */
+.gauge-desc {
+  color: var(--dim);
+  font-size: 0.7rem;
+  line-height: 1.3;
+  margin-top: 0.15rem;
+}
+
 .gauge-value {
   font-size: 1.7rem;
   font-weight: 700;

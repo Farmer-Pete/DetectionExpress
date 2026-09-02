@@ -61,6 +61,20 @@ describe("Hud", () => {
   });
 });
 
+describe("Hud gauge descriptions (GH124)", () => {
+  it("renders a short explanatory caption under each of the four gauges", () => {
+    render(<Hud />);
+    expect(screen.getByText("Events the Engine finishes per second.")).toBeDefined();
+    expect(
+      screen.getByText("Events admitted but not yet processed. A growing Queue fails the run."),
+    ).toBeDefined();
+    expect(screen.getByText("Ticks each Event costs your Rules. Lower is cheaper.")).toBeDefined();
+    expect(
+      screen.getByText("Rolling accuracy from caught, missed, and false Alerts."),
+    ).toBeDefined();
+  });
+});
+
 /** Find one gauge's fill element by its label text (Hud renders several `.gauge-fill`s). */
 function gaugeFill(label: string): Element {
   const gauge = screen.getByText(label).closest(".gauge");
