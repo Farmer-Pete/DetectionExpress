@@ -106,15 +106,17 @@ type WaveOutcomeKind = "held" | "breach";
  */
 export interface WaveOutcomeObservation {
   waveId: WaveId;
-  /** The scorer key this wave's attack registered under. */
-  attackId: number;
   outcome: WaveOutcomeKind;
-  /** Whether the wave's attack resolved caught (vs missed at the drain watermark). */
-  caught: boolean;
+  /** How many attacks this wave launched (its 2 to 8 attackers). */
+  attackCount: number;
+  /** How many of those attacks resolved caught (vs missed at the drain watermark). */
+  caughtCount: number;
+  /** Whether EVERY attack resolved caught: `caughtCount === attackCount`. */
+  allCaught: boolean;
   /**
    * The wave-window peak of the in-flight backlog: the `ScoredIngress` buffer plus
-   * every channel's contents (finding 8). "held" needs both `caught` and this at or
-   * under `QUEUE_CAP`.
+   * every channel's contents (finding 8). "held" needs both `allCaught` and this at
+   * or under `QUEUE_CAP`.
    */
   queuePeak: number;
 }
@@ -124,16 +126,22 @@ export interface WaveOutcomeObservation {
  * time). Non-null between `triggerWave` and the drain watermark; its non-null-ness IS
  * the cooldown that makes a second trigger a no-op.
  */
+interface ActiveWaveAttack {
+  /** This attack's scorer key, minted from the global monotonic counter. */
+  attackId: number;
+  /** `wave-<WaveId>-attacker-<i>`: the admitted attacker whose fails are this attack's evidence. */
+  actorId: string;
+  /** How many fails this attacker emits; every one is bound as evidence (`evidenceCount`). */
+  expectedEvidence: number;
+  /** The bound global scored ids for this attacker, in offer order; the last is its highest. */
+  collectedEvidence: number[];
+}
+
 interface ActiveWave {
   waveId: WaveId;
-  attackId: number;
-  /** `wave-<WaveId>-attacker`: the admitted attacker whose fails are this wave's evidence. */
-  actorId: string;
-  /** How many fails the attacker emits; every one is bound as evidence (`plan.evidenceCount`). */
-  expectedEvidence: number;
-  /** The bound global scored ids, in offer order; the last is the highest. */
-  collectedEvidence: number[];
-  /** The attack's detection-window close, in game seconds. */
+  /** The wave's 2 to 8 attacks, each on its own victim and actor (`planChaosWave`). */
+  attacks: ActiveWaveAttack[];
+  /** The shared detection-window close, in game seconds (all attacks share one window). */
   windowEnd: number;
   /** `windowEnd` plus the drain margin: the earliest game-seconds the wave may resolve. */
   drainDeadline: number;
@@ -721,18 +729,22 @@ export function start(options: StartOptions): EngineHandle {
       // the ingress: the engine runs on into calm.
       const resolveWave = (wave: ActiveWave): void => {
         options.scorer.advanceTo(wave.drainDeadline);
-        const caught = waveCaught(wave.attackId);
-        const outcome: WaveOutcomeKind = caught && wave.queuePeak <= QUEUE_CAP ? "held" : "breach";
-        activeWave = null; // lift the cooldown; the attacker is already dormant
+        const caughtCount = wave.attacks.filter((attack) => waveCaught(attack.attackId)).length;
+        const attackCount = wave.attacks.length;
+        const allCaught = caughtCount === attackCount;
+        const outcome: WaveOutcomeKind =
+          allCaught && wave.queuePeak <= QUEUE_CAP ? "held" : "breach";
+        activeWave = null; // lift the cooldown; every attacker is already dormant
         console.info(
           `Detection Express: chaos wave ${wave.waveId} resolved ${outcome} ` +
-            `(attack ${wave.attackId} ${caught ? "caught" : "missed"}, queue peak ${wave.queuePeak}).`,
+            `(${caughtCount}/${attackCount} attacks caught, queue peak ${wave.queuePeak}).`,
         );
         options.onWaveOutcome?.({
           waveId: wave.waveId,
-          attackId: wave.attackId,
           outcome,
-          caught,
+          attackCount,
+          caughtCount,
+          allCaught,
           queuePeak: wave.queuePeak,
         });
       };
@@ -752,46 +764,54 @@ export function start(options: StartOptions): EngineHandle {
         // tick's `foldTick`, so the attacker's start sits a margin past it.
         const triggerTick = clock?.now() ?? 0;
         const waveId: WaveId = ++nextWaveId;
-        const attackId = ++nextAttackId;
-        const actorId = `wave-${waveId}-attacker`;
         const startTick = triggerTick + WAVE_TRIGGER_MARGIN_TICKS;
         const plan = planChaosWave(
           startTick,
-          actorId,
+          (index) => `wave-${waveId}-attacker-${index}`,
           randomLcg(waveSeed(cast.runSeed, triggerTick)),
         );
 
-        // Register the pending attack BEFORE any evidence is offered or scored
-        // (findings 1, 6, N2). The scorer's default matches by reason, so `entity` is
-        // informational and `windowEnd` drives the miss.
-        options.scorer.addAttack({
-          attackId,
-          entity: plan.victim,
-          reason: PIN_BRUTE_FORCE_REASON,
-          threshold: plan.threshold,
-          windowEnd: plan.window.endTs,
-        });
+        // Admit each planned attacker in order. Per attacker: mint a unique global
+        // attackId, register the pending attack BEFORE any evidence is offered or
+        // scored (findings 1, 6, N2), then admit and seed its view. The scorer's
+        // default matches by reason, so `entity` is informational and `windowEnd`
+        // drives the miss; every attack shares the one window.
+        const attacks: ActiveWaveAttack[] = [];
+        for (const planned of plan.attackers) {
+          const attackId = ++nextAttackId;
+          options.scorer.addAttack({
+            attackId,
+            entity: planned.victim,
+            reason: PIN_BRUTE_FORCE_REASON,
+            threshold: plan.threshold,
+            windowEnd: plan.window.endTs,
+          });
 
-        const admission: Admission<WorldReading, WorldEnv> = {
-          actor: plan.attacker.build(),
-          kind: plan.attacker.kind,
-          initialPresence: plan.attacker.initialPresence,
-        };
-        const firstTick = schedule.admit(admission);
-        provenanceById.set(actorId, "scored-scenario");
-        seedView(
-          actorId,
-          plan.attacker.kind,
-          plan.attacker.initialPresence(firstTick),
-          "scored-scenario",
-        );
+          const admission: Admission<WorldReading, WorldEnv> = {
+            actor: planned.attacker.build(),
+            kind: planned.attacker.kind,
+            initialPresence: planned.attacker.initialPresence,
+          };
+          const firstTick = schedule.admit(admission);
+          provenanceById.set(planned.actorId, "scored-scenario");
+          seedView(
+            planned.actorId,
+            planned.attacker.kind,
+            planned.attacker.initialPresence(firstTick),
+            "scored-scenario",
+          );
+
+          attacks.push({
+            attackId,
+            actorId: planned.actorId,
+            expectedEvidence: planned.evidenceCount,
+            collectedEvidence: [],
+          });
+        }
 
         activeWave = {
           waveId,
-          attackId,
-          actorId,
-          expectedEvidence: plan.evidenceCount,
-          collectedEvidence: [],
+          attacks,
           windowEnd: plan.window.endTs,
           drainDeadline: plan.window.endTs + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK,
           queuePeak: 0,
@@ -958,14 +978,18 @@ export function start(options: StartOptions): EngineHandle {
           // actually offered under.
           if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
             const scoredEventId = nextScoredEventId++;
-            // GH126-PLAN.md M2b, evidence bind (finding 1): a reading from the active
-            // wave's attacker is this attack's evidence, so bind its global dense id
-            // to the attack the moment it is offered — before Detect scores the
-            // finding that cites it. The attack was registered at trigger, so `owner`
-            // is populated before the finding is judged, and it scores caught.
-            if (activeWave && timed.actorId === activeWave.actorId) {
-              options.scorer.bindEvidence(activeWave.attackId, scoredEventId);
-              activeWave.collectedEvidence.push(scoredEventId);
+            // GH126-PLAN.md M2b, evidence bind (finding 1): a reading from one of the
+            // active wave's attackers is that attack's evidence, so bind its global
+            // dense id to the attack the moment it is offered — before Detect scores
+            // the finding that cites it. The wave now holds several attackers, so match
+            // by actorId. The attack was registered at trigger, so `owner` is populated
+            // before the finding is judged, and it scores caught.
+            if (activeWave) {
+              const attack = activeWave.attacks.find((a) => a.actorId === timed.actorId);
+              if (attack) {
+                options.scorer.bindEvidence(attack.attackId, scoredEventId);
+                attack.collectedEvidence.push(scoredEventId);
+              }
             }
             scoredIngest.ingress.offer(scoredIngest.toEvent(timed, scoredEventId));
             captureWorldEvent(reading, reading.reading.ts, timed.actorId, true, scoredEventId);
@@ -1231,14 +1255,25 @@ export function start(options: StartOptions): EngineHandle {
           if (backlog > wave.queuePeak) {
             wave.queuePeak = backlog;
           }
-          // Resolve once every fail has been offered and bound, Detect has processed
-          // the wave's last evidence id (`completed` is a dense FIFO count, so
-          // `completed > lastId` means that id cleared the pipeline), and the drain
-          // deadline passed. A queued-evidence case is never resolved early.
-          const lastId = wave.collectedEvidence[wave.collectedEvidence.length - 1];
+          // Resolve once EVERY attacker's fails have all been offered and bound, Detect
+          // has processed the wave's last evidence id across all attacks (`completed` is
+          // a dense FIFO count, so `completed > lastId` means that id cleared the
+          // pipeline), and the drain deadline passed. A queued-evidence case is never
+          // resolved early.
+          let totalExpected = 0;
+          let totalCollected = 0;
+          let lastId = -1;
+          for (const attack of wave.attacks) {
+            totalExpected += attack.expectedEvidence;
+            totalCollected += attack.collectedEvidence.length;
+            const attackLast = attack.collectedEvidence[attack.collectedEvidence.length - 1];
+            if (attackLast !== undefined && attackLast > lastId) {
+              lastId = attackLast;
+            }
+          }
           if (
-            wave.collectedEvidence.length >= wave.expectedEvidence &&
-            lastId !== undefined &&
+            totalCollected >= totalExpected &&
+            lastId >= 0 &&
             completed > lastId &&
             tick * GAME_SECONDS_PER_TICK >= wave.drainDeadline
           ) {

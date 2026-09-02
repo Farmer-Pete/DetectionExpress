@@ -2266,22 +2266,28 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
     });
   }
 
-  // Seam 8: the wave is rebased to the live tick, so the attacker's start sits at or
-  // past the admit frontier and it admits without error.
-  it("rebases the attacker to the live tick and admits it without error (seam 8)", async () => {
+  // Seam 8: the wave is rebased to the live tick, so EVERY attacker's start sits at or
+  // past the admit frontier and all admit without error.
+  it("rebases every attacker to the live tick and admits them without error (seam 8)", async () => {
     const h = endlessHarness({ algorithm: idleAlgorithm });
     await step(h.driver, 5);
     const waveId = h.handle.triggerWave();
     expect(waveId).not.toBeNull(); // admitted, no throw
-    await step(h.driver, 3); // let the sampler publish the admitted attacker
-    const attacker = h.last()?.actors.find((a) => a.kind === "pin-attacker");
-    expect(attacker).toBeDefined();
-    expect(attacker?.id).toBe(`wave-${waveId}-attacker`);
+    await step(h.driver, 3); // let the sampler publish the admitted attackers
+    const attackers = h.last()?.actors.filter((a) => a.kind === "pin-attacker") ?? [];
+    // A wave launches 2 to 8 attackers, each with a distinct WaveId-derived id.
+    expect(attackers.length).toBeGreaterThanOrEqual(2);
+    expect(attackers.length).toBeLessThanOrEqual(8);
+    const ids = attackers.map((a) => a.id);
+    expect(new Set(ids).size).toBe(ids.length); // distinct
+    for (const id of ids) {
+      expect(id).toMatch(new RegExp(`^wave-${waveId}-attacker-\\d+$`));
+    }
     expect(h.last()?.status).toBe("running");
     h.handle.stop();
   });
 
-  it("scores the wave CAUGHT end to end and returns to calm without ending the run", async () => {
+  it("scores EVERY attack CAUGHT end to end and returns to calm without ending the run", async () => {
     const outcomes: WaveOutcomeObservation[] = [];
     const h = endlessHarness({
       algorithm: referenceTaskAlgorithm(),
@@ -2291,17 +2297,21 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
     expect(h.last()?.status).toBe("running");
     const waveId = h.handle.triggerWave();
     expect(waveId).not.toBeNull();
-    // Drive past the attack window and the drain deadline. The attacker's fails are
-    // offered, bound, and the rule raises a finding that credits the wave's attack.
+    // Drive past the attack window and the drain deadline. Every attacker's fails are
+    // offered, bound, and the rule raises a finding that credits each wave attack.
     await step(h.driver, 195);
 
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]?.waveId).toBe(waveId);
-    expect(outcomes[0]?.caught).toBe(true);
-    expect(outcomes[0]?.outcome).toBe("held");
-    expect(outcomes[0]?.queuePeak).toBeLessThanOrEqual(QUEUE_CAP);
-    expect(h.last()?.correctness.caught).toBe(1);
-    // The run never ends: still running throughout and after, and the attacker went
+    const outcome = outcomes[0];
+    expect(outcome?.waveId).toBe(waveId);
+    expect(outcome?.attackCount).toBeGreaterThanOrEqual(2);
+    expect(outcome?.attackCount).toBeLessThanOrEqual(8);
+    expect(outcome?.allCaught).toBe(true);
+    expect(outcome?.caughtCount).toBe(outcome?.attackCount);
+    expect(outcome?.outcome).toBe("held");
+    expect(outcome?.queuePeak).toBeLessThanOrEqual(QUEUE_CAP);
+    expect(h.last()?.correctness.caught).toBe(outcome?.attackCount);
+    // The run never ends: still running throughout and after, and every attacker went
     // dormant on its own so the sim continues into calm.
     expect(h.last()?.status).toBe("running");
     expect(h.last()?.actors.some((a) => a.kind === "pin-attacker")).toBe(false);
@@ -2311,7 +2321,7 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
   it("resolves BREACH when the rule never catches, and still does not end the run", async () => {
     const outcomes: WaveOutcomeObservation[] = [];
     const h = endlessHarness({
-      // detect never fires: the attack is missed at the drain watermark via advanceTo.
+      // detect never fires: every attack is missed at the drain watermark via advanceTo.
       algorithm: idleAlgorithm,
       onWaveOutcome: (o) => outcomes.push(o),
     });
@@ -2321,10 +2331,14 @@ describe("engine triggerWave splices a chaos wave into the endless run (GH126-PL
     await step(h.driver, 195);
 
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0]?.waveId).toBe(waveId);
-    expect(outcomes[0]?.caught).toBe(false);
-    expect(outcomes[0]?.outcome).toBe("breach");
-    expect(h.last()?.correctness.missed).toBe(1); // settled missed by advanceTo, not caught
+    const outcome = outcomes[0];
+    expect(outcome?.waveId).toBe(waveId);
+    expect(outcome?.attackCount).toBeGreaterThanOrEqual(2);
+    expect(outcome?.allCaught).toBe(false);
+    expect(outcome?.caughtCount).toBe(0); // the idle rule catches nothing
+    expect(outcome?.outcome).toBe("breach");
+    // Every attack settled missed by advanceTo, not caught.
+    expect(h.last()?.correctness.missed).toBe(outcome?.attackCount);
     expect(h.last()?.status).toBe("running"); // a breach is a banner, never a hard fail
     h.handle.stop();
   });
