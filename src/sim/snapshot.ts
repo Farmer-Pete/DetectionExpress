@@ -62,8 +62,7 @@ export interface SimSnapshot {
   /**
    * The run's arrival shape (GH124-PLAN.md Checkpoint 3): `"waves"` is the
    * original climbing ramp, `"steady"` is the gapless constant stream the app
-   * defaults to. The status pill reads this to show "Steady" instead of
-   * "Running" while a steady run is live.
+   * defaults to.
    */
   scheduleMode: ScheduleMode;
   /**

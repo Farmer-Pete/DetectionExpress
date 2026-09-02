@@ -21,7 +21,7 @@ import type { PlaceKind } from "../icons/sensor-icons";
 export type { MapSelection } from "../../game/store";
 
 /** One header badge: a label/value pair, e.g. `{ label: "Zone", value: "Z3" }`. */
-export interface MetaBadge {
+interface MetaBadge {
   label: string;
   value: string;
 }

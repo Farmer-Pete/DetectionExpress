@@ -22,7 +22,7 @@ import type { WorldLogEvent } from "../../sim/world-log";
 import type { WorldReading } from "../../sim/world-reading";
 
 /** A scored kiosk reading whose pipeline event is still in the inspector ring. */
-export interface ScoredEventDetail {
+interface ScoredEventDetail {
   kind: "scored";
   raw: JsonValue;
   normalized: JsonValue;
@@ -32,7 +32,7 @@ export interface ScoredEventDetail {
 
 /** A scored kiosk reading whose pipeline event has aged out of the 256-entry
  *  inspector ring, even though the wider world ring still holds this row. */
-export interface ScoredEvictedEventDetail {
+interface ScoredEvictedEventDetail {
   kind: "scored-evicted";
   raw: WorldReading;
   citingFindings: readonly LiveFinding[];
@@ -41,7 +41,7 @@ export interface ScoredEvictedEventDetail {
 
 /** Every non-scored sensor: the raw reading plus where (and, for a live actor, who)
  *  produced it. */
-export interface RawEventDetail {
+interface RawEventDetail {
   kind: "raw";
   raw: WorldReading;
   source: { placeId: MapNodeId; actorId?: string };

@@ -39,12 +39,12 @@ describe("StatusPill", () => {
     expect(screen.getByText("Failed: Correctness too low")).toBeDefined();
   });
 
-  it("reads Steady while running in steady schedule mode (GH124-PLAN.md Checkpoint 3)", () => {
+  it("reads Running while running in steady schedule mode", () => {
     useGameStore.setState({
       snapshot: { ...emptySnapshot(), status: "running", scheduleMode: "steady" },
     });
     render(<StatusPill />);
-    expect(screen.getByText("Steady")).toBeDefined();
+    expect(screen.getByText("Running")).toBeDefined();
   });
 
   it("reads Running while running in waves schedule mode", () => {

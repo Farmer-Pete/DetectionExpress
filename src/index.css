@@ -1317,6 +1317,12 @@ body {
   height: 100%;
 }
 
+/* A passive render layer (train positions painted every frame): let clicks pass
+   through to the interactive map SVG underneath instead of swallowing them. */
+.metro-actors {
+  pointer-events: none;
+}
+
 .metro-network-link {
   stroke: rgba(251, 213, 123, 0.1);
   stroke-width: 1;
