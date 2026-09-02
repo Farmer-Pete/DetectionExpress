@@ -190,14 +190,6 @@ export const CORRECTNESS_FLOOR = 50;
 export const WAVE_WARN_TICKS = 30;
 
 /**
- * The shared severity ramp's thresholds (`src/ui/hud/severity.ts`), promoted to
- * tuning constants so #40 can tune them. Generic names, not "queue"-specific:
- * the ramp also colors the Compute gauge.
- */
-export const SEVERITY_WARN_FRAC = 0.5;
-export const SEVERITY_DANGER_FRAC = 0.8;
-
-/**
  * The live-hit count at which the findings panel throbs (`FindingsPanel.tsx`
  * gains the `urgent` border-pulse class at or above this count).
  */

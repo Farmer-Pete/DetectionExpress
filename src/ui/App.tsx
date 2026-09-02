@@ -2,7 +2,7 @@
  * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md,
  * GH118-PLAN.md). It holds only the `mapShown` toggle, the wave shake, the
  * modal-open derivation, the two panel refs shared with
- * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the three Topbar button refs
+ * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the two Topbar button refs
  * shared with the side panel; everything else is composed from a hook or a
  * component that owns its own lifecycle and its own tests:
  *
@@ -27,11 +27,11 @@
  *   the two side-panel openers, the "How this works" reopen button (wired to
  *   `useIntroOverlay`'s `reopenRef` and `onReopen`), and Hire Me.
  *
- * The four HUD gauges moved into the side panel's Metrics tab (GH124-PLAN.md
- * Checkpoint 2), so this file no longer mounts `Hud` in the main column; only the
- * run-status pill (`StatusPill`, read by `Topbar`) stays in the top bar. The pending
- * side-panel-tab dispatch below (see "The intro transition") now switches over all
- * three tabs instead of treating "not chaos" as "algorithm".
+ * Only the run-status pill (`StatusPill`, read by `Topbar`) lives in the top bar;
+ * the sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
+ * nothing currently displays them. The pending side-panel-tab dispatch below (see
+ * "The intro transition") switches over both tabs instead of treating "not chaos"
+ * as "algorithm".
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
@@ -72,14 +72,12 @@
  *
  * The intro button that triggered this is unmounted before the panel could restore
  * focus to it, so the panel falls back to a stable Topbar button instead:
- * `chaosButtonRef`/`algorithmButtonRef`/`metricsButtonRef` are handed to both
- * `Topbar` (which attaches them to its three openers) and `useSidePanel` (which
+ * `chaosButtonRef`/`algorithmButtonRef` are handed to both
+ * `Topbar` (which attaches them to its two openers) and `useSidePanel` (which
  * forwards whichever one matches the active tab as `SidePanel`'s
  * `fallbackFocusRef`), the same fallback-focus pattern `TraceOverlay` already uses.
- * The intro itself only ever requests "chaos" or "algorithm" (it has no Metrics
- * action), but the pending-tab switch below still covers "metrics" so the dispatch
- * stays correct if that ever changes, rather than silently falling through to
- * Algorithm.
+ * The pending-tab switch below covers both tabs explicitly, rather than treating
+ * "not chaos" as "algorithm".
  *
  * ## Pause ownership (GH118-PLAN.md)
  * The pause runs through the store's `transport.frozen`, not a direct controller
@@ -163,12 +161,11 @@ export function App({ createPipelineController }: AppProps = {}) {
   // of whichever dialog opened the session rather than whichever one is on top when
   // it closes — see `dialog-stack-focus.ts`.
   const mapDialogRootFallbackRef = useRef<RefObject<HTMLElement | null> | null>(null);
-  // Shared with Topbar (which attaches them to its three openers) and useSidePanel
+  // Shared with Topbar (which attaches them to its two openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
   const chaosButtonRef = useRef<HTMLButtonElement>(null);
   const algorithmButtonRef = useRef<HTMLButtonElement>(null);
-  const metricsButtonRef = useRef<HTMLButtonElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -239,7 +236,6 @@ export function App({ createPipelineController }: AppProps = {}) {
     controllerRef,
     chaosFocusRef: chaosButtonRef,
     algorithmFocusRef: algorithmButtonRef,
-    metricsFocusRef: metricsButtonRef,
   });
 
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
@@ -280,9 +276,8 @@ export function App({ createPipelineController }: AppProps = {}) {
   // Complete the intro transition: once the intro has actually closed, act on
   // whatever tab a dismiss recorded (see the module doc's "The intro transition").
   // A no-op on every other render, since `pendingPanelTabRef` only ever holds a
-  // value between an intro dismiss and this effect's next run. A switch over all
-  // three tabs, not an if/else that treats "not chaos" as "algorithm" — the bug
-  // that shipped before GH124-PLAN.md Checkpoint 2 added the metrics tab.
+  // value between an intro dismiss and this effect's next run. A switch over both
+  // tabs, not an if/else that treats "not chaos" as "algorithm".
   useEffect(() => {
     if (intro.introOpen) {
       return;
@@ -299,11 +294,8 @@ export function App({ createPipelineController }: AppProps = {}) {
       case "algorithm":
         sidePanel.openAlgorithm();
         break;
-      case "metrics":
-        sidePanel.openMetrics();
-        break;
     }
-  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm, sidePanel.openMetrics]);
+  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm]);
 
   const modalOpen = intro.introOpen || traceOpen || sidePanel.open || stackOpen;
 
@@ -369,10 +361,8 @@ export function App({ createPipelineController }: AppProps = {}) {
         onReopen={intro.onReopen}
         onOpenChaos={sidePanel.openChaos}
         onOpenAlgorithm={sidePanel.openAlgorithm}
-        onOpenMetrics={sidePanel.openMetrics}
         chaosButtonRef={chaosButtonRef}
         algorithmButtonRef={algorithmButtonRef}
-        metricsButtonRef={metricsButtonRef}
       />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
       {/* TEMPORARY (GH126-PLAN.md M2b): a hand trigger for one chaos wave, so the

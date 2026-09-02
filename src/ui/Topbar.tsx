@@ -1,9 +1,9 @@
 /**
  * The app header, extracted from `App.tsx` (GH109-PLAN.md, GH118-PLAN.md): the
  * title, the slice tag, the run-status pill, the embedded metro map's show/hide
- * toggle, the three side-panel openers, the "How this works" reopen button, and
+ * toggle, the two side-panel openers, the "How this works" reopen button, and
  * `<HireMe>`. It consumes `reopenRef`/`onReopen` from `useIntroOverlay` the same way
- * it consumes `onOpenChaos`/`onOpenAlgorithm`/`onOpenMetrics` from `useSidePanel`,
+ * it consumes `onOpenChaos`/`onOpenAlgorithm` from `useSidePanel`,
  * rather than owning either itself, so `App` wires both hooks to this component the
  * same way it wires them to `ModalHost`'s overlay slot. `StatusPill` is the one
  * exception: like `HireMe`, it is a self-contained leaf that reads the store
@@ -12,13 +12,12 @@
  * GH117 Part F: there is only one view now (the pipeline HUD with the metro map
  * embedded in it), so the map toggle no longer swaps between two loops — it just
  * shows or hides the map region in place, via `mapShown`. That also means the
- * chaos-ladder, Algorithm, and Metrics openers (GH118-PLAN.md, GH124-PLAN.md
- * Checkpoint 2) are unconditional: with a single view there is no mode where the
- * side panel they open would have nowhere to land. `chaosButtonRef`/
- * `algorithmButtonRef`/`metricsButtonRef` are exposed the same way `reopenRef` is,
- * so App can hand them to the side panel as its focus-restore fallback for the
- * intro path, where the button that opened the panel (the intro's own) is already
- * gone by the time the panel closes.
+ * chaos-ladder and Algorithm openers (GH118-PLAN.md) are unconditional: with a
+ * single view there is no mode where the side panel they open would have nowhere
+ * to land. `chaosButtonRef`/`algorithmButtonRef` are exposed the same way
+ * `reopenRef` is, so App can hand them to the side panel as its focus-restore
+ * fallback for the intro path, where the button that opened the panel (the
+ * intro's own) is already gone by the time the panel closes.
  */
 import type { RefObject } from "react";
 import { hireMe } from "./content/narrative";
@@ -32,10 +31,8 @@ interface TopbarProps {
   onReopen: () => void;
   onOpenChaos: () => void;
   onOpenAlgorithm: () => void;
-  onOpenMetrics: () => void;
   chaosButtonRef: RefObject<HTMLButtonElement | null>;
   algorithmButtonRef: RefObject<HTMLButtonElement | null>;
-  metricsButtonRef: RefObject<HTMLButtonElement | null>;
 }
 
 export function Topbar({
@@ -45,10 +42,8 @@ export function Topbar({
   onReopen,
   onOpenChaos,
   onOpenAlgorithm,
-  onOpenMetrics,
   chaosButtonRef,
   algorithmButtonRef,
-  metricsButtonRef,
 }: TopbarProps) {
   return (
     <header className="topbar">
@@ -71,14 +66,6 @@ export function Topbar({
           onClick={onOpenAlgorithm}
         >
           Algorithm
-        </button>
-        <button
-          type="button"
-          ref={metricsButtonRef}
-          className="topbar-panel-open"
-          onClick={onOpenMetrics}
-        >
-          Metrics
         </button>
         <button type="button" className="view-toggle" onClick={onToggleMap}>
           {mapShown ? "Hide metro view" : "Show metro view"}

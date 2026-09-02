@@ -102,23 +102,15 @@ describe("App shell", () => {
     expect(container.querySelector(".status-pill")?.textContent).toBe("Running");
   });
 
-  it("has no gauge strip on screen at rest: the four gauges live in the Metrics side-panel tab (GH124-PLAN.md Checkpoint 2)", () => {
+  it("has no gauge strip on screen at rest: the Metrics UI is retired for now, though the sim still computes the values", () => {
     render(<App createPipelineController={() => stubController()} />);
     expect(screen.queryByText("Throughput")).toBeNull();
     expect(screen.queryByText("Queue")).toBeNull();
   });
 
-  it("opens the side panel on the metrics tab, gauges included, from the Topbar's Metrics button", () => {
+  it("has no Metrics opener in the Topbar", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
-    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
-    expect(screen.getByRole("tab", { name: /metrics/i }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    expect(screen.getByText("Throughput")).toBeDefined();
-    expect(screen.getByText("Queue")).toBeDefined();
-    expect(screen.getByText("Compute")).toBeDefined();
-    expect(screen.getByText("Correctness")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Metrics" })).toBeNull();
   });
 
   it("has no side panel on screen at rest", () => {
@@ -674,7 +666,7 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
     expect(pipes[0]?.runs).toBe(1);
   });
 
-  it("renders the map region and the inspector shell together, map before the inspector (the gauge strip moved into the Metrics side-panel tab)", () => {
+  it("renders the map region and the inspector shell together, map before the inspector", () => {
     const { container } = render(<App createPipelineController={() => stubController()} />);
     expect(container.querySelector(".metro-view")).not.toBeNull();
     expect(container.querySelector(".inspector-shell")).not.toBeNull();

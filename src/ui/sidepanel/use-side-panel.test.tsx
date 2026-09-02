@@ -78,23 +78,6 @@ describe("useSidePanel", () => {
     expect(result.current.tab).toBe("algorithm");
   });
 
-  it("openMetrics opens the panel on the metrics tab", () => {
-    const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
-    act(() => result.current.openMetrics());
-    expect(result.current.open).toBe(true);
-    expect(result.current.tab).toBe("metrics");
-    expect(result.current.sidePanel).not.toBeNull();
-  });
-
-  it("openMetrics is a no-op while a finding trace is open", () => {
-    useGameStore.setState({ selection: { seq: 1 } });
-    const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
-    act(() => result.current.openMetrics());
-    expect(result.current.open).toBe(false);
-  });
-
   it("close() closes the panel", () => {
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
@@ -166,7 +149,7 @@ describe("useSidePanel", () => {
     expect(result.current.open).toBe(false);
   });
 
-  it("openMetrics is a no-op while the map/event dialog stack holds more than one entry (a pushed dialog)", () => {
+  it("openChaos is a no-op while the map/event dialog stack holds more than one entry (a pushed dialog)", () => {
     useGameStore.setState({
       mapDialogStack: [
         { kind: "place", selection: { kind: "train", actorId: "T1" } },
@@ -175,7 +158,7 @@ describe("useSidePanel", () => {
     });
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));
-    act(() => result.current.openMetrics());
+    act(() => result.current.openChaos());
     expect(result.current.open).toBe(false);
   });
 
