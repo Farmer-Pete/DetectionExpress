@@ -63,13 +63,31 @@ function stubController(): RunController & {
 }
 
 describe("App shell", () => {
-  it("renders the heading and both gauges", () => {
-    render(<App createPipelineController={() => stubController()} />);
+  it("renders the heading and the run-status pill", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
     // getByRole/getByText throw if missing, so finding them is the assertion.
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
+    expect(container.querySelector(".status-pill")?.textContent).toBe("Running");
+  });
+
+  it("has no gauge strip on screen at rest: the four gauges live in the Metrics side-panel tab (GH124-PLAN.md Checkpoint 2)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.queryByText("Throughput")).toBeNull();
+    expect(screen.queryByText("Queue")).toBeNull();
+  });
+
+  it("opens the side panel on the metrics tab, gauges included, from the Topbar's Metrics button", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Metrics" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+    expect(screen.getByRole("tab", { name: /metrics/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     expect(screen.getByText("Throughput")).toBeDefined();
     expect(screen.getByText("Queue")).toBeDefined();
+    expect(screen.getByText("Compute")).toBeDefined();
+    expect(screen.getByText("Correctness")).toBeDefined();
   });
 
   it("has no side panel on screen at rest", () => {
@@ -323,16 +341,15 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
     expect(pipes[0]?.runs).toBe(1);
   });
 
-  it("renders the Hud, the map region, and the inspector shell together, map between Hud and the inspector", () => {
+  it("renders the map region and the inspector shell together, map before the inspector (the gauge strip moved into the Metrics side-panel tab)", () => {
     const { container } = render(<App createPipelineController={() => stubController()} />);
-    expect(container.querySelector(".hud")).not.toBeNull();
     expect(container.querySelector(".metro-view")).not.toBeNull();
     expect(container.querySelector(".inspector-shell")).not.toBeNull();
     // querySelectorAll returns matches in document order, so this list IS the order.
-    const classes = [...container.querySelectorAll(".hud, .metro-view, .inspector-shell")].map(
+    const classes = [...container.querySelectorAll(".metro-view, .inspector-shell")].map(
       (el) => el.className,
     );
-    expect(classes).toEqual(["hud", "metro-view", "inspector-shell"]);
+    expect(classes).toEqual(["metro-view", "inspector-shell"]);
   });
 
   it("shows the map region by default and hides it on toggle, without touching the pipeline loop", () => {

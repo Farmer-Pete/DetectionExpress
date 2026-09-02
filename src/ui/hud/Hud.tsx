@@ -1,8 +1,14 @@
-/** The HUD strip. Reads live sim values through primitive selectors, one per gauge. */
+/**
+ * The Metrics tab body (GH124-PLAN.md Checkpoint 2): the four gauges, stacked to
+ * the side panel's width, plus the caught/missed/false counts. Reads live sim
+ * values through primitive selectors, one per gauge — the same shape this used to
+ * render as the top HUD strip, before the strip moved into `SidePanel`'s Metrics
+ * tab. The run-status pill it used to render alongside the gauges now lives in the
+ * top bar instead (`StatusPill.tsx`), reading the same shared `outcomeText()`.
+ */
 
 import { useGameStore } from "../../game/store";
 import { CHANNEL_CAP, OMEGA } from "../../game/tuning";
-import type { FailureReason, RunStatus } from "../../sim/snapshot";
 import { Gauge } from "../gauges/Gauge";
 import { severityFill, severityLevel } from "./severity";
 
@@ -28,21 +34,6 @@ function correctnessFill(rolling: number) {
   return "var(--threat)";
 }
 
-/** The one-line outcome the player reads: running, won, or lost with the reason. */
-function outcomeText(status: RunStatus, reason: FailureReason) {
-  if (status === "won") {
-    return "Won";
-  }
-  if (status === "failed") {
-    return reason === "queue"
-      ? "Failed: Queue overflowed"
-      : reason === "correctness"
-        ? "Failed: Correctness too low"
-        : "Failed";
-  }
-  return "Running";
-}
-
 export function Hud() {
   const throughput = useGameStore((state) => state.snapshot.throughput);
   // The Queue the player sees is the authoritative outstanding count,
@@ -58,13 +49,12 @@ export function Hud() {
   const falseAlerts = useGameStore((state) => state.snapshot.correctness.falseAlerts);
   const compute = useGameStore((state) => state.snapshot.compute);
   const status = useGameStore((state) => state.snapshot.status);
-  const failureReason = useGameStore((state) => state.snapshot.failureReason);
   // The severity fill color persists on a frozen terminal frame; only the
   // ANIMATED heartbeat pulse gates on run conclusion (F004+F006), the same
   // family rule LogPanel's queue bar and FindingsPanel's border follow.
   const running = status === "running";
   return (
-    <div className="hud">
+    <div className="metrics-gauges">
       <Gauge label="Throughput" value={throughput} max={20} unit="/s" fill="var(--a1)" />
       <Gauge
         label="Queue"
@@ -89,9 +79,6 @@ export function Hud() {
           <span className="gauge-count gauge-count-alert">{falseAlerts} false</span>
         </div>
       </Gauge>
-      <div className={`hud-outcome hud-outcome-${status}`} role="status">
-        {outcomeText(status, failureReason)}
-      </div>
     </div>
   );
 }

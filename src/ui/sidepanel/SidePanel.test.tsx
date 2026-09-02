@@ -28,14 +28,16 @@ describe("SidePanel", () => {
     expect(container.querySelector(".app-shell")).toBeNull();
   });
 
-  it("renders two tabs, chaos active when tab is chaos", () => {
+  it("renders three tabs, chaos active when tab is chaos", () => {
     renderPanel({ tab: "chaos" });
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(3);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
     const algorithmTab = screen.getByRole("tab", { name: /algorithm/i });
+    const metricsTab = screen.getByRole("tab", { name: /metrics/i });
     expect(chaosTab.getAttribute("aria-selected")).toBe("true");
     expect(algorithmTab.getAttribute("aria-selected")).toBe("false");
+    expect(metricsTab.getAttribute("aria-selected")).toBe("false");
   });
 
   it("marks the algorithm tab selected when tab is algorithm", () => {
@@ -44,6 +46,20 @@ describe("SidePanel", () => {
       "true",
     );
     expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: /metrics/i }).getAttribute("aria-selected")).toBe(
+      "false",
+    );
+  });
+
+  it("marks the metrics tab selected when tab is metrics", () => {
+    renderPanel({ tab: "metrics" });
+    expect(screen.getByRole("tab", { name: /metrics/i }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
+      "false",
+    );
   });
 
   it("each tab has an associated tabpanel", () => {
@@ -54,14 +70,16 @@ describe("SidePanel", () => {
     expect(panel.getAttribute("aria-labelledby")).toBe(tab.id);
   });
 
-  it("renders both tabpanels, hides the inactive one, so every tab's aria-controls resolves", () => {
+  it("renders all three tabpanels, hides the inactive ones, so every tab's aria-controls resolves", () => {
     const { container } = renderPanel({ tab: "chaos" });
     const panels = container.querySelectorAll<HTMLElement>('[role="tabpanel"]');
-    expect(panels).toHaveLength(2);
+    expect(panels).toHaveLength(3);
     const chaosPanel = document.getElementById("sidepanel-tabpanel-chaos");
     const algorithmPanel = document.getElementById("sidepanel-tabpanel-algorithm");
+    const metricsPanel = document.getElementById("sidepanel-tabpanel-metrics");
     expect(chaosPanel?.hasAttribute("hidden")).toBe(false);
     expect(algorithmPanel?.hasAttribute("hidden")).toBe(true);
+    expect(metricsPanel?.hasAttribute("hidden")).toBe(true);
     for (const tab of screen.getAllByRole("tab")) {
       const controls = tab.getAttribute("aria-controls");
       expect(controls).not.toBeNull();
@@ -100,7 +118,23 @@ describe("SidePanel", () => {
       <SidePanel tab="algorithm" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
     );
     const algorithmTab = screen.getByRole("tab", { name: /algorithm/i });
-    fireEvent.keyDown(algorithmTab, { key: "ArrowLeft" });
+    fireEvent.keyDown(algorithmTab, { key: "ArrowRight" });
+    expect(onSelectTab).toHaveBeenCalledWith("metrics");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /metrics/i }));
+
+    // ArrowRight from the last tab wraps around to the first.
+    rerender(
+      <SidePanel tab="metrics" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
+    );
+    const metricsTab = screen.getByRole("tab", { name: /metrics/i });
+    fireEvent.keyDown(metricsTab, { key: "ArrowRight" });
+    expect(onSelectTab).toHaveBeenCalledWith("chaos");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /chaos/i }));
+
+    rerender(
+      <SidePanel tab="algorithm" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
+    );
+    fireEvent.keyDown(screen.getByRole("tab", { name: /algorithm/i }), { key: "ArrowLeft" });
     expect(onSelectTab).toHaveBeenCalledWith("chaos");
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: /chaos/i }));
   });
@@ -114,6 +148,14 @@ describe("SidePanel", () => {
     renderPanel({ tab: "algorithm" });
     expect(screen.getByRole("textbox", { name: /algorithm source/i })).toBeDefined();
     expect(screen.queryByRole("button", { name: /download/i })).toBeNull();
+  });
+
+  it("renders the four gauges in the metrics tab (GH124-PLAN.md Checkpoint 2)", () => {
+    renderPanel({ tab: "metrics" });
+    expect(screen.getByText("Throughput")).toBeDefined();
+    expect(screen.getByText("Queue")).toBeDefined();
+    expect(screen.getByText("Compute")).toBeDefined();
+    expect(screen.getByText("Correctness")).toBeDefined();
   });
 
   it("wires Apply in the algorithm tab to onApply", () => {

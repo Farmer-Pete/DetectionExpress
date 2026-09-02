@@ -70,6 +70,23 @@ describe("useSidePanel", () => {
     expect(result.current.tab).toBe("algorithm");
   });
 
+  it("openMetrics opens the panel on the metrics tab", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openMetrics());
+    expect(result.current.open).toBe(true);
+    expect(result.current.tab).toBe("metrics");
+    expect(result.current.sidePanel).not.toBeNull();
+  });
+
+  it("openMetrics is a no-op while a finding trace is open", () => {
+    useGameStore.setState({ selection: { seq: 1 } });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    act(() => result.current.openMetrics());
+    expect(result.current.open).toBe(false);
+  });
+
   it("close() closes the panel", () => {
     const controllerRef = createRef<RunController | null>();
     const { result } = renderHook(() => useSidePanel({ controllerRef }));

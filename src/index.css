@@ -156,17 +156,43 @@ body {
   font-size: 0.85rem;
 }
 
-/* HUD */
-.hud {
+/* Run-status pill (GH124-PLAN.md Checkpoint 2): the one line of outcome text that
+   used to sit at the end of the HUD strip, now living in the top bar next to the
+   slice tag, since the strip itself moved into the Metrics side-panel tab below. */
+.status-pill {
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-pill-won {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.status-pill-failed {
+  border-color: var(--threat);
+  color: var(--threat);
+}
+
+/* Metrics tab (GH124-PLAN.md Checkpoint 2): the four gauges that used to run
+   horizontally across the top strip, now stacked vertically to the ~460px side
+   panel's width, plus the caught/missed/false counts under Correctness. */
+.metrics-gauges {
   display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0.5rem 1.5rem 1rem;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
 }
 
 .gauge {
-  flex: 1 1 0;
-  max-width: 320px;
+  width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
