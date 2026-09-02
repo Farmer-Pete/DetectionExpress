@@ -1,6 +1,6 @@
 /**
  * The place dialog (GH124-PLAN.md Checkpoint 4): a centered modal for whatever the
- * player last clicked or activated on the map — a station, a site, the OCC, or a
+ * player last clicked or activated on the map, a station, a site, the OCC, or a
  * train. It renders only while the map/event dialog stack's TOP entry
  * (`topMapDialogEntry`) is a `"place"` entry, reading the stack and the live
  * `snapshot` straight from the store, so its content tracks the running sim tick by
@@ -9,30 +9,22 @@
  * the player cannot reach anything behind it, but the sim keeps stepping and this
  * dialog keeps re-rendering as it does.
  *
- * Follows `TraceOverlay`'s dialog shape and its shared `src/ui/focus.ts` plumbing:
- * `role="dialog"`, a backdrop that dismisses (the whole stack) on a genuine outside
- * click, focus moves in whenever this dialog becomes the stack's top entry,
- * Tab/Shift+Tab wrap at the dialog's edges, and on a FULL close focus restores to
- * whatever triggered this dialog-stack session's very first, "outside", open —
- * falling back to `fallbackFocusRef` (the metro map region, wired by `App`) ONLY when
- * this dialog is the one that rooted the session; an event-rooted session that pushed
- * this place dialog on top instead falls back to the event dialog's own fallback (the
- * log panel), mirroring `TraceOverlay`'s decision 14 fallback (see
- * `dialog-stack-focus.ts` for why the root trigger AND its fallback are shared with
- * `EventDialog` rather than captured independently by each dialog). A "‹ Back" control appears in
- * the header whenever the stack holds more than this one entry (i.e. this place
- * dialog was pushed from a scoped-log row inside an EventDialog); Esc pops one entry
- * while that control is showing, and only closes the whole stack at the root entry —
- * the × button and the backdrop always close the whole stack, regardless of depth.
+ * The backdrop, header (Back and Close controls), Escape/Tab handling, outside-click
+ * dismissal, and focus lifecycle all live in the shared `MapDialogShell`, which
+ * `EventDialog` renders too, so the two never drift. This component only picks its
+ * own visibility off the stack's top entry, builds its header slots (icon, title,
+ * meta badges) and its body, and hands them to the shell. `fallbackFocusRef`,
+ * `rootTriggerRef`, and `rootFallbackFocusRef` pass straight through to the shell's
+ * focus wiring (see `dialog-stack-focus.ts` for why the root trigger and its fallback
+ * are shared with `EventDialog` rather than captured independently by each dialog).
  */
-import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import { topMapDialogEntry, useGameStore } from "../../game/store";
 import { world } from "../../sim/world/world";
 import { sensorCodeFor, type WorldLogEvent } from "../../sim/world-log";
-import { useMapDialogFocus } from "../dialog-stack-focus";
-import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { placeIcon, sensorIcon } from "../icons/sensor-icons";
 import { formatClock, toLogRow } from "../log/formatters";
+import { MapDialogShell } from "../MapDialogShell";
 import { type ActorSummaryRow, type DeviceView, placeView, ROLE_LABEL } from "./place-view";
 
 /**
@@ -77,58 +69,12 @@ export function PlaceDialog({
 }: PlaceDialogProps) {
   const stack = useGameStore((state) => state.mapDialogStack);
   const snapshot = useGameStore((state) => state.snapshot);
-  const clearMapDialogStack = useGameStore((state) => state.clearMapDialogStack);
-  const popMapDialog = useGameStore((state) => state.popMapDialog);
   const openEventFromPlace = useGameStore((state) => state.openEventFromPlace);
 
   const top = topMapDialogEntry(stack);
   const open = top !== null && top.kind === "place";
   const selection = open ? top.selection : null;
-  // More than this one entry means a scoped-log row inside an EventDialog pushed this
-  // place dialog on top of it, so a "‹ Back" can pop back to it.
-  const canGoBack = stack.length > 1;
   const view = selection === null ? null : placeView(selection, snapshot, world);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Move focus into the dialog whenever it becomes (or stays) the stack's top entry;
-  // restore it only on a full close, falling back when the root trigger has since
-  // left the document — see `dialog-stack-focus.ts` for why a push or a pop touches
-  // neither the capture nor the restore.
-  useMapDialogFocus({
-    isTop: open,
-    stackLength: stack.length,
-    dialogRef,
-    fallbackFocusRef,
-    rootTriggerRef,
-    rootFallbackFocusRef,
-  });
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    // A backdrop click always closes the WHOLE stack, not just this entry — it is
-    // the "give up and leave" gesture, not a Back.
-    return installOutsidePointerDismiss(dialogRef, clearMapDialogStack);
-  }, [open, clearMapDialogStack]);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (canGoBack) {
-        popMapDialog();
-      } else {
-        clearMapDialogStack();
-      }
-      return;
-    }
-    const dialog = dialogRef.current;
-    if (dialog === null) {
-      return;
-    }
-    trapTab(dialog, event);
-  };
 
   if (view === null) {
     return null;
@@ -137,92 +83,72 @@ export function PlaceDialog({
   const Icon = view.iconKind === undefined ? null : placeIcon(view.iconKind);
 
   return (
-    <div className="place-overlay-backdrop">
-      <div
-        ref={dialogRef}
-        className="place-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label={view.title}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-      >
-        <header className="place-overlay-header">
-          {canGoBack ? (
-            <button type="button" className="place-overlay-back" onClick={popMapDialog}>
-              <span aria-hidden="true">‹</span> Back
-            </button>
-          ) : null}
-          {Icon !== null ? (
-            <Icon className="place-overlay-icon" size={20} aria-hidden="true" />
-          ) : null}
-          <span className="place-overlay-title">{view.title}</span>
-          {view.meta.map((badge) => (
-            <span className="place-meta-badge" key={`${badge.label}:${badge.value}`}>
-              {badge.label === "Line" ? badge.value : `${badge.label} ${badge.value}`}
-            </span>
-          ))}
-          <button
-            type="button"
-            className="place-overlay-close"
-            aria-label="Close"
-            onClick={clearMapDialogStack}
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        </header>
+    <MapDialogShell
+      ariaLabel={view.title}
+      title={view.title}
+      icon={
+        Icon !== null ? <Icon className="place-overlay-icon" size={20} aria-hidden="true" /> : null
+      }
+      meta={view.meta.map((badge) => (
+        <span className="place-meta-badge" key={`${badge.label}:${badge.value}`}>
+          {badge.label === "Line" ? badge.value : `${badge.label} ${badge.value}`}
+        </span>
+      ))}
+      stackLength={stack.length}
+      fallbackFocusRef={fallbackFocusRef}
+      rootTriggerRef={rootTriggerRef}
+      rootFallbackFocusRef={rootFallbackFocusRef}
+    >
+      <section className="place-devices" aria-label="Devices">
+        <h3 className="place-section-title">Devices</h3>
+        {view.devices.length === 0 ? (
+          <p className="place-section-empty">No devices here.</p>
+        ) : (
+          <ul className="place-device-list">
+            {view.devices.map((device) => (
+              <DeviceCard key={device.code} device={device} />
+            ))}
+          </ul>
+        )}
+      </section>
 
-        <section className="place-devices" aria-label="Devices">
-          <h3 className="place-section-title">Devices</h3>
-          {view.devices.length === 0 ? (
-            <p className="place-section-empty">No devices here.</p>
-          ) : (
-            <ul className="place-device-list">
-              {view.devices.map((device) => (
-                <DeviceCard key={device.code} device={device} />
+      <section className="place-actors" aria-label="Actors">
+        <h3 className="place-section-title" id="place-actors-title">
+          Actors
+        </h3>
+        {view.actorRows.length === 0 ? (
+          <p className="place-section-empty">No one here right now.</p>
+        ) : (
+          <table className="actor-table" aria-labelledby="place-actors-title">
+            <thead>
+              <tr>
+                <th>Actor</th>
+                <th>Activity</th>
+                <th className="actor-table-count-header">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.actorRows.map((row) => (
+                <ActorTableRow key={`${row.kind}:${row.activity}`} row={row} />
               ))}
-            </ul>
-          )}
-        </section>
+            </tbody>
+          </table>
+        )}
+      </section>
 
-        <section className="place-actors" aria-label="Actors">
-          <h3 className="place-section-title" id="place-actors-title">
-            Actors
-          </h3>
-          {view.actorRows.length === 0 ? (
-            <p className="place-section-empty">No one here right now.</p>
-          ) : (
-            <table className="actor-table" aria-labelledby="place-actors-title">
-              <thead>
-                <tr>
-                  <th>Actor</th>
-                  <th>Activity</th>
-                  <th className="actor-table-count-header">Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.actorRows.map((row) => (
-                  <ActorTableRow key={`${row.kind}:${row.activity}`} row={row} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <section className="place-log" aria-label="Log">
-          <h3 className="place-section-title">Log</h3>
-          {view.log.length === 0 ? (
-            <p className="place-section-empty">No activity logged here yet.</p>
-          ) : (
-            <div className="log-stream place-log-stream">
-              {view.log.map((event) => (
-                <PlaceLogRow key={event.id} event={event} onSelect={openEventFromPlace} />
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-    </div>
+      <section className="place-log" aria-label="Log">
+        <h3 className="place-section-title">Log</h3>
+        {view.log.length === 0 ? (
+          <p className="place-section-empty">No activity logged here yet.</p>
+        ) : (
+          <div className="log-stream place-log-stream">
+            {view.log.map((event) => (
+              <PlaceLogRow key={event.id} event={event} onSelect={openEventFromPlace} />
+            ))}
+          </div>
+        )}
+      </section>
+    </MapDialogShell>
   );
 }
 

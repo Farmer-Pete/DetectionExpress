@@ -14,37 +14,28 @@
  * entry, this component stops rendering (or the entry beneath it takes over), which is
  * the "close on evict" contract — there is no separate close-detection effect here.
  *
- * Follows `PlaceDialog`'s (and `TraceOverlay`'s) shape and shared `src/ui/focus.ts`
- * plumbing: `role="dialog"`, a backdrop that dismisses the whole stack on a genuine
- * outside click, focus moves in whenever this dialog becomes the stack's top entry,
- * Tab/Shift+Tab wrap at the dialog's edges, and on a FULL close focus restores to
- * whatever triggered this dialog-stack session's very first, "outside", open —
- * falling back to `fallbackFocusRef` (the log panel, wired by `App`) ONLY when this
- * dialog is the one that rooted the session; a map-rooted session that pushed this
- * event dialog on top instead falls back to the place dialog's own fallback (the map
- * region), when that trigger is no longer connected (a row it evicted, or the shell
- * having gone inert out from under it — see `dialog-stack-focus.ts` for why the root
- * trigger AND its fallback are shared with `PlaceDialog` rather than captured
- * independently by each dialog). A "‹ Back"
- * control appears in the header whenever the stack holds more than this one entry
- * (this event dialog was pushed from an "Open place" link inside a PlaceDialog); Esc
- * pops one entry while that control is showing, and only closes the whole stack at
- * the root entry — the × button and the backdrop always close the whole stack,
- * regardless of depth.
+ * The backdrop, header (Back and Close controls), Escape/Tab handling, outside-click
+ * dismissal, and focus lifecycle all live in the shared `MapDialogShell`, which
+ * `PlaceDialog` renders too, so the two never drift. This component only picks its own
+ * visibility off the stack's top entry, builds its header slots (icon, title, meta
+ * badge) and its adaptive body, and hands them to the shell. `fallbackFocusRef` (the
+ * log panel, wired by `App`), `rootTriggerRef`, and `rootFallbackFocusRef` pass
+ * straight through to the shell's focus wiring (see `dialog-stack-focus.ts` for why
+ * the root trigger and its fallback are shared with `PlaceDialog` rather than captured
+ * independently by each dialog).
  *
- * Every detail kind's "Open place" link (`OpenPlaceButton` below, common to all
- * three — a scored kiosk reading, one whose scored detail has aged out of the
- * inspector ring, and a raw/otherwise reading, since every `WorldLogEvent` carries a
- * `placeId` regardless of kind) calls `openPlaceFromEvent`, which PUSHES a place entry
- * on top of this one instead of replacing it, so a later Back returns here.
+ * Every detail kind's "Open place" link (`OpenPlaceButton` below, common to a scored
+ * kiosk reading, one whose scored detail has aged out of the inspector ring, and a
+ * raw/otherwise reading, since every `WorldLogEvent` carries a `placeId` regardless of
+ * kind) calls `openPlaceFromEvent`, which PUSHES a place entry on top of this one
+ * instead of replacing it, so a later Back returns here.
  */
-import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
+import type { RefObject } from "react";
 import { topMapDialogEntry, useGameStore } from "../../game/store";
 import type { MapNodeId } from "../../sim/world/presence";
 import { sensorCodeFor } from "../../sim/world-log";
-import { useMapDialogFocus } from "../dialog-stack-focus";
-import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { sensorIcon } from "../icons/sensor-icons";
+import { MapDialogShell } from "../MapDialogShell";
 import { eventDetail } from "./event-detail";
 import { formatClock, sensorLabel } from "./formatters";
 
@@ -72,61 +63,16 @@ export function EventDialog({
 }: EventDialogProps) {
   const stack = useGameStore((state) => state.mapDialogStack);
   const snapshot = useGameStore((state) => state.snapshot);
-  const clearMapDialogStack = useGameStore((state) => state.clearMapDialogStack);
-  const popMapDialog = useGameStore((state) => state.popMapDialog);
   const openPlaceFromEvent = useGameStore((state) => state.openPlaceFromEvent);
 
   const top = topMapDialogEntry(stack);
   const open = top !== null && top.kind === "event";
   const eventId = open ? top.id : null;
-  // More than this one entry means an "Open place" link inside a PlaceDialog pushed
-  // this event dialog on top of it, so a "‹ Back" can pop back to it.
-  const canGoBack = stack.length > 1;
   const ev = eventId === null ? undefined : snapshot.worldEvents.find((e) => e.id === eventId);
   const detail =
     ev === undefined
       ? null
       : eventDetail(ev, snapshot.events, snapshot.findings, snapshot.decisions);
-
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Move focus into the dialog whenever it becomes (or stays) the stack's top entry;
-  // restore it only on a full close, falling back when the root trigger has since
-  // left the document — see `dialog-stack-focus.ts` for why a push or a pop touches
-  // neither the capture nor the restore.
-  useMapDialogFocus({
-    isTop: open,
-    stackLength: stack.length,
-    dialogRef,
-    fallbackFocusRef,
-    rootTriggerRef,
-    rootFallbackFocusRef,
-  });
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-    // A backdrop click always closes the WHOLE stack, not just this entry.
-    return installOutsidePointerDismiss(dialogRef, clearMapDialogStack);
-  }, [open, clearMapDialogStack]);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (canGoBack) {
-        popMapDialog();
-      } else {
-        clearMapDialogStack();
-      }
-      return;
-    }
-    const dialog = dialogRef.current;
-    if (dialog === null) {
-      return;
-    }
-    trapTab(dialog, event);
-  };
 
   // `ev`/`detail` are both null while closed, or (defensively) if the selected id
   // somehow named nothing live — reconciliation should make this unreachable in
@@ -138,64 +84,45 @@ export function EventDialog({
   const { Icon, token } = sensorIcon(sensorCodeFor(ev.sensor));
 
   return (
-    <div className="place-overlay-backdrop">
-      <div
-        ref={dialogRef}
-        className="place-overlay event-overlay"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${sensorLabel(ev.sensor)} reading`}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-      >
-        <header className="place-overlay-header">
-          {canGoBack ? (
-            <button type="button" className="place-overlay-back" onClick={popMapDialog}>
-              <span aria-hidden="true">‹</span> Back
-            </button>
-          ) : null}
-          <Icon className="place-overlay-icon" size={20} color={token} aria-hidden="true" />
-          <span className="place-overlay-title">{sensorLabel(ev.sensor)}</span>
-          <span className="place-meta-badge">{formatClock(ev.ts)}</span>
-          <button
-            type="button"
-            className="place-overlay-close"
-            aria-label="Close"
-            onClick={clearMapDialogStack}
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        </header>
-
-        {detail.kind === "scored" ? (
-          <>
-            <EventJsonSection title="Raw" value={detail.raw} />
-            <EventJsonSection title="Normalized" value={detail.normalized} />
-            <CitationsSection findings={detail.citingFindings} decisions={detail.citingDecisions} />
-          </>
-        ) : detail.kind === "scored-evicted" ? (
-          <>
-            <EventJsonSection title="Raw" value={detail.raw} />
-            <p className="event-detail-note" data-testid="event-detail-evicted-note">
-              Normalized detail no longer retained.
+    <MapDialogShell
+      ariaLabel={`${sensorLabel(ev.sensor)} reading`}
+      title={sensorLabel(ev.sensor)}
+      icon={<Icon className="place-overlay-icon" size={20} color={token} aria-hidden="true" />}
+      meta={<span className="place-meta-badge">{formatClock(ev.ts)}</span>}
+      className="event-overlay"
+      stackLength={stack.length}
+      fallbackFocusRef={fallbackFocusRef}
+      rootTriggerRef={rootTriggerRef}
+      rootFallbackFocusRef={rootFallbackFocusRef}
+    >
+      {detail.kind === "scored" ? (
+        <>
+          <EventJsonSection title="Raw" value={detail.raw} />
+          <EventJsonSection title="Normalized" value={detail.normalized} />
+          <CitationsSection findings={detail.citingFindings} decisions={detail.citingDecisions} />
+        </>
+      ) : detail.kind === "scored-evicted" ? (
+        <>
+          <EventJsonSection title="Raw" value={detail.raw} />
+          <p className="event-detail-note" data-testid="event-detail-evicted-note">
+            Normalized detail no longer retained.
+          </p>
+          <CitationsSection findings={detail.citingFindings} decisions={detail.citingDecisions} />
+        </>
+      ) : (
+        <>
+          <EventJsonSection title="Raw" value={detail.raw} />
+          <section className="place-devices" aria-label="Source">
+            <h3 className="place-section-title">Source</h3>
+            <p className="event-detail-source">
+              {detail.source.actorId !== undefined ? `${detail.source.actorId} at ` : ""}
+              {detail.source.placeId}
             </p>
-            <CitationsSection findings={detail.citingFindings} decisions={detail.citingDecisions} />
-          </>
-        ) : (
-          <>
-            <EventJsonSection title="Raw" value={detail.raw} />
-            <section className="place-devices" aria-label="Source">
-              <h3 className="place-section-title">Source</h3>
-              <p className="event-detail-source">
-                {detail.source.actorId !== undefined ? `${detail.source.actorId} at ` : ""}
-                {detail.source.placeId}
-              </p>
-            </section>
-          </>
-        )}
-        <OpenPlaceButton placeId={ev.placeId} onOpenPlace={openPlaceFromEvent} />
-      </div>
-    </div>
+          </section>
+        </>
+      )}
+      <OpenPlaceButton placeId={ev.placeId} onOpenPlace={openPlaceFromEvent} />
+    </MapDialogShell>
   );
 }
 
