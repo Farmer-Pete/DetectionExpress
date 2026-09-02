@@ -416,6 +416,14 @@ export function ActorLayer() {
         if (actor.kind === "train") {
           continue;
         }
+        // In steady mode the engine pre-seeds every future actor `at` its station at
+        // tick 0; skip any whose `at` window has not opened yet (fromTick > now), so the
+        // map draws only actors present now, matching `actorsAtNode`. This precedes the
+        // per-kind dispatch so staff, operators, and hosts are filtered too, not just
+        // riders.
+        if (actor.presence.kind === "at" && actor.presence.fromTick > renderNow) {
+          continue;
+        }
         if (actor.kind === "staff") {
           // A staff member is a green square, walking the site<->station line or resting
           // at the site; onTrain never applies, so presencePoint places it directly.
@@ -430,14 +438,8 @@ export function ActorLayer() {
           continue;
         }
 
-        // A rider (or account rider). In steady mode the engine pre-seeds every future
-        // patron `at` its station at tick 0, so skip one whose window has not opened yet
-        // (fromTick > now): draw only actors present now, matching `actorsAtNode`.
-        if (actor.presence.kind === "at" && actor.presence.fromTick > renderNow) {
-          continue;
-        }
-        // Track its presence across frames to catch the board / alight flip and animate
-        // the short step on / off the train.
+        // A rider (or account rider). Track its presence across frames to catch the
+        // board / alight flip and animate the short step on / off the train.
         liveRiderIds.add(actor.id);
         const prev = riderAnim.get(actor.id);
         const presence = actor.presence;
