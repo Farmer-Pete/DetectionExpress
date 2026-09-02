@@ -23,6 +23,9 @@ beforeEach(() => {
     runPending: false,
     transport: { frozen: false, speed: 1 },
     overlayOpen: false,
+    selection: null,
+    decisionSelection: null,
+    mapSelection: null,
   });
   markIntroSeen();
 });
@@ -216,6 +219,74 @@ describe("App side panel (GH118-PLAN.md)", () => {
   });
 });
 
+describe("App place dialog (GH124-PLAN.md Checkpoint 4)", () => {
+  it("opens a station's place dialog on click, inerts the shell, and does not freeze the engine", () => {
+    const controller = stubController();
+    render(<App createPipelineController={() => controller} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+    expect(controller.frozenCalls).not.toContain(true);
+  });
+
+  it("Escape closes the place dialog and lifts the shell's inert state", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Central" }), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+    expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+
+  it("re-renders the open dialog live as the snapshot changes, unlike the frozen trace/side-panel overlays", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    act(() => {
+      useGameStore.setState({
+        snapshot: {
+          ...emptySnapshot(),
+          actors: [
+            {
+              id: "R1",
+              kind: "rider",
+              presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 10 },
+            },
+          ],
+        },
+      });
+    });
+
+    expect(screen.getByText("R1")).toBeDefined();
+  });
+
+  it("is mutually exclusive with the side panel: a map click while it is open never also opens the place dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(screen.queryByRole("dialog", { name: "Central" })).toBeNull();
+    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("is mutually exclusive with the trace dialog: a map click while a finding/decision is selected never also opens the place dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ selection: { seq: 1 } });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+});
+
 describe("App onboarding", () => {
   // Record the anchor id each scrollIntoView lands on, so a test asserts the target.
   let scrollTargets: string[];
@@ -363,13 +434,16 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
         }}
       />,
     );
-    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
+    // role="group", not role="img" (GH124-PLAN.md Checkpoint 4): an image's
+    // descendants are not exposed as interactive controls, which would make every
+    // station/site/train button on the map unreachable to assistive tech.
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
-    expect(screen.queryByRole("img", { name: "Metro network map" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "Metro network map" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
-    expect(screen.getByRole("img", { name: "Metro network map" })).toBeDefined();
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
 
     // Never rebuilt or disposed across either toggle: the one engine keeps running.
     expect(pipes).toHaveLength(1);

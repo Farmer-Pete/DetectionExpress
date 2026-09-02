@@ -13,8 +13,15 @@
  * update re-renders only the panel that reads the changed field, not the whole view
  * (ARCHITECTURE rule 4). The map's hot path (moving actors, flashes) is the canvas
  * layer, not React.
+ *
+ * GH124-PLAN.md Checkpoint 4: `onSelect` and `mapRegionRef` pass straight through to
+ * `MetroMap`/the map region — App owns the actual selection state (the store's
+ * `mapSelection`) and the place dialog's focus-restore fallback, so this component
+ * stays a thin relay for both, the same way it already relays nothing else of its own.
  */
 
+import type { RefObject } from "react";
+import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
 import type { FailureReason, RunStatus } from "../sim/snapshot";
 import type { SensorCode } from "../sim/world/layout";
@@ -165,14 +172,23 @@ function EndedOverlay() {
   );
 }
 
-export function MetroView() {
+interface MetroViewProps {
+  /** Lifted selection handler (GH124-PLAN.md Checkpoint 4), forwarded to `MetroMap`. */
+  onSelect: (selection: MapSelection) => void;
+  /** The map region's ref, for the place dialog's focus-restore fallback (App owns
+   *  the ref; `tabIndex={-1}` here makes it programmatically focusable without
+   *  joining the Tab order, mirroring `DecisionsPanel.tsx`'s own panel ref). */
+  mapRegionRef?: RefObject<HTMLDivElement | null> | undefined;
+}
+
+export function MetroView({ onSelect, mapRegionRef }: MetroViewProps) {
   return (
     <div className="metro-view">
       {/* Two grid children, not overlays: the map region (so the full map, Harbor to
           World's End, and every site, is never hidden under a panel) and the key,
           each placed by `.metro-view`'s CSS grid areas — no width check here. */}
-      <div className="metro-map-region">
-        <MetroMap />
+      <div className="metro-map-region" ref={mapRegionRef} tabIndex={-1}>
+        <MetroMap onSelect={onSelect} />
         <EndedOverlay />
       </div>
       <MetroKey />

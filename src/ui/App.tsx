@@ -96,6 +96,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
+import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
@@ -103,6 +104,7 @@ import { TraceOverlay } from "./findings/TraceOverlay";
 import { useIntroOverlay } from "./intro/use-intro-overlay";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
+import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
 import { type SidePanelTab, useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
@@ -131,6 +133,10 @@ export function App({ createPipelineController }: AppProps = {}) {
   // Shared with DecisionsPanel (which renders it) and TraceOverlay (which reads it as
   // the decision-mode focus fallback, GH34-35-PLAN.md decision 14).
   const decisionsPanelRef = useRef<HTMLElement>(null);
+  // Shared with MetroView (which attaches it to the map region) and PlaceDialog
+  // (which reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 4 — the
+  // same fallback-focus pattern as findingsPanelRef/decisionsPanelRef above).
+  const metroMapRegionRef = useRef<HTMLDivElement>(null);
   // Shared with Topbar (which attaches them to its three openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
@@ -158,6 +164,15 @@ export function App({ createPipelineController }: AppProps = {}) {
   const selection = useGameStore((s) => s.selection);
   const decisionSelection = useGameStore((s) => s.decisionSelection);
   const traceOpen = selection !== null || decisionSelection !== null;
+
+  // The place dialog (GH124-PLAN.md Checkpoint 4): `mapSelection !== null` IS "the
+  // dialog is open", mirroring `traceOpen` above. Unlike the trace dialog, opening it
+  // never freezes the engine (PlaceDialog's own concern, not App's) — it only feeds
+  // `modalOpen` below, so the shell still goes inert while it is up.
+  const mapSelection = useGameStore((s) => s.mapSelection);
+  const placeOpen = mapSelection !== null;
+  const selectMapNode = useGameStore((s) => s.selectMapNode);
+  const selectMapTrain = useGameStore((s) => s.selectMapTrain);
 
   // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
   // requests a side-panel tab records it here instead of opening the panel
@@ -193,6 +208,24 @@ export function App({ createPipelineController }: AppProps = {}) {
     metricsFocusRef: metricsButtonRef,
   });
 
+  // No-op while another overlay is already open (mirrors useSidePanel's own openWith
+  // exclusivity check): the shell being inert already blocks a real pointer/keyboard
+  // click from reaching the map, but this guard is what actually enforces "only one
+  // map modal at a time" against any path that is not gated by inert.
+  const onMapSelect = useCallback(
+    (next: MapSelection) => {
+      if (intro.introOpen || traceOpen || sidePanel.open) {
+        return;
+      }
+      if (next.kind === "node") {
+        selectMapNode(next.id);
+      } else {
+        selectMapTrain(next.actorId);
+      }
+    },
+    [intro.introOpen, traceOpen, sidePanel.open, selectMapNode, selectMapTrain],
+  );
+
   // Complete the intro transition: once the intro has actually closed, act on
   // whatever tab a dismiss recorded (see the module doc's "The intro transition").
   // A no-op on every other render, since `pendingPanelTabRef` only ever holds a
@@ -221,7 +254,7 @@ export function App({ createPipelineController }: AppProps = {}) {
     }
   }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm, sidePanel.openMetrics]);
 
-  const modalOpen = intro.introOpen || traceOpen || sidePanel.open;
+  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || placeOpen;
 
   // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
   // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
@@ -262,6 +295,7 @@ export function App({ createPipelineController }: AppProps = {}) {
             fallbackFocusRef={findingsPanelRef}
             decisionsFallbackFocusRef={decisionsPanelRef}
           />
+          <PlaceDialog fallbackFocusRef={metroMapRegionRef} />
           {sidePanel.sidePanel}
         </>
       }
@@ -278,7 +312,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         algorithmButtonRef={algorithmButtonRef}
         metricsButtonRef={metricsButtonRef}
       />
-      {mapShown ? <MetroView /> : null}
+      {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
       <InspectorShell findingsPanelRef={findingsPanelRef} />
       <DecisionsPanel panelRef={decisionsPanelRef} />
     </ModalHost>

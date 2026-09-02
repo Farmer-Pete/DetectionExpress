@@ -11,10 +11,21 @@
 import { create } from "zustand";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import type { MapNodeId } from "../sim/world/presence";
 import { referenceSource } from "./engine-source";
 import type { RuleErrorInfo, Speed } from "./run-controller";
 import { PIPELINE_EDGES, PIPELINE_NODES } from "./topology";
 import { LEVEL_SEED } from "./tuning";
+
+/**
+ * What the map's place dialog (GH124-PLAN.md Checkpoint 4) is open on: a station,
+ * site, or the OCC (`node`, keyed by its `MapNodeId`), or a train (`train`, keyed by
+ * its actor id, e.g. `"T1"`, a separate namespace from `MapNodeId`). Defined here,
+ * not in a `src/ui` module, so this game-layer store never depends on the UI layer
+ * (the existing `selection`/`decisionSelection` fields follow the same rule: their
+ * shape is inline, not imported from `src/ui/findings`).
+ */
+export type MapSelection = { kind: "node"; id: MapNodeId } | { kind: "train"; actorId: string };
 
 /**
  * The transport mirror. The run controller owns the authoritative transport state;
@@ -77,6 +88,14 @@ interface GameState {
    * kind clears the other. UI state, not sim state, so it survives snapshot churn.
    */
   decisionSelection: { seq: number } | null;
+  /**
+   * The map's place-dialog selection (GH124-PLAN.md Checkpoint 4): a clicked station,
+   * site, the OCC, or a train, or null while the dialog is closed. UI state, not sim
+   * state (survives snapshot churn). Unlike `selection`/`decisionSelection`, it needs
+   * no snapshot reconciliation: every node and train it can name is a fixed fixture of
+   * `world.json`, never evicted, so a stale id can never occur.
+   */
+  mapSelection: MapSelection | null;
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
@@ -113,6 +132,15 @@ interface GameState {
   selectDecision: (seq: number) => void;
   /** Clear both selections. Esc and a click on the empty panel call it. */
   clearSelection: () => void;
+  /**
+   * Select a map node (a station, site, or the OCC) by id (GH124-PLAN.md Checkpoint
+   * 4). Re-selecting the same id clears the selection, mirroring `selectFinding`.
+   */
+  selectMapNode: (id: MapNodeId) => void;
+  /** Select a train by its actor id. Re-selecting the same id clears the selection. */
+  selectMapTrain: (actorId: string) => void;
+  /** Clear the map selection. Esc, the backdrop, and the close button call it. */
+  clearMapSelection: () => void;
   /** Sets the transport freeze mirror. The App reflects it into the run controller. */
   setFrozen: (frozen: boolean) => void;
   /** Sets the transport speed mirror. The App reflects it into the run controller. */
@@ -141,6 +169,7 @@ export const useGameStore = create<GameState>((set) => ({
   runPending: false,
   selection: null,
   decisionSelection: null,
+  mapSelection: null,
   transport: { frozen: false, speed: 1 },
   flashes: new Map(),
   runToken: 0,
@@ -201,6 +230,23 @@ export const useGameStore = create<GameState>((set) => ({
       return { decisionSelection: { seq }, selection: null };
     }),
   clearSelection: () => set({ selection: null, decisionSelection: null }),
+  // No snapshot-presence validation, unlike selectFinding/selectDecision: every node
+  // and train id these can name is a fixed world.json fixture, never evicted.
+  selectMapNode: (id) =>
+    set((state) => {
+      if (state.mapSelection?.kind === "node" && state.mapSelection.id === id) {
+        return { mapSelection: null }; // re-select toggles off
+      }
+      return { mapSelection: { kind: "node", id } };
+    }),
+  selectMapTrain: (actorId) =>
+    set((state) => {
+      if (state.mapSelection?.kind === "train" && state.mapSelection.actorId === actorId) {
+        return { mapSelection: null };
+      }
+      return { mapSelection: { kind: "train", actorId } };
+    }),
+  clearMapSelection: () => set({ mapSelection: null }),
   // Each setter keeps the sibling field, so toggling freeze never resets speed and
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),
