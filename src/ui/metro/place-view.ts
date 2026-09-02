@@ -4,11 +4,10 @@
  * component so the mapping from world data + a live snapshot to devices, actors, and
  * descriptive text is unit-tested without mounting React.
  *
- * `describePresence` and `actorsAtNode` take only `(presence, snapshot)` /
- * `(nodeId, snapshot)` — no `World` — so their text is built from ids and the actor
- * graph alone, never a station's display name; `placeView` (which does receive
- * `World`) is the one place real names surface, sourced from `metroNodes(world)`, not
- * hardcoded.
+ * All the mapping functions take `World` so real `world.json` display names surface
+ * everywhere — `describePresence` renders "at Central" / "to Market" rather than raw
+ * node ids, and `placeView` titles/badges use the same names — sourced from
+ * `metroNodes(world)`, never hardcoded.
  */
 import type { MapSelection } from "../../game/store";
 import type { SimSnapshot } from "../../sim/snapshot";
@@ -101,6 +100,12 @@ function trainDestination(presence: Presence): MapNodeId | null {
   return null;
 }
 
+/** A node id's human display name from `world.json` (e.g. `cen` -> `Central`), falling
+ *  back to the raw id if it names nothing on the map. */
+function nodeLabel(id: MapNodeId, world: World): string {
+  return metroNodes(world).find((node) => node.id === id)?.name ?? id;
+}
+
 /**
  * What a presence is doing right now, and a short description of where it is headed.
  * Exhaustive over `Presence`'s three arms. The `onTrain` arm alone carries only a
@@ -111,21 +116,23 @@ function trainDestination(presence: Presence): MapNodeId | null {
 export function describePresence(
   presence: Presence,
   snapshot: SimSnapshot,
+  world: World,
 ): { doing: string; heading: string } {
   switch (presence.kind) {
     case "at":
       return {
         doing: presence.untilTick === "open" ? "stationed" : "waiting",
-        heading: `at ${presence.node}`,
+        heading: `at ${nodeLabel(presence.node, world)}`,
       };
     case "moving":
-      return { doing: "walking", heading: `to ${presence.to}` };
+      return { doing: "walking", heading: `to ${nodeLabel(presence.to, world)}` };
     case "onTrain": {
       const train = snapshot.actors.find((actor) => actor.id === presence.train);
       const destination = train === undefined ? null : trainDestination(train.presence);
       return {
         doing: "riding",
-        heading: destination === null ? `on ${presence.train}` : `to ${destination}`,
+        heading:
+          destination === null ? `on ${presence.train}` : `to ${nodeLabel(destination, world)}`,
       };
     }
   }
@@ -159,7 +166,7 @@ export function devicesForNode(nodeId: MapNodeId, world: World): DeviceView[] {
  * it. The two id spaces (`MapNodeId` and a train's actor id) never collide, so one
  * query serves both a station/site/OCC dialog and a train dialog's onboard-rider list.
  */
-export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot): ActorLine[] {
+export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot, world: World): ActorLine[] {
   const lines: ActorLine[] = [];
   for (const actor of snapshot.actors) {
     const presence = actor.presence;
@@ -169,7 +176,7 @@ export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot): ActorLin
     if (!resolvesHere) {
       continue;
     }
-    const { doing, heading } = describePresence(presence, snapshot);
+    const { doing, heading } = describePresence(presence, snapshot, world);
     lines.push({
       glyphKind: actor.kind,
       id: actor.id,
@@ -240,7 +247,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       iconKind: undefined,
       meta: [],
       devices: [],
-      actors: actorsAtNode(selection.actorId, snapshot),
+      actors: actorsAtNode(selection.actorId, snapshot, world),
     };
   }
   const node = metroNodes(world).find((candidate) => candidate.id === selection.id);
@@ -254,6 +261,6 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
     iconKind: placeKindForNode(node, world),
     meta: node.kind === "station" ? stationMeta(node, world) : placeMeta(node, world),
     devices: devicesForNode(node.id, world),
-    actors: actorsAtNode(node.id, snapshot),
+    actors: actorsAtNode(node.id, snapshot, world),
   };
 }

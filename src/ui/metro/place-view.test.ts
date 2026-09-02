@@ -13,14 +13,16 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
+      world,
     );
-    expect(result).toEqual({ doing: "waiting", heading: "at cen" });
+    expect(result).toEqual({ doing: "waiting", heading: "at Central" });
   });
 
   it("describes an open-ended 'at' presence (a fixture) as stationed", () => {
     const result = describePresence(
       { kind: "at", node: "occ", fromTick: 0, untilTick: "open" },
       emptySnapshot(),
+      world,
     );
     expect(result.doing).toBe("stationed");
   });
@@ -29,8 +31,9 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "moving", from: "cen", to: "riv", line: "red", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
+      world,
     );
-    expect(result).toEqual({ doing: "walking", heading: "to riv" });
+    expect(result).toEqual({ doing: "walking", heading: "to Riverside" });
   });
 
   it("resolves an onTrain presence's destination via the named train's ActorView", () => {
@@ -51,8 +54,9 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "onTrain", train: "T1", fromTick: 0, untilTick: 20 },
       snapshot,
+      world,
     );
-    expect(result).toEqual({ doing: "riding", heading: "to riv" });
+    expect(result).toEqual({ doing: "riding", heading: "to Riverside" });
   });
 
   it("resolves an onTrain presence's destination when the train is dwelling ('at')", () => {
@@ -66,14 +70,16 @@ describe("describePresence", () => {
     const result = describePresence(
       { kind: "onTrain", train: "T1", fromTick: 0, untilTick: 5 },
       snapshot,
+      world,
     );
-    expect(result).toEqual({ doing: "riding", heading: "to riv" });
+    expect(result).toEqual({ doing: "riding", heading: "to Riverside" });
   });
 
   it("falls back gracefully when the named train is not in the snapshot", () => {
     const result = describePresence(
       { kind: "onTrain", train: "T9", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
+      world,
     );
     expect(result.doing).toBe("riding");
     expect(result.heading).toBe("on T9");
@@ -122,7 +128,7 @@ describe("actorsAtNode", () => {
         presence: { kind: "at", node: "riv", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const lines = actorsAtNode("cen", snapshot);
+    const lines = actorsAtNode("cen", snapshot, world);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ id: "R1", glyphKind: "rider", role: "Rider" });
   });
@@ -145,12 +151,12 @@ describe("actorsAtNode", () => {
         presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       },
     ]);
-    const lines = actorsAtNode("T1", snapshot);
+    const lines = actorsAtNode("T1", snapshot, world);
     expect(lines.map((line) => line.id)).toEqual(["R1"]);
   });
 
   it("returns an empty list when no actor resolves to the node", () => {
-    expect(actorsAtNode("cen", emptySnapshot())).toEqual([]);
+    expect(actorsAtNode("cen", emptySnapshot(), world)).toEqual([]);
   });
 });
 
