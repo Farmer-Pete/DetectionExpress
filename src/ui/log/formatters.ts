@@ -107,7 +107,9 @@ export interface LogRow {
  * extends `formatRow`'s per-endpoint idea from the two scored wire formats to every
  * sensor kind the world ring carries. Exhaustive over `WorldReading["sensor"]` via the
  * switch below, so a future sensor arm is a `tsc` error here, never a silently blank
- * row. Pure and total; never throws.
+ * row. Exhaustive over the sensor kinds. It resolves ids through the `world.ts` resolver
+ * layer, which throws on an unknown id; the sim only ever feeds it real world ids, so in
+ * practice it does not throw.
  *
  * Resolves every world-entity id (a station, a site, or a train) to its display name
  * (GH127-PLAN.md M2), through the shared `world.ts` resolver layer. Telemetry stays

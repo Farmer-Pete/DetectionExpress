@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { trainIdForLine } from "../sim/world/timetable";
-import { world } from "../sim/world/world";
+import { trainName, world } from "../sim/world/world";
 import type { CatalogueScenario } from "./catalogue.types";
 import { manufacturersData } from "./manufacturers.data";
 import { scenariosData } from "./scenarios.data";
@@ -83,7 +83,12 @@ function checkLineTrainNames(
     if (line.trainName.trim().length === 0) {
       throw new Error(`line "${line.id}" has an empty trainName.`);
     }
-    trainIdForLine(world, line.id);
+    const trainId = trainIdForLine(world, line.id);
+    if (trainName(trainId) !== line.trainName) {
+      throw new Error(
+        `line "${line.id}" trainName "${line.trainName}" does not round-trip through train id "${trainId}".`,
+      );
+    }
   }
 }
 
