@@ -112,13 +112,16 @@ interface HarnessProps {
   clock: FxClock;
 }
 
-/** The minimal DOM FxLayer measures: a log panel with rows, a findings panel with rows. */
+/** The minimal DOM FxLayer measures: a log panel with rows, a findings panel with rows.
+ *  `data-scored-event-id` is what FxLayer actually anchors on (GH124-PLAN.md Checkpoint
+ *  5: a scored pipeline event id, a separate namespace from a row's own world-log id);
+ *  `data-testid` stays too, purely so the tests below can still grab a row by its id. */
 function Harness({ logRowIds, findingSeqs, clock }: HarnessProps) {
   return (
     <>
       <div className="log-stream">
         {logRowIds.map((id) => (
-          <div key={id} data-testid={`log-row-${id}`} />
+          <div key={id} data-testid={`log-row-${id}`} data-scored-event-id={id} />
         ))}
       </div>
       <div className="findings-panel">

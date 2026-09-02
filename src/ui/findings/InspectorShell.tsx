@@ -31,14 +31,20 @@ import { FindingsPanel } from "./FindingsPanel";
 
 interface InspectorShellProps {
   findingsPanelRef?: RefObject<HTMLElement | null>;
+  /** The event dialog's focus-fallback ref (GH124-PLAN.md Checkpoint 5), forwarded to
+   *  `LogPanel`. Mirrors `findingsPanelRef`. */
+  logPanelRef?: RefObject<HTMLDivElement | null>;
 }
 
 export function InspectorShell({
   findingsPanelRef: externalFindingsRef,
+  logPanelRef: externalLogRef,
 }: InspectorShellProps = {}) {
   const clearSelection = useGameStore((state) => state.clearSelection);
   const ownFindingsRef = useRef<HTMLElement>(null);
   const findingsPanelRef = externalFindingsRef ?? ownFindingsRef;
+  const ownLogRef = useRef<HTMLDivElement>(null);
+  const logPanelRef = externalLogRef ?? ownLogRef;
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     if (event.key === "Escape" && !event.defaultPrevented) {
@@ -49,7 +55,7 @@ export function InspectorShell({
   return (
     <section className="inspector-shell" aria-label="Inspector" onKeyDown={onKeyDown}>
       <div className="inspector-stream">
-        <LogPanel />
+        <LogPanel panelRef={logPanelRef} />
       </div>
       <FindingsPanel panelRef={findingsPanelRef} />
       <FxLayer />

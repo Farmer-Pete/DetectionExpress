@@ -102,6 +102,7 @@ import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
 import { useIntroOverlay } from "./intro/use-intro-overlay";
+import { EventDialog } from "./log/EventDialog";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { PlaceDialog } from "./metro/PlaceDialog";
@@ -137,6 +138,10 @@ export function App({ createPipelineController }: AppProps = {}) {
   // (which reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 4 — the
   // same fallback-focus pattern as findingsPanelRef/decisionsPanelRef above).
   const metroMapRegionRef = useRef<HTMLDivElement>(null);
+  // Shared with InspectorShell (which forwards it to LogPanel) and EventDialog (which
+  // reads it as its focus-restore fallback, GH124-PLAN.md Checkpoint 5 — the same
+  // fallback-focus pattern as the refs above).
+  const logPanelRef = useRef<HTMLDivElement>(null);
   // Shared with Topbar (which attaches them to its three openers) and useSidePanel
   // (which forwards them as the panel's intro-path focus fallback, see the module
   // doc's "The intro transition").
@@ -173,6 +178,14 @@ export function App({ createPipelineController }: AppProps = {}) {
   const placeOpen = mapSelection !== null;
   const selectMapNode = useGameStore((s) => s.selectMapNode);
   const selectMapTrain = useGameStore((s) => s.selectMapTrain);
+
+  // The event dialog (GH124-PLAN.md Checkpoint 5): `eventSelection !== null` IS "the
+  // dialog is open", mirroring `placeOpen` above. The store already keeps
+  // `mapSelection`/`eventSelection` mutually exclusive (selecting one clears the
+  // other) and reconciles `eventSelection` against the live ring on every publish, so
+  // this derivation needs no further validation here.
+  const eventSelection = useGameStore((s) => s.eventSelection);
+  const eventOpen = eventSelection !== null;
 
   // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
   // requests a side-panel tab records it here instead of opening the panel
@@ -214,7 +227,7 @@ export function App({ createPipelineController }: AppProps = {}) {
   // map modal at a time" against any path that is not gated by inert.
   const onMapSelect = useCallback(
     (next: MapSelection) => {
-      if (intro.introOpen || traceOpen || sidePanel.open) {
+      if (intro.introOpen || traceOpen || sidePanel.open || eventOpen) {
         return;
       }
       if (next.kind === "node") {
@@ -223,7 +236,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         selectMapTrain(next.actorId);
       }
     },
-    [intro.introOpen, traceOpen, sidePanel.open, selectMapNode, selectMapTrain],
+    [intro.introOpen, traceOpen, sidePanel.open, eventOpen, selectMapNode, selectMapTrain],
   );
 
   // Complete the intro transition: once the intro has actually closed, act on
@@ -254,7 +267,7 @@ export function App({ createPipelineController }: AppProps = {}) {
     }
   }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm, sidePanel.openMetrics]);
 
-  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || placeOpen;
+  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || placeOpen || eventOpen;
 
   // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
   // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
@@ -296,6 +309,7 @@ export function App({ createPipelineController }: AppProps = {}) {
             decisionsFallbackFocusRef={decisionsPanelRef}
           />
           <PlaceDialog fallbackFocusRef={metroMapRegionRef} />
+          <EventDialog fallbackFocusRef={logPanelRef} />
           {sidePanel.sidePanel}
         </>
       }
@@ -313,7 +327,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         metricsButtonRef={metricsButtonRef}
       />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
-      <InspectorShell findingsPanelRef={findingsPanelRef} />
+      <InspectorShell findingsPanelRef={findingsPanelRef} logPanelRef={logPanelRef} />
       <DecisionsPanel panelRef={decisionsPanelRef} />
     </ModalHost>
   );

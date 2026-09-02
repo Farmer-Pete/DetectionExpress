@@ -14,6 +14,7 @@ import type { SimSnapshot } from "../../sim/snapshot";
 import { type MapNode, metroNodes, type SensorCode } from "../../sim/world/layout";
 import type { MapNodeId, Presence } from "../../sim/world/presence";
 import type { World } from "../../sim/world/world";
+import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import type { PlaceKind } from "../icons/sensor-icons";
 
@@ -44,14 +45,19 @@ export interface ActorLine {
   heading: string;
 }
 
-/** The whole dialog's content for one selection. The scoped log field arrives in
- *  Checkpoint 5 (GH124-PLAN.md); this shape intentionally carries none yet. */
+/** The whole dialog's content for one selection. */
 export interface PlaceView {
   title: string;
   iconKind: PlaceKind | undefined;
   meta: readonly MetaBadge[];
   devices: readonly DeviceView[];
   actors: readonly ActorLine[];
+  /**
+   * The world-event ring entries scoped to this selection, newest first
+   * (GH124-PLAN.md Checkpoint 5): the SAME `snapshot.worldEvents` ring the unified
+   * log panel reads, filtered here rather than held in a second buffer.
+   */
+  log: readonly WorldLogEvent[];
 }
 
 /** A human sensor name per chip code, for the device card title. */
@@ -236,9 +242,24 @@ function placeMeta(node: MapNode, world: World): MetaBadge[] {
 }
 
 /**
+ * The world-event ring entries scoped to `selection`, newest first (GH124-PLAN.md
+ * Checkpoint 5): a train selection scopes to the readings ITS OWN actor id produced
+ * (e.g. its train-tracker arrivals); a node selection scopes to readings whose
+ * `placeId` names it. One ring, filtered here — never a second buffer.
+ */
+function placeLog(selection: MapSelection, snapshot: SimSnapshot): WorldLogEvent[] {
+  const matches: (event: WorldLogEvent) => boolean =
+    selection.kind === "train"
+      ? (event) => event.actorId === selection.actorId
+      : (event) => event.placeId === selection.id;
+  return snapshot.worldEvents.filter(matches).toReversed();
+}
+
+/**
  * The whole dialog's content for one `MapSelection`. A train selection carries its
  * onboard riders and no devices (a train has none); a node selection carries its real
- * `world.json` name and type, its devices, and the actors currently at it.
+ * `world.json` name and type, its devices, and the actors currently at it. Both carry
+ * the scoped log.
  */
 export function placeView(selection: MapSelection, snapshot: SimSnapshot, world: World): PlaceView {
   if (selection.kind === "train") {
@@ -248,13 +269,21 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       meta: [],
       devices: [],
       actors: actorsAtNode(selection.actorId, snapshot, world),
+      log: placeLog(selection, snapshot),
     };
   }
   const node = metroNodes(world).find((candidate) => candidate.id === selection.id);
   if (node === undefined) {
     // Defensive only: every node id the map can select is a fixed world.json fixture
     // (see the store's mapSelection doc), so this should be unreachable in practice.
-    return { title: selection.id, iconKind: undefined, meta: [], devices: [], actors: [] };
+    return {
+      title: selection.id,
+      iconKind: undefined,
+      meta: [],
+      devices: [],
+      actors: [],
+      log: placeLog(selection, snapshot),
+    };
   }
   return {
     title: node.name,
@@ -262,5 +291,6 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
     meta: node.kind === "station" ? stationMeta(node, world) : placeMeta(node, world),
     devices: devicesForNode(node.id, world),
     actors: actorsAtNode(node.id, snapshot, world),
+    log: placeLog(selection, snapshot),
   };
 }

@@ -17,8 +17,10 @@
 import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
 import { useGameStore } from "../../game/store";
 import { world } from "../../sim/world/world";
+import { sensorCodeFor, type WorldLogEvent } from "../../sim/world-log";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { placeIcon, sensorIcon } from "../icons/sensor-icons";
+import { formatClock, toLogRow } from "../log/formatters";
 import { type ActorLine, type DeviceView, placeView } from "./place-view";
 
 interface PlaceDialogProps {
@@ -30,6 +32,7 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
   const selection = useGameStore((state) => state.mapSelection);
   const snapshot = useGameStore((state) => state.snapshot);
   const clearMapSelection = useGameStore((state) => state.clearMapSelection);
+  const selectWorldEvent = useGameStore((state) => state.selectWorldEvent);
 
   const open = selection !== null;
   const view = selection === null ? null : placeView(selection, snapshot, world);
@@ -135,6 +138,19 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
             </ul>
           )}
         </section>
+
+        <section className="place-log" aria-label="Log">
+          <h3 className="place-section-title">Log</h3>
+          {view.log.length === 0 ? (
+            <p className="place-section-empty">No activity logged here yet.</p>
+          ) : (
+            <div className="log-stream place-log-stream">
+              {view.log.map((event) => (
+                <PlaceLogRow key={event.id} event={event} onSelect={selectWorldEvent} />
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -164,5 +180,41 @@ function ActorRow({ actorLine }: { actorLine: ActorLine }) {
       <span className="place-actor-doing">{actorLine.doing}</span>
       <span className="place-actor-heading">{actorLine.heading}</span>
     </li>
+  );
+}
+
+/**
+ * One scoped-log row (GH124-PLAN.md Checkpoint 5): the SAME `toLogRow` mapping the
+ * unified log panel uses, so the two never drift in how they describe a reading.
+ * Clicking it opens the event dialog on this row's world-log id, exactly like a
+ * `LogPanel` row.
+ */
+function PlaceLogRow({
+  event,
+  onSelect,
+}: {
+  event: WorldLogEvent;
+  onSelect: (id: number) => void;
+}) {
+  const row = toLogRow(event);
+  const { Icon, token } = sensorIcon(sensorCodeFor(event.sensor));
+  return (
+    <button
+      type="button"
+      className={`log-row log-row-${row.tone}`}
+      data-testid={`place-log-row-${event.id}`}
+      onClick={(clickEvent) => {
+        clickEvent.currentTarget.focus();
+        onSelect(event.id);
+      }}
+    >
+      <span className="log-row-time">{formatClock(row.ts)}</span>
+      <span className="log-row-sensor">
+        <Icon size={14} color={token} aria-hidden="true" />
+      </span>
+      <span className="log-row-who">{row.who}</span>
+      <span className="log-row-where">{row.where}</span>
+      <span className="log-row-result">{row.result}</span>
+    </button>
   );
 }

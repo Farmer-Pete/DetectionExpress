@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { world } from "../../sim/world/world";
+import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import { actorsAtNode, describePresence, devicesForNode, placeView } from "./place-view";
 
@@ -198,5 +199,58 @@ describe("placeView", () => {
     expect(view.title).toContain("T1");
     expect(view.devices).toEqual([]);
     expect(view.actors.map((line) => line.id)).toEqual(["R1"]);
+  });
+});
+
+/** A minimal `WorldLogEvent` at `placeId`, with `actorId` when given. */
+function worldEvent(id: number, placeId: string, actorId?: string): WorldLogEvent {
+  const base = {
+    id,
+    ts: id,
+    sensor: "fare-gate" as const,
+    placeId,
+    reading: {
+      sensor: "fare-gate" as const,
+      reading: {
+        ts: id,
+        card: "c",
+        station: placeId,
+        line: "red",
+        direction: "in" as const,
+        result: "ok" as const,
+        balance: 10,
+      },
+    },
+    scored: false,
+  };
+  return actorId === undefined ? base : { ...base, actorId };
+}
+
+describe("placeView: the scoped log (GH124-PLAN.md Checkpoint 5)", () => {
+  it("scopes a node selection's log to worldEvents whose placeId matches, newest first", () => {
+    const snapshot: SimSnapshot = {
+      ...emptySnapshot(),
+      worldEvents: [worldEvent(0, "cen"), worldEvent(1, "riv"), worldEvent(2, "cen")],
+    };
+    const view = placeView({ kind: "node", id: "cen" }, snapshot, world);
+    expect(view.log.map((e) => e.id)).toEqual([2, 0]);
+  });
+
+  it("scopes a train selection's log to worldEvents whose actorId matches the train", () => {
+    const snapshot: SimSnapshot = {
+      ...emptySnapshot(),
+      worldEvents: [
+        worldEvent(0, "cen", "T1"),
+        worldEvent(1, "riv", "T2"),
+        worldEvent(2, "cen", "T1"),
+      ],
+    };
+    const view = placeView({ kind: "train", actorId: "T1" }, snapshot, world);
+    expect(view.log.map((e) => e.id)).toEqual([2, 0]);
+  });
+
+  it("returns an empty log when nothing in the ring matches the selection", () => {
+    const snapshot: SimSnapshot = { ...emptySnapshot(), worldEvents: [worldEvent(0, "riv")] };
+    expect(placeView({ kind: "node", id: "cen" }, snapshot, world).log).toEqual([]);
   });
 });

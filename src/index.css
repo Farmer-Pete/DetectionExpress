@@ -940,6 +940,47 @@ body {
   color: color-mix(in srgb, var(--dim) 25%, var(--ink));
 }
 
+/* The place dialog's scoped log (GH124-PLAN.md Checkpoint 5): the same `.log-stream`/
+   `.log-row` rules the unified log panel uses, just bounded to a shorter height inside
+   the dialog and given breathing room below the actors section above it. */
+.place-log-stream {
+  max-height: 12rem;
+  margin: 0 0 0.2rem;
+}
+
+/* The event dialog's "otherwise" branch (GH124-PLAN.md Checkpoint 5): the raw
+   reading's source line and the link that opens its place dialog. */
+.event-detail-source {
+  margin: 0 0 0.6rem;
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.event-open-place {
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.event-open-place:hover {
+  border-color: var(--a1);
+}
+
+/* The evicted-scored branch's explicit "no longer retained" note (GH124-PLAN.md
+   Checkpoint 5): a scored reading whose inspector entry aged out of the 256-entry
+   ring, even though the wider world ring still holds this row. */
+.event-detail-note {
+  margin: 0 0 1rem;
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
 /* Context widgets (text / kv / table / json), shared by the Judge node and the
    decisions view. */
 .widget-list {
@@ -2006,45 +2047,6 @@ body {
   font-weight: 700;
 }
 
-.engine-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  margin-bottom: 0.6rem;
-}
-
-.queue-bar {
-  flex: 1 1 auto;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--panel2);
-  overflow: hidden;
-}
-
-.queue-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition:
-    width 0.12s linear,
-    background 0.2s linear;
-}
-
-/* Queue-bar danger pulse (#38 juice item 2). LogPanel adds this at danger
-   severity; the fill's background is already `severityFill`'s danger color
-   (the static form), so `currentcolor` below is safely the threat hue. The
-   pulse animation itself lives in the reduced-motion guard near the end of
-   this file. */
-.queue-bar-danger {
-  color: var(--threat);
-}
-
-.queue-count {
-  flex: 0 0 auto;
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .log-stream {
   position: relative;
   display: flex;
@@ -2065,15 +2067,30 @@ body {
   overflow-y: auto;
 }
 
+/* Five columns (GH124-PLAN.md Checkpoint 5): time, the sensor-kind icon, who, where,
+   result. Every sensor kind renders through this one row shape now, not just the two
+   scored endpoints. */
 .log-row {
   display: grid;
-  grid-template-columns: 3.5rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: 3.5rem 1.4rem minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
   gap: 0.5rem;
   padding: 0.3rem 0.5rem;
   border-radius: 6px;
+  font: inherit;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+
+.log-row:hover,
+.log-row:focus-visible {
+  background: var(--panel2);
 }
 
 /* Zero-minimum tracks let a cell shrink; wrap long endpoint values or JSON
@@ -2085,6 +2102,12 @@ body {
 
 .log-row-time {
   color: var(--dim);
+}
+
+.log-row-sensor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .log-row-ok .log-row-result {
@@ -2099,18 +2122,9 @@ body {
   color: var(--dim);
 }
 
-.log-row-pending {
-  opacity: 0.55;
-}
-
-.log-row-cursor {
-  opacity: 1;
-  background: color-mix(in srgb, var(--a1) 16%, transparent);
-  box-shadow: inset 2px 0 0 var(--a1);
-}
-
 /* T12 (GH37-PLAN.md "Comets"): a row FxLayer cited as evidence for a just-landed
-   finding, flashing in the finding's hunt color (`--hunt-color`, set inline). */
+   finding, flashing in the finding's hunt color (`--hunt-color`, set inline). Only a
+   scored row (`data-scored-event-id`) can ever carry a flash entry. */
 .log-row-cited {
   animation: fx-cite 1.2s ease;
 }
@@ -2127,20 +2141,6 @@ body {
     background: transparent;
     box-shadow: none;
   }
-}
-
-.log-sticky {
-  position: sticky;
-  bottom: 0;
-  margin-top: 0.3rem;
-  padding: 0.35rem 0.6rem;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--a1) 25%, var(--panel));
-  border: 1px solid var(--a1);
-  color: var(--ink);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-align: center;
 }
 
 /* Wave juice animations (#38, GH38+40-PLAN.md Part 2). Every `animation:` rule
@@ -2163,7 +2163,6 @@ body {
     animation: heart 0.45s infinite;
   }
 
-  .queue-bar-danger,
   .gauge-fill-pulse {
     animation: heart 0.45s infinite;
   }

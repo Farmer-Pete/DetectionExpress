@@ -1,18 +1,22 @@
 /**
- * The log panel: one row per Event, newest first, with a processing-frontier
- * cursor and a queue bar. Reads the store's `events`, `processed`, and
- * `admitted` through primitive/array selectors, the same pattern as the Hud.
+ * The unified log panel (GH124-PLAN.md Checkpoint 5): one row per world-event ring
+ * entry, newest first, across every sensor kind — kiosk, fare gate, TVM, train
+ * tracker, door reader, door contact, platform camera, OCC console, network relay.
+ * Reads `snapshot.worldEvents` through an array selector, the same pattern the panel
+ * always used, just re-sourced off the wider ring instead of the scored-only one.
  *
- * The cursor has three states (see GH32-PLAN.md, "The panel"):
- *   1. Caught up (`processed === admitted`): no cursor, no sticky bar.
- *   2. Cursor in the ring: the row with `event.id === processed` gets the
- *      cursor marker.
- *   3. Cursor evicted: queued is positive but no visible row has
- *      `id === processed` (the ring dropped it, the ring is empty, or the
- *      next cursor event has not normalized yet). A sticky bar pinned to the
- *      stream's bottom reads "engine N behind".
- * State 3 is decided purely from `events`/`processed`/`admitted`, never from
- * DOM measurement.
+ * Dropped in this checkpoint: the processing-frontier cursor, pending-row dimming,
+ * and the queue bar (GH32-PLAN.md's cursor states no longer apply — there is no
+ * single scored "processed" watermark to draw one against when every sensor logs
+ * here, and the Metrics tab's own Queue gauge already covers that number). Kept:
+ * Freeze and the speed control.
+ *
+ * A row is a button: clicking it opens the adaptive event dialog (`selectWorldEvent`,
+ * `EventDialog.tsx`) on that row's world-log id. A scored kiosk row also carries
+ * `data-scored-event-id`, a SEPARATE namespace from the row's own `data-testid` world
+ * id — `FxLayer` anchors finding comets and cited-row highlighting through that
+ * attribute, never the world id, so re-sourcing the log off the wider ring never
+ * moves where a comet lands.
  *
  * The transport row also carries the wave readout (#38 juice item 1): "next
  * wave in Ns" (N quantized to a 30-game-second bucket, see `waveReadout`)
@@ -31,39 +35,38 @@
  * (`useWavePhaseEdge` feeding its own `useOneShotFlag` call, one-shot
  * ownership: this component holds its own hook instance and clears
  * `.waveflash` itself, independent of App's `.shake`, which calls the same
- * shared hook from its own instance). The queue bar also gains a
- * `queue-bar-danger` pulse class at danger severity (juice item 2).
+ * shared hook from its own instance).
  *
- * The conclusion gate (F004+F006): severity COLORS persist on the frozen
- * terminal frame (`severityFill` stays ungated), but ANIMATED cues — the
- * flash edge and the danger pulse — gate on `snapshot.status === "running"`.
- * `running` is derived once, early, and feeds `useWavePhaseEdge` a `"calm"`
- * input while not running, so a status flip alone can never manufacture an
- * edge; `running` is deliberately left out of `useOneShotFlag`'s own token
- * input (only `edgeToken` drives it), since folding it in there would re-fire
- * the last edge on a status flip instead of gating admission at the source.
+ * The conclusion gate (F004+F006): ANIMATED cues — the flash edge — gate on
+ * `snapshot.status === "running"`. `running` is derived once, early, and feeds
+ * `useWavePhaseEdge` a `"calm"` input while not running, so a status flip alone can
+ * never manufacture an edge; `running` is deliberately left out of `useOneShotFlag`'s
+ * own token input (only `edgeToken` drives it), since folding it in there would
+ * re-fire the last edge on a status flip instead of gating admission at the source.
  * This is about conclusion, never the transport freeze: pausing
  * (`transport.frozen`) leaves every cue live, since the run can still resume.
  * The flash render site itself also ANDs `flashing` with `running`, so an
  * ALREADY in-flight flash clears the instant a run concludes, instead of
  * running out its own timer over a frozen frame (CodeRabbit review).
  *
- * A row also reads its entry in the store's `flashes` map (T12, GH37-PLAN.md
- * "Comets"): FxLayer spawns one when the row is cited evidence for a just-landed
- * finding. The row's React `key` folds in the flash's `gen`, so a re-spawn on the
- * same row (a higher gen) remounts the node and restarts the CSS keyframe, rather
- * than extending whatever the old flash had already animated.
+ * A scored row also reads its entry in the store's `flashes` map (T12, GH37-PLAN.md
+ * "Comets"), keyed by its `scoredEventId`: FxLayer spawns one when the row is cited
+ * evidence for a just-landed finding. The row's React `key` folds in the flash's
+ * `gen`, so a re-spawn on the same row (a higher gen) remounts the node and restarts
+ * the CSS keyframe, rather than extending whatever the old flash had already
+ * animated.
  */
-import { type CSSProperties, memo, useEffect } from "react";
+import { type CSSProperties, memo, type RefObject, useEffect, useRef } from "react";
 import type { Speed } from "../../game/run-controller";
 import { type FlashEntry, useGameStore } from "../../game/store";
-import { GAME_SECONDS_PER_TICK, LOG_QUEUE_MAX } from "../../game/tuning";
-import type { RingEvent } from "../../sim/inspector";
+import { GAME_SECONDS_PER_TICK } from "../../game/tuning";
 import type { SimSnapshot } from "../../sim/snapshot";
-import { severityFill, severityLevel } from "../hud/severity";
+import type { WorldLogEvent } from "../../sim/world-log";
+import { sensorCodeFor } from "../../sim/world-log";
+import { sensorIcon } from "../icons/sensor-icons";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
-import { formatClock, formatRow } from "./formatters";
+import { formatClock, toLogRow } from "./formatters";
 
 /** Matches the CSS `waveflash` keyframes' 0.6s duration (`src/index.css`). */
 const WAVEFLASH_MS = 600;
@@ -151,40 +154,61 @@ interface CitedRowStyle extends CSSProperties {
 }
 
 interface LogRowProps {
-  event: RingEvent;
-  pending: boolean;
-  cursor: boolean;
-  /** Present while this row is cited evidence for a just-landed finding. */
+  event: WorldLogEvent;
+  /** Present while this row is cited evidence for a just-landed finding. Only a
+   *  scored row (keyed by `scoredEventId`) can ever carry one. */
   flash: FlashEntry | undefined;
+  onSelect: (id: number) => void;
 }
 
-const LogRow = memo(function LogRow({ event, pending, cursor, flash }: LogRowProps) {
-  const view = formatRow(event.endpoint, event.raw);
+const LogRow = memo(function LogRow({ event, flash, onSelect }: LogRowProps) {
+  const view = toLogRow(event);
+  const { Icon, token } = sensorIcon(sensorCodeFor(event.sensor));
   const classes = ["log-row", `log-row-${view.tone}`];
-  if (pending) {
-    classes.push("log-row-pending");
-  }
-  if (cursor) {
-    classes.push("log-row-cursor");
-  }
   if (flash) {
     classes.push("log-row-cited");
   }
   const style: CitedRowStyle | undefined = flash ? { "--hunt-color": flash.colorVar } : undefined;
   return (
-    <div className={classes.join(" ")} data-testid={`log-row-${event.id}`} style={style}>
-      <span className="log-row-time">{formatClock(event.ts)}</span>
+    <button
+      type="button"
+      className={classes.join(" ")}
+      data-testid={`log-row-${event.id}`}
+      data-scored-event-id={event.scored ? event.scoredEventId : undefined}
+      style={style}
+      onClick={(clickEvent) => {
+        // Safari does not focus a clicked <button> by default; force it so the event
+        // dialog's open-effect can capture this row as its trigger to restore focus to
+        // on close (mirrors FindingsPanel.tsx's FindingRowItem).
+        clickEvent.currentTarget.focus();
+        onSelect(event.id);
+      }}
+    >
+      <span className="log-row-time">{formatClock(view.ts)}</span>
+      <span className="log-row-sensor">
+        <Icon size={14} color={token} aria-hidden="true" />
+      </span>
       <span className="log-row-who">{view.who}</span>
       <span className="log-row-where">{view.where}</span>
       <span className="log-row-result">{view.result}</span>
-    </div>
+    </button>
   );
 });
 
-export function LogPanel() {
-  const events = useGameStore((s) => s.snapshot.events);
-  const processed = useGameStore((s) => s.snapshot.processed);
-  const admitted = useGameStore((s) => s.snapshot.admitted);
+interface LogPanelProps {
+  /**
+   * The event dialog's focus-fallback ref (GH124-PLAN.md Checkpoint 5, mirroring
+   * `FindingsPanel`'s `panelRef` / GH34-35-PLAN.md decision 14): when a clicked row's
+   * trigger is gone by the time the dialog closes, focus lands here instead. Defaults
+   * to a locally-owned ref, so a bare `<LogPanel />` (an isolated test) still works.
+   */
+  panelRef?: RefObject<HTMLDivElement | null>;
+}
+
+export function LogPanel({ panelRef: externalRef }: LogPanelProps = {}) {
+  const ownRef = useRef<HTMLDivElement>(null);
+  const panelRef = externalRef ?? ownRef;
+  const worldEvents = useGameStore((s) => s.snapshot.worldEvents);
   const wave = useGameStore((s) => s.snapshot.wave);
   const status = useGameStore((s) => s.snapshot.status);
   const frozen = useGameStore((s) => s.transport.frozen);
@@ -192,6 +216,7 @@ export function LogPanel() {
   const flashes = useGameStore((s) => s.flashes);
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
+  const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
 
   // Derived early, before the edge hook: gate on conclusion (won/failed), never
   // on the transport freeze (F003, F004+F006). A paused run can still resume,
@@ -250,23 +275,17 @@ export function LogPanel() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [setFrozen]);
 
-  const queued = admitted - processed;
-  const frac = Math.max(0, Math.min(1, queued / LOG_QUEUE_MAX));
-
-  const caughtUp = processed === admitted;
-  const cursorVisible = !caughtUp && events.some((event) => event.id === processed);
-  const showSticky = !caughtUp && !cursorVisible;
-
-  const newestFirst = events.slice().reverse();
+  const newestFirst = worldEvents.slice().reverse();
   // `running` (F003) also gates the readout text: a concluded run's stale
   // reading must not keep showing.
   const readout = running ? waveReadout(wave) : null;
-  // severityFill (the bar's color) stays ungated — that's the persistent color
-  // cue (F004+F006) — but the pulse is animated, so it gates on `running` too.
-  const dangerPulse = running && severityLevel(frac) === "danger";
 
   return (
-    <div className={flashing && running ? "log-panel waveflash" : "log-panel"}>
+    <div
+      ref={panelRef}
+      className={flashing && running ? "log-panel waveflash" : "log-panel"}
+      tabIndex={-1}
+    >
       <div className="log-header">
         <div className="transport">
           <button
@@ -307,37 +326,18 @@ export function LogPanel() {
           </span>
         </div>
       </div>
-      <div className="engine-bar">
-        <div className="queue-bar">
-          <div
-            className={dangerPulse ? "queue-bar-fill queue-bar-danger" : "queue-bar-fill"}
-            data-testid="queue-bar-fill"
-            style={{ width: `${frac * 100}%`, background: severityFill(frac) }}
-          />
-        </div>
-        <span className="queue-count">{queued} queued</span>
-      </div>
       <div className="log-stream">
         {newestFirst.map((event) => {
-          const flash = flashes.get(event.id);
+          // Only a scored row's world-log entry ever has a scoredEventId, and only
+          // that id is ever a key in `flashes` (FxLayer anchors through it, not the
+          // world id) — see the module doc.
+          const flash =
+            event.scoredEventId !== undefined ? flashes.get(event.scoredEventId) : undefined;
           // The key folds in the flash's gen, so a re-spawn on the same row (a higher
           // gen) remounts the node instead of extending the running keyframe.
           const key = flash ? `${event.id}:${flash.gen}` : event.id;
-          return (
-            <LogRow
-              key={key}
-              event={event}
-              pending={event.id >= processed}
-              cursor={!caughtUp && event.id === processed}
-              flash={flash}
-            />
-          );
+          return <LogRow key={key} event={event} flash={flash} onSelect={selectWorldEvent} />;
         })}
-        {showSticky ? (
-          <div className="log-sticky" data-testid="log-sticky">
-            engine {queued} behind
-          </div>
-        ) : null}
       </div>
     </div>
   );

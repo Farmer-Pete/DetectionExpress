@@ -96,6 +96,19 @@ interface GameState {
    * `world.json`, never evicted, so a stale id can never occur.
    */
   mapSelection: MapSelection | null;
+  /**
+   * The log panel's event-dialog selection (GH124-PLAN.md Checkpoint 5): the id of a
+   * `WorldLogEvent` in the live ring, or null while the dialog is closed. UI state, not
+   * sim state, so it survives snapshot churn on its own, but — unlike `mapSelection`,
+   * which names a fixed `world.json` fixture that can never age out — the ring it names
+   * an id in is bounded and evicts, so `setSnapshot` below reconciles it every publish
+   * exactly like `selection`/`decisionSelection`. Mutually exclusive with
+   * `mapSelection`: the shell's `inert` gate already keeps a normal click from opening
+   * both, but `selectWorldEvent`/`selectMapNode`/`selectMapTrain` also cross-clear each
+   * other so the pair can never observably both hold a value, and `openPlaceFromEvent`
+   * (the event dialog's "open place" link) swaps one for the other atomically.
+   */
+  eventSelection: number | null;
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
@@ -141,6 +154,20 @@ interface GameState {
   selectMapTrain: (actorId: string) => void;
   /** Clear the map selection. Esc, the backdrop, and the close button call it. */
   clearMapSelection: () => void;
+  /**
+   * Select a world-log event by id (GH124-PLAN.md Checkpoint 5), clearing any open
+   * place selection. Re-selecting the same id clears the selection, mirroring
+   * `selectFinding`/`selectMapNode`.
+   */
+  selectWorldEvent: (id: number) => void;
+  /** Clear the event selection. Esc, the backdrop, and the close button call it. */
+  clearEventSelection: () => void;
+  /**
+   * The event dialog's "open place" link: close the event selection and open the
+   * place dialog on `placeId`, in ONE atomic update, so no render ever shows both (or
+   * neither) modal open.
+   */
+  openPlaceFromEvent: (placeId: MapNodeId) => void;
   /** Sets the transport freeze mirror. The App reflects it into the run controller. */
   setFrozen: (frozen: boolean) => void;
   /** Sets the transport speed mirror. The App reflects it into the run controller. */
@@ -170,6 +197,7 @@ export const useGameStore = create<GameState>((set) => ({
   selection: null,
   decisionSelection: null,
   mapSelection: null,
+  eventSelection: null,
   transport: { frozen: false, speed: 1 },
   flashes: new Map(),
   runToken: 0,
@@ -194,6 +222,16 @@ export const useGameStore = create<GameState>((set) => ({
         const present = snapshot.decisions.some((decision) => decision.seq === seq);
         if (!present) {
           next.decisionSelection = null;
+        }
+      }
+      // Unlike `mapSelection` (a fixed world.json fixture, never evicted), the event
+      // selection names an id in the bounded world-event ring, so it needs the same
+      // per-publish reconciliation as `selection`/`decisionSelection`: close the event
+      // dialog the moment its entry ages out of the ring.
+      if (state.eventSelection !== null) {
+        const present = snapshot.worldEvents.some((event) => event.id === state.eventSelection);
+        if (!present) {
+          next.eventSelection = null;
         }
       }
       return next;
@@ -237,16 +275,30 @@ export const useGameStore = create<GameState>((set) => ({
       if (state.mapSelection?.kind === "node" && state.mapSelection.id === id) {
         return { mapSelection: null }; // re-select toggles off
       }
-      return { mapSelection: { kind: "node", id } };
+      return { mapSelection: { kind: "node", id }, eventSelection: null };
     }),
   selectMapTrain: (actorId) =>
     set((state) => {
       if (state.mapSelection?.kind === "train" && state.mapSelection.actorId === actorId) {
         return { mapSelection: null };
       }
-      return { mapSelection: { kind: "train", actorId } };
+      return { mapSelection: { kind: "train", actorId }, eventSelection: null };
     }),
   clearMapSelection: () => set({ mapSelection: null }),
+  // No snapshot-presence validation here either: a stale id is caught by the
+  // `setSnapshot` reconciliation above on the very next publish, the same contract
+  // `selectFinding`/`selectDecision` follow for their own live-set checks — this
+  // setter only needs to clear the other selection, mirroring `selectMapNode`.
+  selectWorldEvent: (id) =>
+    set((state) => {
+      if (state.eventSelection === id) {
+        return { eventSelection: null }; // re-select toggles off
+      }
+      return { eventSelection: id, mapSelection: null };
+    }),
+  clearEventSelection: () => set({ eventSelection: null }),
+  openPlaceFromEvent: (placeId) =>
+    set({ mapSelection: { kind: "node", id: placeId }, eventSelection: null }),
   // Each setter keeps the sibling field, so toggling freeze never resets speed and
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),

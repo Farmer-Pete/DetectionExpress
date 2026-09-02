@@ -32,7 +32,15 @@ import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { TaskAlgorithm } from "../sim/tasks";
 import { distanceTable } from "../sim/world/distance";
-import { consoleNodeId, kioskNodeId, relayNodeId } from "../sim/world/layout";
+import {
+  consoleNodeId,
+  contactNodeId,
+  gateNodeId,
+  kioskNodeId,
+  readerNodeId,
+  relayNodeId,
+  tvmNodeId,
+} from "../sim/world/layout";
 import type { Presence } from "../sim/world/presence";
 import { buildTimetable } from "../sim/world/timetable";
 import { world } from "../sim/world/world";
@@ -139,6 +147,7 @@ interface LaunchOpts {
   scheduleMode?: ScheduleMode;
   scenarioCast?: ScenarioCast;
   ambientCast?: AmbientCast;
+  scoredIngest?: ScoredIngestSource;
 }
 
 interface Harness {
@@ -165,6 +174,7 @@ function launch(opts: LaunchOpts): Harness {
     ...(opts.scenarioCast ? { scenarioCast: opts.scenarioCast } : {}),
     ...(opts.ambientCast ? { ambientCast: opts.ambientCast } : {}),
     ...(opts.onError ? { onError: opts.onError } : {}),
+    ...(opts.scoredIngest ? { scoredIngest: opts.scoredIngest } : {}),
   };
   const handle = start(options);
   return { handle, driver, snapshots, last: () => snapshots.at(-1) };
@@ -1847,6 +1857,377 @@ describe("engine bounded cost over a long run (ported from world-engine.test.ts)
       expect(registriesThatDeletedIt.size).toBeGreaterThanOrEqual(3);
     } finally {
       deleteSpy.mockRestore();
+    }
+  });
+});
+
+// GH124-PLAN.md Checkpoint 5: the world-event ring. Every sensor's raw reading is
+// captured to `snapshot.worldEvents`, id-ordered, in its own namespace, separate from
+// the scored inspector ring and never disturbing it (the parity guards above prove
+// that). Only a scored-scenario kiosk reading crosses the #117 boundary and carries
+// `scored: true` with a real `scoredEventId`; every other sensor, and every ambient
+// kiosk reading, always logs `scored: false`.
+
+/** An ambient fixture that reads a door at `site`/`door` once at tick 0, then goes
+ *  dormant. Exercises capture site 1 (the door-reader actor reading) and capture site
+ *  2 (the door reducer's synthesized door-contact open) off one tick. */
+function doorReaderFixture(id: string, site: string, door: string): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      if (tick > 0) {
+        return { readings: [], nextTick: "dormant" };
+      }
+      const reading: WorldReading = {
+        sensor: "door-reader",
+        reading: { ts: 0, badge: "B1", site, door, zone: "z1", result: "grant" },
+      };
+      return { readings: [reading], nextTick: 1 };
+    },
+  };
+  return {
+    actor,
+    kind: "staff",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: site,
+      fromTick: firstTick,
+      untilTick: "open",
+    }),
+  };
+}
+
+/** An ambient fixture that tops up a TVM at `station` once at tick 0, then goes dormant. */
+function tvmFixture(id: string, station: string): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      if (tick > 0) {
+        return { readings: [], nextTick: "dormant" };
+      }
+      const reading: WorldReading = {
+        sensor: "tvm",
+        reading: { ts: 0, card: "C1", station, machine: "V1", amount: 100, kind: "topup" },
+      };
+      return { readings: [reading], nextTick: 1 };
+    },
+  };
+  return {
+    actor,
+    kind: "rider",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: station,
+      fromTick: firstTick,
+      untilTick: "open",
+    }),
+  };
+}
+
+/** An ambient fixture that reports a train arrival at `station` once at tick 0, then
+ *  goes dormant. */
+function trainTrackerFixture(id: string, station: string): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      if (tick > 0) {
+        return { readings: [], nextTick: "dormant" };
+      }
+      const reading: WorldReading = {
+        sensor: "train-tracker",
+        reading: { ts: 0, train: id, line: "red", station, event: "arr", track: "1" },
+      };
+      return { readings: [reading], nextTick: 1 };
+    },
+  };
+  return {
+    actor,
+    kind: "train",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: station,
+      fromTick: firstTick,
+      untilTick: "open",
+    }),
+  };
+}
+
+/** An ambient fixture that keeps tapping a benign fare-gate `ok` reading at `station`
+ *  for exactly `activeTicks` ticks (0..activeTicks-1), then goes dormant for good. */
+function cameraTriggerFixture(id: string, station: string, activeTicks: number): AmbientFixture {
+  const actor: Actor<WorldReading, WorldEnv> = {
+    id,
+    start: () => 0,
+    act: ({ tick }) => {
+      if (tick >= activeTicks) {
+        return { readings: [], nextTick: "dormant" };
+      }
+      const reading: WorldReading = {
+        sensor: "fare-gate",
+        reading: {
+          ts: tick * GAME_SECONDS_PER_TICK,
+          card: id,
+          station,
+          line: "blue",
+          direction: "in",
+          result: "ok",
+          balance: 100,
+        },
+      };
+      return { readings: [reading], nextTick: tick + 1 };
+    },
+  };
+  return {
+    actor,
+    kind: "rider",
+    initialPresence: (firstTick) => ({
+      kind: "at",
+      node: station,
+      fromTick: firstTick,
+      untilTick: "open",
+    }),
+  };
+}
+
+describe("engine captures a WorldLogEvent for each sensor kind (GH124-PLAN.md Checkpoint 5)", () => {
+  it("logs a scored-scenario kiosk reading with scored:true and the real scoredEventId", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED); // only its toEvent kiosk adapter is used
+    const patron = createAccountRider({
+      id: "patron-0",
+      account: "rider",
+      station: "cen",
+      terminal: "K1",
+      startTick: 3,
+      dwellTicks: 4,
+      fumbleFails: 0,
+    });
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: patron,
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const h = launch({
+      scenarioCast: cast,
+      checkpoints: deadlineAt(100),
+      scoredIngest: { ingress: new ScoredIngress(), toEvent: blueprint.toEvent, lastScoredTick: 3 },
+    });
+    await step(h.driver, 5);
+    h.handle.stop();
+
+    const kioskEvent = h.last()?.worldEvents.find((e) => e.sensor === "kiosk");
+    expect(kioskEvent).toBeDefined();
+    expect(kioskEvent?.scored).toBe(true);
+    expect(kioskEvent?.scoredEventId).toBe(0);
+    expect(kioskEvent?.placeId).toBe("cen");
+    expect(kioskEvent?.chipNode).toBe(kioskNodeId("cen"));
+    expect(kioskEvent?.actorId).toBe("patron-0");
+  });
+
+  it("logs an ambient kiosk reading with scored:false and no scoredEventId, even with scoredIngest attached", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      ambientCast: { fixtures: [], accountSpawner: oneAmbientAccountRider("A-amb", "riv", 0) },
+      checkpoints: deadlineAt(60),
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: 3,
+      },
+    });
+    await step(h.driver, 5, 10);
+    h.handle.stop();
+
+    const kioskEvent = h
+      .last()
+      ?.worldEvents.find((e) => e.sensor === "kiosk" && e.actorId === "A-amb");
+    expect(kioskEvent).toBeDefined();
+    expect(kioskEvent?.scored).toBe(false);
+    expect(kioskEvent?.scoredEventId).toBeUndefined();
+  });
+
+  it("logs a fare-gate tap with scored:false", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [cameraTriggerFixture("F1", "cen", 1)] },
+      checkpoints: deadlineAt(60),
+    });
+    await step(h.driver, 3, 10);
+    h.handle.stop();
+
+    const gateEvent = h.last()?.worldEvents.find((e) => e.sensor === "fare-gate");
+    expect(gateEvent).toBeDefined();
+    expect(gateEvent?.scored).toBe(false);
+    expect(gateEvent?.placeId).toBe("cen");
+    expect(gateEvent?.chipNode).toBe(gateNodeId("cen"));
+  });
+
+  it("logs a tvm top-up with scored:false", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [tvmFixture("V1", "cen")] },
+      checkpoints: deadlineAt(60),
+    });
+    await step(h.driver, 3, 10);
+    h.handle.stop();
+
+    const tvmEvent = h.last()?.worldEvents.find((e) => e.sensor === "tvm");
+    expect(tvmEvent).toBeDefined();
+    expect(tvmEvent?.scored).toBe(false);
+    expect(tvmEvent?.placeId).toBe("cen");
+    expect(tvmEvent?.chipNode).toBe(tvmNodeId("cen"));
+  });
+
+  it("logs a train-tracker arrival keyed on placeId alone, with no chipNode", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [trainTrackerFixture("T9", "cen")] },
+      checkpoints: deadlineAt(60),
+    });
+    await step(h.driver, 3, 10);
+    h.handle.stop();
+
+    const trainEvent = h.last()?.worldEvents.find((e) => e.sensor === "train-tracker");
+    expect(trainEvent).toBeDefined();
+    expect(trainEvent?.scored).toBe(false);
+    expect(trainEvent?.placeId).toBe("cen");
+    expect(trainEvent?.chipNode).toBeUndefined();
+  });
+
+  it("logs a door-reader grant and the reducer's synthesized door-contact open, both scored:false", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [doorReaderFixture("S1", "dep", "D1")] },
+      checkpoints: deadlineAt(60),
+    });
+    await step(h.driver, 3, 10);
+    h.handle.stop();
+
+    const events = h.last()?.worldEvents ?? [];
+    const readerEvent = events.find((e) => e.sensor === "door-reader");
+    const contactEvent = events.find((e) => e.sensor === "door-contact");
+    expect(readerEvent).toBeDefined();
+    expect(readerEvent?.scored).toBe(false);
+    expect(readerEvent?.placeId).toBe("dep");
+    expect(readerEvent?.chipNode).toBe(readerNodeId("dep"));
+    expect(readerEvent?.actorId).toBe("S1");
+
+    expect(contactEvent).toBeDefined();
+    expect(contactEvent?.scored).toBe(false);
+    expect(contactEvent?.placeId).toBe("dep");
+    expect(contactEvent?.chipNode).toBe(contactNodeId("dep"));
+    expect(contactEvent?.actorId).toBeUndefined(); // reducer-synthesized, no actor
+  });
+
+  it("logs an occ-console command and a network-relay packet, both scored:false", async () => {
+    const h = launch({
+      scenarioCast: { members: [], env: CONTROL_ENV, runSeed: 3 },
+      ambientCast: { fixtures: controlFixtures() },
+      checkpoints: deadlineAt(200),
+    });
+    await step(h.driver, 40, 10);
+    h.handle.stop();
+
+    const occId = world.controlCenter.id;
+    const events = h.last()?.worldEvents ?? [];
+    const consoleEvent = events.find((e) => e.sensor === "occ-console");
+    const relayEvent = events.find((e) => e.sensor === "network-relay");
+
+    expect(consoleEvent).toBeDefined();
+    expect(consoleEvent?.scored).toBe(false);
+    expect(consoleEvent?.placeId).toBe(occId);
+    expect(consoleEvent?.chipNode).toBe(consoleNodeId(occId));
+
+    expect(relayEvent).toBeDefined();
+    expect(relayEvent?.scored).toBe(false);
+    expect(relayEvent?.placeId).toBe("dep");
+    expect(relayEvent?.chipNode).toBe(relayNodeId("dep"));
+  });
+
+  it("logs the full camera on-change sequence: a positive count, then omitted while unchanged, then exactly one zero, then silence", async () => {
+    // A gate tapped only on tick 0: its window carries grants=1 through tick 59
+    // (CAMERA_WINDOW_TICKS=60), then the bucket ages out at tick 60.
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: 1 },
+      ambientCast: { fixtures: [cameraTriggerFixture("F1", "cen", 1)] },
+      checkpoints: deadlineAt(400),
+    });
+    await step(h.driver, 70, 3);
+    h.handle.stop();
+
+    const cameraEvents = (h.last()?.worldEvents ?? []).filter(
+      (e) => e.sensor === "platform-camera",
+    );
+    // Exactly two logged rows: the first positive count, then the one zero once the
+    // window empties. Every tick in between the count held steady (omitted) and every
+    // tick after the zero stayed silent, so nothing else was ever logged for this gate.
+    expect(cameraEvents).toHaveLength(2);
+    const [first, second] = cameraEvents;
+    expect(first?.reading.sensor).toBe("platform-camera");
+    if (first?.reading.sensor === "platform-camera") {
+      expect(first.reading.reading.grants).toBe(1);
+      expect(first.reading.reading.persons).toBe(1);
+    }
+    expect(second?.reading.sensor).toBe("platform-camera");
+    if (second?.reading.sensor === "platform-camera") {
+      expect(second.reading.reading.grants).toBe(0);
+      expect(second.reading.reading.persons).toBe(0);
+    }
+    expect(first?.ts).toBeLessThan(second?.ts ?? 0);
+    expect(cameraEvents.every((e) => e.scored === false)).toBe(true);
+  });
+
+  it("gives every WorldLogEvent its own dense id, separate from the scored event id namespace", async () => {
+    const blueprint = buildBlueprint(LEVEL_SEED);
+    const patron = createAccountRider({
+      id: "patron-0",
+      account: "rider",
+      station: "cen",
+      terminal: "K1",
+      startTick: 0,
+      dwellTicks: 4,
+      fumbleFails: 1, // one wrong-PIN fumble then a success: two scored kiosk readings
+    });
+    const cast: ScenarioCast = {
+      members: [
+        {
+          actor: patron,
+          kind: "account-rider",
+          provenance: "scored-scenario",
+          initialPresence: (t) => initialAccountRiderPresence("cen", t),
+        },
+      ],
+      env: CAST_ENV,
+      runSeed: LEVEL_SEED,
+    };
+    const h = launch({
+      scenarioCast: cast,
+      ambientCast: { fixtures: [cameraTriggerFixture("F1", "cen", 2)] },
+      checkpoints: deadlineAt(60),
+      scoredIngest: { ingress: new ScoredIngress(), toEvent: blueprint.toEvent, lastScoredTick: 3 },
+    });
+    await step(h.driver, 10, 10);
+    h.handle.stop();
+
+    const events = h.last()?.worldEvents ?? [];
+    // World ids are dense from 0 in push order, whatever mix of sensors produced them.
+    expect(events.map((e) => e.id)).toEqual(events.map((_, i) => i));
+    // Every scored kiosk reading's own id (world-log namespace) differs from its
+    // scoredEventId (pipeline namespace); the two never collide by construction.
+    const scoredRows = events.filter((e) => e.scored);
+    expect(scoredRows.length).toBeGreaterThan(0);
+    for (const row of scoredRows) {
+      expect(row.scoredEventId).toBeDefined();
     }
   });
 });

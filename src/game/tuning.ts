@@ -13,11 +13,13 @@ export const PUBLISH_HZ = 20;
 export const RING_SIZE = 256;
 
 /**
- * The log panel's queue bar full-scale: the `admitted - processed` value that
- * paints the bar red. This is the cursor's own queue, the count Detect has not
- * yet scored, a different number from the HUD's channel-buffer queue.
+ * The world-event ring's own capacity (GH124-PLAN.md Checkpoint 5), separate from
+ * `RING_SIZE`: it logs every sensor's ambient traffic, not just the scored kiosk
+ * stream, so it sees far higher volume (every fare-gate tap, camera count change,
+ * door open/close, and console/relay tick) and needs more headroom before a row a
+ * player might still want scrolls out.
  */
-export const LOG_QUEUE_MAX = 50;
+export const WORLD_LOG_RING_SIZE = 512;
 
 /** Queue channel capacity. A push waits when the channel is full. */
 export const CHANNEL_CAP = 100;

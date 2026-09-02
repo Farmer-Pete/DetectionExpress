@@ -3,11 +3,35 @@ import type { RefObject } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../game/store";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
+import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import { PlaceDialog } from "./PlaceDialog";
 
 function snapshotWith(actors: readonly ActorView[]): SimSnapshot {
   return { ...emptySnapshot(), actors };
+}
+
+function fareGateEvent(id: number, placeId: string): WorldLogEvent {
+  return {
+    id,
+    ts: id,
+    sensor: "fare-gate",
+    placeId,
+    chipNode: `${placeId}:gate`,
+    reading: {
+      sensor: "fare-gate",
+      reading: {
+        ts: id,
+        card: `card-${id}`,
+        station: placeId,
+        line: "red",
+        direction: "in",
+        result: "ok",
+        balance: 10,
+      },
+    },
+    scored: false,
+  };
 }
 
 function noFallback(): RefObject<HTMLElement | null> {
@@ -18,6 +42,7 @@ beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
     mapSelection: null,
+    eventSelection: null,
     transport: { frozen: false, speed: 1 },
   });
 });
@@ -133,5 +158,36 @@ describe("PlaceDialog", () => {
     render(<PlaceDialog fallbackFocusRef={noFallback()} />);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+});
+
+describe("PlaceDialog scoped log (GH124-PLAN.md Checkpoint 5)", () => {
+  it("shows only worldEvents scoped to this place, from the same ring", () => {
+    useGameStore.setState({
+      mapSelection: { kind: "node", id: "cen" },
+      snapshot: {
+        ...emptySnapshot(),
+        worldEvents: [fareGateEvent(0, "cen"), fareGateEvent(1, "riv")],
+      },
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    expect(screen.getByTestId("place-log-row-0")).toBeDefined();
+    expect(screen.queryByTestId("place-log-row-1")).toBeNull();
+  });
+
+  it("shows an empty state when nothing has logged here yet", () => {
+    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    expect(screen.getByText("No activity logged here yet.")).toBeDefined();
+  });
+
+  it("selects the world event when a scoped-log row is clicked", () => {
+    useGameStore.setState({
+      mapSelection: { kind: "node", id: "cen" },
+      snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(0, "cen")] },
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    fireEvent.click(screen.getByTestId("place-log-row-0"));
+    expect(useGameStore.getState().eventSelection).toBe(0);
   });
 });
