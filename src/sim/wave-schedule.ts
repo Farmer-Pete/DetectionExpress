@@ -1,21 +1,24 @@
 /**
  * The shared wave-schedule guard (F003 hardening, F002 field validation). Every
  * wave's own fields must be well-formed, waves must sit in non-decreasing
- * `startTick` order, their half-open `[startTick, startTick + durationTicks)`
- * ranges must never overlap, and each successor must leave a drain gap wide
- * enough for its own `incoming` cue to publish. The wave admission controller
- * (`sim/actors/admission.ts`) and the engine's `start()` seam both call this,
- * so a malformed `StartOptions.waves` throws before a run allocates, instead of
- * producing arrivals in the wrong order, double-counted ticks, a stalled
- * accumulator, or a successor whose arrival cue never shows.
+ * `startTick` order, and their half-open `[startTick, startTick +
+ * durationTicks)` ranges must never overlap. In `"waves"` mode each successor
+ * must also leave a drain gap wide enough for its own `incoming` cue to
+ * publish; `"steady"` mode (GH124-PLAN.md Checkpoint 3) skips that one check,
+ * since a gapless constant stream is intentional there. The wave admission
+ * controller (`sim/actors/admission.ts`) and the engine's `start()` seam both
+ * call this with the same mode, so a malformed `StartOptions.waves` throws
+ * before a run allocates, instead of producing arrivals in the wrong order,
+ * double-counted ticks, a stalled accumulator, or a successor whose arrival
+ * cue never shows.
  *
- * Pure and total. `assertWaveScheduleOrdered` covers all four checks (fields,
- * order, overlap, successor gap) in one call; the only thing left to a caller is
- * any accumulator-specific cap on `eventsPerTick` it needs on top (see
- * `sim/actors/admission.ts`'s `MAX_EVENTS_PER_TICK`).
+ * Pure and total. `assertWaveScheduleOrdered` covers all of the above in one
+ * call; the only thing left to a caller is any accumulator-specific cap on
+ * `eventsPerTick` it needs on top (see `sim/actors/admission.ts`'s
+ * `MAX_EVENTS_PER_TICK`).
  */
 import { CLOCK_HZ, PUBLISH_HZ } from "../game/tuning";
-import type { Wave } from "./scenario";
+import type { ScheduleMode, Wave } from "./scenario";
 
 /**
  * The smallest tick gap a successor wave needs after the prior wave ends for its
@@ -133,17 +136,30 @@ function assertSuccessorGap(waves: readonly Wave[]): void {
 /**
  * Throws unless every wave's own fields are well-formed (`assertWaveFields`)
  * AND `waves` sits in non-decreasing `startTick` order with no overlapping
- * half-open ranges AND each successor sits at least `MIN_SUCCESSOR_GAP_TICKS`
- * past the prior wave's end. One call covers all of those checks, so a caller
- * needs no separate field pass of its own. Touching boundaries (one wave's end
- * equal to the next wave's start) are rejected: a successor with too small a
- * drain gap never publishes its `incoming` cue (see `assertSuccessorGap`).
+ * half-open ranges AND, in `"waves"` mode, each successor sits at least
+ * `MIN_SUCCESSOR_GAP_TICKS` past the prior wave's end. One call covers all of
+ * those checks, so a caller needs no separate field pass of its own. Touching
+ * boundaries (one wave's end equal to the next wave's start) are rejected in
+ * `"waves"` mode: a successor with too small a drain gap never publishes its
+ * `incoming` cue (see `assertSuccessorGap`).
+ *
+ * `mode` defaults to `"waves"`, the original ramp. In `"steady"` mode
+ * (GH124-PLAN.md Checkpoint 3) `assertSuccessorGap` is skipped: touching,
+ * gap-0 waves are the intended shape of a contiguous constant stream, and the
+ * `incoming` cue the gap exists for is never sampled while steady (the sampler
+ * always publishes `calm`). Every OTHER check still runs in steady mode —
+ * fields, order, and no-overlap are unconditional regardless of arrival shape.
  */
-export function assertWaveScheduleOrdered(waves: readonly Wave[]): void {
+export function assertWaveScheduleOrdered(
+  waves: readonly Wave[],
+  mode: ScheduleMode = "waves",
+): void {
   waves.forEach((wave, index) => {
     assertWaveFields(wave, index);
   });
   assertChronological(waves);
   assertNoOverlap(waves);
-  assertSuccessorGap(waves);
+  if (mode !== "steady") {
+    assertSuccessorGap(waves);
+  }
 }

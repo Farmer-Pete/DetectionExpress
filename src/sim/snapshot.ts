@@ -5,6 +5,7 @@
  */
 import type { CorrectnessReading, Decision, LiveFinding } from "./correctness";
 import type { RingEvent } from "./inspector";
+import type { ScheduleMode } from "./scenario";
 import type { WaveReading } from "./wave-state";
 // `ActorView`, `FlashEvent`, `DoorView`, and `CrowdView` stay defined in
 // `world-snapshot.ts` for now (GH117 Part E, to minimize churn); import them from
@@ -58,6 +59,13 @@ export interface SimSnapshot {
    */
   wave: WaveReading;
   /**
+   * The run's arrival shape (GH124-PLAN.md Checkpoint 3): `"waves"` is the
+   * original climbing ramp, `"steady"` is the gapless constant stream the app
+   * defaults to. The status pill reads this to show "Steady" instead of
+   * "Running" while a steady run is live.
+   */
+  scheduleMode: ScheduleMode;
+  /**
    * Live actors the embedded map draws, with semantic presence (GH117 Part E). Empty
    * until the engine steps the cast onto this snapshot; the current producer still
    * publishes `[]`.
@@ -93,6 +101,7 @@ export function emptySnapshot(): SimSnapshot {
     events: [],
     processed: 0,
     wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
+    scheduleMode: "waves",
     actors: Object.freeze([]),
     flashes: Object.freeze([]),
     doors: Object.freeze([]),

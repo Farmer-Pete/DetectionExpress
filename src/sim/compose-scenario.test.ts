@@ -109,6 +109,17 @@ describe("buildBlueprint descriptors", () => {
     expect(blueprint.waves.length).toBeGreaterThan(0);
     expect(blueprint.checkpoints.length).toBeGreaterThan(0);
   });
+
+  it('defaults scheduleMode to "waves" when omitted (GH124-PLAN.md Checkpoint 3)', () => {
+    const blueprint = buildBlueprint(42);
+    expect(blueprint.scheduleMode).toBe("waves");
+  });
+
+  it("carries an explicit scheduleMode through to the blueprint and its checkpoints", () => {
+    const blueprint = buildBlueprint(42, "steady");
+    expect(blueprint.scheduleMode).toBe("steady");
+    expect(blueprint.checkpoints.length).toBe(1); // one terminal checkpoint, no interim waves
+  });
 });
 
 describe("buildBlueprint instantiate()", () => {

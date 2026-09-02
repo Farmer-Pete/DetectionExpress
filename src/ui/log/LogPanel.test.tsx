@@ -276,6 +276,19 @@ describe("LogPanel wave readout (#38 juice item 1)", () => {
     expect(screen.queryByText(/next wave in/)).toBeNull();
     expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
   });
+
+  it("shows no readout for a steady run: the sampler publishes this same calm, null-index reading for the whole run (GH124-PLAN.md Checkpoint 3)", () => {
+    useGameStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        wave: { phase: "calm", index: null, ticksUntilNext: null, eventsPerTick: null },
+        scheduleMode: "steady",
+      },
+    });
+    render(<LogPanel />);
+    expect(screen.queryByText(/next wave in/)).toBeNull();
+    expect(screen.queryByText("◈ WAVE INCOMING")).toBeNull();
+  });
 });
 
 describe("LogPanel wave readout: concluded-run gate (GH38 review round 2, F003)", () => {

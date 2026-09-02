@@ -48,4 +48,14 @@ describe("useWavePhaseEdge", () => {
     rerender({ phase: "active" });
     expect(result.current).toBe(2);
   });
+
+  it("never fires across a steady run: the phase never leaves calm (GH124-PLAN.md Checkpoint 3)", () => {
+    // Steady's sampler publishes "calm" for the whole run, so a consumer feeding
+    // this hook `snapshot.wave.phase` never sees an incoming -> active edge.
+    const { result, rerender } = setup("calm");
+    for (let i = 0; i < 20; i++) {
+      rerender({ phase: "calm" });
+    }
+    expect(result.current).toBe(0);
+  });
 });

@@ -33,13 +33,13 @@ import type { PipeEvent, PipeMessage } from "../sim/event";
 import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/graph";
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
-import type { Checkpoint, Wave } from "../sim/scenario";
+import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
 import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
-import { waveStateAt } from "../sim/wave-state";
+import { type WaveReading, waveStateAt } from "../sim/wave-state";
 import {
   cameraNodeId,
   consoleNodeId,
@@ -185,6 +185,15 @@ export interface StartOptions {
   /** The wave boundaries the sampler reads to publish `snapshot.wave` each tick. */
   waves: Wave[];
   /**
+   * The arrival shape `waves`/`checkpoints` were built with (GH124-PLAN.md
+   * Checkpoint 3). Defaults to `"waves"`, the original climbing ramp: startup
+   * validation (`assertWaveScheduleOrdered`) and the sampler both read it, so a
+   * `"steady"` run's gap-0 waves pass validation and the sampler publishes
+   * `calm` for the whole run instead of deriving `incoming`/`active` off a
+   * schedule shape steady never intends the UI to read as a wave cue.
+   */
+  scheduleMode?: ScheduleMode;
+  /**
    * The instantiated scenario cast the engine steps on its own single Clock to
    * publish map presence and wrong-PIN / sign-in flashes (GH117-PLAN.md "Part B").
    * Optional: omitted, the engine runs exactly as before — scoring always runs off
@@ -289,6 +298,14 @@ interface MapView {
   getCrowds: () => readonly CrowdView[];
 }
 
+/** The wave reading `"steady"` mode always publishes: calm, forever, no matter the ticks. */
+const STEADY_WAVE_READING: WaveReading = {
+  phase: "calm",
+  index: null,
+  ticksUntilNext: null,
+  eventsPerTick: null,
+};
+
 function makeSampler(
   clock: Clock,
   channels: Map<string, Channel<PipeMessage>>,
@@ -298,6 +315,7 @@ function makeSampler(
   run: RunState,
   waves: readonly Wave[],
   map: MapView,
+  scheduleMode: ScheduleMode,
 ): (force: boolean) => void {
   const ticksPerSample = CLOCK_HZ / PUBLISH_HZ;
   const throughputSamples = Math.round((THROUGHPUT_WINDOW_MS * PUBLISH_HZ) / 1000);
@@ -355,7 +373,9 @@ function makeSampler(
       decisions,
       events: ring.events,
       processed: ring.processed,
-      wave: waveStateAt(now, waves, WAVE_WARN_TICKS),
+      wave:
+        scheduleMode === "steady" ? STEADY_WAVE_READING : waveStateAt(now, waves, WAVE_WARN_TICKS),
+      scheduleMode,
       // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
       // living metro — scenario cast plus ambient life — into one authoritative view the
       // sampler reads here: presence, every sensor's flashes, the door and crowd reducer
@@ -377,8 +397,9 @@ export function start(options: StartOptions): EngineHandle {
   }
 
   const graph = options.getGraph();
+  const scheduleMode: ScheduleMode = options.scheduleMode ?? "waves";
   validateLinearChain(graph.nodes, graph.edges); // throws before allocation
-  assertWaveScheduleOrdered(options.waves); // throws before allocation
+  assertWaveScheduleOrdered(options.waves, scheduleMode); // throws before allocation
   // scoredIngest only ever offers or closes inside the `if (cast)` branch below, so
   // without a scenarioCast nothing ever calls ingress.offer/close: Ingest parks on
   // take() forever, admitted stays 0, and a queued === 0 terminal checkpoint reports a
@@ -851,6 +872,7 @@ export function start(options: StartOptions): EngineHandle {
       },
       options.waves,
       mapView,
+      scheduleMode,
     );
 
     // The per-tick sampler. A throwing setSnapshot is a sampler failure, so it

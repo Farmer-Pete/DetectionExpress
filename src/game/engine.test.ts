@@ -19,7 +19,7 @@ import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import { controlReference } from "../sim/entities/control";
 import type { PipeEvent } from "../sim/event";
 import { RuleError } from "../sim/rule-error";
-import type { Checkpoint, Wave } from "../sim/scenario";
+import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
 import {
   createPinAttacker,
   initialPinAttackerPresence,
@@ -136,6 +136,7 @@ interface LaunchOpts {
   serviceRate?: ServiceRate;
   checkpoints?: Checkpoint[];
   waves?: Wave[];
+  scheduleMode?: ScheduleMode;
   scenarioCast?: ScenarioCast;
   ambientCast?: AmbientCast;
 }
@@ -159,6 +160,7 @@ function launch(opts: LaunchOpts): Harness {
     serviceRate: opts.serviceRate ?? FAST_RATE,
     checkpoints: opts.checkpoints ?? [],
     waves: opts.waves ?? [],
+    ...(opts.scheduleMode ? { scheduleMode: opts.scheduleMode } : {}),
     driver,
     ...(opts.scenarioCast ? { scenarioCast: opts.scenarioCast } : {}),
     ...(opts.ambientCast ? { ambientCast: opts.ambientCast } : {}),
@@ -841,6 +843,98 @@ describe("engine publishes the wave reading (GH38+40-PLAN.md Part 1)", () => {
       ticksUntilNext: START_TICK - 40,
       eventsPerTick: null,
     });
+  });
+});
+
+describe('engine scheduleMode: "steady" (GH124-PLAN.md Checkpoint 3)', () => {
+  // Two contiguous, gap-0 waves: "waves" mode would reject this at startup
+  // (assertSuccessorGap), "steady" mode must accept it.
+  const STEADY_WAVES: Wave[] = [
+    { startTick: 0, durationTicks: 6, eventsPerTick: 4 },
+    { startTick: 6, durationTicks: 6, eventsPerTick: 4 },
+  ];
+
+  it('rejects a gap-0 schedule at startup by default (mode omitted, same as "waves")', () => {
+    expect(() =>
+      launch({
+        generator: scheduleOf([]),
+        checkpoints: deadlineAt(30),
+        waves: STEADY_WAVES,
+      }),
+    ).toThrow();
+  });
+
+  it('accepts a gap-0 schedule at startup when scheduleMode is "steady"', () => {
+    const h = launch({
+      generator: scheduleOf([]),
+      checkpoints: deadlineAt(30),
+      waves: STEADY_WAVES,
+      scheduleMode: "steady",
+    });
+    h.handle.stop();
+  });
+
+  it("publishes scheduleMode on every snapshot", async () => {
+    const h = launch({
+      generator: scheduleOf([]),
+      checkpoints: deadlineAt(30),
+      waves: STEADY_WAVES,
+      scheduleMode: "steady",
+    });
+    await step(h.driver, 3);
+    expect(h.last()?.scheduleMode).toBe("steady");
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+
+  it("always publishes a calm wave reading, never incoming or active, across the whole gap-0 schedule", async () => {
+    const h = launch({
+      generator: scheduleOf([]),
+      checkpoints: deadlineAt(30),
+      waves: STEADY_WAVES,
+      scheduleMode: "steady",
+    });
+    // Step in publish-cadence increments (CLOCK_HZ / PUBLISH_HZ = 3 ticks/sample):
+    // a non-forced publish is a no-op between samples, so `h.last()` would
+    // otherwise still read the PRIOR sample rather than nothing changing.
+    for (let i = 0; i < 4; i++) {
+      await step(h.driver, 3);
+      expect(h.last()?.wave).toEqual({
+        phase: "calm",
+        index: null,
+        ticksUntilNext: null,
+        eventsPerTick: null,
+      });
+    }
+    h.handle.stop();
+    await h.handle.whenStopped;
+  });
+
+  it("still reaches a win outcome off the one terminal checkpoint", async () => {
+    const h = launch({
+      generator: scheduleOf([]),
+      checkpoints: deadlineAt(30), // one checkpoint, the final deadline: no queue, no attacks
+      waves: STEADY_WAVES,
+      scheduleMode: "steady",
+    });
+    await step(h.driver, 31);
+    await h.handle.whenStopped;
+    expect(h.last()?.status).toBe("won");
+  });
+
+  it("still reaches a failed outcome off the one terminal checkpoint when Queue is not clear", async () => {
+    const events = [0, 1, 2, 3, 4].map((t) => ev(t, t * GAME_SECONDS_PER_TICK));
+    const h = launch({
+      generator: scheduleOf(events),
+      serviceRate: { num: 1, den: 20 }, // slow enough to still be queued at the deadline
+      checkpoints: deadlineAt(6),
+      waves: STEADY_WAVES,
+      scheduleMode: "steady",
+    });
+    await step(h.driver, 7);
+    await h.handle.whenStopped;
+    expect(h.last()?.status).toBe("failed");
+    expect(h.last()?.failureReason).toBe("queue");
   });
 });
 

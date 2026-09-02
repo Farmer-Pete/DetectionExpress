@@ -201,3 +201,39 @@ describe("assertWaveScheduleOrdered", () => {
     expect(() => assertWaveScheduleOrdered(waves)).not.toThrow();
   });
 });
+
+describe("assertWaveScheduleOrdered: mode-gated successor gap (GH124-PLAN.md Checkpoint 3)", () => {
+  const touching: Wave[] = [
+    { startTick: 0, durationTicks: 10, eventsPerTick: 5 },
+    { startTick: 10, durationTicks: 5, eventsPerTick: 5 }, // gap 0
+  ];
+
+  it('rejects touching boundaries by default (mode omitted, same as "waves")', () => {
+    expect(() => assertWaveScheduleOrdered(touching)).toThrow();
+  });
+
+  it('rejects touching boundaries when mode is explicitly "waves"', () => {
+    expect(() => assertWaveScheduleOrdered(touching, "waves")).toThrow();
+  });
+
+  it('accepts touching, gap-0 boundaries when mode is "steady"', () => {
+    expect(() => assertWaveScheduleOrdered(touching, "steady")).not.toThrow();
+  });
+
+  it('still rejects chronological, overlap, and field violations in "steady" mode', () => {
+    const outOfOrder: Wave[] = [
+      { startTick: 20, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+    ];
+    expect(() => assertWaveScheduleOrdered(outOfOrder, "steady")).toThrow();
+
+    const overlapping: Wave[] = [
+      { startTick: 0, durationTicks: 10, eventsPerTick: 1 },
+      { startTick: 5, durationTicks: 10, eventsPerTick: 1 },
+    ];
+    expect(() => assertWaveScheduleOrdered(overlapping, "steady")).toThrow();
+
+    const badField: Wave[] = [{ startTick: -1, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(badField, "steady")).toThrow();
+  });
+});
