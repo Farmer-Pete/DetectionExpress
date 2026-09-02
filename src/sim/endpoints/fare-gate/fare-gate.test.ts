@@ -22,7 +22,7 @@ describe("gatekeepGate.format", () => {
   });
 
   it("maps every field, upper-casing codes and spelling out the Gatekeep words", () => {
-    // The EVENT_TIME literal is the example time in docs/world/sensors.json.
+    // The EVENT_TIME literal is the example time in src/game/sensors.data.ts.
     expect(gatekeepGate.format(entry)).toEqual({
       EVENT_TIME: "2025-08-29T02:14:03.000Z",
       MEDIA_SERIAL: "C09",

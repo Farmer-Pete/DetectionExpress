@@ -233,6 +233,8 @@ The environment is the world the actors move through, held as read-only data.
 
 - The station map, the lines, the zones, the sites, the control center, and the doors. These live
   in `docs/world/world.json`, which the sim imports at build time. `parseWorld` validates it.
+  (Superseded by ADR-0011: the world data is now a typed TS module at `src/sim/world/world.data.ts`;
+  `assertWorldConsistent` holds the referential checks.)
 - The distance table. The shortest travel time in minutes between any two stations, computed once
   from the `connections` graph. A rider reads it to ride a feasible duration. It lands in ticket
   #30, because benign coherence needs it. The impossible-travel hunt (#77) reads the same table
@@ -243,7 +245,9 @@ The environment is the world the actors move through, held as read-only data.
   not environment. They are run state the scorer or the train actors own.
 
 `parseWorld` is the runtime authority on `world.json`, so it validates every referential and graph
-invariant, not just the doors. It requires unique zone, line, station, site, and door ids. It
+invariant, not just the doors. (Superseded by ADR-0011: the structural shape is now a compile-time
+contract on `world.data.ts`; `assertWorldConsistent` is the runtime authority on the referential
+and graph invariants below.) It requires unique zone, line, station, site, and door ids. It
 checks line membership both ways, so a station's `lines` and a line's `stations` agree. It checks
 that every connection names a real neighbor and a real line, and that the named line contains both
 endpoints. It treats a connection as an undirected edge and requires the reciprocal edge to carry
@@ -362,6 +366,9 @@ actors keep their guards, none of them can produce these patterns, so the ground
   JSON skeleton would split each machine across a data file and a code registry, joined by string
   names the compiler cannot check. The typed FSM keeps the whole machine in one place the compiler
   can see, rename, and prove exhaustive. `world.json` stays JSON because it is pure facts.
+  (Superseded by ADR-0011: the facts moved to a typed TS module, `world.data.ts`, so the compiler
+  also owns their shape; the argument against encoding *behavior* as JSON, made two sentences above
+  this one, still stands.)
 - The environment is imported data plus derived tables, all pure. `parseWorld` narrows and
   validates the imported JSON. `distanceTable` computes shortest paths once. `doorGrade` resolves
   a door to its zone's trust level.

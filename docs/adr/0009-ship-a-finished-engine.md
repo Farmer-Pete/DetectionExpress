@@ -41,7 +41,7 @@ Ship a finished engine. Frame the whole game as observe, then perturb.
 - **The 30 hunts' framing changes.** Each hunt is no longer a task the player builds
   a Rule for. It is a form of chaos the finished engine answers. This ticket rewords
   only the one live scenario (`kiosk-pin-attack`). A follow-up ticket rewrites all 30
-  per-hunt briefings, reading from `docs/world/scenarios.json`.
+  per-hunt briefings, reading from `src/game/scenarios.data.ts`.
 - **The `ChaosLevel.playable` flag is a seam.** Today the ladder is prose. When the
   chaos runner lands, the flag grows into real level selection.
 

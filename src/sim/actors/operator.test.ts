@@ -57,7 +57,7 @@ describe("createOperator", () => {
     expect(readings.length).toBeGreaterThan(0);
     const commandKeys = new Set(controlReference.commands.map((c) => `${c.command}|${c.target}`));
     for (const { reading } of readings) {
-      // The exact field set from sensors.json: ts, operator, host, command, target.
+      // The exact field set from the sensor data: ts, operator, host, command, target.
       expect(Object.keys(reading).sort()).toEqual(
         ["command", "host", "operator", "target", "ts"].sort(),
       );

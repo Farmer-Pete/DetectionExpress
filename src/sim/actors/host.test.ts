@@ -56,7 +56,7 @@ describe("createHost", () => {
     const { min, max } = controlReference.byteRange;
     const destSet = new Set(controlReference.destinations);
     for (const { reading } of readings) {
-      // The exact field set from sensors.json: ts, site, host, dest, bytes.
+      // The exact field set from the sensor data: ts, site, host, dest, bytes.
       expect(Object.keys(reading).sort()).toEqual(["bytes", "dest", "host", "site", "ts"].sort());
       expect(reading.site).toBe(CONFIG.site);
       expect(reading.host).toBe(CONFIG.host);

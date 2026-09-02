@@ -25,7 +25,7 @@ export interface LineTimetable {
   readonly line: string;
   /** True when the line loops; its stops already return to the start. */
   readonly loop: boolean;
-  /** The ordered stops along the line, from `world.json`'s station order. */
+  /** The ordered stops along the line, from the world data's station order. */
   readonly stops: readonly string[];
   /** The platform dwell in whole ticks, uniform across stops. */
   readonly dwellTicks: number;
@@ -39,7 +39,7 @@ export interface LineTimetable {
 export interface Timetable {
   /** The schedule for one line. Throws on an unknown line. */
   line(lineId: string): LineTimetable;
-  /** Every line's schedule, in `world.json` order. */
+  /** Every line's schedule, in world-data order. */
   lines(): readonly LineTimetable[];
 }
 

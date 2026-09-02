@@ -37,7 +37,7 @@ describe("MetroMap", () => {
     expect(screen.getByText("World's End")).toBeDefined();
   });
 
-  it("draws each line as a polyline in its world.json color", () => {
+  it("draws each line as a polyline in its world-data color", () => {
     const { container } = render(<MetroMap onSelect={() => {}} />);
     const red = container.querySelector('[data-line="red"]');
     const circle = container.querySelector('[data-line="circle"]');
@@ -130,7 +130,7 @@ describe("MetroMap", () => {
   });
 
   it("exposes every train hit target even for a train not currently in the snapshot", () => {
-    // The four trains are fixed world.json fixtures; the hit target set never
+    // The four trains are fixed world-data fixtures; the hit target set never
     // shrinks just because a train has not published a frame yet.
     render(<MetroMap onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: "Open T2" })).toBeDefined();

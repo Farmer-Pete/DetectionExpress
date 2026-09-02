@@ -78,7 +78,7 @@ describe("metroLines", () => {
   const lines = metroLines(world);
   const byId = new Map(lines.map((line) => [line.id, line]));
 
-  it("uses the world.json colors and station counts, in the fixed line order", () => {
+  it("uses the world-data colors and station counts, in the fixed line order", () => {
     expect(lines.map((line) => line.id)).toEqual(["red", "blue", "green", "circle"]);
     expect(byId.get("red")?.color).toBe("#e6394a");
     expect(byId.get("red")?.points).toHaveLength(5);

@@ -26,7 +26,7 @@ export type SensorCode = "K" | "G" | "V" | "C" | "R" | "D" | "T" | "N" | "O";
 interface Chip {
   id: MapNodeId;
   code: SensorCode;
-  /** The canonical `sensors.json` id, e.g. `"fare-gate"`, `"platform-camera"`. */
+  /** The canonical `sensors.data.ts` id, e.g. `"fare-gate"`, `"platform-camera"`. */
   sensor: string;
   point: Point;
 }
@@ -42,7 +42,7 @@ export interface MapNode {
   chips: readonly Chip[];
 }
 
-/** One line's offset-parallel polyline in its world.json color. */
+/** One line's offset-parallel polyline in its world-data color. */
 export interface LinePolyline {
   id: string;
   color: string;
@@ -104,7 +104,7 @@ const SENSOR_KEY: Record<SensorCode, string> = {
   O: "console",
 };
 
-/** The canonical `sensors.json` id per chip code. */
+/** The canonical `sensors.data.ts` id per chip code. */
 const SENSOR_ID: Record<SensorCode, string> = {
   K: "kiosk",
   G: "fare-gate",
@@ -286,7 +286,7 @@ function offsetPoints(points: readonly Point[], offset: number): Point[] {
   });
 }
 
-/** Each line as an offset-parallel polyline in its world.json color, in the fixed order. */
+/** Each line as an offset-parallel polyline in its world-data color, in the fixed order. */
 export function metroLines(world: World): LinePolyline[] {
   const lineById = new Map(world.lines.map((line) => [line.id, line]));
   // LINE_ORDER fixes both draw order and parallel offset, so a world line missing from

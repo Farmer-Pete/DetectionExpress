@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import catalogue from "../../docs/world/scenarios.json";
 import { isRawKioskV1 } from "../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { DetectView } from "../sim/finding";
 import { reasonOf } from "../sim/reason-of";
 import { buildEngine, scenarioRegistry } from "./registry";
+import { scenariosData } from "./scenarios.data";
 import { LEVEL_SEED } from "./tuning";
 
 /**
@@ -55,7 +55,7 @@ const NOT_BUILT_YET = [
   "ghost-crowd",
 ];
 
-const catalogueIds = catalogue.scenarios.map((s) => s.id);
+const catalogueIds = scenariosData.scenarios.map((s) => s.id);
 const registeredIds = scenarioRegistry.map((e) => e.id);
 
 describe("drift guard: catalogue vs. registry", () => {

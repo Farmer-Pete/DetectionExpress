@@ -13,7 +13,7 @@
  * re-render would visibly lag the 60 Hz canvas; this loop is what keeps the hit
  * target locked to the drawn train every frame.
  *
- * The four train ids are fixed fixtures of `world.json` (one per line), so the set of
+ * The four train ids are fixed fixtures of the world data (one per line), so the set of
  * rects never changes across a run; only their position does.
  */
 import { useEffect, useRef } from "react";

@@ -19,7 +19,7 @@ import type { World } from "./world/world";
 
 /**
  * The train-tracker family's internal record, matching the `normalizedExample` in
- * `sensors.json`: a train arriving at (`arr`) or leaving (`dep`) a station, and on
+ * `sensors.data.ts`: a train arriving at (`arr`) or leaving (`dep`) a station, and on
  * which track. `ts` is in game seconds; `track` is a deterministic per-segment id.
  */
 interface TrainReading {
@@ -34,7 +34,7 @@ interface TrainReading {
 
 /**
  * The door-reader family's internal record, matching the `normalizedExample` in
- * `sensors.json`: a badge granted through a door at a site or the control center, and
+ * `sensors.data.ts`: a badge granted through a door at a site or the control center, and
  * the zone that door guards. Benign traffic is always a `grant` (the `deny` value is
  * for a later attack ticket). `ts` is in game seconds; `site` is the door's location
  * id (a site or the OCC), `zone` the guarded zone (e.g. `"z3"`).
@@ -51,7 +51,7 @@ export interface DoorReaderReading {
 
 /**
  * The door-contact family's internal record, matching the `normalizedExample` in
- * `sensors.json`: the magnetic sensor reporting a door opening or closing. Benign
+ * `sensors.data.ts`: the magnetic sensor reporting a door opening or closing. Benign
  * traffic toggles `open`/`close`; the `forced`/`held` values are for a later attack
  * ticket. The engine's door reducer emits these, never a scheduler actor.
  */
@@ -65,7 +65,7 @@ interface DoorContactReading {
 
 /**
  * The TVM (ticket vending machine) family's internal record, matching the
- * `normalizedExample` in `sensors.json`: a card topping up its stored value at a
+ * `normalizedExample` in `sensors.data.ts`: a card topping up its stored value at a
  * station's machine. Benign traffic is always a `topup`. The live world rider emits
  * one when it tops up rather than going dormant on a low balance. `ts` is in game
  * seconds; `machine` is a deterministic per-machine id (e.g. `"V1"`); `amount` is a
@@ -83,7 +83,7 @@ interface TvmReading {
 
 /**
  * The platform-camera family's internal record, matching the `normalizedExample` in
- * `sensors.json`: the camera over a station's fare gate turning a picture into two
+ * `sensors.data.ts`: the camera over a station's fare gate turning a picture into two
  * numbers, how many taps (`grants`) and how many bodies (`persons`), counted over a
  * rolling window. Benign, so the two agree; an untapped person is the later Shadow
  * Rider hunt, out of scope here. The engine's camera reducer emits these, never a
@@ -101,7 +101,7 @@ interface CameraReading {
 
 /**
  * The occ-console family's internal record, matching the `normalizedExample` in
- * `sensors.json`: an authorized operator issuing a command from an OCC console. Benign
+ * `sensors.data.ts`: an authorized operator issuing a command from an OCC console. Benign
  * traffic is a routine control-room command on a benign target; the Phantom Signal /
  * Dispatcher Overreach values are for a later attack ticket, out of scope here. `ts` is
  * in game seconds; `operator` is the login (e.g. `"green.disp"`), `host` the console
@@ -118,7 +118,7 @@ export interface ConsoleReading {
 
 /**
  * The network-relay family's internal record, matching the `normalizedExample` in
- * `sensors.json`: a node on the control backbone reporting which host talked to which
+ * `sensors.data.ts`: a node on the control backbone reporting which host talked to which
  * destination, and how many bytes moved. Benign traffic is a small internal transfer;
  * an exfil-sized flow to an external address is a later hunt, out of scope here. `ts` is
  * in game seconds; `site` is the host's location, `host` its id, `dest` the internal

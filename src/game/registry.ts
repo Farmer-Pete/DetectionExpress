@@ -3,7 +3,7 @@
  * endpoint normalizers are gathered and composed into the single engine. It globs
  * each scenario's `index.ts` (the UI reads `scenario`, the engine reads `buildRule`,
  * the profiler reads `corpus`), globs each endpoint's normalizer, joins every code
- * scenario to its `docs/world/scenarios.json` entry by id, and calls `createEngine`.
+ * scenario to its `scenarios.data.ts` entry by id, and calls `createEngine`.
  *
  * The glob lives here in `game/`, never in `sim/`, so `sim/` stays free of bundler
  * coupling (ARCHITECTURE). Validation happens at this seam: a scenario module missing
@@ -11,7 +11,6 @@
  * throw at load, so a malformed folder fails loudly instead of silently dropping out.
  */
 
-import catalogue from "../../docs/world/scenarios.json";
 import {
   type BuildRule,
   createEngine,
@@ -20,18 +19,12 @@ import {
   type Normalizer,
 } from "../sim/engine/engine";
 import type { Scenario } from "../sim/scenario";
+import type { CatalogueEntry } from "./catalogue.types";
 import { isScenarioCorpus, type ScenarioCorpus } from "./profiler/scenario-corpus";
+import { scenariosData } from "./scenarios.data";
 
-/** One catalogue entry, as the display join reads it. Loose: `docs/world` owns the schema. */
-export interface CatalogueEntry {
-  id: string;
-  name: string;
-  difficulty: { stars: number; label: string; shape: string };
-  sensors: string[];
-  flavor: { tagline: string; intro: string };
-  // `mitre` is absent on some catalogue entries, so it stays optional here.
-  security: { realWorldConcept: string; briefing: string; mitre?: string[] };
-}
+/** Re-exported so existing consumers keep importing `CatalogueEntry` from here. */
+export type { CatalogueEntry };
 
 /** A code scenario joined to its catalogue metadata by id. */
 export interface ScenarioRegistryEntry {
@@ -70,8 +63,8 @@ const normalizerModules = import.meta.glob<NormalizerModule>("../sim/endpoints/*
 /**
  * Index the catalogue by id, so each join is a lookup. Pure, so tests inject their
  * own. Throws on a duplicate id rather than letting the later entry silently win:
- * a duplicate is a data bug in `docs/world/scenarios.json`, so it fails loudly here
- * instead of quietly dropping one hunt's metadata.
+ * a duplicate is a data bug in `scenarios.data.ts`, so it fails loudly here instead
+ * of quietly dropping one hunt's metadata.
  */
 export function indexCatalogue(entries: readonly CatalogueEntry[]): Map<string, CatalogueEntry> {
   const byId = new Map<string, CatalogueEntry>();
@@ -207,7 +200,7 @@ export function mergeNormalizers(
 }
 
 /** The registered scenarios, joined to their catalogue metadata, sorted by id. */
-const catalogueScenarios: readonly CatalogueEntry[] = catalogue.scenarios;
+const catalogueScenarios: readonly CatalogueEntry[] = scenariosData.scenarios;
 export const scenarioRegistry: ScenarioRegistryEntry[] = composeRegistry(
   scenarioModules,
   indexCatalogue(catalogueScenarios),

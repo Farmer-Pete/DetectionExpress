@@ -1,6 +1,6 @@
 /**
  * The metro map: the static topology, rendered once in SVG, with the moving actor
- * canvas mounted over it. Lines are offset-parallel polylines in the world.json
+ * canvas mounted over it. Lines are offset-parallel polylines in the world-data
  * colors so shared track reads as parallel; stations are nodes; sites and the OCC
  * carry a zone badge (there are NO tinted zone regions); every node draws its sensor
  * chips as quiet static fixtures. Only the fare gate is live in M1 — its taps flash
@@ -16,7 +16,7 @@
  * assistive tech, which would make every button below unreachable — so it carries a
  * neutral `role="group"` with the same accessible name instead. Each node's whole `<g>`
  * (badge/circle, name, and its static chips) is one `role="button"` control, named by
- * the node's real `world.json` name via `aria-label`, reachable by Tab and activated
+ * the node's real world-data name via `aria-label`, reachable by Tab and activated
  * by Enter/Space as well as a click. The train hit targets (`TrainHitTargets.tsx`)
  * are a further child of this same SVG, so they share this exact coordinate space
  * without needing the canvas's own device-pixel `fit()` transform.
@@ -85,7 +85,7 @@ export function MetroMap({ onSelect }: MetroMapProps) {
               ))
           : null}
 
-        {/* Offset-parallel line polylines in the world.json colors. A loop line's stops
+        {/* Offset-parallel line polylines in the world-data colors. A loop line's stops
             already return to the start (the Circle is cen, jct, cen), so its polyline is
             drawn as-is; appending the first point again would add a spurious segment
             between the two offset Central tracks. */}
