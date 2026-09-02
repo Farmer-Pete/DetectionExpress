@@ -430,8 +430,14 @@ export function ActorLayer() {
           continue;
         }
 
-        // A rider (or account rider). Track its presence across frames to catch the
-        // board / alight flip and animate the short step on / off the train.
+        // A rider (or account rider). In steady mode the engine pre-seeds every future
+        // patron `at` its station at tick 0, so skip one whose window has not opened yet
+        // (fromTick > now): draw only actors present now, matching `actorsAtNode`.
+        if (actor.presence.kind === "at" && actor.presence.fromTick > renderNow) {
+          continue;
+        }
+        // Track its presence across frames to catch the board / alight flip and animate
+        // the short step on / off the train.
         liveRiderIds.add(actor.id);
         const prev = riderAnim.get(actor.id);
         const presence = actor.presence;

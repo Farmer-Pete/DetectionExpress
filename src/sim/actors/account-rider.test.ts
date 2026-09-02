@@ -134,8 +134,8 @@ describe("createAccountRider destination (GH124-PLAN.md Checkpoint 4 Part 1)", (
   // metro trip or chosen destination at all, unlike `createWorldRider`. It must never
   // emit a `destination` delta, so its `ActorView.destination` stays undefined for
   // its whole life. It is not a trip kind, so the place dialog never labels it
-  // "waiting for a train"; `actorsAtNode` gives it "signing in" instead, since it is
-  // at a kiosk (see `place-view.ts`'s `activityFor`).
+  // "waiting for a train"; `actorsAtNode` gives it "signing in at a kiosk" instead
+  // (see `place-view.ts`'s `activityFor`).
   it("never reports a destination, at sign-in or while lingering at the kiosk", () => {
     const schedule = createSchedule({ actors: [createAccountRider(BASE)], env, runSeed: 1 });
     for (let tick = 0; tick < 500; tick++) {

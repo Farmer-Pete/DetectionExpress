@@ -9,6 +9,7 @@ import {
   describePresence,
   devicesForNode,
   placeView,
+  ROLE_LABEL,
 } from "./place-view";
 
 function snapshotWith(actors: readonly ActorView[]): SimSnapshot {
@@ -261,7 +262,7 @@ describe("actorSummaryRows", () => {
     const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
     expect(rows[0]).toEqual({
       kind: "pin-attacker",
-      activity: "on duty",
+      activity: "Pin attacking",
       count: 1,
       tone: "threat",
     });
@@ -303,7 +304,7 @@ describe("actorSummaryRows", () => {
     expect(rows).toEqual([{ kind: "staff", activity: "on duty", count: 1 }]);
   });
 
-  it("labels an account rider at a kiosk 'signing in', never 'waiting for a train'", () => {
+  it("labels an account rider at a kiosk 'signing in at a kiosk', never 'waiting for a train'", () => {
     const snapshot = snapshotWith([
       {
         id: "A1",
@@ -312,7 +313,43 @@ describe("actorSummaryRows", () => {
       },
     ]);
     const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
-    expect(rows).toEqual([{ kind: "account-rider", activity: "signing in", count: 1 }]);
+    expect(rows).toEqual([{ kind: "account-rider", activity: "signing in at a kiosk", count: 1 }]);
+  });
+
+  it("labels an attacker by its scenario ('Pin attacking'), shown as 'Attacker'", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "X1",
+        kind: "pin-attacker",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows).toEqual([
+      { kind: "pin-attacker", activity: "Pin attacking", count: 1, tone: "threat" },
+    ]);
+    expect(ROLE_LABEL["pin-attacker"]).toBe("Attacker");
+  });
+
+  it("excludes a future-parked actor whose 'at' window has not opened yet", () => {
+    const snapshot: SimSnapshot = {
+      ...emptySnapshot(),
+      nowTick: 10,
+      actors: [
+        {
+          id: "here",
+          kind: "account-rider",
+          presence: { kind: "at", node: "cen", fromTick: 5, untilTick: 20 },
+        },
+        {
+          id: "future",
+          kind: "account-rider",
+          presence: { kind: "at", node: "cen", fromTick: 900, untilTick: 900 },
+        },
+      ],
+    };
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows).toEqual([{ kind: "account-rider", activity: "signing in at a kiosk", count: 1 }]);
   });
 
   it("returns an empty table for a node with no actors", () => {

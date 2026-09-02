@@ -284,7 +284,8 @@ describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
     render(<PlaceDialog fallbackFocusRef={noFallback()} rootTriggerRef={noRootTrigger()} />);
     const rows = document.querySelectorAll(".actor-table tbody tr");
     expect(rows[0]?.className).toContain("actor-table-row-threat");
-    expect(rows[0]?.textContent).toContain("Pin attacker");
+    expect(rows[0]?.textContent).toContain("Attacker");
+    expect(rows[0]?.textContent).toContain("Pin attacking");
   });
 
   it("shows the empty state when no actor is at the selected place", () => {

@@ -102,7 +102,10 @@ export const ROLE_LABEL: Record<ActorView["kind"], string> = {
   staff: "Staff",
   operator: "Operator",
   host: "Host",
-  "pin-attacker": "Pin attacker",
+  // Generic category, not the specific scenario: the scenario ("Pin attacking")
+  // lives in the Activity column, so a new attack scenario reuses this actor and
+  // icon rather than adding a new kind. See `activityFor`.
+  "pin-attacker": "Attacker",
 };
 
 /** A human label per site `type` (`world.ts`'s `SITE_TYPES`). */
@@ -186,16 +189,24 @@ function isTripKind(kind: ActorView["kind"]): boolean {
 
 /**
  * One actor's activity phrase for the table. A non-trip actor `at` a node does not
- * route through `describePresence`, whose "at" wording is a trip actor's fallback
- * and has no meaning for a fixture, a patron at a kiosk, or an attacker mid-attack:
- * an `account-rider` reads "signing in" (it is at a kiosk), and staff, operators,
- * hosts, a dwelling train, and a pin-attacker read "on duty". Every other presence
- * shape (`moving`, `onTrain`, or an "at" trip rider) routes straight through
+ * route through `describePresence`, whose "at" wording is a trip actor's fallback and
+ * has no meaning for a fixture, a patron at a kiosk, or an attacker mid-attack. The
+ * Actor column holds the generic kind and the Activity column holds what it is doing,
+ * so an `account-rider` reads "signing in at a kiosk", a `pin-attacker` reads "Pin
+ * attacking" (the scenario, so a new attack reuses the Attacker actor), and staff,
+ * operators, hosts, and a dwelling train read "on duty". Every other presence shape
+ * (`moving`, `onTrain`, or an "at" trip rider) routes straight through
  * `describePresence`, destination included.
  */
 function activityFor(actor: ActorView, snapshot: SimSnapshot, world: World): string {
   if (actor.presence.kind === "at" && !isTripKind(actor.kind)) {
-    return actor.kind === "account-rider" ? "signing in" : "on duty";
+    if (actor.kind === "account-rider") {
+      return "signing in at a kiosk";
+    }
+    if (actor.kind === "pin-attacker") {
+      return "Pin attacking";
+    }
+    return "on duty";
   }
   return describePresence(actor.presence, snapshot, world, actor.destination);
 }
@@ -232,8 +243,14 @@ export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot, world: Wo
   const lines: ActorLine[] = [];
   for (const actor of snapshot.actors) {
     const presence = actor.presence;
+    // In steady mode the engine pre-seeds every future patron `at` its station at
+    // tick 0 (fromTick === untilTick === its future startTick), so an `at` presence
+    // only counts as present once its window has opened: fromTick <= now. A genuinely
+    // waiting or dwelling actor passes this; a not-yet-arrived one does not.
     const resolvesHere =
-      (presence.kind === "at" && presence.node === nodeId) ||
+      (presence.kind === "at" &&
+        presence.node === nodeId &&
+        presence.fromTick <= snapshot.nowTick) ||
       (presence.kind === "onTrain" && presence.train === nodeId);
     if (!resolvesHere) {
       continue;
