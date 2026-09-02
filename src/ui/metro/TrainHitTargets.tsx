@@ -70,6 +70,9 @@ export function TrainHitTargets({ onSelect }: TrainHitTargetsProps) {
           "transform",
           `translate(${point.x} ${point.y}) rotate(${(angle * 180) / Math.PI})`,
         );
+        // The train has a published placement now, so reveal its target and let it take
+        // pointer and keyboard hits (see the `data-unplaced` note on the <rect> below).
+        el.removeAttribute("data-unplaced");
       }
       raf = requestAnimationFrame(frame);
     };
@@ -91,6 +94,12 @@ export function TrainHitTargets({ onSelect }: TrainHitTargetsProps) {
             }
           }}
           className="metro-train-hit"
+          // Until the frame loop first places this train (it may be absent from the
+          // snapshot for many ticks), the rect carries no transform and sits centered on
+          // the SVG origin. `data-unplaced` hides it (see `index.css`) so all four do not
+          // stack transparent-but-clickable at the top-left corner; the loop clears the
+          // attribute the frame the train gets a real placement.
+          data-unplaced=""
           x={-HIT_W / 2}
           y={-HIT_H / 2}
           width={HIT_W}

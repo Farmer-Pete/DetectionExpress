@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Point } from "../../sim/world/layout";
+import { metroLines, type Point } from "../../sim/world/layout";
 import type { Presence } from "../../sim/world/presence";
 import { world } from "../../sim/world/world";
 import { movingFraction, trainPlacement } from "./train-placement";
@@ -12,6 +12,14 @@ const layout = new Map<string, Point>([
 /** The red line's own offset polyline points, so a rail test asserts against the
  *  exact segment the map draws, not a station-to-station straight line. */
 const redLineId = world.lines.find((line) => line.name.toLowerCase().includes("red"))?.id ?? "red";
+
+/** The red line's first drawn segment (`rail.from` 0 -> `rail.to` 1) taken straight from
+ *  the offset polyline the renderer uses, so a rail test pins the exact point and tangent
+ *  instead of accepting "differs from the station center" or "not NaN". */
+const redPolyline = metroLines(world).find((poly) => poly.id === redLineId)?.points ?? [];
+const railNear = redPolyline[0] ?? { x: 0, y: 0 };
+const railFar = redPolyline[1] ?? { x: 0, y: 0 };
+const railAngle = Math.atan2(railFar.y - railNear.y, railFar.x - railNear.x);
 
 describe("movingFraction", () => {
   it("clamps to [0,1] and is linear in between", () => {
@@ -58,9 +66,16 @@ describe("trainPlacement", () => {
       untilTick: 10,
       rail: { line: redLineId, from: 0, to: 1 },
     };
-    const placement = trainPlacement(presence, layout, 0);
-    // The rail-riding point comes from the offset polyline, not the raw station
-    // centers this test's own `layout` map holds — so it must not equal "cen".
+    // Halfway through the wave, so t = 0.5: the point is the midpoint of the offset
+    // polyline segment, and the facing is that segment's own tangent.
+    const placement = trainPlacement(presence, layout, 5);
+    expect(placement.point).toEqual({
+      x: railNear.x + (railFar.x - railNear.x) * 0.5,
+      y: railNear.y + (railFar.y - railNear.y) * 0.5,
+    });
+    expect(placement.angle).toBeCloseTo(railAngle);
+    // The point rides the offset polyline, not the raw station centers this test's own
+    // `layout` map holds — so it must not equal "cen".
     expect(placement.point).not.toEqual({ x: 470, y: 300 });
   });
 
@@ -73,7 +88,10 @@ describe("trainPlacement", () => {
       rail: { line: redLineId, from: 0, to: 1 },
     };
     const placement = trainPlacement(presence, layout, 0);
-    expect(placement.angle).not.toBeNaN();
+    // A dwelling train sits on the segment's far (arrival) point (t = 1) and keeps the
+    // segment's tangent, so it does not rotate or snap when it stops.
+    expect(placement.point).toEqual(railFar);
+    expect(placement.angle).toBeCloseTo(railAngle);
   });
 
   it("returns the origin with no angle for the (unreachable) onTrain arm", () => {

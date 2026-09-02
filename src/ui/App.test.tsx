@@ -485,10 +485,7 @@ describe("App map/event dialog navigation stack (GH124 follow-up: Back)", () => 
       useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
     });
     // The main log row (a real `<button>`) focuses itself on click (LogPanel.tsx),
-    // the same stand-in a real browser click would produce; the map's station
-    // control is an SVG `<g>`, which never satisfies `instanceof HTMLElement`
-    // (a pre-existing gap in the trigger-restore check, unrelated to the navigation
-    // stack), so this test roots the session on a trigger that check does apply to.
+    // the same stand-in a real browser click would produce.
     const logRow = screen.getByTestId("log-row-5");
     fireEvent.click(logRow); // opens the event dialog: the root of this session
 
@@ -499,6 +496,28 @@ describe("App map/event dialog navigation stack (GH124 follow-up: Back)", () => 
 
     expect(useGameStore.getState().mapDialogStack).toEqual([]);
     expect(document.activeElement).toBe(logRow);
+  });
+
+  it("restores focus to an SVG station control that rooted the stack, across a push", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    // The map's station control is an SVG `<g>` (MetroMap.tsx). A keyboard user tabs to
+    // it, focusing it, then activates it; an `SVGElement` satisfies the widened
+    // focus-restore guard, so a full close returns focus here even across a pushed dialog.
+    const station = screen.getByRole("button", { name: "Central" });
+    station.focus();
+    fireEvent.click(station); // opens the place dialog: the root of this session
+    expect(document.activeElement).not.toBe(station); // focus moved into the dialog
+
+    fireEvent.click(screen.getByTestId("place-log-row-5")); // pushes the event dialog on top
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(document.activeElement).toBe(station);
   });
 
   it("closing an event-rooted stack that pushed a place restores focus to the event's own fallback (the log panel), not the place dialog's, when the trigger is gone", () => {

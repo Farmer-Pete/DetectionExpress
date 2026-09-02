@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MapSelection } from "../game/store";
 import { useGameStore } from "../game/store";
@@ -134,5 +134,19 @@ describe("MetroMap", () => {
     // shrinks just because a train has not published a frame yet.
     render(<MetroMap onSelect={() => {}} />);
     expect(screen.getByRole("button", { name: "Open T2" })).toBeDefined();
+  });
+
+  it("keeps a hit target unplaced until its train publishes a placement", async () => {
+    // Every rect starts `data-unplaced` (hidden via CSS), so before its train's first
+    // frame it is not a transparent click/tab target at the SVG origin. Only T1 is in
+    // the seeded snapshot, so the frame loop places it and clears the flag; T2 never
+    // publishes a frame and stays unplaced.
+    render(<MetroMap onSelect={() => {}} />);
+    const t2 = screen.getByRole("button", { name: "Open T2" });
+    expect(t2.getAttribute("data-unplaced")).not.toBeNull();
+
+    const t1 = screen.getByRole("button", { name: "Open T1" });
+    await waitFor(() => expect(t1.getAttribute("data-unplaced")).toBeNull());
+    expect(t2.getAttribute("data-unplaced")).not.toBeNull();
   });
 });

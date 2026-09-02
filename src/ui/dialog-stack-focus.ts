@@ -96,7 +96,13 @@ export function useMapDialogFocus({
       const rootFallback = rootFallbackFocusRef.current;
       rootTriggerRef.current = null; // consumed; the next root open captures fresh
       rootFallbackFocusRef.current = null;
-      if (trigger instanceof HTMLElement && trigger.isConnected) {
+      if (
+        (trigger instanceof HTMLElement || trigger instanceof SVGElement) &&
+        trigger.isConnected
+      ) {
+        // An SVGElement also implements `focus()`, so a map place control (an SVG
+        // `<g>`, `MetroMap.tsx`) that rooted the session restores to itself, not the
+        // fallback.
         trigger.focus();
       } else {
         // The ROOT session's fallback, not this dialog's own `fallbackFocusRef` — the

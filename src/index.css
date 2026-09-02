@@ -1419,6 +1419,12 @@ body {
   cursor: pointer;
 }
 
+/* A train with no published placement yet renders at the SVG origin; hide it so it is
+   not a transparent click/tab target stacked in the top-left corner (`TrainHitTargets.tsx`). */
+.metro-train-hit[data-unplaced] {
+  display: none;
+}
+
 .metro-train-hit:focus-visible {
   fill: rgba(207, 227, 234, 0.12);
   outline: 2px solid var(--a3);

@@ -145,7 +145,7 @@ interface GameState {
    * this store; it stays exclusive with these two through `useSidePanel`'s own check
    * plus App's opener guards, not through this store (`use-side-panel.tsx`).
    */
-  mapDialogStack: MapModalEntry[];
+  mapDialogStack: readonly MapModalEntry[];
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
   transport: TransportState;
   /** Cited log rows currently flashing in their hunt color, keyed by `eventId`. */
@@ -260,9 +260,10 @@ interface GameState {
 /**
  * A shared empty dialog stack, so every closer/opener that clears
  * `mapDialogStack` hands back the SAME reference instead of allocating a fresh `[]`
- * on every call. Never mutated: pushes, pops, and resets all build fresh arrays.
+ * on every call. Frozen and typed `readonly` so a stray in-place write can never
+ * corrupt this shared instance; pushes, pops, and resets all build fresh arrays.
  */
-const EMPTY_MAP_DIALOG_STACK: MapModalEntry[] = [];
+const EMPTY_MAP_DIALOG_STACK: readonly MapModalEntry[] = Object.freeze([]);
 
 /**
  * Hard cap on `mapDialogStack`'s depth (GH124 follow-up): the two "inside" pushers,

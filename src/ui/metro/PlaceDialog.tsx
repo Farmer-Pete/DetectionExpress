@@ -186,11 +186,13 @@ export function PlaceDialog({
         </section>
 
         <section className="place-actors" aria-label="Actors">
-          <h3 className="place-section-title">Actors</h3>
+          <h3 className="place-section-title" id="place-actors-title">
+            Actors
+          </h3>
           {view.actorRows.length === 0 ? (
             <p className="place-section-empty">No one here right now.</p>
           ) : (
-            <table className="actor-table">
+            <table className="actor-table" aria-labelledby="place-actors-title">
               <thead>
                 <tr>
                   <th>Actor</th>

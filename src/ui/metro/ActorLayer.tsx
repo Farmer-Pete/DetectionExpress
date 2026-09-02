@@ -420,8 +420,11 @@ export function ActorLayer() {
         // tick 0; skip any whose `at` window has not opened yet (fromTick > now), so the
         // map draws only actors present now, matching `actorsAtNode`. This precedes the
         // per-kind dispatch so staff, operators, and hosts are filtered too, not just
-        // riders.
-        if (actor.presence.kind === "at" && actor.presence.fromTick > renderNow) {
+        // riders. Gate on the PUBLISHED tick, not `renderNow` (which extrapolates past
+        // it between publishes), so an actor never renders a frame before the snapshot
+        // and place dialog agree it is present; `renderNow` still drives interpolation
+        // once it is live.
+        if (actor.presence.kind === "at" && actor.presence.fromTick > snapshot.nowTick) {
           continue;
         }
         if (actor.kind === "staff") {
