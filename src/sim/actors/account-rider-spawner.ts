@@ -76,6 +76,16 @@ export interface AccountRiderSpawner {
 }
 
 export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): AccountRiderSpawner {
+  // Fail loudly here, once, rather than let an empty pool fall through to `pick`'s
+  // `?? "rider.x"` fallback on every draw: that literal has no home in either account
+  // namespace, so a silent fallback could collide with `ATTACK_ACCOUNT_NAMESPACE` and
+  // break the disjointness invariant every benign draw depends on (see the module doc).
+  if (config.benignAccounts.length === 0) {
+    throw new Error(
+      "createAccountRiderSpawner: config.benignAccounts must be non-empty; got an empty pool.",
+    );
+  }
+
   // A distinct seeded stream, keyed off the run seed but separate from every actor's,
   // so the spawn cadence never shares a stream with an account rider's own draws.
   const rng = randomLcg(actorSeedHash(config.seed, "account-rider-spawner"));
@@ -88,6 +98,9 @@ export function createAccountRiderSpawner(config: AccountRiderSpawnerConfig): Ac
 
   const makeAdmission = (atTick: number): Admission<WorldReading, WorldEnv> => {
     const id = `A${String(births++).padStart(6, "0")}`;
+    // `accounts` is validated non-empty above; `?? "rider.x"` is a type-level
+    // non-null guard only (`pick`'s return type is `T | undefined`), never a real
+    // fallback path.
     const account = pick(accounts) ?? "rider.x";
     const station = pick(stations)?.id ?? stations[0]?.id ?? "cen";
     const terminal = pick(KIOSK_TERMINALS) ?? "K1";

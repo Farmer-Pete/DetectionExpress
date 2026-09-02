@@ -96,12 +96,15 @@ describe("buildBaselineCast", () => {
 });
 
 describe("engine + baseline cast: the endless calm run (GH126-PLAN.md M1, seams 3, 4, 5)", () => {
-  function launchBaseline(onCheckpoint?: (o: CheckpointObservation) => void) {
+  function launchBaseline(
+    onCheckpoint?: (o: CheckpointObservation) => void,
+    setSnapshot?: (s: SimSnapshot) => void,
+  ) {
     const driver = new ManualDriver();
     const { scenarioCast, ambientCast, scoredIngest } = buildBaselineCast(SEED);
     const options: StartOptions = {
       getGraph,
-      setSnapshot: () => undefined,
+      setSnapshot: setSnapshot ?? (() => undefined),
       algorithm: idleAlgorithm,
       scorer: createScorer([], SCORER_CONFIG),
       generator: () => null,
@@ -135,23 +138,7 @@ describe("engine + baseline cast: the endless calm run (GH126-PLAN.md M1, seams 
 
   it("keeps running well past where any bounded run would have concluded, never won or failed", async () => {
     const snapshots: SimSnapshot[] = [];
-    const driver = new ManualDriver();
-    const { scenarioCast, ambientCast, scoredIngest } = buildBaselineCast(SEED);
-    const handle = start({
-      getGraph,
-      setSnapshot: (s) => snapshots.push(s),
-      algorithm: idleAlgorithm,
-      scorer: createScorer([], SCORER_CONFIG),
-      generator: () => null,
-      serviceRate: { num: 1_000_000, den: 1 },
-      checkpoints: [],
-      waves: [],
-      scheduleMode: "endless",
-      scenarioCast,
-      ambientCast,
-      scoredIngest,
-      driver,
-    });
+    const { handle, driver } = launchBaseline(undefined, (s) => snapshots.push(s));
     await step(driver, 300, 30);
     expect(snapshots.at(-1)?.status).toBe("running");
     handle.stop();
@@ -160,23 +147,7 @@ describe("engine + baseline cast: the endless calm run (GH126-PLAN.md M1, seams 
 
   it("scores account-rider kiosk readings (admits scored Events) over a perpetual run", async () => {
     const snapshots: SimSnapshot[] = [];
-    const driver = new ManualDriver();
-    const { scenarioCast, ambientCast, scoredIngest } = buildBaselineCast(SEED);
-    const handle = start({
-      getGraph,
-      setSnapshot: (s) => snapshots.push(s),
-      algorithm: idleAlgorithm,
-      scorer: createScorer([], SCORER_CONFIG),
-      generator: () => null,
-      serviceRate: { num: 1_000_000, den: 1 },
-      checkpoints: [],
-      waves: [],
-      scheduleMode: "endless",
-      scenarioCast,
-      ambientCast,
-      scoredIngest,
-      driver,
-    });
+    const { handle, driver } = launchBaseline(undefined, (s) => snapshots.push(s));
     await step(driver, 120, 30);
     expect(snapshots.at(-1)?.admitted).toBeGreaterThan(0);
     handle.stop();
@@ -185,23 +156,7 @@ describe("engine + baseline cast: the endless calm run (GH126-PLAN.md M1, seams 
 
   it("tags a live account-rider actor scored-scenario and a live plain rider ambient (seam 5)", async () => {
     const snapshots: SimSnapshot[] = [];
-    const driver = new ManualDriver();
-    const { scenarioCast, ambientCast, scoredIngest } = buildBaselineCast(SEED);
-    const handle = start({
-      getGraph,
-      setSnapshot: (s) => snapshots.push(s),
-      algorithm: idleAlgorithm,
-      scorer: createScorer([], SCORER_CONFIG),
-      generator: () => null,
-      serviceRate: { num: 1_000_000, den: 1 },
-      checkpoints: [],
-      waves: [],
-      scheduleMode: "endless",
-      scenarioCast,
-      ambientCast,
-      scoredIngest,
-      driver,
-    });
+    const { handle, driver } = launchBaseline(undefined, (s) => snapshots.push(s));
     await step(driver, 120, 30);
     const actors = snapshots.flatMap((s) => s.actors);
     const accountRiders = actors.filter((a) => a.kind === "account-rider");
@@ -216,23 +171,7 @@ describe("engine + baseline cast: the endless calm run (GH126-PLAN.md M1, seams 
 
   it("always publishes a calm wave reading under endless mode, never incoming or active", async () => {
     const snapshots: SimSnapshot[] = [];
-    const driver = new ManualDriver();
-    const { scenarioCast, ambientCast, scoredIngest } = buildBaselineCast(SEED);
-    const handle = start({
-      getGraph,
-      setSnapshot: (s) => snapshots.push(s),
-      algorithm: idleAlgorithm,
-      scorer: createScorer([], SCORER_CONFIG),
-      generator: () => null,
-      serviceRate: { num: 1_000_000, den: 1 },
-      checkpoints: [],
-      waves: [],
-      scheduleMode: "endless",
-      scenarioCast,
-      ambientCast,
-      scoredIngest,
-      driver,
-    });
+    const { handle, driver } = launchBaseline(undefined, (s) => snapshots.push(s));
     await step(driver, 90, 30);
     expect(snapshots.at(-1)?.wave).toEqual({
       phase: "calm",

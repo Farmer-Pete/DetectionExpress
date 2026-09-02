@@ -112,4 +112,16 @@ describe("ChaosLadder", () => {
     expect(screen.getByText(/cooldown/i)).toBeDefined();
     expect(screen.getByText(/42/)).toBeDefined();
   });
+
+  // CodeRabbit (PR #130): a level-0 stop still runs its final cooldown out (see
+  // `advanceChaosLoop` in `engine.ts`), but no wave follows it, so "next wave in..."
+  // would be a lie. Matches `chaosWaveReading`'s own `selectedLevel > 0` gate.
+  it("shows no phase indicator during the final cooldown after selecting level 0", () => {
+    renderLadder({
+      selectedLevel: 0,
+      phase: { kind: "cooldown", selectedLevel: 0, cooldownRemaining: 42 },
+    });
+    expect(screen.queryByText(/cooldown/i)).toBeNull();
+    expect(screen.queryByText(/wave active/i)).toBeNull();
+  });
 });

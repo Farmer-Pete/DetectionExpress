@@ -53,6 +53,7 @@ import {
   CORRECTNESS_WINDOW,
   DECISIONS_CAP,
   GAME_SECONDS_PER_TICK,
+  MAX_CHAOS_LEVEL,
   PROFILER_VERSION,
   WAVE_DRAIN_MARGIN_TICKS,
 } from "./tuning";
@@ -730,9 +731,17 @@ export function createRunController(deps: RunControllerDeps): RunController {
   // the handle itself no-ops outside endless mode or during a wave's cooldown.
   const triggerWave = (): WaveId | null => engine?.triggerWave() ?? null;
 
-  // Retain the selected chaos level and, when a clock is live, apply it at once. With
-  // no engine live it just stores the value; startEngine reapplies it on the next start.
+  // Validate before retaining, mirroring `setSpeed` above: the engine itself ignores
+  // a non-integer or out-of-range level (`engine.ts`'s own `setChaosLevel` guard), so
+  // without this check an invalid value would still overwrite a valid retained level
+  // here, then get lost (never reapplied) on the next `run()`. Ignore invalid values
+  // rather than throw, since the engine's guard is itself a silent ignore, not a
+  // throw. Then, when a clock is live, apply it at once. With no engine live it just
+  // stores the value; startEngine reapplies it on the next start.
   const setChaosLevel = (level: number): void => {
+    if (!Number.isInteger(level) || level < 0 || level > MAX_CHAOS_LEVEL) {
+      return;
+    }
     chaosLevel = level;
     engine?.setChaosLevel(level);
   };

@@ -13,7 +13,7 @@ import {
   SCORER_CONFIG,
   type ServiceRateHandle,
 } from "./run-controller";
-import { GAME_SECONDS_PER_TICK, WAVE_DRAIN_MARGIN_TICKS } from "./tuning";
+import { GAME_SECONDS_PER_TICK, MAX_CHAOS_LEVEL, WAVE_DRAIN_MARGIN_TICKS } from "./tuning";
 
 const algo: LoadedAlgorithm = { normalize: (raw) => raw, detect: () => [] };
 
@@ -840,6 +840,37 @@ describe("run controller", () => {
     controller.run(); // a replacement run reapplies the retained level
     await flush();
     expect(levels).toEqual([0, 1, 1]); // start 0 default, explicit 1, then start reapply 1
+  });
+
+  it("ignores a non-integer or out-of-range chaos level before it retains it", async () => {
+    const levels: number[] = [];
+    let call = 0;
+    const controller = createRunController(
+      baseDeps({
+        getAlgorithmSource: () => sourceMode(`source-${call}`),
+        start: () => {
+          call++;
+          return {
+            stop: () => undefined,
+            pause: () => undefined,
+            resume: () => undefined,
+            setSpeed: () => undefined,
+            triggerWave: () => null,
+            setChaosLevel: (level) => levels.push(level),
+            whenStopped: new Promise(() => undefined),
+          };
+        },
+      }),
+    );
+    controller.run(); // first start reapplies the default level 0
+    await flush();
+    controller.setChaosLevel(1); // valid: retained
+    controller.setChaosLevel(2.5); // invalid: non-integer, ignored
+    controller.setChaosLevel(MAX_CHAOS_LEVEL + 1); // invalid: out of range, ignored
+    controller.setChaosLevel(-1); // invalid: out of range, ignored
+    controller.run(); // a replacement run reapplies the retained level, still 1
+    await flush();
+    expect(levels).toEqual([0, 1, 1]); // neither invalid call ever overwrote or reapplied
   });
 
   it("rejects a speed outside 0.5|1|2 before it retains it", async () => {

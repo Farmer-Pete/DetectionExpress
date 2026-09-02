@@ -30,12 +30,18 @@ interface ChaosLadderProps {
 
 const RADIO_GROUP_NAME = "chaos-level";
 
-/** The phase line shown above the ladder while a cycle is running, or null while idle. */
+/**
+ * The phase line shown above the ladder while a cycle is running, or null while
+ * idle. A `cooldown` phase with `selectedLevel === 0` is the final cooldown after a
+ * level-0 stop (`engine.ts`'s `advanceChaosLoop` still lets that cooldown run out;
+ * no wave follows it), so "next wave in..." would be false — treat it like idle.
+ * Mirrors `chaosWaveReading`'s own `selectedLevel > 0` gate (`sim/wave-state.ts`).
+ */
 function phaseText(phase: ChaosPhase): string | null {
   if (phase.kind === "wave") {
     return `Wave active: level ${phase.activeLevel}`;
   }
-  if (phase.kind === "cooldown") {
+  if (phase.kind === "cooldown" && phase.selectedLevel > 0) {
     return `Cooldown: next wave in ${phase.cooldownRemaining} ticks`;
   }
   return null;

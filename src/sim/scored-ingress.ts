@@ -76,9 +76,13 @@ export class ScoredIngress {
 
   /**
    * How many offered Events are buffered here, not yet taken by `pump` (GH126-PLAN.md
-   * finding 8, seam 12). The engine's wave-scoped queue metric adds this to the
-   * channel sizes so the backlog it peaks over includes Events still waiting inside
-   * this source, not only those already pushed onto a channel. Zero once drained.
+   * finding 8, seam 12). The engine no longer folds this into its wave-scoped queue
+   * metric: that metric now reads the EXACT offered-minus-processed watermark
+   * (`nextScoredEventId - inspector.processedCount()`, in `engine.ts`'s per-tick
+   * handler), which already counts an Event buffered here without needing this
+   * getter (code-review fix 1). `size` stays for the ingress's own backlog getter
+   * and the tests below, which exercise it directly against `offer`/`pump` rather
+   * than through the engine's metric. Zero once drained.
    */
   get size(): number {
     return this.queue.length;

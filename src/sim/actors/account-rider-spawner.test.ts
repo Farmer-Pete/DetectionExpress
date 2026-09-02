@@ -163,4 +163,18 @@ describe("createAccountRiderSpawner benign namespace and capped fumbles", () => 
     // reintroduced behavior is actually live, not merely absent.
     expect(fumbleCounts.some((count) => count > 0)).toBe(true);
   });
+
+  // CodeRabbit (PR #130): an empty pool must fail loudly at construction, not
+  // silently fall back to the literal "rider.x" (which could collide with
+  // ATTACK_ACCOUNT_NAMESPACE and break the disjointness invariant).
+  it("throws at construction on an empty benign-account pool", () => {
+    expect(() =>
+      createAccountRiderSpawner({
+        seed: 7,
+        world,
+        target: ACCOUNT_RIDER_TARGET,
+        benignAccounts: [],
+      }),
+    ).toThrow(/benignAccounts/);
+  });
 });
