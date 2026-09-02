@@ -13,6 +13,11 @@
  * after the last arrival rather than one checkpoint per wave. `planAttacks()`
  * still gets exactly `WAVE_COUNT` waves to plan one attack batch per wave; only
  * the benign arrival shape underneath changes.
+ *
+ * GH126-PLAN.md M1 adds a third `mode`: `"endless"` builds NO waves and NO
+ * checkpoints at all. The perpetual ambient account-rider spawner owns arrival
+ * cadence for the endless baseline, not this schedule, and an empty checkpoint
+ * list makes the engine's checkpoint loop inert, so the run never concludes.
  */
 import {
   DRAIN_GAP_TICKS,
@@ -52,6 +57,12 @@ export function buildSchedule(mode: ScheduleMode = "waves"): {
   waves: Wave[];
   checkpoints: Checkpoint[];
 } {
+  if (mode === "endless") {
+    // No ramp, no checkpoints: the ambient account-rider spawner owns arrival
+    // cadence, and an empty checkpoint list makes the checkpoint loop inert
+    // (GH126-PLAN.md M1).
+    return { waves: [], checkpoints: [] };
+  }
   if (mode === "steady") {
     return buildSteadySchedule();
   }

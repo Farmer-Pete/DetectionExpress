@@ -125,3 +125,15 @@ describe('buildSchedule("steady") (GH124-PLAN.md Checkpoint 3)', () => {
     expect(waves.length).toBe(WAVE_COUNT);
   });
 });
+
+describe('buildSchedule("endless") (GH126-PLAN.md M1, seam 1)', () => {
+  it("returns no waves and no checkpoints: no ramp", () => {
+    const { waves, checkpoints } = buildSchedule("endless");
+    expect(waves).toEqual([]);
+    expect(checkpoints).toEqual([]);
+  });
+
+  it("is deterministic: repeated calls return the same empty schedule", () => {
+    expect(buildSchedule("endless")).toEqual(buildSchedule("endless"));
+  });
+});

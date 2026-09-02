@@ -239,6 +239,38 @@ describe("assertWaveScheduleOrdered: mode-gated successor gap (GH124-PLAN.md Che
   });
 });
 
+describe('assertWaveScheduleOrdered: "endless" mode (GH126-PLAN.md M1, seam 2)', () => {
+  it('accepts the empty wave list buildSchedule("endless") always returns', () => {
+    const { waves } = buildSchedule("endless");
+    expect(() => assertWaveScheduleOrdered(waves, "endless")).not.toThrow();
+  });
+
+  it("accepts an empty wave list directly, with no successor-gap or steady-rate checks to fail", () => {
+    expect(() => assertWaveScheduleOrdered([], "endless")).not.toThrow();
+  });
+
+  it("still rejects a malformed wave under endless mode, if one were ever passed", () => {
+    const badField: Wave[] = [{ startTick: -1, durationTicks: 5, eventsPerTick: 1 }];
+    expect(() => assertWaveScheduleOrdered(badField, "endless")).toThrow();
+  });
+
+  it("does not run the waves-mode successor-gap check under endless mode: touching waves pass", () => {
+    const touching: Wave[] = [
+      { startTick: 0, durationTicks: 10, eventsPerTick: 5 },
+      { startTick: 10, durationTicks: 5, eventsPerTick: 5 }, // gap 0
+    ];
+    expect(() => assertWaveScheduleOrdered(touching, "endless")).not.toThrow();
+  });
+
+  it("does not run the steady-mode contiguous/equal-rate check under endless mode: a gapped, mixed-rate list passes", () => {
+    const gappedMixedRate: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 1 },
+      { startTick: 20, durationTicks: 5, eventsPerTick: 3 },
+    ];
+    expect(() => assertWaveScheduleOrdered(gappedMixedRate, "endless")).not.toThrow();
+  });
+});
+
 describe('assertWaveScheduleOrdered: "steady" mode rejects a fractional eventsPerTick (CodeRabbit #2)', () => {
   it("rejects contiguous steady waves at a fractional rate, since the per-wave accumulator reset would break the gapless stream", () => {
     // Two contiguous 3-tick waves at 0.5/tick would admit ticks [1, 4] instead

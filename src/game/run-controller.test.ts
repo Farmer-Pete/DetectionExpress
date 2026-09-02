@@ -315,6 +315,42 @@ describe("run controller", () => {
     expect(seen[0]?.scheduleMode).toBe("steady");
   });
 
+  it('runs the baseline cast under "endless": no waves, no checkpoints, an empty-member scenarioCast, and a never-closing scoredIngest, without ever calling buildBlueprint or scenario.generate (GH126-PLAN.md M1)', async () => {
+    const seen: StartOptions[] = [];
+    let blueprintCalls = 0;
+    let generateCalls = 0;
+    const trackedScenario: Scenario = {
+      id: "test",
+      generate: () => {
+        generateCalls += 1;
+        return emptyRun;
+      },
+    };
+    const controller = createRunController(
+      baseDeps({
+        scenario: trackedScenario,
+        scheduleMode: "endless",
+        buildBlueprint: (seed, mode) => {
+          blueprintCalls += 1;
+          return buildRealBlueprint(seed, mode);
+        },
+        start: (options) => {
+          seen.push(options);
+          return fakeHandle();
+        },
+      }),
+    );
+    controller.run();
+    await flush();
+    expect(seen[0]?.scheduleMode).toBe("endless");
+    expect(seen[0]?.checkpoints).toEqual([]);
+    expect(seen[0]?.waves).toEqual([]);
+    expect(seen[0]?.scenarioCast?.members).toEqual([]);
+    expect(seen[0]?.scoredIngest?.lastScoredTick).toBe(Number.POSITIVE_INFINITY);
+    expect(blueprintCalls).toBe(0); // no attack blueprint: the baseline plans no Attack
+    expect(generateCalls).toBe(0); // no scenario batch generation either
+  });
+
   it("injects the profiled service rate into start (M2)", async () => {
     const seen: StartOptions[] = [];
     const controller = createRunController(

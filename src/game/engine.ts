@@ -301,7 +301,12 @@ interface MapView {
   getWorldEvents: () => readonly WorldLogEvent[];
 }
 
-/** The wave reading `"steady"` mode always publishes: calm, forever, no matter the ticks. */
+/**
+ * The wave reading `"steady"` and `"endless"` mode always publish: calm, forever,
+ * no matter the ticks. `"endless"` (GH126-PLAN.md M1) carries no waves at all, so
+ * `waveStateAt` would have nothing to derive a phase from anyway; this constant
+ * makes that explicit rather than relying on an empty-array coincidence.
+ */
 const STEADY_WAVE_READING: WaveReading = {
   phase: "calm",
   index: null,
@@ -377,7 +382,9 @@ function makeSampler(
       events: ring.events,
       processed: ring.processed,
       wave:
-        scheduleMode === "steady" ? STEADY_WAVE_READING : waveStateAt(now, waves, WAVE_WARN_TICKS),
+        scheduleMode === "steady" || scheduleMode === "endless"
+          ? STEADY_WAVE_READING
+          : waveStateAt(now, waves, WAVE_WARN_TICKS),
       scheduleMode,
       // GH117 Part B: the merged snapshot's map fields. The cast stepper folds the whole
       // living metro — scenario cast plus ambient life — into one authoritative view the
@@ -937,19 +944,34 @@ export function start(options: StartOptions): EngineHandle {
         }
       };
 
-      // Admit each ambient spawner's due births at the frontier and seed each view,
-      // tagging every admission `"ambient"`. Each spawner is capped by its own live count.
-      // Ticked at the post-advance frontier so an admission lands at or after it.
+      // Admit each ambient spawner's due births at the frontier and seed each view.
+      // Each spawner is capped by its own live count. Ticked at the post-advance
+      // frontier so an admission lands at or after it.
+      //
+      // GH126-PLAN.md M1, seam 5: under `"endless"` (the baseline), an account-rider
+      // admission is tagged `"scored-scenario"`, not `"ambient"`, so its kiosk
+      // readings cross the scoring boundary above and enter the baseline's scored
+      // pipeline — there is no scenario cast in baseline mode to score off instead.
+      // A plain rider or staff admission always stays `"ambient"`: visual only,
+      // never scored. Outside `"endless"` (a blueprint-driven `"waves"`/`"steady"`
+      // run), every ambient admission stays `"ambient"` exactly as before: that
+      // scenario's own cast members already carry `"scored-scenario"` provenance,
+      // and promoting the ambient account rider too would double-score against the
+      // precomposed run the parity guards check against (GH117-PLAN.md guard 1).
       const spawnTransients = (frontier: number): void => {
         const admit = (admissions: readonly Admission<WorldReading, WorldEnv>[]): void => {
           for (const admission of admissions) {
             const firstTick = schedule.admit(admission);
-            provenanceById.set(admission.actor.id, "ambient");
+            const provenance: ActorProvenance =
+              admission.kind === "account-rider" && scheduleMode === "endless"
+                ? "scored-scenario"
+                : "ambient";
+            provenanceById.set(admission.actor.id, provenance);
             seedView(
               admission.actor.id,
               admission.kind,
               admission.initialPresence(firstTick),
-              "ambient",
+              provenance,
             );
           }
         };

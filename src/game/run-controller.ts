@@ -26,12 +26,14 @@ import type { PipeEvent } from "../sim/event";
 import type { GraphEdge, GraphNode } from "../sim/graph";
 import { RuleError } from "../sim/rule-error";
 import type { GeneratedRun, Scenario, ScheduleMode } from "../sim/scenario";
+import { buildSchedule } from "../sim/schedule";
 import { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldEnv } from "../sim/world-reading";
 import { type LoadedAlgorithm, loadAlgorithm as loadAlgorithmDefault } from "./algorithm";
 import { buildAmbientFixtures, buildAmbientSpawners } from "./ambient-cast";
+import { buildBaselineCast } from "./baseline-cast";
 import {
   type AmbientCast,
   type EngineHandle,
@@ -541,36 +543,56 @@ export function createRunController(deps: RunControllerDeps): RunController {
       // or replaced, so a failed dry-run never orphans the running engine.
       let phase = "setup";
       try {
-        // Build the blueprint once when the scenario provides one (GH117 Part B). The
-        // scorer and generator come from its precomposed run — byte for byte what
-        // `generate(seed)` returns — and the same blueprint yields the live cast + env.
-        // A scenario without a blueprint falls back to `generate` and runs with no cast.
+        // GH126-PLAN.md M1: under "endless" the app runs the calm baseline, never a
+        // Scenario's Attack. It skips `buildBlueprint`/`scenario.generate` entirely —
+        // there is no attack to plan — and instead runs `buildBaselineCast`'s
+        // empty-member scenario cast, ambient life, and never-closing scored ingress,
+        // with zero attacks in the scorer and no waves or checkpoints (finding 9).
+        //
+        // Outside "endless" (this build's own dev/test paths, "waves"/"steady"), the
+        // blueprint drives a live cast exactly as before (GH117 Part B): the scorer
+        // and generator come from its precomposed run — byte for byte what
+        // `generate(seed)` returns — and the same blueprint yields the live cast +
+        // env. A scenario without a blueprint falls back to `generate` and runs with
+        // no cast.
         const scheduleMode: ScheduleMode = deps.scheduleMode ?? "waves";
-        const blueprint = deps.buildBlueprint?.(seed, scheduleMode) ?? null;
-        const generated: GeneratedRun = blueprint
-          ? {
-              events: [...blueprint.precomposed.events],
-              attacks: [...blueprint.precomposed.attacks],
-              checkpoints: [...blueprint.checkpoints],
-              waves: [...blueprint.waves],
-            }
-          : deps.scenario.generate(seed); // fresh per run
+        let generated: GeneratedRun;
+        let mapCast: { scenarioCast: ScenarioCast; ambientCast: AmbientCast } | undefined;
+        let scoredIngest: StartOptions["scoredIngest"];
+        if (scheduleMode === "endless") {
+          const { waves, checkpoints } = buildSchedule("endless");
+          generated = { events: [], attacks: [], checkpoints, waves };
+          const baseline = buildBaselineCast(seed);
+          mapCast = { scenarioCast: baseline.scenarioCast, ambientCast: baseline.ambientCast };
+          scoredIngest = baseline.scoredIngest;
+        } else {
+          const blueprint = deps.buildBlueprint?.(seed, scheduleMode) ?? null;
+          generated = blueprint
+            ? {
+                events: [...blueprint.precomposed.events],
+                attacks: [...blueprint.precomposed.attacks],
+                checkpoints: [...blueprint.checkpoints],
+                waves: [...blueprint.waves],
+              }
+            : deps.scenario.generate(seed); // fresh per run
+          mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
+          // GH117 Part C: when a blueprint drives a live cast, score off the live
+          // stepped stream, not the pre-generated `generator`. The engine offers each
+          // scored reading into this ingress and closes it at `lastScoredTick`;
+          // `generator` stays wired as the no-blueprint fallback. Guard 2 proves the
+          // two agree.
+          scoredIngest = blueprint
+            ? {
+                ingress: new ScoredIngress(),
+                toEvent: blueprint.toEvent,
+                lastScoredTick: blueprint.lastScoredTick,
+              }
+            : undefined;
+        }
         const scorer = createScorer(generated.attacks, SCORER_CONFIG);
         let index = 0;
         const generator = (): PipeEvent | null =>
           index < generated.events.length ? (generated.events[index++] ?? null) : null;
-        const mapCast = blueprint ? buildMapCast(blueprint, seed) : undefined;
-        // GH117 Part C: when a blueprint drives a live cast, score off the live stepped
-        // stream, not the pre-generated `generator`. The engine offers each scored
-        // reading into this ingress and closes it at `lastScoredTick`; `generator`
-        // stays wired as the no-blueprint fallback. Guard 2 proves the two agree.
-        const scoredIngest = blueprint
-          ? {
-              ingress: new ScoredIngress(),
-              toEvent: blueprint.toEvent,
-              lastScoredTick: blueprint.lastScoredTick,
-            }
-          : undefined;
         deps.setError(null);
         deps.setSnapshot(emptySnapshot());
         phase = "start";
