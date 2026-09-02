@@ -20,6 +20,19 @@ export interface ActorView {
    * legacy world engine never sets it, and it is drawn by `kind`, not by provenance.
    */
   provenance?: "scored-scenario" | "ambient";
+  /**
+   * The station this actor is currently trying to reach (GH124-PLAN.md Checkpoint 4
+   * Part 2), for the place dialog's "heading to X" wording. View-only, like
+   * `presence`: it never affects scoring, the world-event ring, or the #117 parity
+   * guards. Populated only for a trip actor (`rider`, `account-rider`) that has
+   * actually committed to a destination right now — `world-rider.ts` sets it once its
+   * trip core picks one and clears it once the trip ends. `account-rider` never sets
+   * it: it only visits a kiosk and leaves, with no metro destination of its own.
+   * Every other kind (`train`, `staff`, `operator`, `host`, `pin-attacker`) never sets
+   * it either. Undefined for a waiting rider with no chosen destination yet, or for
+   * one whose trip has already ended.
+   */
+  destination?: MapNodeId;
 }
 
 /**

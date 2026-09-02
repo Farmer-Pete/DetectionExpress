@@ -21,7 +21,25 @@ import { sensorCodeFor, type WorldLogEvent } from "../../sim/world-log";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { placeIcon, sensorIcon } from "../icons/sensor-icons";
 import { formatClock, toLogRow } from "../log/formatters";
-import { type ActorLine, type DeviceView, placeView } from "./place-view";
+import { type ActorSummaryRow, type DeviceView, placeView, ROLE_LABEL } from "./place-view";
+
+/**
+ * A small color per actor kind for the ACTORS table's glyph dot, matching the map's
+ * own per-kind treatment (`ActorLayer.tsx`) where one exists: `--ink` for a rider,
+ * `--s-kiosk` for an account rider (it reads as "at the kiosk" there too), `--ok` for
+ * staff, `--s-train` for a train, `--threat` for a pin-attacker (the map rings it in
+ * the same color). A host/operator has no map glyph of its own (it is drawn only as
+ * its command/relay flash), so it gets a neutral fixture tone here instead.
+ */
+const ACTOR_GLYPH_COLOR: Record<ActorSummaryRow["kind"], string> = {
+  rider: "var(--ink)",
+  "account-rider": "var(--s-kiosk)",
+  train: "var(--s-train)",
+  staff: "var(--ok)",
+  operator: "var(--a3)",
+  host: "var(--a3)",
+  "pin-attacker": "var(--threat)",
+};
 
 interface PlaceDialogProps {
   /** Focus-restore fallback for when the trigger element is no longer connected. */
@@ -128,14 +146,23 @@ export function PlaceDialog({ fallbackFocusRef }: PlaceDialogProps) {
 
         <section className="place-actors" aria-label="Actors">
           <h3 className="place-section-title">Actors</h3>
-          {view.actors.length === 0 ? (
+          {view.actorRows.length === 0 ? (
             <p className="place-section-empty">No one here right now.</p>
           ) : (
-            <ul className="place-actor-list">
-              {view.actors.map((actorLine) => (
-                <ActorRow key={actorLine.id} actorLine={actorLine} />
-              ))}
-            </ul>
+            <table className="actor-table">
+              <thead>
+                <tr>
+                  <th>Actor</th>
+                  <th>Activity</th>
+                  <th className="actor-table-count-header">Count</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.actorRows.map((row) => (
+                  <ActorTableRow key={`${row.kind}:${row.activity}`} row={row} />
+                ))}
+              </tbody>
+            </table>
           )}
         </section>
 
@@ -171,15 +198,26 @@ function DeviceCard({ device }: { device: DeviceView }) {
   );
 }
 
-/** One actor row: role, id, and its live activity (from `describePresence`). */
-function ActorRow({ actorLine }: { actorLine: ActorLine }) {
+/**
+ * One aggregated ACTORS row (GH124-PLAN.md Checkpoint 4 Part 4): a kind glyph + label,
+ * its shared activity phrase, and how many actors are doing exactly that right now.
+ * A pin-attacker row (`row.tone === "threat"`) renders in the threat color, so a
+ * player spots an attacker in the table before opening a single finding.
+ */
+function ActorTableRow({ row }: { row: ActorSummaryRow }) {
   return (
-    <li className="place-actor-row">
-      <span className="place-actor-role">{actorLine.role}</span>
-      <span className="place-actor-id">{actorLine.id}</span>
-      <span className="place-actor-doing">{actorLine.doing}</span>
-      <span className="place-actor-heading">{actorLine.heading}</span>
-    </li>
+    <tr className={row.tone === "threat" ? "actor-table-row-threat" : undefined}>
+      <td className="actor-table-actor">
+        <span
+          className="actor-table-glyph"
+          style={{ background: ACTOR_GLYPH_COLOR[row.kind] }}
+          aria-hidden="true"
+        />
+        {ROLE_LABEL[row.kind]}
+      </td>
+      <td className="actor-table-activity">{row.activity}</td>
+      <td className="actor-table-count">{row.count}</td>
+    </tr>
   );
 }
 

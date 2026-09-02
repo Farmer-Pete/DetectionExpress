@@ -772,6 +772,25 @@ export function start(options: StartOptions): EngineHandle {
             views.set(id, { ...view, presence });
           }
         }
+        // GH124-PLAN.md Checkpoint 4 Part 2: overlay the tick's destination deltas the
+        // same way `presences` does above, in its own loop since it is its own delta
+        // map. `destinations` uses `MapNodeId | null`, not `MapNodeId | undefined`, so
+        // an explicit clear (`null`) is a real delta this loop applies — by dropping
+        // the key entirely, never by assigning it `undefined` (an `exactOptionalPropertyTypes`
+        // violation: `ActorView.destination` being unset and being present-but-undefined
+        // are not the same type here).
+        for (const [id, destination] of step.destinations) {
+          const view = views.get(id);
+          if (view === undefined) {
+            continue;
+          }
+          if (destination === null) {
+            const { destination: _cleared, ...rest } = view;
+            views.set(id, rest);
+          } else {
+            views.set(id, { ...view, destination });
+          }
+        }
         // Evict the dormant actor from both registries, or provenanceById grows with
         // total admissions instead of live actors on a perpetual run. Safe: this
         // step's readings (above) already read provenance before this loop runs, and

@@ -35,13 +35,15 @@
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
- * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open` — and hands it in
- * along with all three overlays, `IntroOverlay`, `TraceOverlay`, and the side panel,
- * as `ModalHost`'s `overlays` prop. All three render as siblings of the inert shell,
- * so a screen reader's browse mode and the keyboard cannot reach shell content
- * behind any of them. `openChaos`/`openAlgorithm` are mutually exclusive with the
- * trace overlay (`useSidePanel`'s own concern), so the shell never stacks two dim
- * backdrops.
+ * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open || placeOpen ||
+ * eventOpen` — and hands it in along with all five overlays, `IntroOverlay`,
+ * `TraceOverlay`, `PlaceDialog` (GH124-PLAN.md Checkpoint 4), `EventDialog`
+ * (Checkpoint 5), and the side panel, as `ModalHost`'s `overlays` prop. All five
+ * render as siblings of the inert shell, so a screen reader's browse mode and the
+ * keyboard cannot reach shell content behind any of them. `openChaos`/`openAlgorithm`
+ * are mutually exclusive with the trace overlay (`useSidePanel`'s own concern), and
+ * `onMapSelect`/`onEventSelect` below enforce the same exclusivity for the place and
+ * event dialogs, so the shell never stacks two dim backdrops.
  *
  * `App` also publishes `modalOpen` to the store as `overlayOpen`, with
  * `useLayoutEffect` (not a passive effect) so it lands in the same commit as
@@ -304,18 +306,19 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   return (
     // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
-    // (GH105-PLAN.md). `modalOpen` covers all three overlays, so the shell goes
-    // inert while ANY of the intro, the trace dialog, or the side panel is open, and
-    // a screen reader's browse mode and the keyboard cannot reach shell content
-    // behind any of them. The shake class lands on the shell class it manages, not
-    // the outer `.app` wrapper, so its transform never turns into a containing block
-    // for an overlay's `position: fixed` backdrop (F006). `shellExtraClass` ANDs
-    // `shaking` with `status === "running"`, so an in-flight shake clears
-    // immediately if the run concludes mid-animation, instead of running out its own
-    // timer over a frozen frame (CodeRabbit review). All three overlays are
-    // ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
+    // (GH105-PLAN.md). `modalOpen` covers all five overlays, so the shell goes
+    // inert while ANY of the intro, the trace dialog, the place dialog, the event
+    // dialog, or the side panel is open, and a screen reader's browse mode and the
+    // keyboard cannot reach shell content behind any of them. The shake class lands
+    // on the shell class it manages, not the outer `.app` wrapper, so its transform
+    // never turns into a containing block for an overlay's `position: fixed` backdrop
+    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"`, so an
+    // in-flight shake clears immediately if the run concludes mid-animation, instead
+    // of running out its own timer over a frozen frame (CodeRabbit review). All five
+    // overlays are ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
     // `TraceOverlay` unconditionally (it renders null itself when neither selection
-    // is set), and the side panel when `sidePanel.open`.
+    // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
+    // when its own selection is unset), and the side panel when `sidePanel.open`.
     <ModalHost
       modalOpen={modalOpen}
       shellExtraClass={shaking && status === "running" ? "shake" : undefined}

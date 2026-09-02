@@ -68,7 +68,7 @@ describe("PlaceDialog", () => {
     expect(screen.getByText("Train tracker")).toBeDefined();
   });
 
-  it("shows a train's onboard riders and no devices", () => {
+  it("shows a train's onboard riders, aggregated, and no devices", () => {
     useGameStore.setState({
       mapSelection: { kind: "train", actorId: "T1" },
       snapshot: snapshotWith([
@@ -86,7 +86,11 @@ describe("PlaceDialog", () => {
     });
     render(<PlaceDialog fallbackFocusRef={noFallback()} />);
     expect(screen.getByRole("dialog", { name: /T1/ })).toBeDefined();
-    expect(screen.getByText("R1")).toBeDefined();
+    // The aggregated table: an actor kind/activity/count, never a raw actor id.
+    expect(screen.getByText("Rider")).toBeDefined();
+    expect(screen.getByText("heading to Riverside")).toBeDefined();
+    expect(screen.getByText("1")).toBeDefined();
+    expect(screen.queryByText("R1")).toBeNull();
     expect(screen.getByText("No devices here.")).toBeDefined();
   });
 
@@ -102,7 +106,7 @@ describe("PlaceDialog", () => {
       ]),
     });
     render(<PlaceDialog fallbackFocusRef={noFallback()} />);
-    expect(screen.getByText("R1")).toBeDefined();
+    expect(screen.getByText("waiting for a train")).toBeDefined();
 
     act(() => {
       useGameStore.setState({
@@ -115,7 +119,9 @@ describe("PlaceDialog", () => {
         ]),
       });
     });
-    expect(screen.queryByText("R1")).toBeNull(); // moved off cen, live
+    // Moved off cen, live: the table row is gone and the empty state is back.
+    expect(screen.queryByText("waiting for a train")).toBeNull();
+    expect(screen.getByText("No one here right now.")).toBeDefined();
 
     expect(useGameStore.getState().transport.frozen).toBe(false);
   });
@@ -158,6 +164,69 @@ describe("PlaceDialog", () => {
     render(<PlaceDialog fallbackFocusRef={noFallback()} />);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+});
+
+describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {
+  it("aggregates several actors doing the same thing into one row with a count, not one row each", () => {
+    useGameStore.setState({
+      mapSelection: { kind: "node", id: "cen" },
+      snapshot: snapshotWith([
+        {
+          id: "R1",
+          kind: "rider",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+        {
+          id: "R2",
+          kind: "rider",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+        {
+          id: "R3",
+          kind: "rider",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+      ]),
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    expect(screen.getByText("waiting for a train")).toBeDefined();
+    expect(screen.getByText("3")).toBeDefined();
+    expect(screen.queryByText("R1")).toBeNull();
+  });
+
+  it("sorts a pin-attacker row first and renders it in the threat tone", () => {
+    useGameStore.setState({
+      mapSelection: { kind: "node", id: "cen" },
+      snapshot: snapshotWith([
+        {
+          id: "R1",
+          kind: "rider",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+        {
+          id: "R2",
+          kind: "rider",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+        {
+          id: "P1",
+          kind: "pin-attacker",
+          presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        },
+      ]),
+    });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    const rows = document.querySelectorAll(".actor-table tbody tr");
+    expect(rows[0]?.className).toContain("actor-table-row-threat");
+    expect(rows[0]?.textContent).toContain("Pin attacker");
+  });
+
+  it("shows the empty state when no actor is at the selected place", () => {
+    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" } });
+    render(<PlaceDialog fallbackFocusRef={noFallback()} />);
+    expect(screen.getByText("No one here right now.")).toBeDefined();
+    expect(document.querySelector(".actor-table")).toBeNull();
   });
 });
 

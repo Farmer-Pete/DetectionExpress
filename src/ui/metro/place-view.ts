@@ -5,9 +5,15 @@
  * descriptive text is unit-tested without mounting React.
  *
  * All the mapping functions take `World` so real `world.json` display names surface
- * everywhere — `describePresence` renders "at Central" / "to Market" rather than raw
- * node ids, and `placeView` titles/badges use the same names — sourced from
- * `metroNodes(world)`, never hardcoded.
+ * everywhere — `describePresence` renders "heading to Central" / "heading to Market"
+ * rather than raw node ids, and `placeView` titles/badges use the same names —
+ * sourced from `metroNodes(world)`, never hardcoded.
+ *
+ * The ACTORS section is a compact, aggregated table, not a per-actor list (individual
+ * actor ids are not useful to a player): `actorsAtNode` still returns one line per
+ * actor (the aggregation's input and its own test seam), but `actorSummaryRows`
+ * groups those lines by (kind, activity) and counts each group — see its doc for the
+ * sort order and the pin-attacker threat tone.
  */
 import type { MapSelection } from "../../game/store";
 import type { SimSnapshot } from "../../sim/snapshot";
@@ -36,13 +42,27 @@ export interface DeviceView {
 }
 
 /** One actor row: what draws it on the map (`glyphKind`), its id, a human role label,
- *  and its current activity (`doing`/`heading`, from `describePresence`). */
+ *  and its current activity (a single phrase from `describePresence`, e.g. "heading
+ *  to Riverside" or "waiting for a train"). The aggregation input, and its own test
+ *  seam — `actorSummaryRows` groups these, but never renders them one-for-one. */
 export interface ActorLine {
   glyphKind: ActorView["kind"];
   id: string;
   role: string;
-  doing: string;
-  heading: string;
+  activity: string;
+}
+
+/**
+ * One row of the ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4): every actor
+ * sharing `kind` and `activity` collapses into one counted row, since individual
+ * actor ids are not useful to a player and a station can easily hold a dozen riders.
+ * `tone: "threat"` marks a pin-attacker row for the dialog's threat coloring.
+ */
+export interface ActorSummaryRow {
+  kind: ActorView["kind"];
+  activity: string;
+  count: number;
+  tone?: "threat";
 }
 
 /** The whole dialog's content for one selection. */
@@ -51,7 +71,8 @@ export interface PlaceView {
   iconKind: PlaceKind | undefined;
   meta: readonly MetaBadge[];
   devices: readonly DeviceView[];
-  actors: readonly ActorLine[];
+  /** The ACTORS table's rows: `actorSummaryRows` for this same selection. */
+  actorRows: readonly ActorSummaryRow[];
   /**
    * The world-event ring entries scoped to this selection, newest first
    * (GH124-PLAN.md Checkpoint 5): the SAME `snapshot.worldEvents` ring the unified
@@ -73,8 +94,8 @@ const SENSOR_NAME: Record<SensorCode, string> = {
   O: "Control console",
 };
 
-/** A human label per actor kind, for the actor row's role column. */
-const ROLE_LABEL: Record<ActorView["kind"], string> = {
+/** A human label per actor kind, for the ACTORS table's Actor column. */
+export const ROLE_LABEL: Record<ActorView["kind"], string> = {
   rider: "Rider",
   "account-rider": "Account rider",
   train: "Train",
@@ -113,35 +134,67 @@ function nodeLabel(id: MapNodeId, world: World): string {
 }
 
 /**
- * What a presence is doing right now, and a short description of where it is headed.
- * Exhaustive over `Presence`'s three arms. The `onTrain` arm alone carries only a
- * train id and ticks, so its destination is resolved by looking up that train's own
- * `ActorView` in the snapshot; if the train is not (yet) in the snapshot, it degrades
- * to naming the train instead of a destination.
+ * A single-phrase description of what a presence is doing right now. Exhaustive over
+ * `Presence`'s three arms:
+ *
+ * - `at`: `destination` is the FEASIBILITY answer's plumbed field (GH124-PLAN.md
+ *   Checkpoint 4 Part 1/2) — a trip actor (`rider`, `account-rider`) that has
+ *   committed to a trip carries it (set by `world-rider.ts` the moment its trip core
+ *   picks a destination, cleared once the trip ends), so a waiting rider that HAS
+ *   already chosen where it is going reads "heading to X" instead of a bare "waiting".
+ *   Undefined `destination` reads "waiting for a train": either no trip is chosen
+ *   yet (a rider still planning, or between trips), or the caller never resolves one
+ *   for a kind that has no such concept (a non-trip actor's "on duty" wording is
+ *   decided by the caller, `actorsAtNode`, not here — this function has no actor kind
+ *   to branch on).
+ * - `moving`: always "heading to X", the edge's own `to` node — true regardless of
+ *   kind, since a `moving` presence always carries a real near-term target.
+ * - `onTrain`: the rider carries only a train id and ticks, so its destination is
+ *   resolved by looking up that train's own `ActorView` in the snapshot; if the train
+ *   is not (yet) in the snapshot, it degrades to naming the train instead.
  */
 export function describePresence(
   presence: Presence,
   snapshot: SimSnapshot,
   world: World,
-): { doing: string; heading: string } {
+  destination?: MapNodeId,
+): string {
   switch (presence.kind) {
     case "at":
-      return {
-        doing: presence.untilTick === "open" ? "stationed" : "waiting",
-        heading: `at ${nodeLabel(presence.node, world)}`,
-      };
+      return destination === undefined
+        ? "waiting for a train"
+        : `heading to ${nodeLabel(destination, world)}`;
     case "moving":
-      return { doing: "walking", heading: `to ${nodeLabel(presence.to, world)}` };
+      return `heading to ${nodeLabel(presence.to, world)}`;
     case "onTrain": {
       const train = snapshot.actors.find((actor) => actor.id === presence.train);
-      const destination = train === undefined ? null : trainDestination(train.presence);
-      return {
-        doing: "riding",
-        heading:
-          destination === null ? `on ${presence.train}` : `to ${nodeLabel(destination, world)}`,
-      };
+      const trainDest = train === undefined ? null : trainDestination(train.presence);
+      return trainDest === null
+        ? `riding on ${presence.train}`
+        : `heading to ${nodeLabel(trainDest, world)}`;
     }
   }
+}
+
+/** `rider` and `account-rider`: the two kinds `ActorView.destination` is ever
+ *  populated for (the FEASIBILITY answer, GH124-PLAN.md Checkpoint 4 Part 1). */
+function isTripKind(kind: ActorView["kind"]): boolean {
+  return kind === "rider" || kind === "account-rider";
+}
+
+/**
+ * One actor's activity phrase for the table: a non-trip actor `at` a node (staff,
+ * host, operator, a dwelling train, a pin-attacker) reads "on duty" rather than
+ * "waiting for a train", since `describePresence`'s "at" wording is specifically a
+ * trip actor's fallback and has no meaning for a fixture or an attacker mid-attack.
+ * Every other presence shape (`moving`, `onTrain`, or an "at" trip actor) routes
+ * straight through `describePresence`, destination included.
+ */
+function activityFor(actor: ActorView, snapshot: SimSnapshot, world: World): string {
+  if (actor.presence.kind === "at" && !isTripKind(actor.kind)) {
+    return "on duty";
+  }
+  return describePresence(actor.presence, snapshot, world, actor.destination);
 }
 
 /**
@@ -182,16 +235,64 @@ export function actorsAtNode(nodeId: MapNodeId, snapshot: SimSnapshot, world: Wo
     if (!resolvesHere) {
       continue;
     }
-    const { doing, heading } = describePresence(presence, snapshot, world);
     lines.push({
       glyphKind: actor.kind,
       id: actor.id,
       role: ROLE_LABEL[actor.kind],
-      doing,
-      heading,
+      activity: activityFor(actor, snapshot, world),
     });
   }
   return lines;
+}
+
+/** The `nodeId` a selection resolves to for `actorsAtNode`: the node itself, or a
+ *  train's own actor id (`actorsAtNode`'s doc explains why the two id spaces never
+ *  collide). Shared by `actorSummaryRows` and `placeView` so they scope identically. */
+function actorNodeId(selection: MapSelection): MapNodeId {
+  return selection.kind === "train" ? selection.actorId : selection.id;
+}
+
+/**
+ * The ACTORS table's rows for one selection (GH124-PLAN.md Checkpoint 4 Part 4):
+ * `actorsAtNode`'s per-actor lines, grouped by (kind, activity) and counted, since a
+ * player has no use for individual actor ids and a busy station can hold a dozen
+ * riders doing the same two or three things. Sorted threats first (a pin-attacker
+ * group always sorts above everything else, `tone: "threat"`), then by count
+ * descending, then by activity text for a stable order between equal counts.
+ */
+export function actorSummaryRows(
+  selection: MapSelection,
+  snapshot: SimSnapshot,
+  world: World,
+): ActorSummaryRow[] {
+  const lines = actorsAtNode(actorNodeId(selection), snapshot, world);
+  const rowByKey = new Map<string, ActorSummaryRow>();
+  for (const line of lines) {
+    const key = `${line.glyphKind} ${line.activity}`;
+    const existing = rowByKey.get(key);
+    if (existing !== undefined) {
+      existing.count += 1;
+      continue;
+    }
+    rowByKey.set(key, {
+      kind: line.glyphKind,
+      activity: line.activity,
+      count: 1,
+      ...(line.glyphKind === "pin-attacker" ? { tone: "threat" as const } : {}),
+    });
+  }
+  return [...rowByKey.values()].sort((a, b) => {
+    const threatRank = (row: ActorSummaryRow) => (row.tone === "threat" ? 0 : 1);
+    const byThreat = threatRank(a) - threatRank(b);
+    if (byThreat !== 0) {
+      return byThreat;
+    }
+    const byCount = b.count - a.count;
+    if (byCount !== 0) {
+      return byCount;
+    }
+    return a.activity.localeCompare(b.activity);
+  });
 }
 
 /** A site's `type`, narrowed to `PlaceKind`'s three site arms. A real type guard, not
@@ -268,7 +369,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       iconKind: undefined,
       meta: [],
       devices: [],
-      actors: actorsAtNode(selection.actorId, snapshot, world),
+      actorRows: actorSummaryRows(selection, snapshot, world),
       log: placeLog(selection, snapshot),
     };
   }
@@ -281,7 +382,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       iconKind: undefined,
       meta: [],
       devices: [],
-      actors: [],
+      actorRows: actorSummaryRows(selection, snapshot, world),
       log: placeLog(selection, snapshot),
     };
   }
@@ -290,7 +391,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
     iconKind: placeKindForNode(node, world),
     meta: node.kind === "station" ? stationMeta(node, world) : placeMeta(node, world),
     devices: devicesForNode(node.id, world),
-    actors: actorsAtNode(node.id, snapshot, world),
+    actorRows: actorSummaryRows(selection, snapshot, world),
     log: placeLog(selection, snapshot),
   };
 }

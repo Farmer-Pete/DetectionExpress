@@ -286,7 +286,9 @@ describe("App place dialog (GH124-PLAN.md Checkpoint 4)", () => {
       });
     });
 
-    expect(screen.getByText("R1")).toBeDefined();
+    // The aggregated ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4) shows the
+    // activity phrase and a count, never a raw actor id.
+    expect(screen.getByText("waiting for a train")).toBeDefined();
   });
 
   it("is mutually exclusive with the side panel: a map click while it is open never also opens the place dialog", () => {
@@ -340,6 +342,33 @@ describe("App event dialog opener guard (GH124-PLAN.md Checkpoint 5, consistency
     });
     fireEvent.click(screen.getByRole("button", { name: "Central" }));
     expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
+  it("is mutually exclusive with the intro overlay: a log-row click while it is open never also opens the event dialog", () => {
+    localStorage.clear(); // show the intro overlay on this render (beforeEach marks it seen)
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
+  it("is mutually exclusive with the trace dialog: a log-row click while a finding/decision is selected never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({
+        selection: { seq: 1 },
+        snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] },
+      });
+    });
 
     fireEvent.click(screen.getByTestId("log-row-5"));
 

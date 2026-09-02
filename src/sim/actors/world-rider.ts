@@ -15,6 +15,15 @@
  * train's dwell and alights on its real arrival, never a phantom. `createRider`, the batch
  * actor, keeps its abstract-duration model and its byte-identical readings; only the
  * ride execution differs here. No wall clock, no React (ADR-0007, ARCHITECTURE rule 8).
+ *
+ * GH124-PLAN.md Checkpoint 4 Part 2: once `core.step` commits to a trip (`enter`),
+ * this actor also reports the chosen `dest` as its view-only `destination`, so the
+ * place dialog can say where a waiting rider is headed instead of just that it is
+ * waiting. It clears that destination the moment the trip ends (the tap-out into the
+ * go-home dwell), since the view must not keep pointing at a stale destination once
+ * the rider isn't going anywhere. `RidePhase` itself never needed to hold `dest` — the
+ * three points that set or clear it already have it in scope from `core.step`'s own
+ * transition.
  */
 import {
   GAME_SECONDS_PER_TICK,
@@ -144,6 +153,10 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
             fromTick: tick,
             untilTick: gohomeUntil,
           },
+          // The trip that destination named is over: clear it (GH124-PLAN.md
+          // Checkpoint 4 Part 2), rather than let the view keep showing where the
+          // rider was headed through the whole go-home dwell.
+          destination: null,
         };
       }
 
@@ -197,6 +210,7 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
             fromTick: tick,
             untilTick: transition.nextTick,
           },
+          destination: dest,
         };
       }
 
@@ -207,11 +221,14 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
           readings: [tap(station, line, "in", balance, tick)],
           nextTick: service.alightTick,
           presence: { kind: "onTrain", train, fromTick: tick, untilTick: service.alightTick },
+          destination: dest,
         };
       }
 
       // Wait `at` the origin until the train arrives and the boarding window opens
-      // (boardTick); no tap yet.
+      // (boardTick); no tap yet. The trip is already committed — `core.step` chose
+      // `dest` above — so the view can say where this wait is headed, not just that
+      // it is waiting (GH124-PLAN.md Checkpoint 4 Part 2).
       phase = {
         kind: "boarding",
         station,
@@ -225,6 +242,7 @@ export function createWorldRider(config: RiderTripConfig): Actor<WorldReading, W
         readings: [],
         nextTick: service.boardTick,
         presence: { kind: "at", node: station, fromTick: tick, untilTick: service.boardTick },
+        destination: dest,
       };
     },
   };

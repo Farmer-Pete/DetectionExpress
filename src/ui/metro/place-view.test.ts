@@ -3,38 +3,45 @@ import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { world } from "../../sim/world/world";
 import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
-import { actorsAtNode, describePresence, devicesForNode, placeView } from "./place-view";
+import {
+  actorSummaryRows,
+  actorsAtNode,
+  describePresence,
+  devicesForNode,
+  placeView,
+} from "./place-view";
 
 function snapshotWith(actors: readonly ActorView[]): SimSnapshot {
   return { ...emptySnapshot(), actors };
 }
 
 describe("describePresence", () => {
-  it("describes a stationary 'at' presence as waiting at its node", () => {
+  it("describes a stationary 'at' presence with no destination as waiting for a train", () => {
     const result = describePresence(
       { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
       world,
     );
-    expect(result).toEqual({ doing: "waiting", heading: "at Central" });
+    expect(result).toBe("waiting for a train");
   });
 
-  it("describes an open-ended 'at' presence (a fixture) as stationed", () => {
+  it("describes an 'at' presence carrying a chosen destination as heading to it, not waiting", () => {
     const result = describePresence(
-      { kind: "at", node: "occ", fromTick: 0, untilTick: "open" },
+      { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
       world,
+      "riv",
     );
-    expect(result.doing).toBe("stationed");
+    expect(result).toBe("heading to Riverside");
   });
 
-  it("describes a 'moving' presence as walking toward its destination", () => {
+  it("describes a 'moving' presence as heading to its destination", () => {
     const result = describePresence(
       { kind: "moving", from: "cen", to: "riv", line: "red", fromTick: 0, untilTick: 20 },
       emptySnapshot(),
       world,
     );
-    expect(result).toEqual({ doing: "walking", heading: "to Riverside" });
+    expect(result).toBe("heading to Riverside");
   });
 
   it("resolves an onTrain presence's destination via the named train's ActorView", () => {
@@ -57,7 +64,7 @@ describe("describePresence", () => {
       snapshot,
       world,
     );
-    expect(result).toEqual({ doing: "riding", heading: "to Riverside" });
+    expect(result).toBe("heading to Riverside");
   });
 
   it("resolves an onTrain presence's destination when the train is dwelling ('at')", () => {
@@ -73,7 +80,7 @@ describe("describePresence", () => {
       snapshot,
       world,
     );
-    expect(result).toEqual({ doing: "riding", heading: "to Riverside" });
+    expect(result).toBe("heading to Riverside");
   });
 
   it("falls back gracefully when the named train is not in the snapshot", () => {
@@ -82,8 +89,7 @@ describe("describePresence", () => {
       emptySnapshot(),
       world,
     );
-    expect(result.doing).toBe("riding");
-    expect(result.heading).toBe("on T9");
+    expect(result).toBe("riding on T9");
   });
 });
 
@@ -198,7 +204,107 @@ describe("placeView", () => {
     const view = placeView({ kind: "train", actorId: "T1" }, snapshot, world);
     expect(view.title).toContain("T1");
     expect(view.devices).toEqual([]);
-    expect(view.actors.map((line) => line.id)).toEqual(["R1"]);
+    expect(view.actorRows).toEqual([{ kind: "rider", activity: "heading to Riverside", count: 1 }]);
+  });
+});
+
+describe("actorSummaryRows", () => {
+  it("groups actors sharing a kind and activity into one counted row", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "R1",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R2",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R3",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+        destination: "riv",
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows).toEqual([
+      { kind: "rider", activity: "waiting for a train", count: 2 },
+      { kind: "rider", activity: "heading to Riverside", count: 1 },
+    ]);
+  });
+
+  it("sorts a threat (pin-attacker) row first regardless of count, tone: threat", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "R1",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R2",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R3",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "P1",
+        kind: "pin-attacker",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows[0]).toEqual({
+      kind: "pin-attacker",
+      activity: "on duty",
+      count: 1,
+      tone: "threat",
+    });
+    expect(rows[0]?.count).toBeLessThan(rows[1]?.count ?? 0);
+  });
+
+  it("otherwise sorts by count descending", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "S1",
+        kind: "staff",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R1",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+      {
+        id: "R2",
+        kind: "rider",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows.map((row) => row.kind)).toEqual(["rider", "staff"]);
+    expect(rows.map((row) => row.count)).toEqual([2, 1]);
+  });
+
+  it("gives a non-trip actor 'at' a node the 'on duty' activity, never 'waiting for a train'", () => {
+    const snapshot = snapshotWith([
+      {
+        id: "S1",
+        kind: "staff",
+        presence: { kind: "at", node: "cen", fromTick: 0, untilTick: 20 },
+      },
+    ]);
+    const rows = actorSummaryRows({ kind: "node", id: "cen" }, snapshot, world);
+    expect(rows).toEqual([{ kind: "staff", activity: "on duty", count: 1 }]);
+  });
+
+  it("returns an empty table for a node with no actors", () => {
+    expect(actorSummaryRows({ kind: "node", id: "cen" }, emptySnapshot(), world)).toEqual([]);
   });
 });
 

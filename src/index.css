@@ -870,8 +870,7 @@ body {
   font-size: 0.85rem;
 }
 
-.place-device-list,
-.place-actor-list {
+.place-device-list {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -911,33 +910,73 @@ body {
   letter-spacing: 0.03em;
 }
 
-.place-actor-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel2);
-  font-size: 0.8rem;
+/* The ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4): actors AGGREGATED by
+   (kind, activity), not one row per actor id, so a busy station stays a handful of
+   dense rows instead of a scrolling list. Shared by the place dialog and the train
+   dialog's onboard-rider table — same component, same markup, same styling. */
+.actor-table {
+  width: 100%;
+  margin: 0 0 1rem;
+  border-collapse: collapse;
+  font-size: 0.78rem;
 }
 
-.place-actor-role {
+.actor-table th {
+  padding: 0.2rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
   font-weight: 600;
-  color: var(--ink);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: left;
 }
 
-.place-actor-id {
-  /* Text brightened from --dim (3.09:1 on --panel2) to clear WCAG AA (4.75:1). */
-  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+.actor-table td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--ink);
+  vertical-align: middle;
+}
+
+.actor-table tr:last-child td {
+  border-bottom: none;
+}
+
+.actor-table-actor {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.actor-table-glyph {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.actor-table-activity {
+  /* Text brightened from --dim (2.40:1 on --panel) to clear WCAG AA (4.78:1). */
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+}
+
+.actor-table-count,
+.actor-table-count-header {
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.place-actor-doing,
-.place-actor-heading {
-  /* Text brightened from --dim (2.40:1 on --panel2) to clear WCAG AA (4.78:1). */
-  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+/* A pin-attacker row (GH124-PLAN.md Checkpoint 4 Part 4): sorted first, colored to
+   match the map's own attacker ring and the log's "bad" tone, so a threat reads as
+   one before a player opens a single finding. */
+.actor-table-row-threat td {
+  color: var(--threat);
+}
+
+.actor-table-row-threat .actor-table-activity {
+  color: color-mix(in srgb, var(--threat) 80%, var(--ink));
 }
 
 /* The place dialog's scoped log (GH124-PLAN.md Checkpoint 5): the same `.log-stream`/
