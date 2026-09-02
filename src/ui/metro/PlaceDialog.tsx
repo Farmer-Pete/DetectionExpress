@@ -99,6 +99,23 @@ export function PlaceDialog({
       rootTriggerRef={rootTriggerRef}
       rootFallbackFocusRef={rootFallbackFocusRef}
     >
+      <p className="place-description">{view.description}</p>
+
+      {view.zone === undefined ? null : (
+        <section className="place-zone" aria-label="Zone">
+          <h3 className="place-section-title">Zone</h3>
+          <div className="place-zone-card">
+            <div className="place-zone-name">{view.zone.name}</div>
+            <dl className="place-zone-kv">
+              <dt>Who belongs</dt>
+              <dd>{view.zone.whoBelongs}</dd>
+              <dt>Security parallel</dt>
+              <dd>{view.zone.securityParallel}</dd>
+            </dl>
+          </div>
+        </section>
+      )}
+
       <section className="place-devices" aria-label="Devices">
         <h3 className="place-section-title">Devices</h3>
         {view.devices.length === 0 ? (

@@ -123,6 +123,63 @@ describe("PlaceDialog", () => {
     expect(screen.getByText("Train tracker")).toBeDefined();
   });
 
+  it("shows a station's world.stations description, and no zone section (GH127-PLAN.md M3)", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "The beating heart. Four lines cross here. If Central sneezes, the whole network catches a cold.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("Who belongs")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Zone" })).toBeNull();
+  });
+
+  it("shows a site's description and its dominant zone's name, who-belongs, and security parallel", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("dep") });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Where trains sleep and mechanics swear. Badge in, or the guard dogs introduce themselves.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("Operational")).toBeDefined();
+    expect(screen.getByText("Operations and maintenance crews on shift.")).toBeDefined();
+    expect(
+      screen.getByText("The restricted operational technology network that runs the machines."),
+    ).toBeDefined();
+  });
+
+  it("shows the control center's description and its dominant zone section", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("occ") });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("Control")).toBeDefined();
+    expect(screen.getByText("Dispatchers and the duty manager.")).toBeDefined();
+  });
+
   it("shows a train's onboard riders, aggregated, and no devices", () => {
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
@@ -155,6 +212,25 @@ describe("PlaceDialog", () => {
     expect(screen.getByText("1")).toBeDefined();
     expect(screen.queryByText("R1")).toBeNull();
     expect(screen.getByText("No devices here.")).toBeDefined();
+  });
+
+  it("shows a train's description, sourced from its line (no train entity exists)", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
+    });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    // T1 derives from the Red Line, so its flavor text is the Red Line's description.
+    expect(
+      screen.getByText(
+        "The workhorse. Longest, busiest, and always a minute late. Runs coast to coast, Harbor to World's End.",
+      ),
+    ).toBeDefined();
   });
 
   it("re-renders live as the snapshot changes, without ever freezing the engine", () => {

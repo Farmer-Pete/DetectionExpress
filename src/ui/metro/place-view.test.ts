@@ -191,10 +191,40 @@ describe("placeView", () => {
     expect(view.meta).toContainEqual({ label: "Zone", value: "Z3 · Operational" });
   });
 
-  it("builds the OCC's view as the control-center place kind", () => {
+  it("sets a station's description from world.stations, and no zone (a station has none)", () => {
+    const view = placeView({ kind: "node", id: "cen" }, emptySnapshot(), world);
+    expect(view.description).toBe(
+      "The beating heart. Four lines cross here. If Central sneezes, the whole network catches a cold.",
+    );
+    expect(view.zone).toBeUndefined();
+  });
+
+  it("sets a site's description from world.sites, and its dominant zone's name/whoBelongs/securityParallel", () => {
+    const view = placeView({ kind: "node", id: "dep" }, emptySnapshot(), world);
+    expect(view.description).toBe(
+      "Where trains sleep and mechanics swear. Badge in, or the guard dogs introduce themselves.",
+    );
+    // Eastyard Depot's zonesPresent (z2, z3) dominate at z3, "Operational".
+    expect(view.zone).toEqual({
+      name: "Operational",
+      whoBelongs: "Operations and maintenance crews on shift.",
+      securityParallel: "The restricted operational technology network that runs the machines.",
+    });
+  });
+
+  it("builds the OCC's view as the control-center place kind, with its description and dominant zone", () => {
     const view = placeView({ kind: "node", id: "occ" }, emptySnapshot(), world);
     expect(view.title).toBe("Operations Control Center");
     expect(view.iconKind).toBe("control-center");
+    expect(view.description).toBe(
+      "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost.",
+    );
+    // The OCC's zonesPresent (z2, z3, z4) dominate at z4, "Control".
+    expect(view.zone).toEqual({
+      name: "Control",
+      whoBelongs: "Dispatchers and the duty manager.",
+      securityParallel: "The management plane and the crown jewels.",
+    });
   });
 
   it("builds a train's view with its onboard riders and no devices", () => {
@@ -214,6 +244,14 @@ describe("placeView", () => {
     expect(view.title).toBe("Red Line train");
     expect(view.devices).toEqual([]);
     expect(view.actorRows).toEqual([{ kind: "rider", activity: "heading to Riverside", count: 1 }]);
+  });
+
+  it("sets a train's description from its line, and no zone (a train has none)", () => {
+    const view = placeView({ kind: "train", actorId: "T1" }, emptySnapshot(), world);
+    expect(view.description).toBe(
+      "The workhorse. Longest, busiest, and always a minute late. Runs coast to coast, Harbor to World's End.",
+    );
+    expect(view.zone).toBeUndefined();
   });
 });
 

@@ -344,6 +344,28 @@ describe("EventDialog: adaptive detail", () => {
     expect(screen.getByRole("button", { name: "Open place" })).toBeDefined();
   });
 
+  it("shows the sensor's sensors.data description as a subtitle, and leaves the raw blob verbatim (GH127-PLAN.md M3)", () => {
+    setSnapshot({ worldEvents: [fareGateWorldEvent({ id: 1, actorId: "R1", placeId: "cen" })] });
+    useGameStore.setState({ mapDialogStack: eventStack(1) });
+    render(
+      <EventDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    // The subtitle comes straight from sensors.data, never generated.
+    expect(
+      screen.getByText(
+        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
+      ),
+    ).toBeDefined();
+    // The raw blob stays the literal sensor payload, verbatim (untouched by this milestone).
+    const raw = screen.getByText(/"card": "card-1"/);
+    expect(raw.textContent).toContain('"station": "cen"');
+    expect(raw.textContent).not.toContain("Central");
+  });
+
   it("the 'open place' link PUSHES a place entry, keeping the event entry underneath (Back returns to it)", () => {
     setSnapshot({ worldEvents: [fareGateWorldEvent({ id: 1, placeId: "cen" })] });
     useGameStore.setState({ mapDialogStack: eventStack(1) });

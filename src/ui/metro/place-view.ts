@@ -20,8 +20,16 @@ import type { MapSelection } from "../../game/store";
 import type { SimSnapshot } from "../../sim/snapshot";
 import { type MapNode, metroNodes, type SensorCode } from "../../sim/world/layout";
 import type { MapNodeId, Presence } from "../../sim/world/presence";
-import type { World } from "../../sim/world/world";
-import { lineName, placeName, trainName, zoneName } from "../../sim/world/world";
+import type { World, ZoneSummary } from "../../sim/world/world";
+import {
+  lineName,
+  placeDescription,
+  placeName,
+  trainDescription,
+  trainName,
+  zoneName,
+  zoneSummary,
+} from "../../sim/world/world";
 import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import type { PlaceKind } from "../icons/sensor-icons";
@@ -74,6 +82,13 @@ export interface PlaceView {
   title: string;
   iconKind: PlaceKind | undefined;
   meta: readonly MetaBadge[];
+  /** The station's, site's, control-center's, or (for a train) its line's narrative
+   *  flavor text (GH127-PLAN.md M3), sourced from the world data, never generated. */
+  description: string;
+  /** The dominant zone's name/whoBelongs/securityParallel (decision B), for a site
+   *  or the control center only; undefined for a station or a train, neither of
+   *  which carries a zone. */
+  zone?: ZoneSummary | undefined;
   devices: readonly DeviceView[];
   /** The ACTORS table's rows: `actorSummaryRows` for this same selection. */
   actorRows: readonly ActorSummaryRow[];
@@ -383,6 +398,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       title: trainName(selection.actorId),
       iconKind: undefined,
       meta: [],
+      description: trainDescription(selection.actorId),
       devices: [],
       actorRows: actorSummaryRows(selection, snapshot),
       log: placeLog(selection, snapshot),
@@ -396,6 +412,7 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
       title: selection.id,
       iconKind: undefined,
       meta: [],
+      description: "",
       devices: [],
       actorRows: actorSummaryRows(selection, snapshot),
       log: placeLog(selection, snapshot),
@@ -405,6 +422,8 @@ export function placeView(selection: MapSelection, snapshot: SimSnapshot, world:
     title: node.name,
     iconKind: placeKindForNode(node, world),
     meta: node.kind === "station" ? stationMeta(node, world) : placeMeta(node, world),
+    description: placeDescription(node.id),
+    zone: node.zoneId === undefined ? undefined : zoneSummary(node.zoneId),
     devices: devicesForNode(node.id, world),
     actorRows: actorSummaryRows(selection, snapshot),
     log: placeLog(selection, snapshot),

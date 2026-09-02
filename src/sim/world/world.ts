@@ -467,17 +467,72 @@ export function placeName(placeId: string): string {
   return placeId;
 }
 
+/** The line a train id derives from, via `lineIdForTrain`. Shared by `trainName`
+ *  and `trainDescription` (GH127-PLAN.md M3), so the two never repeat the lookup. */
+function lineForTrain(trainId: string): Line {
+  const lineId = lineIdForTrain(world, trainId);
+  const line = world.lines.find((candidate) => candidate.id === lineId);
+  if (line === undefined) {
+    // Unreachable: `lineIdForTrain` only ever returns an id drawn from `world.lines`.
+    throw new Error(`lineForTrain: line "${lineId}" not found.`);
+  }
+  return line;
+}
+
 /**
  * A train's display name: its line's authored `trainName` constant (never a
  * generated `${lineName} train` concatenation — see M1). Throws on a train id no
  * line derives, via `lineIdForTrain`.
  */
 export function trainName(trainId: string): string {
-  const lineId = lineIdForTrain(world, trainId);
-  const line = world.lines.find((candidate) => candidate.id === lineId);
-  if (line === undefined) {
-    // Unreachable: `lineIdForTrain` only ever returns an id drawn from `world.lines`.
-    throw new Error(`trainName: line "${lineId}" not found.`);
+  return lineForTrain(trainId).trainName;
+}
+
+/**
+ * A train's narrative flavor text (GH127-PLAN.md M3): no train entity exists in
+ * the world data, so this reads its line's `description` instead. Throws on a
+ * train id no line derives, matching `trainName`.
+ */
+export function trainDescription(trainId: string): string {
+  return lineForTrain(trainId).description;
+}
+
+/**
+ * A station, a site, or the control-center id's narrative flavor text
+ * (GH127-PLAN.md M3), mirroring `placeName`'s three-way resolution. Unlike
+ * `placeName`, this throws on an unknown id rather than falling back: every call
+ * site already holds an id drawn from `metroNodes`, so an unresolvable one is a
+ * bug, not a stale world-log reference.
+ */
+export function placeDescription(placeId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === placeId);
+  if (station !== undefined) {
+    return station.description;
   }
-  return line.trainName;
+  const site = world.sites.find((candidate) => candidate.id === placeId);
+  if (site !== undefined) {
+    return site.description;
+  }
+  if (world.controlCenter.id === placeId) {
+    return world.controlCenter.description;
+  }
+  throw new Error(`unknown place "${placeId}".`);
+}
+
+/** A zone's narrative summary (GH127-PLAN.md M3, decision B): its display name,
+ *  who belongs there, and its security parallel — the fields the place dialog's
+ *  zone section renders for a site or the control center. Stations carry no zone. */
+export interface ZoneSummary {
+  readonly name: string;
+  readonly whoBelongs: string;
+  readonly securityParallel: string;
+}
+
+/** A zone's narrative summary, keyed by id. Throws on an unknown zone id. */
+export function zoneSummary(zoneId: string): ZoneSummary {
+  const zone = world.zones.find((candidate) => candidate.id === zoneId);
+  if (zone === undefined) {
+    throw new Error(`unknown zone "${zoneId}".`);
+  }
+  return { name: zone.name, whoBelongs: zone.whoBelongs, securityParallel: zone.securityParallel };
 }

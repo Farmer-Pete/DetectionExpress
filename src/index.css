@@ -938,6 +938,55 @@ body {
   letter-spacing: 0.03em;
 }
 
+/* The place/train dialog's narrative flavor block (GH127-PLAN.md M3): the world
+   data's own `description`, never generated, rendered under the header for a
+   station, a site, the control center, or a train (sourced from its line). */
+.place-description {
+  margin: 0 0 1rem;
+  padding: 0.1rem 0 0.1rem 0.7rem;
+  border-left: 2px solid var(--a1);
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+/* The zone section (GH127-PLAN.md M3, decision B): a site's or the control
+   center's dominant zone, read through the carried `zoneId`. The numeric trust
+   level still lives on the header's Zone badge; this adds the name and its
+   who-belongs / security-parallel flavor. Stations carry no zone, so they render
+   no zone section at all. */
+.place-zone-card {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+  margin: 0 0 1rem;
+}
+
+.place-zone-name {
+  margin-bottom: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.place-zone-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.6rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.place-zone-kv dt {
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+}
+
+.place-zone-kv dd {
+  margin: 0;
+  color: var(--ink);
+}
+
 /* The ACTORS table (GH124-PLAN.md Checkpoint 4 Part 4): actors AGGREGATED by
    (kind, activity), not one row per actor id, so a busy station stays a handful of
    dense rows instead of a scrolling list. Shared by the place dialog and the train
@@ -1013,6 +1062,15 @@ body {
 .place-log-stream {
   max-height: 12rem;
   margin: 0 0 0.2rem;
+}
+
+/* The event dialog's sensor description subtitle (GH127-PLAN.md M3): the
+   `sensors.data` description, read through `sensor-catalogue`, never generated. It
+   never touches the Raw/Normalized `EventJsonSection` blocks below it. */
+.event-description {
+  margin: 0 0 1rem;
+  color: color-mix(in srgb, var(--dim) 25%, var(--ink));
+  font-size: 0.8rem;
 }
 
 /* The event dialog's "otherwise" branch (GH124-PLAN.md Checkpoint 5): the raw
