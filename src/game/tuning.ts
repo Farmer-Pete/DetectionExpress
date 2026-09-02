@@ -389,3 +389,38 @@ export const HOST_RELAY_TICKS = 12;
  * `k * CONTROL_LAUNCH_PHASE_TICKS`.
  */
 export const CONTROL_LAUNCH_PHASE_TICKS = 4;
+
+/**
+ * GH126-PLAN.md M2b — chaos-wave injection into the endless engine. A triggered
+ * wave splices one bounded attack into the running clock, scores it, then returns
+ * to calm without ever stopping. These constants set its rebase margins and the
+ * held/breach queue bar.
+ */
+
+/**
+ * Ticks of headroom between the captured trigger tick and the attacker's start, so
+ * its `start()` sits at or past the schedule's admit frontier (`clock.now() + 1`
+ * after the trigger tick's `foldTick`). One tick would clear the frontier; a small
+ * margin leaves room and lets the attacker's arrival presence show before its first
+ * fail.
+ */
+export const WAVE_TRIGGER_MARGIN_TICKS = 2;
+
+/**
+ * Ticks past the wave attack's detection-window close before the engine resolves
+ * the wave at its drain watermark. It waits for Detect to process the wave's last
+ * evidence AND for this deadline, then `advanceTo` settles a still-pending attack as
+ * missed. Mirrors the burst clearance `chaos-wave.ts` already leaves after the last
+ * fail.
+ */
+export const WAVE_DRAIN_MARGIN_TICKS = 20;
+
+/**
+ * The wave-scoped queue bar (GH126-PLAN.md Q6, finding 8). A wave is "held" only
+ * when its attack is caught AND the wave-window peak of the in-flight backlog
+ * (`ScoredIngress` buffer plus channel contents) stayed at or under this. Above it,
+ * even a caught attack reads "breach": the rule kept up on accuracy but not on
+ * throughput. First-draft value, comfortably under `CHANNEL_CAP`; M3's ladder tuning
+ * revisits it.
+ */
+export const QUEUE_CAP = 60;

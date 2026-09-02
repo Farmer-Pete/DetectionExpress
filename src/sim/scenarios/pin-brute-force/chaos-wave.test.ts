@@ -63,15 +63,12 @@ describe("planChaosWave", () => {
     expect(runAttacker(b).length).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
   });
 
-  it("asserts distinctEvidenceCount >= threshold when composing the final Attack", () => {
+  it("exposes an evidence count at or above threshold, matching the attacker's fail burst", () => {
     const plan = planChaosWave(1000, "chaos-attacker-2", randomLcg(7));
-    expect(() => plan.toAttack(1, [1, 2])).toThrow(/distinct evidence/);
-    const eventIds = Array.from({ length: PIN_BRUTE_FORCE_THRESHOLD }, (_v, i) => i + 1);
-    const attack = plan.toAttack(1, eventIds);
-    expect(attack.id).toBe(1);
-    expect(attack.entity).toBe(plan.victim);
-    expect(attack.threshold).toBe(PIN_BRUTE_FORCE_THRESHOLD);
-    expect(attack.window).toEqual(plan.window);
+    // `evidenceCount` is the distinct-evidence count the removed `toAttack` used to
+    // assert against threshold; it must equal the number of fails the attacker emits.
+    expect(plan.evidenceCount).toBeGreaterThanOrEqual(PIN_BRUTE_FORCE_THRESHOLD);
+    expect(runAttacker(plan).length).toBe(plan.evidenceCount);
   });
 
   it("is deterministic for a seed and trigger tick", () => {

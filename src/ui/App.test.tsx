@@ -84,6 +84,9 @@ function stubController(): RunController & {
     setSpeed(speed) {
       speedCalls.push(speed);
     },
+    triggerWave() {
+      return null;
+    },
     dispose() {
       disposes += 1;
     },

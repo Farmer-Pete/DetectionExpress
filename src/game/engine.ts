@@ -16,6 +16,7 @@
  * rate, and the checkpoints are all injected by the run controller, so `sim/` stays
  * pure and the engine never builds them or reads a sensor field itself.
  */
+import { randomLcg } from "d3-random";
 import type { AccountRiderSpawner } from "../sim/actors/account-rider-spawner";
 import {
   type Actor,
@@ -34,11 +35,14 @@ import { type GraphEdge, type GraphNode, validateLinearChain } from "../sim/grap
 import { createInspector, type Inspector } from "../sim/inspector";
 import { makeWindowedRate } from "../sim/rate";
 import type { Checkpoint, ScheduleMode, Wave } from "../sim/scenario";
+import { PIN_BRUTE_FORCE_REASON } from "../sim/scenarios/pin-brute-force/attacks";
+import { planChaosWave } from "../sim/scenarios/pin-brute-force/chaos-wave";
 import type { ScoredIngress } from "../sim/scored-ingress";
 import type { ServiceRate } from "../sim/service-governor";
 import type { FailureReason, RunStatus, SimSnapshot } from "../sim/snapshot";
 import { NODE_TASKS, type NodeRuntime, type NodeWiring, type TaskAlgorithm } from "../sim/tasks";
 import { assertWaveScheduleOrdered } from "../sim/wave-schedule";
+import { waveSeed } from "../sim/wave-seed";
 import { type WaveReading, waveStateAt } from "../sim/wave-state";
 import {
   cameraNodeId,
@@ -67,8 +71,11 @@ import {
   FLASH_WINDOW_TICKS,
   GAME_SECONDS_PER_TICK,
   PUBLISH_HZ,
+  QUEUE_CAP,
   RING_SIZE,
   THROUGHPUT_WINDOW_MS,
+  WAVE_DRAIN_MARGIN_TICKS,
+  WAVE_TRIGGER_MARGIN_TICKS,
   WAVE_WARN_TICKS,
   WORLD_LOG_RING_SIZE,
 } from "./tuning";
@@ -81,6 +88,59 @@ import {
  * today; the admission filter reads it in a later step), and the `initialPresence`
  * to seed its `ActorView` with before its first `act()`. Mirrors `WorldFixture`.
  */
+/**
+ * A triggered chaos wave's id (GH126-PLAN.md M2b, finding 5). Minted from a
+ * monotonic counter on the engine handle, never reused, distinct in role from the
+ * dense scored event id and from the scorer's `attackId`.
+ */
+export type WaveId = number;
+
+/** Whether a resolved wave was held or breached. */
+type WaveOutcomeKind = "held" | "breach";
+
+/**
+ * A resolved chaos wave, reported once at its drain watermark. For M2b this is the
+ * minimal exposure: the engine logs it to the console and hands it to a TEST-ONLY
+ * `onWaveOutcome` observer. The store `ChaosPhase`/`WaveOutcome` fields and the
+ * on-screen banner are M3.
+ */
+export interface WaveOutcomeObservation {
+  waveId: WaveId;
+  /** The scorer key this wave's attack registered under. */
+  attackId: number;
+  outcome: WaveOutcomeKind;
+  /** Whether the wave's attack resolved caught (vs missed at the drain watermark). */
+  caught: boolean;
+  /**
+   * The wave-window peak of the in-flight backlog: the `ScoredIngress` buffer plus
+   * every channel's contents (finding 8). "held" needs both `caught` and this at or
+   * under `QUEUE_CAP`.
+   */
+  queuePeak: number;
+}
+
+/**
+ * The live state of the one active chaos wave (GH126-PLAN.md M2b, Q7: one wave at a
+ * time). Non-null between `triggerWave` and the drain watermark; its non-null-ness IS
+ * the cooldown that makes a second trigger a no-op.
+ */
+interface ActiveWave {
+  waveId: WaveId;
+  attackId: number;
+  /** `wave-<WaveId>-attacker`: the admitted attacker whose fails are this wave's evidence. */
+  actorId: string;
+  /** How many fails the attacker emits; every one is bound as evidence (`plan.evidenceCount`). */
+  expectedEvidence: number;
+  /** The bound global scored ids, in offer order; the last is the highest. */
+  collectedEvidence: number[];
+  /** The attack's detection-window close, in game seconds. */
+  windowEnd: number;
+  /** `windowEnd` plus the drain margin: the earliest game-seconds the wave may resolve. */
+  drainDeadline: number;
+  /** The running peak of the in-flight backlog over the wave window. */
+  queuePeak: number;
+}
+
 export interface ScenarioCastMember {
   actor: Actor<WorldReading, WorldEnv>;
   kind: ActorView["kind"];
@@ -225,6 +285,13 @@ export interface StartOptions {
    * Inert in production — the run controller never passes it.
    */
   onCheckpoint?: (observation: CheckpointObservation) => void;
+  /**
+   * TEST-ONLY: observe a chaos wave's resolution at its drain watermark
+   * (GH126-PLAN.md M2b). Inert in production — the run controller never passes it;
+   * the engine's own minimal exposure is a console log. M3 adds the store fields and
+   * the banner.
+   */
+  onWaveOutcome?: (observation: WaveOutcomeObservation) => void;
 }
 
 /** A running engine. `stop` tears it down; `whenStopped` settles for tests. */
@@ -236,6 +303,14 @@ export interface EngineHandle {
   resume: () => void;
   /** Change the run's pace: multiply the live clock's rate. A no-op after stop. */
   setSpeed: (multiplier: number) => void;
+  /**
+   * Splice one bounded chaos wave into the running clock (GH126-PLAN.md M2b). It
+   * captures the live tick, rebases and admits the attacker, and registers its
+   * attack, all without ever stopping the engine. Returns the minted `WaveId`, or
+   * `null` when it is a no-op: outside endless mode, with no scored ingress, after
+   * stop, or while a wave is already active (the cooldown, Q7).
+   */
+  triggerWave: () => WaveId | null;
   whenStopped: Promise<void>;
 }
 
@@ -422,6 +497,11 @@ export function start(options: StartOptions): EngineHandle {
   let clock: Clock | null = null;
   let channels: Map<string, Channel<PipeMessage>> | null = null;
   let publish: ((force: boolean) => void) | null = null;
+  // The chaos-wave trigger (GH126-PLAN.md M2b). Assigned inside the `if (cast)`
+  // branch, where the schedule, scorer, and scored ingress it needs all live. With
+  // no cast (a legacy scored-only run) it stays this no-op, so the handle's
+  // `triggerWave` is always safe to call.
+  let triggerWaveImpl: () => WaveId | null = () => null;
   let stopped = false;
   let admitted = 0; // real Events pushed out of Ingest
   let completed = 0; // Events drained at the Sink
@@ -609,6 +689,117 @@ export function start(options: StartOptions): EngineHandle {
         }
       }
 
+      // GH126-PLAN.md M2b: the one active chaos wave, plus the monotonic id counters
+      // that mint its WaveId and scorer attackId. `activeWave` non-null IS the
+      // cooldown (Q7). The counters never reuse a value (finding 5); the attackId is
+      // a scorer key, a separate namespace from the dense scored event id.
+      let activeWave: ActiveWave | null = null;
+      let nextWaveId = 0;
+      let nextAttackId = 0;
+
+      // Read whether a wave's attack resolved caught, off the scorer's own decision
+      // log, keyed by attackId (GH126-PLAN.md M2b). A caught or missed decision
+      // always exists by the time this runs: the attack was caught during the wave,
+      // or `resolveWave`'s `advanceTo` settled it missed just before. Absent (only if
+      // the log's cap trimmed it) reads as not caught.
+      const waveCaught = (attackId: number): boolean => {
+        for (const decision of options.scorer.decisions()) {
+          if (
+            (decision.outcome === "caught" || decision.outcome === "missed") &&
+            decision.attackId === attackId
+          ) {
+            return decision.outcome === "caught";
+          }
+        }
+        return false;
+      };
+
+      // Resolve the wave at its drain watermark: settle a still-pending attack as
+      // missed (the existing `closeExpired` path via `advanceTo`; a caught attack is
+      // already resolved, so this is a no-op for it), read caught-vs-missed and the
+      // queue peak, then clear the cooldown. NEVER `finishOutcome`, `stop`, or close
+      // the ingress: the engine runs on into calm.
+      const resolveWave = (wave: ActiveWave): void => {
+        options.scorer.advanceTo(wave.drainDeadline);
+        const caught = waveCaught(wave.attackId);
+        const outcome: WaveOutcomeKind = caught && wave.queuePeak <= QUEUE_CAP ? "held" : "breach";
+        activeWave = null; // lift the cooldown; the attacker is already dormant
+        console.info(
+          `Detection Express: chaos wave ${wave.waveId} resolved ${outcome} ` +
+            `(attack ${wave.attackId} ${caught ? "caught" : "missed"}, queue peak ${wave.queuePeak}).`,
+        );
+        options.onWaveOutcome?.({
+          waveId: wave.waveId,
+          attackId: wave.attackId,
+          outcome,
+          caught,
+          queuePeak: wave.queuePeak,
+        });
+      };
+
+      // Splice one chaos wave into the running clock (GH126-PLAN.md M2b "Target
+      // architecture"). In strict order: capture the live tick, mint the ids, plan
+      // the rebased wave, register the attack BEFORE any evidence, then admit the
+      // attacker and start the cooldown.
+      const triggerWave = (): WaveId | null => {
+        // Endless-mode only, one wave at a time (Q7). No-op after stop, without a
+        // scored ingress to offer into, or while a wave is still active.
+        if (stopped || scheduleMode !== "endless" || !scoredIngest || activeWave) {
+          return null;
+        }
+        // The trigger tick, captured atomically from the live clock, not a UI
+        // snapshot (finding 4). The admit frontier is `clock.now() + 1` after this
+        // tick's `foldTick`, so the attacker's start sits a margin past it.
+        const triggerTick = clock?.now() ?? 0;
+        const waveId: WaveId = ++nextWaveId;
+        const attackId = ++nextAttackId;
+        const actorId = `wave-${waveId}-attacker`;
+        const startTick = triggerTick + WAVE_TRIGGER_MARGIN_TICKS;
+        const plan = planChaosWave(
+          startTick,
+          actorId,
+          randomLcg(waveSeed(cast.runSeed, triggerTick)),
+        );
+
+        // Register the pending attack BEFORE any evidence is offered or scored
+        // (findings 1, 6, N2). The scorer's default matches by reason, so `entity` is
+        // informational and `windowEnd` drives the miss.
+        options.scorer.addAttack({
+          attackId,
+          entity: plan.victim,
+          reason: PIN_BRUTE_FORCE_REASON,
+          threshold: plan.threshold,
+          windowEnd: plan.window.endTs,
+        });
+
+        const admission: Admission<WorldReading, WorldEnv> = {
+          actor: plan.attacker.build(),
+          kind: plan.attacker.kind,
+          initialPresence: plan.attacker.initialPresence,
+        };
+        const firstTick = schedule.admit(admission);
+        provenanceById.set(actorId, "scored-scenario");
+        seedView(
+          actorId,
+          plan.attacker.kind,
+          plan.attacker.initialPresence(firstTick),
+          "scored-scenario",
+        );
+
+        activeWave = {
+          waveId,
+          attackId,
+          actorId,
+          expectedEvidence: plan.evidenceCount,
+          collectedEvidence: [],
+          windowEnd: plan.window.endTs,
+          drainDeadline: plan.window.endTs + WAVE_DRAIN_MARGIN_TICKS * GAME_SECONDS_PER_TICK,
+          queuePeak: 0,
+        };
+        return waveId;
+      };
+      triggerWaveImpl = triggerWave;
+
       // The OCC node id an occ-console command flash lands on (the console reading is
       // OCC-only and carries no location of its own).
       const occId = cast.env.world.controlCenter.id;
@@ -767,6 +958,15 @@ export function start(options: StartOptions): EngineHandle {
           // actually offered under.
           if (scoredIngest && reading.sensor === "kiosk" && provenance === "scored-scenario") {
             const scoredEventId = nextScoredEventId++;
+            // GH126-PLAN.md M2b, evidence bind (finding 1): a reading from the active
+            // wave's attacker is this attack's evidence, so bind its global dense id
+            // to the attack the moment it is offered — before Detect scores the
+            // finding that cites it. The attack was registered at trigger, so `owner`
+            // is populated before the finding is judged, and it scores caught.
+            if (activeWave && timed.actorId === activeWave.actorId) {
+              options.scorer.bindEvidence(activeWave.attackId, scoredEventId);
+              activeWave.collectedEvidence.push(scoredEventId);
+            }
             scoredIngest.ingress.offer(scoredIngest.toEvent(timed, scoredEventId));
             captureWorldEvent(reading, reading.reading.ts, timed.actorId, true, scoredEventId);
           } else {
@@ -1014,6 +1214,37 @@ export function start(options: StartOptions): EngineHandle {
         if (scoredIngest && tick >= scoredIngest.lastScoredTick) {
           scoredIngest.ingress.close();
         }
+
+        // GH126-PLAN.md M2b: while a chaos wave is active, peak its in-flight
+        // backlog, then resolve it at the drain watermark. Guarded on `scoredIngest`
+        // because an active wave only ever exists alongside one (triggerWave's guard).
+        if (activeWave && scoredIngest) {
+          const wave = activeWave;
+          // The wave-scoped queue metric (finding 8, seam 12): the peak of
+          // `offered - processed` expressed as the live backlog — the ScoredIngress
+          // buffer PLUS every channel's contents, not only channel sizes. Reset to
+          // zero at wave start, so it measures this wave's window alone.
+          let backlog = scoredIngest.ingress.size;
+          for (const channel of channelMap.values()) {
+            backlog += channel.size;
+          }
+          if (backlog > wave.queuePeak) {
+            wave.queuePeak = backlog;
+          }
+          // Resolve once every fail has been offered and bound, Detect has processed
+          // the wave's last evidence id (`completed` is a dense FIFO count, so
+          // `completed > lastId` means that id cleared the pipeline), and the drain
+          // deadline passed. A queued-evidence case is never resolved early.
+          const lastId = wave.collectedEvidence[wave.collectedEvidence.length - 1];
+          if (
+            wave.collectedEvidence.length >= wave.expectedEvidence &&
+            lastId !== undefined &&
+            completed > lastId &&
+            tick * GAME_SECONDS_PER_TICK >= wave.drainDeadline
+          ) {
+            resolveWave(wave);
+          }
+        }
       };
 
       // Tick zero: prime the schedule once at startup, before the clock loop, with
@@ -1177,6 +1408,7 @@ export function start(options: StartOptions): EngineHandle {
       pause: () => clock?.pause(),
       resume: () => clock?.resume(),
       setSpeed: (multiplier: number) => clock?.setSpeed(multiplier),
+      triggerWave: () => triggerWaveImpl(),
       whenStopped,
     };
   } catch (error) {

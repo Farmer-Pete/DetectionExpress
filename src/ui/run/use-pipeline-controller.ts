@@ -12,7 +12,7 @@
  */
 
 import type { RefObject } from "react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { defaultScenario } from "../../game/registry";
 import { createRunController, type RunController } from "../../game/run-controller";
 import { getGraph, useGameStore } from "../../game/store";
@@ -55,6 +55,14 @@ export interface UsePipelineControllerArgs {
 export function usePipelineController({ createController }: UsePipelineControllerArgs): {
   /** The live pipeline controller ref. */
   controllerRef: RefObject<RunController | null>;
+  /**
+   * TEMPORARY (GH126-PLAN.md M2b): fire one chaos wave on the live engine by hand.
+   * Reads `controllerRef.current` at call time (a safe no-op with no controller) and
+   * delegates to `RunController.triggerWave`, which itself no-ops outside endless mode
+   * or during a wave's cooldown. M3 replaces the hand trigger with the real
+   * chaos-ladder rung wired through `SidePanel`.
+   */
+  triggerWave: () => void;
 } {
   const controllerRef = useRef<RunController | null>(null);
 
@@ -104,5 +112,11 @@ export function usePipelineController({ createController }: UsePipelineControlle
     controllerRef.current?.setSpeed(speed);
   }, [speed]);
 
-  return { controllerRef };
+  // TEMPORARY hand trigger (GH126-PLAN.md M2b). Stable identity so a consumer button
+  // needs no per-render callback. M3 wires the ladder rung here instead.
+  const triggerWave = useCallback(() => {
+    controllerRef.current?.triggerWave();
+  }, []);
+
+  return { controllerRef, triggerWave };
 }

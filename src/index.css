@@ -2336,3 +2336,24 @@ body {
     opacity: 0;
   }
 }
+
+/* TEMPORARY (GH126-PLAN.md M2b): the hand trigger for one chaos wave. Parked in a
+   bottom corner, out of the way, until M3 replaces it with the chaos-ladder rung. */
+.dev-trigger-wave {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: #fff;
+  background: #7a2e2e;
+  border: 1px solid #c0554f;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.dev-trigger-wave:hover {
+  opacity: 1;
+}

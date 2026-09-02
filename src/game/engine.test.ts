@@ -55,6 +55,7 @@ import {
   type ScoredIngestSource,
   type StartOptions,
   start,
+  type WaveOutcomeObservation,
 } from "./engine";
 import { membersOf, scoringFields } from "./parity-test-helpers";
 import { getGraph } from "./store";
@@ -69,6 +70,7 @@ import {
   HOST_RELAY_TICKS,
   LEVEL_SEED,
   OPERATOR_COMMAND_TICKS,
+  QUEUE_CAP,
   RIDER_GOHOME_DWELL_TICKS,
   WAVE_WARN_TICKS,
 } from "./tuning";
@@ -148,6 +150,7 @@ interface LaunchOpts {
   scenarioCast?: ScenarioCast;
   ambientCast?: AmbientCast;
   scoredIngest?: ScoredIngestSource;
+  onWaveOutcome?: (observation: WaveOutcomeObservation) => void;
 }
 
 interface Harness {
@@ -175,6 +178,7 @@ function launch(opts: LaunchOpts): Harness {
     ...(opts.ambientCast ? { ambientCast: opts.ambientCast } : {}),
     ...(opts.onError ? { onError: opts.onError } : {}),
     ...(opts.scoredIngest ? { scoredIngest: opts.scoredIngest } : {}),
+    ...(opts.onWaveOutcome ? { onWaveOutcome: opts.onWaveOutcome } : {}),
   };
   const handle = start(options);
   return { handle, driver, snapshots, last: () => snapshots.at(-1) };
@@ -2231,5 +2235,119 @@ describe("engine captures a WorldLogEvent for each sensor kind (GH124-PLAN.md Ch
     for (const row of scoredRows) {
       expect(row.scoredEventId).toBeDefined();
     }
+  });
+});
+
+// GH126-PLAN.md M2b: triggerWave splices one bounded chaos wave into the SAME
+// running clock and returns to calm, never stopping. The endless harness mirrors the
+// baseline cast: an empty-member scenario cast (so the start() guard passes with a
+// scored ingress present), no checkpoints (the loop is inert), and a never-closing
+// ingress. Only the blueprint's kiosk toEvent adapter is reused, to format the
+// attacker's fails.
+describe("engine triggerWave splices a chaos wave into the endless run (GH126-PLAN.md M2b)", () => {
+  const blueprint = buildBlueprint(LEVEL_SEED);
+
+  function endlessHarness(opts: {
+    algorithm: TaskAlgorithm;
+    onWaveOutcome?: (o: WaveOutcomeObservation) => void;
+  }): Harness {
+    return launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "endless",
+      scorer: createScorer([], SCORER_CONFIG),
+      algorithm: opts.algorithm,
+      checkpoints: [], // endless: the checkpoint loop is inert, the run never ends
+      scoredIngest: {
+        ingress: new ScoredIngress(),
+        toEvent: blueprint.toEvent,
+        lastScoredTick: Number.POSITIVE_INFINITY,
+      },
+      ...(opts.onWaveOutcome ? { onWaveOutcome: opts.onWaveOutcome } : {}),
+    });
+  }
+
+  // Seam 8: the wave is rebased to the live tick, so the attacker's start sits at or
+  // past the admit frontier and it admits without error.
+  it("rebases the attacker to the live tick and admits it without error (seam 8)", async () => {
+    const h = endlessHarness({ algorithm: idleAlgorithm });
+    await step(h.driver, 5);
+    const waveId = h.handle.triggerWave();
+    expect(waveId).not.toBeNull(); // admitted, no throw
+    await step(h.driver, 3); // let the sampler publish the admitted attacker
+    const attacker = h.last()?.actors.find((a) => a.kind === "pin-attacker");
+    expect(attacker).toBeDefined();
+    expect(attacker?.id).toBe(`wave-${waveId}-attacker`);
+    expect(h.last()?.status).toBe("running");
+    h.handle.stop();
+  });
+
+  it("scores the wave CAUGHT end to end and returns to calm without ending the run", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      algorithm: referenceTaskAlgorithm(),
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    expect(h.last()?.status).toBe("running");
+    const waveId = h.handle.triggerWave();
+    expect(waveId).not.toBeNull();
+    // Drive past the attack window and the drain deadline. The attacker's fails are
+    // offered, bound, and the rule raises a finding that credits the wave's attack.
+    await step(h.driver, 195);
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]?.waveId).toBe(waveId);
+    expect(outcomes[0]?.caught).toBe(true);
+    expect(outcomes[0]?.outcome).toBe("held");
+    expect(outcomes[0]?.queuePeak).toBeLessThanOrEqual(QUEUE_CAP);
+    expect(h.last()?.correctness.caught).toBe(1);
+    // The run never ends: still running throughout and after, and the attacker went
+    // dormant on its own so the sim continues into calm.
+    expect(h.last()?.status).toBe("running");
+    expect(h.last()?.actors.some((a) => a.kind === "pin-attacker")).toBe(false);
+    h.handle.stop();
+  });
+
+  it("resolves BREACH when the rule never catches, and still does not end the run", async () => {
+    const outcomes: WaveOutcomeObservation[] = [];
+    const h = endlessHarness({
+      // detect never fires: the attack is missed at the drain watermark via advanceTo.
+      algorithm: idleAlgorithm,
+      onWaveOutcome: (o) => outcomes.push(o),
+    });
+    await step(h.driver, 3);
+    const waveId = h.handle.triggerWave();
+    expect(waveId).not.toBeNull();
+    await step(h.driver, 195);
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]?.waveId).toBe(waveId);
+    expect(outcomes[0]?.caught).toBe(false);
+    expect(outcomes[0]?.outcome).toBe("breach");
+    expect(h.last()?.correctness.missed).toBe(1); // settled missed by advanceTo, not caught
+    expect(h.last()?.status).toBe("running"); // a breach is a banner, never a hard fail
+    h.handle.stop();
+  });
+
+  it("ignores a second trigger while a wave is active (cooldown, Q7)", async () => {
+    const h = endlessHarness({ algorithm: idleAlgorithm });
+    await step(h.driver, 3);
+    const first = h.handle.triggerWave();
+    const second = h.handle.triggerWave();
+    expect(first).not.toBeNull();
+    expect(second).toBeNull(); // one wave at a time
+    h.handle.stop();
+  });
+
+  it("is a no-op outside endless mode", async () => {
+    // A "steady" run carries its own scored cast; triggerWave must not splice into it.
+    const h = launch({
+      scenarioCast: { members: [], env: CAST_ENV, runSeed: LEVEL_SEED },
+      scheduleMode: "steady",
+      checkpoints: deadlineAt(400),
+    });
+    await step(h.driver, 3);
+    expect(h.handle.triggerWave()).toBeNull();
+    h.handle.stop();
   });
 });

@@ -228,7 +228,7 @@ export function App({ createPipelineController }: AppProps = {}) {
   // transport-reflector effects. It is the one engine now (GH117): its blueprint
   // steps the scenario cast the embedded map draws, so there is no separate world
   // controller to build or tear down alongside it.
-  const { controllerRef } = usePipelineController({
+  const { controllerRef, triggerWave } = usePipelineController({
     createController: createPipelineController,
   });
 
@@ -375,6 +375,12 @@ export function App({ createPipelineController }: AppProps = {}) {
         metricsButtonRef={metricsButtonRef}
       />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
+      {/* TEMPORARY (GH126-PLAN.md M2b): a hand trigger for one chaos wave, so the
+          wave path can be driven before the ladder UI exists. M3 removes this and
+          wires the real level-1 chaos-ladder rung through the side panel. */}
+      <button type="button" className="dev-trigger-wave" onClick={triggerWave}>
+        Trigger chaos wave (dev)
+      </button>
       <InspectorShell
         findingsPanelRef={findingsPanelRef}
         logPanelRef={logPanelRef}

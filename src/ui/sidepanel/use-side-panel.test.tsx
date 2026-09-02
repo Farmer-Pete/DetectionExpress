@@ -18,7 +18,13 @@ beforeEach(() => {
 
 /** A no-op controller: run() never settles, for tests that never touch Apply's edge. */
 function stubController(run: () => void = () => {}): RunController {
-  return { run, setFrozen: () => {}, setSpeed: () => {}, dispose: () => {} };
+  return {
+    run,
+    setFrozen: () => {},
+    setSpeed: () => {},
+    triggerWave: () => null,
+    dispose: () => {},
+  };
 }
 
 /**
@@ -41,6 +47,7 @@ function asyncRunController(error: { phase: string; message: string } | null): R
     },
     setFrozen: () => {},
     setSpeed: () => {},
+    triggerWave: () => null,
     dispose: () => {},
   };
 }

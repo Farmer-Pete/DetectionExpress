@@ -58,6 +58,7 @@ function fakeHandle(whenStopped: Promise<void> = Promise.resolve()): EngineHandl
     pause: () => undefined,
     resume: () => undefined,
     setSpeed: () => undefined,
+    triggerWave: () => null,
     whenStopped,
   };
 }
@@ -93,6 +94,7 @@ function spyHandle(whenStopped: Promise<void> = new Promise(() => undefined)): {
     pause: () => undefined,
     resume: () => undefined,
     setSpeed: () => undefined,
+    triggerWave: () => null,
     whenStopped,
   };
   return {
@@ -476,6 +478,7 @@ describe("run controller", () => {
               pause: () => undefined,
               resume: () => undefined,
               setSpeed: () => undefined,
+              triggerWave: () => null,
               whenStopped: new Promise(() => undefined),
             };
             return handle;
@@ -691,6 +694,7 @@ describe("run controller", () => {
       pause: () => calls.push("pause"),
       resume: () => calls.push("resume"),
       setSpeed: () => undefined,
+      triggerWave: () => null,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -720,6 +724,7 @@ describe("run controller", () => {
             pause: () => pauses.push(index),
             resume: () => undefined,
             setSpeed: () => undefined,
+            triggerWave: () => null,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -740,6 +745,7 @@ describe("run controller", () => {
       pause: () => undefined,
       resume: () => undefined,
       setSpeed: (m) => speeds.push(m),
+      triggerWave: () => null,
       whenStopped: new Promise(() => undefined),
     };
     const controller = createRunController(baseDeps({ start: () => handle }));
@@ -755,6 +761,26 @@ describe("run controller", () => {
     expect(() => controller.setSpeed(2)).not.toThrow();
   });
 
+  it("delegates triggerWave to the live engine handle and returns its WaveId", async () => {
+    const handle: EngineHandle = {
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      setSpeed: () => undefined,
+      triggerWave: () => 7,
+      whenStopped: new Promise(() => undefined),
+    };
+    const controller = createRunController(baseDeps({ start: () => handle }));
+    controller.run();
+    await flush();
+    expect(controller.triggerWave()).toBe(7);
+  });
+
+  it("triggerWave is a safe no-op that returns null when no engine is live", () => {
+    const controller = createRunController(baseDeps({}));
+    expect(controller.triggerWave()).toBeNull();
+  });
+
   it("rejects a speed outside 0.5|1|2 before it retains it", async () => {
     const speeds: number[] = [];
     let call = 0;
@@ -768,6 +794,7 @@ describe("run controller", () => {
             pause: () => undefined,
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
+            triggerWave: () => null,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -798,6 +825,7 @@ describe("run controller", () => {
             pause: () => undefined,
             resume: () => undefined,
             setSpeed: (m) => speeds.push(m),
+            triggerWave: () => null,
             whenStopped: new Promise(() => undefined),
           };
         },
@@ -826,6 +854,7 @@ describe("run controller", () => {
           setSpeed: () => {
             throw new Error("setSpeed boom");
           },
+          triggerWave: () => null,
           whenStopped: new Promise(() => undefined),
         }),
       }),

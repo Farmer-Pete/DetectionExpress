@@ -82,6 +82,25 @@ describe("ScoredIngress state transitions", () => {
   });
 });
 
+// GH126-PLAN.md finding 8 / seam 12: the wave-scoped queue metric adds this backlog
+// to the channel sizes, so the buffered-but-unpumped count must be observable.
+describe("ScoredIngress size (the buffered backlog, GH126 seam 12)", () => {
+  it("counts offered events still buffered, and drops to zero once pump drains them", async () => {
+    const ingress = new ScoredIngress();
+    expect(ingress.size).toBe(0);
+
+    ingress.offer(ev(0, 0));
+    ingress.offer(ev(1, 2));
+    ingress.offer(ev(2, 4));
+    expect(ingress.size).toBe(3); // three offered, none pumped yet
+
+    ingress.close();
+    const out = new Channel<PipeMessage>(10);
+    await ingress.pump(out, idleClock, noAdmit);
+    expect(ingress.size).toBe(0); // fully drained
+  });
+});
+
 describe("ScoredIngress backpressure", () => {
   it("blocks pump on a full channel and fires onAdmit only after the channel accepts", async () => {
     const out = new Channel<PipeMessage>(1);

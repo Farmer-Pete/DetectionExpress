@@ -27,6 +27,10 @@ function loggingController(log: string[]): RunController {
     setSpeed(speed) {
       log.push(`setSpeed:${speed}`);
     },
+    triggerWave() {
+      log.push("triggerWave");
+      return null;
+    },
     dispose() {
       log.push("dispose");
     },

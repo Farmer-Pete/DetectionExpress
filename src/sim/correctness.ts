@@ -254,8 +254,9 @@ export interface Scorer {
    * `assertValidThreshold` on the given threshold. Does NOT run the distinct-
    * evidence-vs-threshold check `createScorer` runs on a constructor-seeded
    * Attack: there is no evidence yet to count. That check moves to the caller's
-   * own compose seam, once it knows the real evidence count (e.g. a chaos wave's
-   * `toAttack`). The caller registers the attack before admitting the attacker
+   * own compose seam, where it knows the evidence count up front (e.g. a chaos
+   * wave's `planChaosWave` asserts its fail count `>= threshold` at plan time). The
+   * caller registers the attack before admitting the attacker
    * that will emit its evidence, so a finding scored after registration is
    * matched against a real pending Attack rather than falling through to false.
    */

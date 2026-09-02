@@ -9,18 +9,20 @@
  *
  * The engine caller (M2b) admits `attacker` through `schedule.admit()`, calls
  * `scorer.addAttack(...)` with `victim`/`window`/`threshold` BEFORE any evidence
- * exists, binds each fail's global event id as it is offered
- * (`scorer.bindEvidence`), then calls `toAttack` once every fail has its id, to
- * build the final Ground-truth Attack.
+ * exists, then binds each fail's global event id as it is offered
+ * (`scorer.bindEvidence`). The scorer's dynamic seam (`addAttack` + `bindEvidence`)
+ * is the sole ground truth for a live wave, so no canonical `Attack` object is ever
+ * composed: `evidenceCount` tells the caller how many fails to expect, and the
+ * distinct-evidence-vs-threshold invariant is asserted here at plan time (the check
+ * that once lived on the removed `toAttack`, Codex N3).
  */
 import { GAME_SECONDS_PER_TICK } from "../../../game/tuning";
 import { ATTACK_ACCOUNT_NAMESPACE } from "../../actors/account-namespace";
 import type { ActorDescriptor } from "../../actors/actor";
-import type { Attack } from "../../attack";
 import { KIOSK_TERMINALS } from "../../endpoints/kiosk/internal";
 import { world } from "../../world/world";
 import type { WorldEnv, WorldReading } from "../../world-reading";
-import { type AttackPlan, attackFromPlan, selectVictims } from "./attacks";
+import { selectVictims } from "./attacks";
 import { assembleAttacker, pickSeeded } from "./cast";
 import { ARRIVE_LEAD_TICKS } from "./pin-attacker";
 import { PIN_BRUTE_FORCE_THRESHOLD, SCAN_WINDOW_TICKS } from "./tuning";
@@ -43,12 +45,13 @@ export interface ChaosWavePlan {
   /** This hunt's evidence threshold (`PIN_BRUTE_FORCE_THRESHOLD`). */
   threshold: number;
   /**
-   * Build the Ground-truth Attack once every fail reading has its global event id,
-   * in emission order. Asserts `new Set(eventIds).size >= threshold`: the check
-   * `createScorer` used to run at attack registration, now run here instead now
-   * that `addAttack` registers before any evidence exists (Codex N3).
+   * How many wrong-PIN fails the attacker emits — one distinct scored event each,
+   * always at or above `threshold`. The caller tracks its bound-evidence count
+   * against this to know when every fail has been offered, so it can time the wave's
+   * drain watermark. Asserted `>= threshold` at plan time (the distinct-evidence
+   * check the removed `toAttack` used to carry, Codex N3).
    */
-  toAttack(id: number, eventIds: number[]): Attack;
+  evidenceCount: number;
 }
 
 /**
@@ -80,6 +83,17 @@ export function planChaosWave(
 
   // Between threshold and threshold + 3 fails, mirroring `planAttacks`'s own burst draw.
   const count = PIN_BRUTE_FORCE_THRESHOLD + Math.floor(rng() * 4);
+  // The distinct-evidence invariant, asserted at plan time now that no `toAttack`
+  // composes a canonical Attack downstream: every fail is one distinct scored id, so
+  // `count` IS the distinct evidence count, and a burst below threshold could never
+  // be caught (Codex N3). `count`'s own draw keeps it `>= threshold`; this guards a
+  // future change to that draw.
+  if (count < PIN_BRUTE_FORCE_THRESHOLD) {
+    throw new Error(
+      `planChaosWave: a ${count}-fail burst is below the threshold of ` +
+        `${PIN_BRUTE_FORCE_THRESHOLD}, so no Alert could ever catch it.`,
+    );
+  }
   const spanTicks = SCAN_WINDOW_TICKS - CHAOS_WAVE_MARGIN_TICKS;
   if (spanTicks < count - 1) {
     throw new RangeError("planChaosWave: the detection window is too short for the burst.");
@@ -115,16 +129,6 @@ export function planChaosWave(
     victim,
     window,
     threshold: PIN_BRUTE_FORCE_THRESHOLD,
-    toAttack(id, eventIds) {
-      const distinctEvidence = new Set(eventIds).size;
-      if (distinctEvidence < PIN_BRUTE_FORCE_THRESHOLD) {
-        throw new Error(
-          `planChaosWave: attack ${id} has ${distinctEvidence} distinct evidence ids but a ` +
-            `threshold of ${PIN_BRUTE_FORCE_THRESHOLD}, so no Alert could ever satisfy it.`,
-        );
-      }
-      const plan: AttackPlan = { id, account: victim, window, failTimestamps };
-      return attackFromPlan(plan, eventIds);
-    },
+    evidenceCount: count,
   };
 }

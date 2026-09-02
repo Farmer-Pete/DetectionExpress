@@ -75,6 +75,16 @@ export class ScoredIngress {
   }
 
   /**
+   * How many offered Events are buffered here, not yet taken by `pump` (GH126-PLAN.md
+   * finding 8, seam 12). The engine's wave-scoped queue metric adds this to the
+   * channel sizes so the backlog it peaks over includes Events still waiting inside
+   * this source, not only those already pushed onto a channel. Zero once drained.
+   */
+  get size(): number {
+    return this.queue.length;
+  }
+
+  /**
    * Append one ID-assigned scored Event. Synchronous, never blocks: the
    * tick listener that calls it stays synchronous. Throws if the horizon
    * already closed, since an Event offered after `close()` is a wiring bug,

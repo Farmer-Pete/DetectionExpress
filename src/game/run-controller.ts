@@ -40,6 +40,7 @@ import {
   type ScenarioCast,
   type StartOptions,
   start as startDefault,
+  type WaveId,
 } from "./engine";
 import { tabHidden } from "./profiler/guard";
 import { profile, spawnProfilerWorker } from "./profiler/profile";
@@ -109,6 +110,13 @@ export interface RunController {
    * engine live.
    */
   setSpeed(speed: Speed): void;
+  /**
+   * Trigger one chaos wave on the live engine (GH126-PLAN.md M2b). Delegates to the
+   * engine handle's `triggerWave`, which is itself a no-op outside endless mode or
+   * while a wave is already active (the cooldown, Q7). A safe no-op with no engine
+   * live. Returns the minted `WaveId`, or `null` when nothing was triggered.
+   */
+  triggerWave(): WaveId | null;
   /** Permanent teardown. A later load or completion sees this and does nothing. */
   dispose(): void;
 }
@@ -687,12 +695,17 @@ export function createRunController(deps: RunControllerDeps): RunController {
     engine?.setSpeed(next);
   };
 
+  // Delegate to the live engine handle. Safe with no engine live (returns null), and
+  // the handle itself no-ops outside endless mode or during a wave's cooldown.
+  const triggerWave = (): WaveId | null => engine?.triggerWave() ?? null;
+
   return {
     run: () => {
       void run();
     },
     setFrozen,
     setSpeed,
+    triggerWave,
     dispose,
   };
 }
