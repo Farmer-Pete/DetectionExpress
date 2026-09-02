@@ -122,7 +122,7 @@ interface GameState {
    * control can pop back to what was open before.
    * The TOP entry (`topMapDialogEntry(mapDialogStack)`) is the dialog on screen; an
    * empty stack means neither dialog is open. A `"place"` entry needs no snapshot
-   * reconciliation (every node/train it can name is a fixed `world.json` fixture,
+   * reconciliation (every node/train it can name is a fixed world-data fixture,
    * never evicted); an `"event"` entry names an id in the bounded world-event ring, so
    * `setSnapshot` below filters out any entry whose id has aged out of that ring,
    * wherever it sits in the stack, mirroring how `selection`/`decisionSelection` were
@@ -328,7 +328,7 @@ export const useGameStore = create<GameState>((set) => ({
           next.decisionSelection = null;
         }
       }
-      // Unlike a `"place"` entry (names a fixed world.json fixture, never evicted), an
+      // Unlike a `"place"` entry (names a fixed world-data fixture, never evicted), an
       // `"event"` entry names an id in the bounded world-event ring, so it needs the
       // same per-publish reconciliation `selection`/`decisionSelection` already get:
       // filter out any `"event"` entry whose id has aged out of the ring, wherever it
@@ -387,7 +387,7 @@ export const useGameStore = create<GameState>((set) => ({
   // is inert behind one anyway — so each one plainly RESETS the stack to a fresh
   // single entry rather than needing its own toggle-off case the way selectFinding/
   // selectDecision do. No snapshot-presence validation for a `"place"` entry, unlike
-  // selectWorldEvent: every node/train id it can name is a fixed world.json fixture,
+  // selectWorldEvent: every node/train id it can name is a fixed world-data fixture,
   // never evicted.
   selectMapNode: (id) =>
     set(() => ({

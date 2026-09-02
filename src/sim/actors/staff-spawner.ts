@@ -48,7 +48,7 @@ export interface StaffSpawner {
 }
 
 /**
- * The OCC has no `nearestStation` in `world.json` (it is not a site), but staff still
+ * The OCC has no `nearestStation` in the world data (it is not a site), but staff still
  * walk to it. Central sits directly below the control center on the map, so a staff
  * visit to the OCC walks in from Central. Sites carry their own `nearestStation`.
  */

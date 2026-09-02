@@ -1,10 +1,14 @@
 /**
- * The world environment: the runtime authority on `world.json`. The sim imports
- * the JSON at build time and `parseWorld` narrows and validates it, so a bad edit
- * fails a test rather than reaching a run. Everything here is pure, read-only data
- * the actors read; the environment never reads back (see ADR-0007).
+ * The world environment: the runtime authority on the world's referential and graph
+ * invariants. The shape itself is now a compile-time contract (`worldData` in
+ * `./world.data` is `as const satisfies World`), so `tsc` rejects a malformed field
+ * before a test ever runs. `assertWorldConsistent` holds only what a type cannot
+ * express: cross-references, graph connectivity, uniqueness, and finite ranges. Every
+ * field is `readonly`, and the world is deep-frozen, so an actor can read the
+ * environment but never mutate it (see ADR-0007, ADR-0011).
  */
-import worldJson from "../../../docs/world/world.json";
+import { lineIdForTrain } from "./timetable";
+import { worldData } from "./world.data";
 
 /**
  * A trust layer, 0 (public) to 4 (the control floor). A door's grade is a zone's
@@ -14,7 +18,7 @@ import worldJson from "../../../docs/world/world.json";
 interface Zone {
   readonly id: string;
   readonly name: string;
-  readonly trustLevel: number;
+  readonly trustLevel: 0 | 1 | 2 | 3 | 4;
   readonly area: string;
   readonly whoBelongs: string;
   readonly securityParallel: string;
@@ -29,6 +33,8 @@ interface Line {
   readonly stations: readonly string[];
   readonly loop: boolean;
   readonly description: string;
+  /** The line's train, as the UI shows it, e.g. "Red Line train". Never generated. */
+  readonly trainName: string;
 }
 
 /** An undirected edge to a neighbor on a line, with its ride time in minutes. */
@@ -52,7 +58,7 @@ interface Station {
 interface Site {
   readonly id: string;
   readonly name: string;
-  readonly type: string;
+  readonly type: "depot" | "signal-cabin" | "substation";
   readonly zonesPresent: readonly string[];
   readonly nearestStation: string;
   readonly description: string;
@@ -62,7 +68,7 @@ interface Site {
 interface ControlCenter {
   readonly id: string;
   readonly name: string;
-  readonly type: string;
+  readonly type: "control-center";
   readonly zonesPresent: readonly string[];
   readonly description: string;
 }
@@ -90,248 +96,6 @@ export interface World {
 }
 
 /**
- * A string primitive. The tag check alone also passes a boxed `new String("x")`,
- * which is an object, so the `instanceof String` clause excludes it.
- */
-function isString(value: unknown): value is string {
-  return Object.prototype.toString.call(value) === "[object String]" && !(value instanceof String);
-}
-
-/** A finite number, the only numeric a travel time or trust level may be. */
-function isFiniteNumber(value: unknown): value is number {
-  return Number.isFinite(value);
-}
-
-/** A boolean primitive, by its tag. The `instanceof` clause excludes a boxed `Boolean`. */
-function isBoolean(value: unknown): value is boolean {
-  return (
-    Object.prototype.toString.call(value) === "[object Boolean]" && !(value instanceof Boolean)
-  );
-}
-
-/** An array of string primitives. */
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every(isString);
-}
-
-/** The site-type enum from `world.schema.json`. A site's `type` must be one of these. */
-const SITE_TYPES: readonly string[] = ["depot", "signal-cabin", "substation"];
-
-function parseZone(value: unknown): Zone {
-  if (!(value instanceof Object)) {
-    throw new Error("world.zones: each zone must be an object.");
-  }
-  if (
-    !(
-      "id" in value &&
-      "name" in value &&
-      "trustLevel" in value &&
-      "area" in value &&
-      "whoBelongs" in value &&
-      "securityParallel" in value &&
-      "description" in value
-    )
-  ) {
-    throw new Error("world.zones: a zone is missing a required field.");
-  }
-  const { id, name, trustLevel, area, whoBelongs, securityParallel, description } = value;
-  if (
-    !(
-      isString(id) &&
-      isString(name) &&
-      isFiniteNumber(trustLevel) &&
-      isString(area) &&
-      isString(whoBelongs) &&
-      isString(securityParallel) &&
-      isString(description)
-    )
-  ) {
-    throw new Error("world.zones: a zone field has the wrong type.");
-  }
-  if (!Number.isInteger(trustLevel) || trustLevel < 0 || trustLevel > 4) {
-    throw new Error(`world.zones: zone "${id}" trustLevel must be an integer in [0, 4].`);
-  }
-  if (!/^z[0-4]$/.test(id)) {
-    throw new Error(`world.zones: zone id "${id}" must match ^z[0-4]$.`);
-  }
-  return { id, name, trustLevel, area, whoBelongs, securityParallel, description };
-}
-
-function parseLine(value: unknown): Line {
-  if (!(value instanceof Object)) {
-    throw new Error("world.lines: each line must be an object.");
-  }
-  if (
-    !(
-      "id" in value &&
-      "name" in value &&
-      "color" in value &&
-      "stations" in value &&
-      "loop" in value &&
-      "description" in value
-    )
-  ) {
-    throw new Error("world.lines: a line is missing a required field.");
-  }
-  const { id, name, color, stations, loop, description } = value;
-  if (
-    !(
-      isString(id) &&
-      isString(name) &&
-      isString(color) &&
-      isStringArray(stations) &&
-      isBoolean(loop) &&
-      isString(description)
-    )
-  ) {
-    throw new Error("world.lines: a line field has the wrong type.");
-  }
-  return { id, name, color, stations, loop, description };
-}
-
-function parseConnection(value: unknown): Connection {
-  if (!(value instanceof Object)) {
-    throw new Error("world.stations: each connection must be an object.");
-  }
-  if (!("to" in value && "line" in value && "minutes" in value)) {
-    throw new Error("world.stations: a connection is missing a required field.");
-  }
-  const { to, line, minutes } = value;
-  if (!(isString(to) && isString(line) && isFiniteNumber(minutes))) {
-    throw new Error("world.stations: a connection field has the wrong type.");
-  }
-  return { to, line, minutes };
-}
-
-function parseStation(value: unknown): Station {
-  if (!(value instanceof Object)) {
-    throw new Error("world.stations: each station must be an object.");
-  }
-  if (
-    !(
-      "id" in value &&
-      "name" in value &&
-      "lines" in value &&
-      "interchange" in value &&
-      "connections" in value &&
-      "description" in value
-    )
-  ) {
-    throw new Error("world.stations: a station is missing a required field.");
-  }
-  const { id, name, lines, interchange, connections, description } = value;
-  if (
-    !(
-      isString(id) &&
-      isString(name) &&
-      isStringArray(lines) &&
-      isBoolean(interchange) &&
-      Array.isArray(connections) &&
-      isString(description)
-    )
-  ) {
-    throw new Error("world.stations: a station field has the wrong type.");
-  }
-  return {
-    id,
-    name,
-    lines,
-    interchange,
-    connections: connections.map(parseConnection),
-    description,
-  };
-}
-
-function parseSite(value: unknown): Site {
-  if (!(value instanceof Object)) {
-    throw new Error("world.sites: each site must be an object.");
-  }
-  if (
-    !(
-      "id" in value &&
-      "name" in value &&
-      "type" in value &&
-      "zonesPresent" in value &&
-      "nearestStation" in value &&
-      "description" in value
-    )
-  ) {
-    throw new Error("world.sites: a site is missing a required field.");
-  }
-  const { id, name, type, zonesPresent, nearestStation, description } = value;
-  if (
-    !(
-      isString(id) &&
-      isString(name) &&
-      isString(type) &&
-      isStringArray(zonesPresent) &&
-      isString(nearestStation) &&
-      isString(description)
-    )
-  ) {
-    throw new Error("world.sites: a site field has the wrong type.");
-  }
-  if (!SITE_TYPES.includes(type)) {
-    throw new Error(`world.sites: site "${id}" has unknown type "${type}".`);
-  }
-  return { id, name, type, zonesPresent, nearestStation, description };
-}
-
-function parseControlCenter(value: unknown): ControlCenter {
-  if (!(value instanceof Object)) {
-    throw new Error("world.controlCenter: must be an object.");
-  }
-  if (
-    !(
-      "id" in value &&
-      "name" in value &&
-      "type" in value &&
-      "zonesPresent" in value &&
-      "description" in value
-    )
-  ) {
-    throw new Error("world.controlCenter: a required field is missing.");
-  }
-  const { id, name, type, zonesPresent, description } = value;
-  if (
-    !(
-      isString(id) &&
-      isString(name) &&
-      isString(type) &&
-      isStringArray(zonesPresent) &&
-      isString(description)
-    )
-  ) {
-    throw new Error("world.controlCenter: a field has the wrong type.");
-  }
-  if (type !== "control-center") {
-    throw new Error(`world.controlCenter: type must be "control-center", got "${type}".`);
-  }
-  return { id, name, type, zonesPresent, description };
-}
-
-function parseDoor(value: unknown): Door {
-  if (!(value instanceof Object)) {
-    throw new Error("world.doors: each door must be an object.");
-  }
-  if (!("location" in value && "locationType" in value && "name" in value && "zone" in value)) {
-    throw new Error("world.doors: a door is missing a required field.");
-  }
-  const { location, locationType, name, zone } = value;
-  if (
-    !(
-      isString(location) &&
-      (locationType === "site" || locationType === "control-center") &&
-      isString(name) &&
-      isString(zone)
-    )
-  ) {
-    throw new Error("world.doors: a door field has the wrong type or value.");
-  }
-  return { location, locationType, name, zone };
-}
-
-/**
  * Recursively `Object.freeze` a value and every object it holds, so a runtime
  * mutation of the shared world fails rather than silently breaking determinism.
  */
@@ -346,7 +110,7 @@ function deepFreeze(value: unknown): void {
 }
 
 /** Throw on the first repeated id in a list, naming the collection. */
-function requireUniqueIds(ids: string[], label: string): void {
+function requireUniqueIds(ids: readonly string[], label: string): void {
   const seen = new Set<string>();
   for (const id of ids) {
     if (seen.has(id)) {
@@ -399,10 +163,15 @@ function zonesAtDoorLocation(world: World, door: Door): readonly string[] | unde
 }
 
 /**
- * Check every referential and graph invariant `parseWorld` is the authority on.
- * Each throw names the exact break so a bad `world.json` edit reads clearly in CI.
+ * Check every referential, graph, and range invariant the `World` type cannot
+ * express: unique ids, membership reciprocity, connection resolution and weight
+ * symmetry, graph connectivity, dangling zone/station/door references, a zone's
+ * `^z[0-4]$` id, and every `minutes` a finite number (a type only promises `number`,
+ * which admits `NaN` and `Infinity`). Each throw names the exact break so a bad
+ * `world.data.ts` edit reads clearly in CI. Runs once at load (see ARCHITECTURE
+ * rule 9: validate at seams; trust types inside).
  */
-function validateWorld(world: World): void {
+export function assertWorldConsistent(world: World): void {
   requireUniqueIds(
     world.zones.map((zone) => zone.id),
     "zone",
@@ -419,6 +188,18 @@ function validateWorld(world: World): void {
     world.sites.map((site) => site.id),
     "site",
   );
+
+  for (const zone of world.zones) {
+    if (!/^z[0-4]$/.test(zone.id)) {
+      throw new Error(`world.zones: zone id "${zone.id}" must match ^z[0-4]$.`);
+    }
+    // `trustLevel` is a `0 | 1 | 2 | 3 | 4` literal union, so `tsc` rejects a bad
+    // literal in `world.data.ts`. This mirrors that range for a mutated test clone,
+    // which reaches this function through a runtime cast the compiler cannot see.
+    if (!Number.isInteger(zone.trustLevel) || zone.trustLevel < 0 || zone.trustLevel > 4) {
+      throw new Error(`world.zones: zone "${zone.id}" trustLevel must be an integer in [0, 4].`);
+    }
+  }
 
   const zoneIds = new Set(world.zones.map((zone) => zone.id));
   const lineById = new Map(world.lines.map((line) => [line.id, line]));
@@ -471,6 +252,11 @@ function validateWorld(world: World): void {
       if (!(line.stations.includes(station.id) && line.stations.includes(connection.to))) {
         throw new Error(
           `world.stations: line "${connection.line}" does not contain both "${station.id}" and "${connection.to}".`,
+        );
+      }
+      if (!Number.isFinite(connection.minutes)) {
+        throw new Error(
+          `world.stations: non-finite travel time between "${station.id}" and "${connection.to}".`,
         );
       }
       if (station.id !== connection.to && connection.minutes <= 0) {
@@ -584,55 +370,10 @@ function validateWorld(world: World): void {
   }
 }
 
-/**
- * Narrow and validate an untyped value into a `World`. Pure. It reads fields and
- * checks them with no type assertions, and throws a clear error on any missing or
- * malformed field, any duplicate id, any membership, connection, or graph break,
- * and any dangling site, zone, or door reference.
- */
-export function parseWorld(value: unknown): World {
-  if (!(value instanceof Object)) {
-    throw new Error("world must be an object.");
-  }
-  if (
-    !(
-      "zones" in value &&
-      "lines" in value &&
-      "stations" in value &&
-      "sites" in value &&
-      "controlCenter" in value &&
-      "doors" in value
-    )
-  ) {
-    throw new Error("world is missing a top-level field.");
-  }
-  const { zones, lines, stations, sites, controlCenter, doors } = value;
-  if (
-    !(
-      Array.isArray(zones) &&
-      Array.isArray(lines) &&
-      Array.isArray(stations) &&
-      Array.isArray(sites) &&
-      Array.isArray(doors)
-    )
-  ) {
-    throw new Error("world: zones, lines, stations, sites, and doors must be arrays.");
-  }
-  const world: World = {
-    zones: zones.map(parseZone),
-    lines: lines.map(parseLine),
-    stations: stations.map(parseStation),
-    sites: sites.map(parseSite),
-    controlCenter: parseControlCenter(controlCenter),
-    doors: doors.map(parseDoor),
-  };
-  validateWorld(world);
-  deepFreeze(world);
-  return world;
-}
-
-/** The singleton world, validated once from the imported `world.json`. */
-export const world: World = parseWorld(worldJson);
+/** The singleton world: the typed data, deep-frozen, then checked once at load. */
+export const world: World = worldData;
+deepFreeze(world);
+assertWorldConsistent(world);
 
 /** The trust level of a zone. Throws on an unknown zone id. */
 export function zoneTrustLevel(zoneId: string): number {
@@ -655,4 +396,143 @@ export function doorGrade(location: string, door: string): number {
     throw new Error(`unknown door (${location}, ${door}).`);
   }
   return zoneTrustLevel(found.zone);
+}
+
+/**
+ * The world-entity name resolvers (GH127-PLAN.md M2): every id that reaches the
+ * screen resolves through one of these, never a repeated inline `world.x.find(...)`
+ * and never a generated or concatenated string (the hard rule: names and flavor text
+ * come only from the world and sensor data constants). `stationName`/`siteName`/
+ * `lineName`/`zoneName`/`trainName` throw on an unknown id, matching
+ * `zoneTrustLevel`/`doorGrade` above. `placeName` is the one exception: it resolves a
+ * station, a site, OR the control-center id — the world-log ring and the event
+ * dialog's Source line mix all three under one id space — and falls back to the raw
+ * id for one that names none of the three, the same defensive fallback the private
+ * `nodeLabel` it replaces (formerly in `place-view.ts`) always had.
+ */
+
+/** A station's display name. Throws on an unknown station id. */
+export function stationName(stationId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === stationId);
+  if (station === undefined) {
+    throw new Error(`unknown station "${stationId}".`);
+  }
+  return station.name;
+}
+
+/** A site's display name. Throws on an unknown site id. */
+export function siteName(siteId: string): string {
+  const site = world.sites.find((candidate) => candidate.id === siteId);
+  if (site === undefined) {
+    throw new Error(`unknown site "${siteId}".`);
+  }
+  return site.name;
+}
+
+/** A line's display name. Throws on an unknown line id. */
+export function lineName(lineId: string): string {
+  const line = world.lines.find((candidate) => candidate.id === lineId);
+  if (line === undefined) {
+    throw new Error(`unknown line "${lineId}".`);
+  }
+  return line.name;
+}
+
+/** A zone's display name. Throws on an unknown zone id. */
+export function zoneName(zoneId: string): string {
+  const zone = world.zones.find((candidate) => candidate.id === zoneId);
+  if (zone === undefined) {
+    throw new Error(`unknown zone "${zoneId}".`);
+  }
+  return zone.name;
+}
+
+/**
+ * A station, a site, or the control-center id's display name. Falls back to the raw
+ * id when it names none of the three, so a stale or otherwise-unresolvable id renders
+ * as itself rather than throwing and crashing a dialog.
+ */
+export function placeName(placeId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === placeId);
+  if (station !== undefined) {
+    return station.name;
+  }
+  const site = world.sites.find((candidate) => candidate.id === placeId);
+  if (site !== undefined) {
+    return site.name;
+  }
+  if (world.controlCenter.id === placeId) {
+    return world.controlCenter.name;
+  }
+  return placeId;
+}
+
+/** The line a train id derives from, via `lineIdForTrain`. Shared by `trainName`
+ *  and `trainDescription` (GH127-PLAN.md M3), so the two never repeat the lookup. */
+function lineForTrain(trainId: string): Line {
+  const lineId = lineIdForTrain(world, trainId);
+  const line = world.lines.find((candidate) => candidate.id === lineId);
+  if (line === undefined) {
+    // Unreachable: `lineIdForTrain` only ever returns an id drawn from `world.lines`.
+    throw new Error(`lineForTrain: line "${lineId}" not found.`);
+  }
+  return line;
+}
+
+/**
+ * A train's display name: its line's authored `trainName` constant (never a
+ * generated `${lineName} train` concatenation — see M1). Throws on a train id no
+ * line derives, via `lineIdForTrain`.
+ */
+export function trainName(trainId: string): string {
+  return lineForTrain(trainId).trainName;
+}
+
+/**
+ * A train's narrative flavor text (GH127-PLAN.md M3): no train entity exists in
+ * the world data, so this reads its line's `description` instead. Throws on a
+ * train id no line derives, matching `trainName`.
+ */
+export function trainDescription(trainId: string): string {
+  return lineForTrain(trainId).description;
+}
+
+/**
+ * A station, a site, or the control-center id's narrative flavor text
+ * (GH127-PLAN.md M3), mirroring `placeName`'s three-way resolution. Unlike
+ * `placeName`, this throws on an unknown id rather than falling back: every call
+ * site already holds an id drawn from `metroNodes`, so an unresolvable one is a
+ * bug, not a stale world-log reference.
+ */
+export function placeDescription(placeId: string): string {
+  const station = world.stations.find((candidate) => candidate.id === placeId);
+  if (station !== undefined) {
+    return station.description;
+  }
+  const site = world.sites.find((candidate) => candidate.id === placeId);
+  if (site !== undefined) {
+    return site.description;
+  }
+  if (world.controlCenter.id === placeId) {
+    return world.controlCenter.description;
+  }
+  throw new Error(`unknown place "${placeId}".`);
+}
+
+/** A zone's narrative summary (GH127-PLAN.md M3, decision B): its display name,
+ *  who belongs there, and its security parallel — the fields the place dialog's
+ *  zone section renders for a site or the control center. Stations carry no zone. */
+export interface ZoneSummary {
+  readonly name: string;
+  readonly whoBelongs: string;
+  readonly securityParallel: string;
+}
+
+/** A zone's narrative summary, keyed by id. Throws on an unknown zone id. */
+export function zoneSummary(zoneId: string): ZoneSummary {
+  const zone = world.zones.find((candidate) => candidate.id === zoneId);
+  if (zone === undefined) {
+    throw new Error(`unknown zone "${zoneId}".`);
+  }
+  return { name: zone.name, whoBelongs: zone.whoBelongs, securityParallel: zone.securityParallel };
 }

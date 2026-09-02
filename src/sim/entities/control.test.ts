@@ -6,7 +6,7 @@ describe("controlReference", () => {
   it("lists at least one authorized console, each a login on its own OCC host", () => {
     expect(controlReference.consoles.length).toBeGreaterThan(0);
     for (const console of controlReference.consoles) {
-      // A `line.disp` login, matching the sensors.json "green.disp" style.
+      // A `line.disp` login, matching the sensor data's "green.disp" style.
       expect(console.operator).toMatch(/^[a-z]+\.disp$/);
       // A control-floor host id like OCC-3.
       expect(console.host).toMatch(/^OCC-\d+$/);
@@ -31,7 +31,7 @@ describe("controlReference", () => {
     const siteIds = new Set(world.sites.map((site) => site.id));
     expect(controlReference.hosts.length).toBeGreaterThan(0);
     for (const host of controlReference.hosts) {
-      // The host sits at a REAL site from world.json, never a fabricated location.
+      // The host sits at a REAL site from the world data, never a fabricated location.
       expect(siteIds.has(host.site)).toBe(true);
       expect(host.host.length).toBeGreaterThan(0);
     }

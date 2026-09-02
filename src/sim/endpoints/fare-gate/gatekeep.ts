@@ -1,7 +1,7 @@
 /**
  * The Gatekeep fare-gate endpoint: a dumb formatter over the fare-gate family's
  * internal record. The rider emits a `FareGateReading`; this re-spells it into the
- * Gatekeep TurnKey wire shape from `docs/world/sensors.json`. This slice ships one
+ * Gatekeep TurnKey wire shape from `src/game/sensors.data.ts`. This slice ships one
  * vendor format; VeriTap and RailSense (with their cents and code conversions) are
  * later tickets.
  */
@@ -9,7 +9,7 @@ import type { Endpoint } from "../endpoint";
 
 /**
  * The fare-gate family's internal record, matching the `normalizedExample` in
- * `sensors.json`. Balance is a non-negative integer in whole currency units; the
+ * `sensors.data.ts`. Balance is a non-negative integer in whole currency units; the
  * emitted balance is the balance after a tap-in's charge.
  */
 export interface FareGateReading {
@@ -36,7 +36,7 @@ export interface RawGatekeepGate {
 
 /**
  * Game-second 0 anchored to a fixed wall date, so `EVENT_TIME` is a real ISO 8601
- * string yet reads no wall clock. It matches the example date in `sensors.json`.
+ * string yet reads no wall clock. It matches the example date in `sensors.data.ts`.
  * `new Date(explicitMs)` takes its argument, so this is pure and deterministic
  * (ARCHITECTURE rule 8 bans reading wall time, not formatting game time).
  */

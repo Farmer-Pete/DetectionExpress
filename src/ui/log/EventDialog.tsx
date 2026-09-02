@@ -31,8 +31,10 @@
  * instead of replacing it, so a later Back returns here.
  */
 import type { RefObject } from "react";
+import { sensorCatalogueEntry } from "../../game/sensor-catalogue";
 import { topMapDialogEntry, useGameStore } from "../../game/store";
 import type { MapNodeId } from "../../sim/world/presence";
+import { placeName } from "../../sim/world/world";
 import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { MapDialogShell } from "../MapDialogShell";
@@ -95,6 +97,9 @@ export function EventDialog({
       rootTriggerRef={rootTriggerRef}
       rootFallbackFocusRef={rootFallbackFocusRef}
     >
+      {/* The sensor's sensors.data description, sourced from the catalogue, never
+       *  generated (GH127-PLAN.md M3). The Raw/Normalized blobs below stay untouched. */}
+      <p className="event-description">{sensorCatalogueEntry(ev.sensor).description}</p>
       {detail.kind === "scored" ? (
         <>
           <EventJsonSection title="Raw" value={detail.raw} />
@@ -116,7 +121,7 @@ export function EventDialog({
             <h3 className="place-section-title">Source</h3>
             <p className="event-detail-source">
               {detail.source.actorId !== undefined ? `${detail.source.actorId} at ` : ""}
-              {detail.source.placeId}
+              {placeName(detail.source.placeId)}
             </p>
           </section>
         </>

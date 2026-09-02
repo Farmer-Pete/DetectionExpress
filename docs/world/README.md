@@ -1,39 +1,46 @@
 # The Detection Express world
 
 This folder documents the world the game is set in: the metro network, its sensors, the
-vendors who build those sensors, and the 30 hunts (scenarios) the player works through. The sim
-imports `world.json` at runtime and validates it through `parseWorld`, so that file is live data,
-not just reference. The `src/sim/` scenarios stay the source of truth for what a run actually
-plays.
+vendors who build those sensors, and the 30 hunts (scenarios) the player works through. The world
+data itself no longer lives here as JSON — it is four typed TS modules under `src/`, `as const
+satisfies` their type, imported at build time. `assertWorldConsistent` checks the world module's
+referential and graph invariants once at load, and `src/game/world-data-integrity.test.ts` checks
+the cross-references between all four modules. So this data is live and enforced, not just
+reference (see ADR-0011). The `src/sim/` scenarios stay the source of truth for what a run
+actually plays.
 
 ## The files
 
-Each data file has its own JSON Schema. The data file points at its schema through `$schema`,
-so an editor can validate it as you type.
+Each data file is a typed TS module: the compiler owns its structural shape (field presence,
+primitive types, literal unions), so a malformed edit fails `tsc`, not just a test run. The JSON
+Schemas that used to sit beside these files as editor hints are gone — a schema cannot attach to
+a `.ts` file, and the shape they described now lives in the type itself.
 
-| Data | Schema | Holds |
+| Data | Type | Holds |
 | --- | --- | --- |
-| `world.json` | `world.schema.json` | Trust zones, lines, stations, staff sites, the control center. |
-| `sensors.json` | `sensors.schema.json` | Each sensor, where it sits, its clean shape, and its per-vendor raw shapes. |
-| `manufacturers.json` | `manufacturers.schema.json` | The five vendors and how their data reads. |
-| `scenarios.json` | `scenarios.schema.json` | All 30 hunts, sorted easiest to hardest. |
+| `src/sim/world/world.data.ts` | `World` (`src/sim/world/world.ts`) | Trust zones, lines, stations, staff sites, the control center. |
+| `src/game/sensors.data.ts` | `SensorData` (`src/game/sensor.types.ts`) | Each sensor, where it sits, its clean shape, and its per-vendor raw shapes. |
+| `src/game/manufacturers.data.ts` | `ManufacturerData` (`src/game/sensor.types.ts`) | The five vendors and how their data reads. |
+| `src/game/scenarios.data.ts` | `CatalogueData` (`src/game/catalogue.types.ts`) | All 30 hunts, sorted easiest to hardest. |
 
 ## How they connect
 
 The files reference each other by id. Descriptive text lives in one place only. The
-sensor-to-vendor link is the one relationship stored in both directions: `sensors.json` names the
-`manufacturerId` on each sensor, and `manufacturers.json` names the sensor ids in each vendor's
-`makes`. Adding a sensor means editing both sides, so keep them in sync.
+sensor-to-vendor link is the one relationship stored in both directions: `sensors.data.ts` names
+the `manufacturerId` on each sensor, and `manufacturers.data.ts` names the sensor ids in each
+vendor's `makes`. Adding a sensor means editing both sides, so keep them in sync.
+`world-data-integrity.test.ts` enforces this pair, the scenario-to-sensor link, and the
+`foundAt`-to-world link — a broken cross-reference fails that test, not just a schema hint.
 
 ```text
- scenarios.json ── sensors[] ──▶ sensors.json ── manufacturerId ──▶ manufacturers.json
-        │                             │
-        └── (reads the map) ──▶ world.json ◀── foundAt.zones / stations / sites ──┘
+ scenarios.data.ts ── sensors[] ──▶ sensors.data.ts ── manufacturerId ──▶ manufacturers.data.ts
+ │                                  │
+ └── (reads the map) ──▶ world.data.ts ◀── foundAt.zones / stations / sites ──┘
 ```
 
-- A scenario names the sensor ids it reads. Look them up in `sensors.json`.
-- A sensor names the manufacturer ids that build it. Look them up in `manufacturers.json`.
-- Zones, stations, and sites named anywhere resolve against `world.json`.
+- A scenario names the sensor ids it reads. Look them up in `sensors.data.ts`.
+- A sensor names the manufacturer ids that build it. Look them up in `manufacturers.data.ts`.
+- Zones, stations, and sites named anywhere resolve against `world.data.ts`.
 
 ## Two ideas worth knowing before you read
 
@@ -50,7 +57,7 @@ That gap is the work the player's Normalize Rule exists to close.
 ## Difficulty maps to the logic shape
 
 The star rating tracks the detection logic shape, which is what makes a Rule easy or hard to
-write. `scenarios.json` carries the full scale. In short: one star is a count in a window, and
+write. `scenarios.data.ts` carries the full scale. In short: one star is a count in a window, and
 five stars is a per-entity baseline you have to learn and tune.
 
 ## Honesty notes

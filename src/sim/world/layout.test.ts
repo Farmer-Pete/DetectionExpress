@@ -67,6 +67,14 @@ describe("metroNodes", () => {
     expect(byId.get("cen")?.zone).toBeUndefined(); // stations carry no zone badge
   });
 
+  it("carries the dominant zone's own id alongside its numeric level", () => {
+    expect(byId.get("dep")?.zoneId).toBe("z3");
+    expect(byId.get("sig")?.zoneId).toBe("z3");
+    expect(byId.get("sub")?.zoneId).toBe("z3");
+    expect(byId.get("occ")?.zoneId).toBe("z4");
+    expect(byId.get("cen")?.zoneId).toBeUndefined(); // stations carry no zone at all
+  });
+
   it("gives every station four chips and the OCC four chips", () => {
     expect(byId.get("cen")?.chips).toHaveLength(4);
     expect(byId.get("occ")?.chips).toHaveLength(4);
@@ -78,7 +86,7 @@ describe("metroLines", () => {
   const lines = metroLines(world);
   const byId = new Map(lines.map((line) => [line.id, line]));
 
-  it("uses the world.json colors and station counts, in the fixed line order", () => {
+  it("uses the world-data colors and station counts, in the fixed line order", () => {
     expect(lines.map((line) => line.id)).toEqual(["red", "blue", "green", "circle"]);
     expect(byId.get("red")?.color).toBe("#e6394a");
     expect(byId.get("red")?.points).toHaveLength(5);

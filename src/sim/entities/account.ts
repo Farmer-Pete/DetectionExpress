@@ -8,7 +8,7 @@
 
 /**
  * The username stems the seeded pool draws from. Each account name is a stem, a dot,
- * and a letter (the `sensors.json` style, e.g. `"river.k"`), so the pool reads like
+ * and a letter (the sensor-data style, e.g. `"river.k"`), so the pool reads like
  * real transit logins. The stems name places and roles from the metro world.
  */
 const STEMS: readonly string[] = [

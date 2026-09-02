@@ -99,6 +99,23 @@ export function PlaceDialog({
       rootTriggerRef={rootTriggerRef}
       rootFallbackFocusRef={rootFallbackFocusRef}
     >
+      <p className="place-description">{view.description}</p>
+
+      {view.zone === undefined ? null : (
+        <section className="place-zone" aria-label="Zone">
+          <h3 className="place-section-title">Zone</h3>
+          <div className="place-zone-card">
+            <div className="place-zone-name">{view.zone.name}</div>
+            <dl className="place-zone-kv">
+              <dt>Who belongs</dt>
+              <dd>{view.zone.whoBelongs}</dd>
+              <dt>Security parallel</dt>
+              <dd>{view.zone.securityParallel}</dd>
+            </dl>
+          </div>
+        </section>
+      )}
+
       <section className="place-devices" aria-label="Devices">
         <h3 className="place-section-title">Devices</h3>
         {view.devices.length === 0 ? (
@@ -152,15 +169,18 @@ export function PlaceDialog({
   );
 }
 
-/** One device card: its sensor icon, human name, canonical detail, and access state. */
+/** One device card: its sensor icon, human name, description, vendor list, and
+ *  access state — every field sourced from `sensors.data` via `sensor-catalogue`
+ *  (GH127-PLAN.md M2), never the raw sensor id. */
 function DeviceCard({ device }: { device: DeviceView }) {
   const { Icon, token } = sensorIcon(device.code);
   return (
     <li className="place-device-card">
       <Icon size={16} color={token} aria-hidden="true" />
       <span className="place-device-name">{device.name}</span>
-      {device.detail !== undefined ? (
-        <span className="place-device-detail">{device.detail}</span>
+      <span className="place-device-description">{device.description}</span>
+      {device.vendors.length > 0 ? (
+        <span className="place-device-vendors">{device.vendors.join(", ")}</span>
       ) : null}
       <span className="place-device-state">{device.state}</span>
     </li>
