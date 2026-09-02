@@ -6,9 +6,12 @@
  * must also leave a drain gap wide enough for its own `incoming` cue to
  * publish; `"steady"` mode (GH124-PLAN.md Checkpoint 3) skips that one check,
  * since a gapless constant stream is intentional there, and instead requires
- * every `eventsPerTick` to be an integer, so the accumulator reset at each
- * contiguous wave's start (`sim/actors/admission.ts`) never leaves a seam. The
- * wave admission controller (`sim/actors/admission.ts`) and the engine's
+ * the whole schedule to be CONTIGUOUS (every successor starts exactly at the
+ * prior wave's end, gap 0) and EQUAL-RATE (every wave shares one integer
+ * `eventsPerTick`), so the accumulator reset at each wave's start
+ * (`sim/actors/admission.ts`) never leaves a seam and the stream really is
+ * one constant rate throughout, not merely a gapless run of different ones.
+ * The wave admission controller (`sim/actors/admission.ts`) and the engine's
  * `start()` seam both call this with the same mode, so a malformed
  * `StartOptions.waves` throws before a run allocates, instead of producing
  * arrivals in the wrong order, double-counted ticks, a stalled accumulator, or
@@ -136,24 +139,61 @@ function assertSuccessorGap(waves: readonly Wave[]): void {
 }
 
 /**
- * Reject a non-integer `eventsPerTick` in `"steady"` mode. A steady schedule's
- * waves are contiguous (gap 0) and equal-rate, and `admitArrivals` resets its
- * fractional accumulator at each wave's start (`sim/actors/admission.ts`); only
- * a whole rate is guaranteed to land the accumulator back on exactly zero by a
- * wave's end. A fractional rate would leave a nonzero carry that the reset
- * silently drops, breaking the seam-free stream contiguous steady waves exist
- * to guarantee (e.g. two contiguous 3-tick waves at 0.5/tick would admit
- * ticks `[1, 4]` instead of the seamless `[1, 3, 5]`). The shipped steady
- * schedule already uses the integer `WAVE_RATES[0]`, so this rejects a shape
- * no live caller builds; it exists so that guarantee holds by construction
- * instead of by convention.
+ * Reject a `"steady"` mode schedule unless it is CONTIGUOUS, EQUAL-RATE, and
+ * INTEGER-RATE, the full steady contract `buildSteadySchedule`
+ * (`sim/schedule.ts`) ships: exactly `WAVE_COUNT` waves that touch end to end
+ * and all share one whole `eventsPerTick`. Checking each wave in isolation is
+ * not enough (CodeRabbit #3): a GAPPED schedule or a MIXED-RATE schedule can
+ * both pass a per-wave integer check while still not being the gapless
+ * constant stream `"steady"` mode promises. Three things are enforced here,
+ * per wave:
+ *
+ * - INTEGER RATE: `eventsPerTick` is a whole number. `admitArrivals` resets
+ *   its fractional accumulator at each wave's start
+ *   (`sim/actors/admission.ts`); only a whole rate is guaranteed to land the
+ *   accumulator back on exactly zero by a wave's end. A fractional rate
+ *   would leave a nonzero carry the reset silently drops, breaking the
+ *   seam-free stream contiguous steady waves exist to guarantee (e.g. two
+ *   contiguous 3-tick waves at 0.5/tick would admit ticks `[1, 4]` instead
+ *   of the seamless `[1, 3, 5]`).
+ * - RATE CONSISTENCY: `eventsPerTick` matches wave 0's. A steady schedule at
+ *   two different integer rates would still reset cleanly at each seam, but
+ *   it would not be the single constant stream `"steady"` mode is documented
+ *   to produce.
+ * - CONTIGUITY: `startTick` sits exactly at the prior wave's end
+ *   (`waves[i].startTick === waves[i - 1].startTick +
+ *   waves[i - 1].durationTicks`), gap 0, checked past index 0 only.
+ *   `assertNoOverlap` already forbids overlap; this additionally forbids any
+ *   gap wider than zero, since a gap (unlike touching) is not a shape
+ *   `admitArrivals` treats as one continuous stream.
+ *
+ * The shipped steady schedule already satisfies all three, so this rejects
+ * shapes no live caller builds; it exists so the gapless-constant-stream
+ * guarantee holds by construction instead of by convention.
  */
-function assertSteadyIntegerRate(waves: readonly Wave[]): void {
+function assertSteadyContiguousEqualRate(waves: readonly Wave[]): void {
+  const first = waves[0];
   waves.forEach((wave, index) => {
     if (!Number.isInteger(wave.eventsPerTick)) {
       throw new Error(
         `assertWaveScheduleOrdered: wave ${index} eventsPerTick ${wave.eventsPerTick} must be an integer in "steady" mode, so the per-wave accumulator reset produces no seam between contiguous waves.`,
       );
+    }
+    if (first !== undefined && wave.eventsPerTick !== first.eventsPerTick) {
+      throw new Error(
+        `assertWaveScheduleOrdered: wave ${index} eventsPerTick ${wave.eventsPerTick} does not match wave 0's ${first.eventsPerTick}; "steady" mode requires one constant rate shared by every wave.`,
+      );
+    }
+    if (index > 0) {
+      const prev = waves[index - 1];
+      if (prev !== undefined) {
+        const expectedStart = prev.startTick + prev.durationTicks;
+        if (wave.startTick !== expectedStart) {
+          throw new Error(
+            `assertWaveScheduleOrdered: wave ${index} starts at tick ${wave.startTick}, not ${expectedStart}; "steady" mode requires every wave to be exactly contiguous with the one before it (gap 0, no overlap).`,
+          );
+        }
+      }
     }
   });
 }
@@ -163,10 +203,11 @@ function assertSteadyIntegerRate(waves: readonly Wave[]): void {
  * AND `waves` sits in non-decreasing `startTick` order with no overlapping
  * half-open ranges AND, in `"waves"` mode, each successor sits at least
  * `MIN_SUCCESSOR_GAP_TICKS` past the prior wave's end AND, in `"steady"` mode,
- * every `eventsPerTick` is an integer. One call covers all of those checks, so
- * a caller needs no separate field pass of its own. Touching boundaries (one
- * wave's end equal to the next wave's start) are rejected in `"waves"` mode: a
- * successor with too small a drain gap never publishes its `incoming` cue (see
+ * every wave is contiguous with the one before it and shares one integer
+ * `eventsPerTick`. One call covers all of those checks, so a caller needs no
+ * separate field pass of its own. Touching boundaries (one wave's end equal to
+ * the next wave's start) are rejected in `"waves"` mode: a successor with too
+ * small a drain gap never publishes its `incoming` cue (see
  * `assertSuccessorGap`).
  *
  * `mode` defaults to `"waves"`, the original ramp. In `"steady"` mode
@@ -174,11 +215,12 @@ function assertSteadyIntegerRate(waves: readonly Wave[]): void {
  * gap-0 waves are the intended shape of a contiguous constant stream, and the
  * `incoming` cue the gap exists for is never sampled while steady (the sampler
  * always publishes `calm`). In its place, `"steady"` mode runs
- * `assertSteadyIntegerRate`: a fractional rate would break the seam-free
- * guarantee contiguous waves are meant to provide (see that function's
- * docstring), so it is rejected here rather than left as a latent trap. Every
- * OTHER check still runs in steady mode — fields, order, and no-overlap are
- * unconditional regardless of arrival shape.
+ * `assertSteadyContiguousEqualRate`: a gapped schedule, a mixed-rate
+ * schedule, or a fractional rate would each break the single-gapless-stream
+ * guarantee steady waves are meant to provide (see that function's
+ * docstring), so all three are rejected here rather than left as latent
+ * traps. Every OTHER check still runs in steady mode — fields, order, and
+ * no-overlap are unconditional regardless of arrival shape.
  */
 export function assertWaveScheduleOrdered(
   waves: readonly Wave[],
@@ -190,7 +232,7 @@ export function assertWaveScheduleOrdered(
   assertChronological(waves);
   assertNoOverlap(waves);
   if (mode === "steady") {
-    assertSteadyIntegerRate(waves);
+    assertSteadyContiguousEqualRate(waves);
   } else {
     assertSuccessorGap(waves);
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CLOCK_HZ, PUBLISH_HZ, WAVE_RATES } from "../game/tuning";
 import type { Wave } from "./scenario";
+import { buildSchedule } from "./schedule";
 import { assertWaveFields, assertWaveScheduleOrdered } from "./wave-schedule";
 
 /** The minimum successor drain gap the guard enforces (see `wave-schedule.ts`). */
@@ -262,6 +263,41 @@ describe('assertWaveScheduleOrdered: "steady" mode rejects a fractional eventsPe
       { startTick: 0, durationTicks: 5, eventsPerTick: rate },
       { startTick: 5, durationTicks: 5, eventsPerTick: rate },
     ];
+    expect(() => assertWaveScheduleOrdered(waves, "steady")).not.toThrow();
+  });
+});
+
+describe('assertWaveScheduleOrdered: "steady" mode rejects a gapped or mixed-rate schedule (CodeRabbit #3)', () => {
+  it("rejects a steady schedule with a gap between waves, even though each wave's own fields and rate are fine", () => {
+    // Isolated per-wave checks (integer rate) can't catch this: nothing about
+    // either wave alone is wrong, only their spacing. See
+    // assertSteadyContiguousEqualRate in wave-schedule.ts.
+    const gapped: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 2 },
+      { startTick: 6, durationTicks: 5, eventsPerTick: 2 }, // gap 1, not contiguous
+    ];
+    expect(() => assertWaveScheduleOrdered(gapped, "steady")).toThrow();
+  });
+
+  it("rejects a steady schedule where waves are contiguous but at different integer rates", () => {
+    const mixedRate: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 2 },
+      { startTick: 5, durationTicks: 5, eventsPerTick: 3 }, // contiguous, but not equal-rate
+    ];
+    expect(() => assertWaveScheduleOrdered(mixedRate, "steady")).toThrow();
+  });
+
+  it("accepts a hand-built contiguous, equal-rate, integer-rate steady schedule", () => {
+    const clean: Wave[] = [
+      { startTick: 0, durationTicks: 5, eventsPerTick: 4 },
+      { startTick: 5, durationTicks: 5, eventsPerTick: 4 },
+      { startTick: 10, durationTicks: 5, eventsPerTick: 4 },
+    ];
+    expect(() => assertWaveScheduleOrdered(clean, "steady")).not.toThrow();
+  });
+
+  it("accepts the real shipped steady schedule from buildSchedule('steady')", () => {
+    const { waves } = buildSchedule("steady");
     expect(() => assertWaveScheduleOrdered(waves, "steady")).not.toThrow();
   });
 });
