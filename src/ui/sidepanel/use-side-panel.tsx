@@ -29,9 +29,14 @@
  * unfreezes; a set error leaves the panel open, showing the error line
  * `AlgorithmEditor` already renders, and clears the intent either way.
  *
- * Overlay exclusivity (GH118-PLAN.md): `openChaos`/`openAlgorithm` no-op while the
- * trace overlay is open (`selection`/`decisionSelection`), so the shell never stacks
- * two dim backdrops. The intro transition is App's concern: App records the tab an
+ * Overlay exclusivity (GH118-PLAN.md, extended by GH124-PLAN.md Checkpoints 4-5):
+ * `openChaos`/`openAlgorithm`/`openMetrics` no-op while ANY other modal is open — the
+ * trace overlay (`selection`/`decisionSelection`), the place dialog (`mapSelection`),
+ * or the event dialog (`eventSelection`) — so the shell never stacks two dim
+ * backdrops. `App.tsx` returns the guard: its own map/event openers no-op while
+ * `sidePanel.open` is true, the same way this hook no-ops against the store's three
+ * fields, so the four-way exclusivity (trace, place, event, side panel) holds from
+ * every direction. The intro transition is App's concern: App records the tab an
  * intro action requested, closes the intro, then calls `openChaos`/`openAlgorithm`
  * itself once the intro has actually closed.
  *
@@ -69,11 +74,12 @@ export interface SidePanelController {
   open: boolean;
   /** The active tab. */
   tab: SidePanelTab;
-  /** Open on the chaos tab. No-op while the trace overlay is open. */
+  /** Open on the chaos tab. No-op while the trace, place, or event dialog is open. */
   openChaos: () => void;
-  /** Open on the algorithm tab. No-op while the trace overlay is open. */
+  /** Open on the algorithm tab. No-op while the trace, place, or event dialog is
+   *  open. */
   openAlgorithm: () => void;
-  /** Open on the metrics tab. No-op while the trace overlay is open. */
+  /** Open on the metrics tab. No-op while the trace, place, or event dialog is open. */
   openMetrics: () => void;
   /** Dismiss (Esc, backdrop, or the X button): restores the freeze saved on open. */
   close: () => void;
@@ -94,6 +100,8 @@ export function useSidePanel({
 
   const selection = useGameStore((state) => state.selection);
   const decisionSelection = useGameStore((state) => state.decisionSelection);
+  const mapSelection = useGameStore((state) => state.mapSelection);
+  const eventSelection = useGameStore((state) => state.eventSelection);
   const setFrozen = useGameStore((state) => state.setFrozen);
   const runPending = useGameStore((state) => state.runPending);
   const error = useGameStore((state) => state.error);
@@ -108,8 +116,13 @@ export function useSidePanel({
 
   const openWith = useCallback(
     (nextTab: SidePanelTab): void => {
-      if (selection !== null || decisionSelection !== null) {
-        return; // exclusive with the trace overlay: never stack two dim backdrops
+      if (
+        selection !== null ||
+        decisionSelection !== null ||
+        mapSelection !== null ||
+        eventSelection !== null
+      ) {
+        return; // exclusive with the trace/place/event dialogs: never stack two dim backdrops
       }
       if (!holdsFreezeRef.current) {
         savedFrozenRef.current = useGameStore.getState().transport.frozen;
@@ -119,7 +132,7 @@ export function useSidePanel({
       setTab(nextTab);
       setOpen(true);
     },
-    [selection, decisionSelection, setFrozen],
+    [selection, decisionSelection, mapSelection, eventSelection, setFrozen],
   );
 
   const openChaos = useCallback(() => openWith("chaos"), [openWith]);

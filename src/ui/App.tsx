@@ -186,6 +186,7 @@ export function App({ createPipelineController }: AppProps = {}) {
   // this derivation needs no further validation here.
   const eventSelection = useGameStore((s) => s.eventSelection);
   const eventOpen = eventSelection !== null;
+  const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
 
   // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
   // requests a side-panel tab records it here instead of opening the panel
@@ -224,7 +225,9 @@ export function App({ createPipelineController }: AppProps = {}) {
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
   // exclusivity check): the shell being inert already blocks a real pointer/keyboard
   // click from reaching the map, but this guard is what actually enforces "only one
-  // map modal at a time" against any path that is not gated by inert.
+  // map modal at a time" against any path that is not gated by inert. `onEventSelect`
+  // below applies the identical guard to the event opener, so the two stay
+  // consistent (a Codex review caught the event opener going unguarded here).
   const onMapSelect = useCallback(
     (next: MapSelection) => {
       if (intro.introOpen || traceOpen || sidePanel.open || eventOpen) {
@@ -237,6 +240,21 @@ export function App({ createPipelineController }: AppProps = {}) {
       }
     },
     [intro.introOpen, traceOpen, sidePanel.open, eventOpen, selectMapNode, selectMapTrain],
+  );
+
+  // The event opener's guard, mirroring `onMapSelect` above: the shell's `inert` gate
+  // already blocks a real click on a log row while another overlay is open, but this
+  // is what enforces "only one event modal at a time" against any path not gated by
+  // inert. Forwarded to `LogPanel` (via `InspectorShell`'s `onSelectEvent` prop) so a
+  // row click routes through this guard instead of calling the store directly.
+  const onEventSelect = useCallback(
+    (id: number) => {
+      if (intro.introOpen || traceOpen || sidePanel.open || placeOpen) {
+        return;
+      }
+      selectWorldEvent(id);
+    },
+    [intro.introOpen, traceOpen, sidePanel.open, placeOpen, selectWorldEvent],
   );
 
   // Complete the intro transition: once the intro has actually closed, act on
@@ -327,7 +345,11 @@ export function App({ createPipelineController }: AppProps = {}) {
         metricsButtonRef={metricsButtonRef}
       />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
-      <InspectorShell findingsPanelRef={findingsPanelRef} logPanelRef={logPanelRef} />
+      <InspectorShell
+        findingsPanelRef={findingsPanelRef}
+        logPanelRef={logPanelRef}
+        onSelectEvent={onEventSelect}
+      />
       <DecisionsPanel panelRef={decisionsPanelRef} />
     </ModalHost>
   );

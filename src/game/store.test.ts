@@ -219,6 +219,17 @@ describe("store selection", () => {
     expect(useGameStore.getState().selection).toBeNull();
   });
 
+  it("toggling a finding off also heals a map or event selection left open by a stray click (Codex review gap)", () => {
+    useGameStore.getState().setSnapshot(snapshotWith([finding(7)]));
+    useGameStore.getState().selectFinding(7);
+    // Manufacture the conflicting state the toggle-off branch used to leave standing.
+    useGameStore.setState({ mapSelection: { kind: "node", id: "cen" }, eventSelection: 5 });
+    useGameStore.getState().selectFinding(7); // re-select toggles off
+    expect(useGameStore.getState().selection).toBeNull();
+    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
   it("switches selection when a different seq is selected", () => {
     useGameStore.getState().setSnapshot(snapshotWith([finding(7), finding(9)]));
     useGameStore.getState().selectFinding(7);
@@ -312,6 +323,16 @@ describe("store decision selection (T10)", () => {
     useGameStore.getState().selectDecision(7);
     useGameStore.getState().selectDecision(7);
     expect(useGameStore.getState().decisionSelection).toBeNull();
+  });
+
+  it("toggling a decision off also heals a map or event selection left open by a stray click (Codex review gap)", () => {
+    useGameStore.getState().setSnapshot(snapshotWithDecisions([decision(7)]));
+    useGameStore.getState().selectDecision(7);
+    useGameStore.setState({ mapSelection: { kind: "train", actorId: "T1" }, eventSelection: 5 });
+    useGameStore.getState().selectDecision(7); // re-select toggles off
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().eventSelection).toBeNull();
   });
 
   it("switches decision selection when a different seq is selected", () => {
@@ -416,6 +437,20 @@ describe("store map selection (GH124-PLAN.md Checkpoint 4)", () => {
     expect(useGameStore.getState().mapSelection).toBeNull();
   });
 
+  it("toggling a map node off also heals an open event or trace selection (Codex review gap)", () => {
+    useGameStore.getState().selectMapNode("cen");
+    useGameStore.setState({
+      selection: { seq: 1 },
+      decisionSelection: { seq: 2 },
+      eventSelection: 5,
+    });
+    useGameStore.getState().selectMapNode("cen"); // re-select toggles off
+    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().selection).toBeNull();
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
   it("selects a train by actor id", () => {
     useGameStore.getState().selectMapTrain("T1");
     expect(useGameStore.getState().mapSelection).toEqual({ kind: "train", actorId: "T1" });
@@ -425,6 +460,20 @@ describe("store map selection (GH124-PLAN.md Checkpoint 4)", () => {
     useGameStore.getState().selectMapTrain("T1");
     useGameStore.getState().selectMapTrain("T1");
     expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+
+  it("toggling a train off also heals an open event or trace selection (Codex review gap)", () => {
+    useGameStore.getState().selectMapTrain("T1");
+    useGameStore.setState({
+      selection: { seq: 1 },
+      decisionSelection: { seq: 2 },
+      eventSelection: 5,
+    });
+    useGameStore.getState().selectMapTrain("T1"); // re-select toggles off
+    expect(useGameStore.getState().mapSelection).toBeNull();
+    expect(useGameStore.getState().selection).toBeNull();
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().eventSelection).toBeNull();
   });
 
   it("clears the map selection through clearMapSelection", () => {
@@ -472,6 +521,21 @@ describe("store event selection (GH124-PLAN.md Checkpoint 5)", () => {
     useGameStore.getState().selectWorldEvent(5);
     useGameStore.getState().selectWorldEvent(5);
     expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
+  it("toggling an event off also heals an open map or trace selection (Codex review gap)", () => {
+    useGameStore.getState().setSnapshot(snapshotWithWorldEvents([worldEvent(5)]));
+    useGameStore.getState().selectWorldEvent(5);
+    useGameStore.setState({
+      selection: { seq: 1 },
+      decisionSelection: { seq: 2 },
+      mapSelection: { kind: "node", id: "cen" },
+    });
+    useGameStore.getState().selectWorldEvent(5); // re-select toggles off
+    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(useGameStore.getState().selection).toBeNull();
+    expect(useGameStore.getState().decisionSelection).toBeNull();
+    expect(useGameStore.getState().mapSelection).toBeNull();
   });
 
   it("clears the event selection through clearEventSelection", () => {

@@ -12,11 +12,12 @@
  * Freeze and the speed control.
  *
  * A row is a button: clicking it opens the adaptive event dialog (`selectWorldEvent`,
- * `EventDialog.tsx`) on that row's world-log id. A scored kiosk row also carries
- * `data-scored-event-id`, a SEPARATE namespace from the row's own `data-testid` world
- * id — `FxLayer` anchors finding comets and cited-row highlighting through that
- * attribute, never the world id, so re-sourcing the log off the wider ring never
- * moves where a comet lands.
+ * `EventDialog.tsx`) on that row's world-log id, through the `onSelectEvent` prop
+ * (`App.tsx` forwards a guarded wrapper; see `LogPanelProps` below). A scored kiosk
+ * row also carries `data-scored-event-id`, a SEPARATE namespace from the row's own
+ * `data-testid` world id — `FxLayer` anchors finding comets and cited-row
+ * highlighting through that attribute, never the world id, so re-sourcing the log off
+ * the wider ring never moves where a comet lands.
  *
  * The transport row also carries the wave readout (#38 juice item 1): "next
  * wave in Ns" (N quantized to a 30-game-second bucket, see `waveReadout`)
@@ -203,9 +204,21 @@ interface LogPanelProps {
    * to a locally-owned ref, so a bare `<LogPanel />` (an isolated test) still works.
    */
   panelRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * The row-click opener. Defaults to the store's `selectWorldEvent` directly, so a
+   * bare `<LogPanel />` (an isolated test) still works. `App.tsx` instead forwards a
+   * guarded wrapper that no-ops while the side panel is open, mirroring the guard
+   * `onMapSelect` already applies to the map's opener — the shell's `inert` gate
+   * blocks a real pointer/keyboard click, but this is what enforces the "at most one
+   * modal" invariant against any path not gated by inert.
+   */
+  onSelectEvent?: ((id: number) => void) | undefined;
 }
 
-export function LogPanel({ panelRef: externalRef }: LogPanelProps = {}) {
+export function LogPanel({
+  panelRef: externalRef,
+  onSelectEvent: externalOnSelectEvent,
+}: LogPanelProps = {}) {
   const ownRef = useRef<HTMLDivElement>(null);
   const panelRef = externalRef ?? ownRef;
   const worldEvents = useGameStore((s) => s.snapshot.worldEvents);
@@ -216,7 +229,8 @@ export function LogPanel({ panelRef: externalRef }: LogPanelProps = {}) {
   const flashes = useGameStore((s) => s.flashes);
   const setFrozen = useGameStore((s) => s.setFrozen);
   const setSpeed = useGameStore((s) => s.setSpeed);
-  const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
+  const storeSelectWorldEvent = useGameStore((s) => s.selectWorldEvent);
+  const selectWorldEvent = externalOnSelectEvent ?? storeSelectWorldEvent;
 
   // Derived early, before the edge hook: gate on conclusion (won/failed), never
   // on the transport freeze (F003, F004+F006). A paused run can still resume,

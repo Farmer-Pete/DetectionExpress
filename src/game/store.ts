@@ -95,10 +95,15 @@ interface GameState {
    * no snapshot reconciliation: every node and train it can name is a fixed fixture of
    * `world.json`, never evicted, so a stale id can never occur. Mutually exclusive
    * with `selection`/`decisionSelection` and `eventSelection`: at most one of the
-   * three dialogs is ever open, and every opener (`selectMapNode`, `selectMapTrain`,
-   * `selectFinding`, `selectDecision`, `selectWorldEvent`, `openPlaceFromEvent`)
-   * cross-clears the other two rather than relying solely on the shell's `inert` gate
-   * to keep a stray click from opening a second dialog.
+   * three store-tracked dialogs (trace, place, event) is ever open. Every opener
+   * (`selectMapNode`, `selectMapTrain`, `selectFinding`, `selectDecision`,
+   * `selectWorldEvent`, `openPlaceFromEvent`) clears all three sibling fields on
+   * BOTH its open branch and its toggle-off/no-op branch, via the shared
+   * `NO_MODAL_SELECTION` object below, rather than relying solely on the shell's
+   * `inert` gate to keep a stray click from opening a second dialog. The side panel is
+   * a fourth modal, held as local React state outside this store; it stays exclusive
+   * with these three through `useSidePanel`'s own check plus App's opener guards, not
+   * through this store (`use-side-panel.tsx`).
    */
   mapSelection: MapSelection | null;
   /**
@@ -110,7 +115,8 @@ interface GameState {
    * exactly like `selection`/`decisionSelection`, and `selectWorldEvent` validates a
    * fresh id against that same live set before storing it. Mutually exclusive with
    * `mapSelection` and `selection`/`decisionSelection`: see `mapSelection` above for
-   * how the openers cross-clear.
+   * how the openers cross-clear, and for how the side panel fits in as the fourth
+   * modal.
    */
   eventSelection: number | null;
   /** Mirrors the run controller's transport state so the panel can paint the buttons. */
@@ -133,19 +139,19 @@ interface GameState {
   setOverlayOpen: (open: boolean) => void;
   setRunPending: (pending: boolean) => void;
   /**
-   * Select a finding by seq. Re-selecting the same seq clears the selection.
-   * Clears any decision selection (the two are mutually exclusive), plus any open
-   * map or event selection, so at most one dialog is ever open. A selection is
-   * stored only for a seq present in the current snapshot; a stale seq (a click that
-   * raced a reconciliation, or a seq from a stale render) is ignored without
+   * Select a finding by seq. Re-selecting the same seq closes it AND clears any
+   * other open dialog (decision, map, event), the same as opening it fresh — so at
+   * most one dialog is ever open on every branch, not just the open one. A selection
+   * is stored only for a seq present in the current snapshot; a stale seq (a click
+   * that raced a reconciliation, or a seq from a stale render) is ignored without
    * disturbing any open selection (GH105-PLAN.md).
    */
   selectFinding: (seq: number) => void;
   /**
-   * Select a decision by seq. Re-selecting the same seq clears the selection.
-   * Clears any finding selection (the two are mutually exclusive), plus any open
-   * map or event selection, so at most one dialog is ever open. A selection is
-   * stored only for a seq present in the current snapshot; a stale seq is ignored
+   * Select a decision by seq. Re-selecting the same seq closes it AND clears any
+   * other open dialog (finding, map, event), the same as opening it fresh — so at
+   * most one dialog is ever open on every branch, not just the open one. A selection
+   * is stored only for a seq present in the current snapshot; a stale seq is ignored
    * without disturbing any open selection (GH105-PLAN.md).
    */
   selectDecision: (seq: number) => void;
@@ -153,26 +159,26 @@ interface GameState {
   clearSelection: () => void;
   /**
    * Select a map node (a station, site, or the OCC) by id (GH124-PLAN.md Checkpoint
-   * 4). Re-selecting the same id clears the selection, mirroring `selectFinding`.
-   * Clears any open event selection and any open trace selection, so at most one
-   * dialog is ever open.
+   * 4). Re-selecting the same id closes it AND clears any other open dialog (event,
+   * trace), the same as opening it fresh, mirroring `selectFinding` — so at most one
+   * dialog is ever open on every branch.
    */
   selectMapNode: (id: MapNodeId) => void;
   /**
-   * Select a train by its actor id. Re-selecting the same id clears the selection.
-   * Clears any open event selection and any open trace selection, mirroring
+   * Select a train by its actor id. Re-selecting the same id closes it AND clears any
+   * other open dialog (event, trace), the same as opening it fresh, mirroring
    * `selectMapNode`.
    */
   selectMapTrain: (actorId: string) => void;
   /** Clear the map selection. Esc, the backdrop, and the close button call it. */
   clearMapSelection: () => void;
   /**
-   * Select a world-log event by id (GH124-PLAN.md Checkpoint 5), clearing any open
-   * place selection and any open trace selection. Re-selecting the same id clears the
-   * selection, mirroring `selectFinding`/`selectMapNode`. An id is stored only for an
-   * event present in the current snapshot's `worldEvents` ring; a stale id (a click
-   * that raced a reconciliation, or an id from a stale render) is ignored without
-   * disturbing any open dialog, mirroring `selectFinding`/`selectDecision`.
+   * Select a world-log event by id (GH124-PLAN.md Checkpoint 5). Re-selecting the
+   * same id closes it AND clears any other open dialog (place, trace), the same as
+   * opening it fresh, mirroring `selectFinding`/`selectMapNode`. An id is stored only
+   * for an event present in the current snapshot's `worldEvents` ring; a stale id (a
+   * click that raced a reconciliation, or an id from a stale render) is ignored
+   * without disturbing any open dialog, mirroring `selectFinding`/`selectDecision`.
    */
   selectWorldEvent: (id: number) => void;
   /** Clear the event selection. Esc, the backdrop, and the close button call it. */
@@ -201,6 +207,22 @@ interface GameState {
   /** Bump the run token by one. Called on every fresh engine install. */
   bumpRunToken: () => void;
 }
+
+/**
+ * The four modal-selection fields, all cleared: the shape every opener spreads to
+ * heal the "at most one modal open" invariant, on both its open branch (own field
+ * overridden after the spread) and its toggle-off/no-op branch (returned as-is). One
+ * constant instead of four fields hand-written in five openers means a fifth modal
+ * selection, whenever one is added, only needs adding here to stay covered
+ * everywhere, rather than drifting the way the toggle-off branches did before this
+ * fix (Codex review).
+ */
+const NO_MODAL_SELECTION = {
+  selection: null,
+  decisionSelection: null,
+  mapSelection: null,
+  eventSelection: null,
+} as const;
 
 export const useGameStore = create<GameState>((set) => ({
   snapshot: emptySnapshot(),
@@ -256,72 +278,54 @@ export const useGameStore = create<GameState>((set) => ({
   setOverlayOpen: (open) => set({ overlayOpen: open }),
   setRunPending: (pending) => set({ runPending: pending }),
   // The trace dialog is single, so selecting either kind always clears the other,
-  // and at most one of the three dialogs (trace, map, event) is ever open, so this
-  // also clears mapSelection/eventSelection. A selection is stored only for a seq
-  // present in the current snapshot, so `selection !== null` always implies a live
-  // finding to render (GH105-PLAN.md): (1) re-select of the same seq toggles off
-  // first; (2) validate the seq against the snapshot; (3) only for a valid seq, set
-  // the selection and clear the other three fields. A stale seq returns `state`
-  // itself, not `{}` — a genuine Zustand no-op that leaves any open dialog untouched
-  // and publishes no new root state.
+  // and at most one of the three store-tracked dialogs (trace, map, event) is ever
+  // open, so this also clears mapSelection/eventSelection — on the toggle-off branch
+  // too, via NO_MODAL_SELECTION, not just the open branch. A selection is stored only
+  // for a seq present in the current snapshot, so `selection !== null` always implies
+  // a live finding to render (GH105-PLAN.md): (1) re-select of the same seq toggles
+  // off AND heals the other three fields; (2) validate the seq against the snapshot;
+  // (3) only for a valid seq, set the selection and clear the other three fields. A
+  // stale seq returns `state` itself, not `{}` — a genuine Zustand no-op that leaves
+  // any open dialog untouched and publishes no new root state.
   selectFinding: (seq) =>
     set((state) => {
       if (state.selection?.seq === seq) {
-        return { selection: null, decisionSelection: null }; // re-select toggles off
+        return NO_MODAL_SELECTION; // re-select toggles off, and heals any stray modal
       }
       if (!state.snapshot.findings.some((live) => live.seq === seq)) {
         return state; // stale seq: genuine no-op, leaves any open dialog untouched
       }
-      return {
-        selection: { seq },
-        decisionSelection: null,
-        mapSelection: null,
-        eventSelection: null,
-      };
+      return { ...NO_MODAL_SELECTION, selection: { seq } };
     }),
   selectDecision: (seq) =>
     set((state) => {
       if (state.decisionSelection?.seq === seq) {
-        return { selection: null, decisionSelection: null };
+        return NO_MODAL_SELECTION; // re-select toggles off, and heals any stray modal
       }
       if (!state.snapshot.decisions.some((decision) => decision.seq === seq)) {
         return state;
       }
-      return {
-        decisionSelection: { seq },
-        selection: null,
-        mapSelection: null,
-        eventSelection: null,
-      };
+      return { ...NO_MODAL_SELECTION, decisionSelection: { seq } };
     }),
   clearSelection: () => set({ selection: null, decisionSelection: null }),
   // No snapshot-presence validation, unlike selectFinding/selectDecision: every node
   // and train id these can name is a fixed world.json fixture, never evicted. Still
-  // clears the other two dialogs' fields, the same cross-clear selectFinding and
-  // selectDecision do, so at most one dialog is ever open.
+  // clears the other two dialogs' fields on both branches (open and toggle-off), the
+  // same cross-clear selectFinding and selectDecision do, so at most one dialog is
+  // ever open.
   selectMapNode: (id) =>
     set((state) => {
       if (state.mapSelection?.kind === "node" && state.mapSelection.id === id) {
-        return { mapSelection: null }; // re-select toggles off
+        return NO_MODAL_SELECTION; // re-select toggles off, and heals any stray modal
       }
-      return {
-        mapSelection: { kind: "node", id },
-        eventSelection: null,
-        selection: null,
-        decisionSelection: null,
-      };
+      return { ...NO_MODAL_SELECTION, mapSelection: { kind: "node", id } };
     }),
   selectMapTrain: (actorId) =>
     set((state) => {
       if (state.mapSelection?.kind === "train" && state.mapSelection.actorId === actorId) {
-        return { mapSelection: null };
+        return NO_MODAL_SELECTION; // re-select toggles off, and heals any stray modal
       }
-      return {
-        mapSelection: { kind: "train", actorId },
-        eventSelection: null,
-        selection: null,
-        decisionSelection: null,
-      };
+      return { ...NO_MODAL_SELECTION, mapSelection: { kind: "train", actorId } };
     }),
   clearMapSelection: () => set({ mapSelection: null }),
   // Validates the id against the live ring, mirroring `selectFinding`/`selectDecision`:
@@ -331,21 +335,16 @@ export const useGameStore = create<GameState>((set) => ({
   selectWorldEvent: (id) =>
     set((state) => {
       if (state.eventSelection === id) {
-        return { eventSelection: null }; // re-select toggles off
+        return NO_MODAL_SELECTION; // re-select toggles off, and heals any stray modal
       }
       if (!state.snapshot.worldEvents.some((event) => event.id === id)) {
         return state; // stale id: genuine no-op, leaves any open dialog untouched
       }
-      return { eventSelection: id, mapSelection: null, selection: null, decisionSelection: null };
+      return { ...NO_MODAL_SELECTION, eventSelection: id };
     }),
   clearEventSelection: () => set({ eventSelection: null }),
   openPlaceFromEvent: (placeId) =>
-    set({
-      mapSelection: { kind: "node", id: placeId },
-      eventSelection: null,
-      selection: null,
-      decisionSelection: null,
-    }),
+    set({ ...NO_MODAL_SELECTION, mapSelection: { kind: "node", id: placeId } }),
   // Each setter keeps the sibling field, so toggling freeze never resets speed and
   // vice versa.
   setFrozen: (frozen) => set((s) => ({ transport: { ...s.transport, frozen } })),

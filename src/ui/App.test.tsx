@@ -6,6 +6,7 @@ import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
+import type { WorldLogEvent } from "../sim/world-log";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
 import { markIntroSeen } from "./onboarding-storage";
@@ -26,9 +27,34 @@ beforeEach(() => {
     selection: null,
     decisionSelection: null,
     mapSelection: null,
+    eventSelection: null,
   });
   markIntroSeen();
 });
+
+/** A fare-gate world-log event at Central (`cen`), for the log-row-click tests below. */
+function fareGateEvent(id: number): WorldLogEvent {
+  return {
+    id,
+    ts: id * 2,
+    sensor: "fare-gate",
+    placeId: "cen",
+    chipNode: "cen:gate",
+    reading: {
+      sensor: "fare-gate",
+      reading: {
+        ts: id * 2,
+        card: `card-${id}`,
+        station: "cen",
+        line: "red",
+        direction: "in",
+        result: "ok",
+        balance: 50,
+      },
+    },
+    scored: false,
+  };
+}
 
 /** A no-op controller so the test never touches the real loader or engine. */
 function stubController(): RunController & {
@@ -284,6 +310,51 @@ describe("App place dialog (GH124-PLAN.md Checkpoint 4)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Central" }));
 
     expect(useGameStore.getState().mapSelection).toBeNull();
+  });
+});
+
+// The event opener (a LogPanel row click) is guarded the same way the map opener
+// (onMapSelect) already was, closing the asymmetry a Codex review flagged: before
+// this fix, a log-row click routed straight to the store's selectWorldEvent with no
+// App-level guard at all, so it could stack the event dialog on top of the side panel
+// or the place dialog even though the map opener already blocked the equivalent case.
+describe("App event dialog opener guard (GH124-PLAN.md Checkpoint 5, consistency fix)", () => {
+  it("is mutually exclusive with the side panel: a log-row click while it is open never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().eventSelection).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("is mutually exclusive with the place dialog: a log-row click while it is open never also opens the event dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().eventSelection).toBeNull();
+  });
+
+  it("opens the event dialog on a log-row click when no other modal is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().eventSelection).toBe(5);
   });
 });
 

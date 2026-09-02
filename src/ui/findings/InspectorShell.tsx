@@ -34,11 +34,17 @@ interface InspectorShellProps {
   /** The event dialog's focus-fallback ref (GH124-PLAN.md Checkpoint 5), forwarded to
    *  `LogPanel`. Mirrors `findingsPanelRef`. */
   logPanelRef?: RefObject<HTMLDivElement | null>;
+  /** The row-click opener, forwarded to `LogPanel`. App passes a guarded wrapper that
+   *  no-ops while the side panel is open, mirroring the map opener's own guard
+   *  (`App.tsx`'s `onMapSelect`); defaults to `LogPanel`'s own store call when unset,
+   *  so a bare `<InspectorShell />` (an isolated test) still works. */
+  onSelectEvent?: ((id: number) => void) | undefined;
 }
 
 export function InspectorShell({
   findingsPanelRef: externalFindingsRef,
   logPanelRef: externalLogRef,
+  onSelectEvent,
 }: InspectorShellProps = {}) {
   const clearSelection = useGameStore((state) => state.clearSelection);
   const ownFindingsRef = useRef<HTMLElement>(null);
@@ -55,7 +61,7 @@ export function InspectorShell({
   return (
     <section className="inspector-shell" aria-label="Inspector" onKeyDown={onKeyDown}>
       <div className="inspector-stream">
-        <LogPanel panelRef={logPanelRef} />
+        <LogPanel panelRef={logPanelRef} onSelectEvent={onSelectEvent} />
       </div>
       <FindingsPanel panelRef={findingsPanelRef} />
       <FxLayer />
