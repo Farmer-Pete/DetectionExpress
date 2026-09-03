@@ -16,22 +16,23 @@
 
 import type { RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
 import type { Finding } from "../../sim/finding";
+import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force/index";
 import {
   PIN_BRUTE_FORCE_THRESHOLD,
   SCAN_WINDOW_TICKS,
 } from "../../sim/scenarios/pin-brute-force/tuning";
-import { scenarioEntry } from "../registry";
 import { GAME_SECONDS_PER_TICK } from "../tuning";
 
-/** The registered pin-brute-force entry, looked up by id rather than assumed to sort
- *  first, so a second registered scenario can never silently swap in its corpus. */
-const pinBruteForceEntry = scenarioEntry("pin-brute-force");
-if (pinBruteForceEntry === undefined) {
-  throw new Error('profiler/rules: no "pin-brute-force" entry is registered.');
-}
-
-/** The cast contract, read through the registry, never a scenario folder directly. */
-const pinBruteForceCorpus = pinBruteForceEntry.corpus;
+/**
+ * Imported by name from the scenario itself ("pin-brute-force"), not through
+ * `../registry` (GH128-PLAN.md): the registry gathers scenarios through
+ * `import.meta.glob`, a Vite-only feature that throws under the headless CLI's
+ * plain `tsx` runtime (`scripts/sim-run.ts`), and this module sits on
+ * `run-controller.ts`'s import graph via `profile.ts` -> `calibrate.ts`. Importing
+ * the named export directly is also strictly typed against the scenario's own
+ * `corpus` object, so it needs no runtime shape check the way a module gathered
+ * through the untyped glob boundary would.
+ */
 
 /** The reason the kiosk PIN brute-force Alert names. Shared with the scorer. */
 const REASON = pinBruteForceCorpus.reason;
