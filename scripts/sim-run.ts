@@ -154,11 +154,21 @@ async function main(argv: readonly string[]): Promise<ExitCode> {
     }
 
     console.log(formatLine(result));
-    const dir = outDirFor(args.out, args.scenarios, scenarioId);
-    mkdirSync(dir, { recursive: true });
-    writeJson(path.join(dir, "sim.json"), toSimJson(result));
-    writeJson(path.join(dir, "findings.json"), toFindingsJson(result));
-    writeJson(path.join(dir, "summary.json"), toSummaryJson(result));
+    try {
+      const dir = outDirFor(args.out, args.scenarios, scenarioId);
+      mkdirSync(dir, { recursive: true });
+      writeJson(path.join(dir, "sim.json"), toSimJson(result));
+      writeJson(path.join(dir, "findings.json"), toFindingsJson(result));
+      writeJson(path.join(dir, "summary.json"), toSummaryJson(result));
+    } catch (error) {
+      // A failed write is a run error, not a detection result: report it, take
+      // exit 2, and keep going so later scenarios still run.
+      console.error(
+        `${scenarioId}: output error -- ${error instanceof Error ? error.message : String(error)}`,
+      );
+      worstExit = 2;
+      continue;
+    }
 
     if (result.verdict !== "clean" && worstExit < 1) {
       worstExit = 1;

@@ -92,10 +92,13 @@ describe("sim-run CLI end to end", () => {
           "--out",
           outDir,
         ],
-        { cwd: REPO_ROOT, encoding: "utf8" },
+        // Cap the blocking subprocess below the 30s test timeout, so a hung CLI
+        // fails this test with ETIMEDOUT instead of stalling the worker.
+        { cwd: REPO_ROOT, encoding: "utf8", timeout: 25_000 },
       );
 
-      expect(result.status, result.stderr).toBe(0);
+      const failure = `${result.stderr ?? ""}${result.error ? `\n${String(result.error)}` : ""}`;
+      expect(result.status, failure).toBe(0);
 
       const simPath = path.join(outDir, "sim.json");
       const findingsPath = path.join(outDir, "findings.json");
