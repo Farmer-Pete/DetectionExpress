@@ -2,9 +2,10 @@
  * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md,
  * GH118-PLAN.md). It holds only the `mapShown` toggle, the wave shake, the
  * modal-open derivation, the two panel refs shared with
- * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the two Topbar button refs
- * shared with the side panel; everything else is composed from a hook or a
- * component that owns its own lifecycle and its own tests:
+ * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the hamburger trigger
+ * ref shared with the side panel (GH132-PLAN.md M1); everything else is
+ * composed from a hook or a component that owns its own lifecycle and its own
+ * tests:
  *
  * - `useIntroOverlay` (intro/) owns the overlay's seen-flag state, its three dismiss
  *   actions, and the post-close focus-return effect. Its "Cause chaos"/"Edit the
@@ -19,13 +20,17 @@
  *   panel) reloads the current Algorithm source. GH117 unified the metro map onto
  *   this same engine, so there is only one controller and one loop now — the
  *   standalone `useWorldController` and `WorldRunController` are retired.
- * - `useSidePanel` (sidepanel/) owns the chaos-ladder/Algorithm side panel: its
- *   `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
- *   Apply-on-success-only wiring. `Topbar`'s two openers and the intro's two actions
- *   all route through it.
- * - `Topbar` renders the header: the title, the slice tag, the map show/hide toggle,
- *   the two side-panel openers, the "How this works" reopen button (wired to
- *   `useIntroOverlay`'s `reopenRef` and `onReopen`), and Hire Me.
+ * - `useSidePanel` (sidepanel/) owns the chaos-ladder/Algorithm/Options side panel:
+ *   its `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
+ *   Apply-on-success-only wiring. The intro's two panel-opening actions
+ *   (`openChaos`/`openAlgorithm`) and the hamburger's own opener (`openPanel`) all
+ *   route through it. `mapShown`/`onToggleMap`/`onReopenIntro` (GH132-PLAN.md M1,
+ *   see "The reopen-intro transition" below) feed its Options tab.
+ * - `Topbar` renders the header: the title, the slice tag, the hamburger button
+ *   (GH132-PLAN.md M1, design revision — a plain icon button that opens the side
+ *   panel directly, no popup), and Hire Me. The map toggle and the intro-reopen
+ *   action that used to live here as standalone buttons now live in the side
+ *   panel's own Options tab instead.
  *
  * Only the run-status pill (`StatusPill`, read by `Topbar`) lives in the top bar;
  * the sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
@@ -72,12 +77,27 @@
  *
  * The intro button that triggered this is unmounted before the panel could restore
  * focus to it, so the panel falls back to a stable Topbar button instead:
- * `chaosButtonRef`/`algorithmButtonRef` are handed to both
- * `Topbar` (which attaches them to its two openers) and `useSidePanel` (which
- * forwards whichever one matches the active tab as `SidePanel`'s
- * `fallbackFocusRef`), the same fallback-focus pattern `TraceOverlay` already uses.
- * The pending-tab switch below covers both tabs explicitly, rather than treating
- * "not chaos" as "algorithm".
+ * `hamburgerTriggerRef` (GH132-PLAN.md M1 — the one trigger left once the old
+ * standalone Topbar buttons are gone) is handed to both `Topbar` (which attaches
+ * it to the hamburger button) and `useSidePanel` (as `chaosFocusRef`,
+ * `algorithmFocusRef`, AND `optionsFocusRef`, forwarded to `SidePanel`'s
+ * `fallbackFocusRef` regardless of the active tab, since one trigger now opens
+ * all three), the same fallback-focus pattern `TraceOverlay` already uses. The
+ * pending-tab switch below covers both intro-routed tabs explicitly, rather than
+ * treating "not chaos" as "algorithm".
+ *
+ * ## The reopen-intro transition (GH132-PLAN.md M1)
+ * The side panel's Options tab carries a "How this works" button that reopens the
+ * intro overlay. The panel and the intro are both modals, so `onReopenIntro`
+ * cannot open the intro directly while the panel is still open — the same
+ * one-modal-at-a-time reasoning as "The intro transition" above, run in reverse:
+ * it records the request (`pendingReopenIntroRef`) and closes the panel first; a
+ * plain `useEffect` here reopens the intro once `sidePanel.open` has actually gone
+ * false. `closeSidePanelRef` exists only to break the circularity of handing
+ * `onReopenIntro` INTO `useSidePanel` while it needs `useSidePanel`'s own `close`
+ * function: the ref is written every render (not in an effect, so it is never one
+ * render stale) and `onReopenIntro` reads it lazily, at click time, not at
+ * definition time.
  *
  * ## Pause ownership (GH118-PLAN.md)
  * The pause runs through the store's `transport.frozen`, not a direct controller
@@ -161,11 +181,11 @@ export function App({ createPipelineController }: AppProps = {}) {
   // of whichever dialog opened the session rather than whichever one is on top when
   // it closes — see `dialog-stack-focus.ts`.
   const mapDialogRootFallbackRef = useRef<RefObject<HTMLElement | null> | null>(null);
-  // Shared with Topbar (which attaches them to its two openers) and useSidePanel
-  // (which forwards them as the panel's intro-path focus fallback, see the module
+  // Shared with Topbar (which attaches it to the hamburger button, GH132-PLAN.md
+  // M1) and useSidePanel (which forwards it as the chaos, algorithm, AND options
+  // tab's focus fallback, since one trigger now opens all three — see the module
   // doc's "The intro transition").
-  const chaosButtonRef = useRef<HTMLButtonElement>(null);
-  const algorithmButtonRef = useRef<HTMLButtonElement>(null);
+  const hamburgerTriggerRef = useRef<HTMLButtonElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -217,7 +237,7 @@ export function App({ createPipelineController }: AppProps = {}) {
   // The intro overlay, extracted to its own hook (GH109-PLAN.md): the seen-flag lazy
   // init, the three dismiss actions, the post-close focus-return effect, and the
   // reopen control's ref/handler.
-  const intro = useIntroOverlay({ onRequestPanel });
+  const intro = useIntroOverlay({ onRequestPanel, reopenFocusRef: hamburgerTriggerRef });
 
   // The pipeline controller lifecycle, extracted to its own hook (GH109-PLAN.md): a
   // fresh controller per epoch, seeded from the store transport, disposed (with the
@@ -229,14 +249,43 @@ export function App({ createPipelineController }: AppProps = {}) {
     createController: createPipelineController,
   });
 
-  // The side panel (GH118-PLAN.md, sidepanel/): the chaos ladder and Algorithm
-  // editor tabs, moved off the main column behind a right-edge overlay. Owns its own
-  // open/tab state, the pause protocol, and the Apply-on-success wiring.
+  // The reopen-intro transition (GH132-PLAN.md M1, see the module doc): the
+  // Options tab's "How this works" button closes the panel first, then this
+  // effect reopens the intro once the panel has actually closed.
+  // `closeSidePanelRef` breaks the circularity of `onReopenIntro` needing
+  // `sidePanel.close` while it is itself an argument to the `useSidePanel` call
+  // that produces `sidePanel` — written every render, read lazily at click time.
+  const closeSidePanelRef = useRef<() => void>(() => {});
+  const pendingReopenIntroRef = useRef(false);
+  const onReopenIntro = useCallback(() => {
+    pendingReopenIntroRef.current = true;
+    closeSidePanelRef.current();
+  }, []);
+
+  // The side panel (GH118-PLAN.md, sidepanel/): the chaos ladder, Algorithm editor,
+  // and Options tabs, moved off the main column behind a right-edge overlay. Owns
+  // its own open/tab state, the pause protocol, and the Apply-on-success wiring.
   const sidePanel = useSidePanel({
     controllerRef,
-    chaosFocusRef: chaosButtonRef,
-    algorithmFocusRef: algorithmButtonRef,
+    chaosFocusRef: hamburgerTriggerRef,
+    algorithmFocusRef: hamburgerTriggerRef,
+    optionsFocusRef: hamburgerTriggerRef,
+    mapShown,
+    onToggleMap: () => setMapShown(!mapShown),
+    onReopenIntro,
   });
+  closeSidePanelRef.current = sidePanel.close;
+
+  useEffect(() => {
+    if (sidePanel.open) {
+      return;
+    }
+    if (!pendingReopenIntroRef.current) {
+      return;
+    }
+    pendingReopenIntroRef.current = false;
+    intro.onReopen();
+  }, [sidePanel.open, intro.onReopen]);
 
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
   // exclusivity check): the shell being inert already blocks a real pointer/keyboard
@@ -354,16 +403,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         </>
       }
     >
-      <Topbar
-        mapShown={mapShown}
-        onToggleMap={() => setMapShown(!mapShown)}
-        reopenRef={intro.reopenRef}
-        onReopen={intro.onReopen}
-        onOpenChaos={sidePanel.openChaos}
-        onOpenAlgorithm={sidePanel.openAlgorithm}
-        chaosButtonRef={chaosButtonRef}
-        algorithmButtonRef={algorithmButtonRef}
-      />
+      <Topbar onOpenMenu={sidePanel.openPanel} hamburgerTriggerRef={hamburgerTriggerRef} />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
       <InspectorShell
         findingsPanelRef={findingsPanelRef}

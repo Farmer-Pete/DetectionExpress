@@ -12,6 +12,16 @@
  * moves focus into itself on mount, so this hook has nothing left to focus.
  * `onRequestPanel` keeps this hook agnostic of the side panel: App owns what a
  * "chaos" or "algorithm" request means and how to act on it.
+ *
+ * GH132-PLAN.md M1 (design revision): the Topbar no longer carries a standalone
+ * reopen button (the reopen action moved into the side panel's Options tab, which
+ * is unmounted by the time this hook's post-close effect below can run — see
+ * `App.tsx`'s "The reopen-intro transition"), so `reopenRef` alone would have
+ * nothing left to attach to and the post-close focus-restore would silently
+ * no-op. `reopenFocusRef` is an optional fallback the caller supplies (App hands
+ * it the hamburger trigger ref, the one stable control left); the effect prefers
+ * a real `reopenRef` attachment when one exists, so a future direct attachment
+ * still wins.
  */
 import type { ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -25,6 +35,10 @@ export interface UseIntroOverlayArgs {
    *  requests, before the intro closes. Optional so a bare `useIntroOverlay()` call
    *  still works. */
   onRequestPanel?: ((tab: SidePanelTab) => void) | undefined;
+  /** Focus-restore fallback for the post-close effect, used when nothing attaches
+   *  `reopenRef` directly (see the module doc). Typically the Topbar hamburger
+   *  button's ref. */
+  reopenFocusRef?: RefObject<HTMLElement | null> | undefined;
 }
 
 export interface IntroOverlayController {
@@ -40,6 +54,7 @@ export interface IntroOverlayController {
 
 export function useIntroOverlay({
   onRequestPanel,
+  reopenFocusRef,
 }: UseIntroOverlayArgs = {}): IntroOverlayController {
   const [introOpen, setIntroOpen] = useState(() => !hasSeenIntro());
   const reopenRef = useRef<HTMLButtonElement>(null);
@@ -85,8 +100,9 @@ export function useIntroOverlay({
       return;
     }
     pendingReopenFocus.current = false;
-    reopenRef.current?.focus({ preventScroll: true });
-  }, [introOpen]);
+    const target = reopenRef.current ?? reopenFocusRef?.current;
+    target?.focus({ preventScroll: true });
+  }, [introOpen, reopenFocusRef]);
 
   const onReopen = useCallback(() => setIntroOpen(true), []);
 

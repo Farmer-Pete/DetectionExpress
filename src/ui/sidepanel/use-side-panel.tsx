@@ -42,9 +42,16 @@
  * Focus fallback for that intro path (GH118-PLAN.md): the intro button that
  * triggered the open is unmounted by the time the panel closes, so `SidePanel`'s own
  * focus-restore effect falls back to `fallbackFocusRef`. `chaosFocusRef`/
- * `algorithmFocusRef` are App's two Topbar button refs; this hook
- * forwards whichever one matches the active tab, mirroring the fallback-focus refs
- * `TraceOverlay` already takes.
+ * `algorithmFocusRef`/`optionsFocusRef` are App's Topbar hamburger button ref,
+ * forwarded once per tab; this hook picks whichever one matches the active tab,
+ * mirroring the fallback-focus refs `TraceOverlay` already takes.
+ *
+ * GH132-PLAN.md M1 (design revision, "SUPERSEDES the popup menu"): `openPanel`
+ * is the hamburger's own opener — it opens on whatever tab was last active
+ * (`tab` isn't reset on close), defaulting to "chaos" on first open, since the
+ * hamburger no longer knows or cares which tab it is opening. `mapShown`,
+ * `onToggleMap`, and `onReopenIntro` are forwarded straight into `SidePanel`'s
+ * Options tab; this hook does not interpret them.
  */
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { RunController } from "../../game/run-controller";
@@ -56,13 +63,23 @@ export type { SidePanelTab } from "./SidePanel";
 export interface UseSidePanelArgs {
   controllerRef: RefObject<RunController | null>;
   /** Focus-restore fallback for the chaos tab, for when the trigger element is gone
-   *  on unmount (the intro's "Cause chaos" path). Typically the Topbar chaos-ladder
+   *  on unmount (the intro's "Cause chaos" path). Typically the Topbar hamburger
    *  button's ref. */
   chaosFocusRef?: RefObject<HTMLElement | null> | undefined;
   /** Focus-restore fallback for the algorithm tab, for when the trigger element is
    *  gone on unmount (the intro's "Edit the Engine" path). Typically the Topbar
-   *  Algorithm button's ref. */
+   *  hamburger button's ref. */
   algorithmFocusRef?: RefObject<HTMLElement | null> | undefined;
+  /** Focus-restore fallback for the options tab. Typically the Topbar hamburger
+   *  button's ref, same as the other two. */
+  optionsFocusRef?: RefObject<HTMLElement | null> | undefined;
+  /** Whether the embedded metro map region currently shows. Forwarded to
+   *  `SidePanel`'s Options tab. */
+  mapShown: boolean;
+  /** Flips `mapShown`. Forwarded to `SidePanel`'s Options tab. */
+  onToggleMap: () => void;
+  /** Reopens the intro overlay. Forwarded to `SidePanel`'s Options tab. */
+  onReopenIntro: () => void;
 }
 
 export interface SidePanelController {
@@ -76,6 +93,10 @@ export interface SidePanelController {
   /** Open on the algorithm tab. No-op while the trace dialog or the map/event dialog
    *  stack is open. */
   openAlgorithm: () => void;
+  /** Open on whatever tab was last active (chaos by default). The hamburger
+   *  button's opener. No-op while the trace dialog or the map/event dialog stack
+   *  is open. */
+  openPanel: () => void;
   /** Dismiss (Esc, backdrop, or the X button): restores the freeze saved on open. */
   close: () => void;
   /** The Algorithm tab's Apply: runs the source, closes only on success. */
@@ -88,6 +109,10 @@ export function useSidePanel({
   controllerRef,
   chaosFocusRef,
   algorithmFocusRef,
+  optionsFocusRef,
+  mapShown,
+  onToggleMap,
+  onReopenIntro,
 }: UseSidePanelArgs): SidePanelController {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<SidePanelTab>("chaos");
@@ -125,6 +150,10 @@ export function useSidePanel({
 
   const openChaos = useCallback(() => openWith("chaos"), [openWith]);
   const openAlgorithm = useCallback(() => openWith("algorithm"), [openWith]);
+  // The hamburger's opener (GH132-PLAN.md M1): reopens on whatever tab was last
+  // active. `tab` state isn't reset on close, so its current value already IS
+  // "the last-active tab" — this needs no extra bookkeeping of its own.
+  const openPanel = useCallback(() => openWith(tab), [openWith, tab]);
 
   // The panel-owned Apply intent (decision 5): `onApply` sets it, the falling-edge
   // effect below clears it (on success or failure), and `close()` clears it too, so a
@@ -192,7 +221,8 @@ export function useSidePanel({
     };
   }, [setFrozen]);
 
-  const fallbackFocusRef = tab === "chaos" ? chaosFocusRef : algorithmFocusRef;
+  const fallbackFocusRef =
+    tab === "chaos" ? chaosFocusRef : tab === "algorithm" ? algorithmFocusRef : optionsFocusRef;
 
   const sidePanel = open ? (
     <SidePanel
@@ -200,9 +230,12 @@ export function useSidePanel({
       onSelectTab={setTab}
       onClose={close}
       onApply={onApply}
+      mapShown={mapShown}
+      onToggleMap={onToggleMap}
+      onReopenIntro={onReopenIntro}
       fallbackFocusRef={fallbackFocusRef}
     />
   ) : null;
 
-  return { open, tab, openChaos, openAlgorithm, close, onApply, sidePanel };
+  return { open, tab, openChaos, openAlgorithm, openPanel, close, onApply, sidePanel };
 }

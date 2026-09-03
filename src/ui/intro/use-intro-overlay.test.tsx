@@ -6,7 +6,7 @@
  * `onRequestPanel` callback instead, and this harness stubs it the way App will.
  */
 import { fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { isValidElement } from "react";
+import { isValidElement, type RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { introCopy } from "../content/narrative";
 import { hasSeenIntro, markIntroSeen } from "../onboarding-storage";
@@ -20,6 +20,25 @@ function Harness({ onRequestPanel }: { onRequestPanel?: (tab: SidePanelTab) => v
       {intro.introOverlay}
       <button type="button" ref={intro.reopenRef} onClick={intro.onReopen}>
         How this works
+      </button>
+    </div>
+  );
+}
+
+/** GH132-PLAN.md M1: a harness with NO element attached to `reopenRef` (the
+ *  Topbar's own reopen button is gone), mirroring App.tsx's real wiring — the
+ *  reopen trigger lives inside the side panel's Options tab instead, and is
+ *  already unmounted by the time this hook's post-close effect runs. The
+ *  "Reopen" button here calls `onReopen` but is deliberately NOT the
+ *  `reopenRef` target, so the post-close effect must fall back to
+ *  `reopenFocusRef`. */
+function FallbackHarness({ reopenFocusRef }: { reopenFocusRef: RefObject<HTMLElement | null> }) {
+  const intro = useIntroOverlay({ reopenFocusRef });
+  return (
+    <div>
+      {intro.introOverlay}
+      <button type="button" onClick={intro.onReopen}>
+        Reopen
       </button>
     </div>
   );
@@ -91,6 +110,43 @@ describe("useIntroOverlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "How this works" }));
     expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
     expect(hasSeenIntro()).toBe(true);
+  });
+
+  it("falls back to reopenFocusRef on Observe-dismiss when nothing attaches reopenRef directly (GH132-PLAN.md M1)", () => {
+    const fallback = document.createElement("button");
+    fallback.textContent = "hamburger";
+    document.body.append(fallback);
+    render(<FallbackHarness reopenFocusRef={{ current: fallback }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(fallback);
+    fallback.remove();
+  });
+
+  it("prefers a real reopenRef attachment over reopenFocusRef when both are present", () => {
+    function BothHarness({ reopenFocusRef }: { reopenFocusRef: RefObject<HTMLElement | null> }) {
+      const intro = useIntroOverlay({ reopenFocusRef });
+      return (
+        <div>
+          {intro.introOverlay}
+          <button type="button" ref={intro.reopenRef} onClick={intro.onReopen}>
+            How this works
+          </button>
+        </div>
+      );
+    }
+    const fallback = document.createElement("button");
+    document.body.append(fallback);
+    render(<BothHarness reopenFocusRef={{ current: fallback }} />);
+    const reopen = screen.getByRole("button", { name: "How this works" });
+
+    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
+
+    expect(document.activeElement).toBe(reopen);
+    expect(document.activeElement).not.toBe(fallback);
+    fallback.remove();
   });
 
   it("keeps onObserve's identity stable across an unrelated rerender (F020)", () => {

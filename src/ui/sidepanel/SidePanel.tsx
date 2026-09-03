@@ -35,10 +35,17 @@
  * `"tabpanel"`, `aria-selected`, each tab's `aria-controls` names its panel and the
  * panel's `aria-labelledby` names its tab, and ArrowRight/ArrowLeft both select and
  * move DOM focus to the adjacent tab (roving tabindex: only the active tab is in the
- * Tab order). BOTH tabpanels render at all times, the inactive one carrying `hidden`.
- * That keeps every tab's `aria-controls` pointing at an element that exists, and a
- * `hidden` subtree is excluded from `focusableControls`, so the off-screen panel's
- * controls never enter the focus trap.
+ * Tab order). ALL THREE tabpanels render at all times, the inactive ones carrying
+ * `hidden`. That keeps every tab's `aria-controls` pointing at an element that
+ * exists, and a `hidden` subtree is excluded from `focusableControls`, so an
+ * off-screen panel's controls never enter the focus trap.
+ *
+ * GH132-PLAN.md M1 (design revision, "SUPERSEDES the popup menu"): a third tab,
+ * "Options", holds the two actions that used to live in the popup hamburger menu
+ * and the Topbar's standalone reopen button — the metro-view toggle and "How this
+ * works" (which reopens the intro). The tab strip itself is restyled in
+ * `src/index.css` to read as real tabs (the active tab's underline joins the panel
+ * body's own border), not detached pill buttons; the ARIA above is unchanged.
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { defaultEntry } from "../../game/registry";
@@ -48,13 +55,14 @@ import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
 
-export type SidePanelTab = "chaos" | "algorithm";
+export type SidePanelTab = "chaos" | "algorithm" | "options";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 const TABS: ReadonlyArray<{ id: SidePanelTab; label: string }> = [
   { id: "chaos", label: "Chaos ladder" },
   { id: "algorithm", label: "Algorithm" },
+  { id: "options", label: "Options" },
 ];
 
 export interface SidePanelProps {
@@ -66,6 +74,15 @@ export interface SidePanelProps {
   onClose: () => void;
   /** The Algorithm tab's Apply, wired to `AlgorithmEditor`'s `onRun`. */
   onApply: () => void;
+  /** Whether the embedded metro map region currently shows, so the Options tab's
+   *  toggle button can label itself "Hide"/"Show". */
+  mapShown: boolean;
+  /** Flips `mapShown`, wired to the Options tab's metro-view toggle button. */
+  onToggleMap: () => void;
+  /** Reopens the intro overlay, wired to the Options tab's "How this works"
+   *  button. Both the panel and the intro are modals, so `App.tsx` closes this
+   *  panel first, then reopens the intro once it has actually unmounted. */
+  onReopenIntro: () => void;
   /** Focus-restore fallback for when the trigger element is gone on unmount (decision
    *  14's TraceOverlay pattern), e.g. the intro path in a later stage. */
   fallbackFocusRef?: RefObject<HTMLElement | null> | undefined;
@@ -76,6 +93,9 @@ export function SidePanel({
   onSelectTab,
   onClose,
   onApply,
+  mapShown,
+  onToggleMap,
+  onReopenIntro,
   fallbackFocusRef,
 }: SidePanelProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -214,6 +234,22 @@ export function SidePanel({
           hidden={tab !== "algorithm"}
         >
           <AlgorithmEditor onRun={onApply} />
+        </div>
+        <div
+          role="tabpanel"
+          id="sidepanel-tabpanel-options"
+          aria-labelledby="sidepanel-tab-options"
+          className="sidepanel-body"
+          hidden={tab !== "options"}
+        >
+          <div className="sidepanel-options">
+            <button type="button" className="sidepanel-options-button" onClick={onToggleMap}>
+              {mapShown ? "Hide metro view" : "Show metro view"}
+            </button>
+            <button type="button" className="sidepanel-options-button" onClick={onReopenIntro}>
+              How this works
+            </button>
+          </div>
         </div>
       </div>
     </div>

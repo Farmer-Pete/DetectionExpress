@@ -202,11 +202,15 @@ describe("App browse-mode isolation (GH105)", () => {
     expect(document.activeElement).toBe(row);
   });
 
-  it("keeps the finding trace open and its freeze held across a map show/hide toggle (GH117: one engine, no more view teardown)", () => {
+  it("keeps the finding trace open and its freeze held: the hamburger is exclusive with it and never opens the panel (GH117 + GH132-PLAN.md M1)", () => {
     // Pre-GH117, "Metro view" swapped controllers and the pipeline's teardown closed
-    // the dialog and released its freeze (freeze lifecycle 7a). Now the map toggle is
-    // a display-only flip over the one merged engine, so neither the dialog nor its
-    // freeze claim should be disturbed by it.
+    // the dialog and released its freeze (freeze lifecycle 7a). GH132-PLAN.md M1
+    // (design revision) then moved the map toggle into the side panel's Options
+    // tab, which is a real modal — exclusive with the trace dialog, the same
+    // one-modal-at-a-time rule `useSidePanel`'s own tests cover. So the map
+    // toggle is unreachable via the hamburger while a trace dialog is open;
+    // this only checks that reaching for it (a no-op) never disturbs the
+    // trace dialog or its freeze.
     publishFinding(live(1, [0]));
     render(<App createPipelineController={stubController} />);
 
@@ -214,8 +218,9 @@ describe("App browse-mode isolation (GH105)", () => {
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(useGameStore.getState().transport.frozen).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
+    fireEvent.click(screen.getByRole("button", { name: /menu/i }));
 
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(useGameStore.getState().transport.frozen).toBe(true);
   });

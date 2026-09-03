@@ -32,6 +32,28 @@ beforeEach(() => {
   markIntroSeen();
 });
 
+/** Clicks the hamburger: opens the side panel on whatever tab was last active
+ *  (chaos, by default). GH132-PLAN.md M1 (design revision): the hamburger no
+ *  longer opens a popup — it opens the panel directly. */
+function openPanel(): void {
+  fireEvent.click(screen.getByRole("button", { name: /menu/i }));
+}
+
+/** Opens the panel (via the hamburger) and switches it to the named tab. */
+function openPanelOnTab(name: RegExp): void {
+  openPanel();
+  fireEvent.click(screen.getByRole("tab", { name }));
+}
+
+/** Reopens the intro from the side panel's Options tab (GH132-PLAN.md M1,
+ *  design revision: the Topbar's standalone "How this works" button is gone).
+ *  This closes the panel first, then the intro opens once the panel has
+ *  actually unmounted — see App.tsx's "The reopen-intro transition". */
+function reopenIntroFromOptions(): void {
+  openPanelOnTab(/options/i);
+  fireEvent.click(screen.getByRole("button", { name: "How this works" }));
+}
+
 /** A fare-gate world-log event at Central (`cen`), for the log-row-click tests below. */
 function fareGateEvent(id: number): WorldLogEvent {
   return {
@@ -131,18 +153,18 @@ describe("App shell", () => {
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
   });
 
-  it("opens the side panel on the chaos tab, chaos ladder default, from the Topbar's Chaos ladder button", () => {
+  it("opens the side panel on the chaos tab, chaos ladder default, from the hamburger button", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
     expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("heading", { name: /chaos ladder/i })).toBeDefined();
     expect(screen.getByText(new RegExp(liveScenario.displayName))).toBeDefined();
   });
 
-  it("opens the side panel on the algorithm tab, with Apply and Reset, from the Topbar's Algorithm button", () => {
+  it("opens the side panel on the algorithm tab, with Apply and Reset, from the hamburger button then the Algorithm tab", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Algorithm" }));
+    openPanelOnTab(/algorithm/i);
     expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
       "true",
     );
@@ -158,10 +180,10 @@ describe("App shell", () => {
     expect(controller.disposes).toBe(1);
   });
 
-  it("carries the Hire Me button and the reopen control in the topbar", () => {
+  it("carries the Hire Me button and the hamburger button in the topbar", () => {
     render(<App createPipelineController={() => stubController()} />);
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
-    expect(screen.getByRole("button", { name: /how this works/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /menu/i })).toBeDefined();
   });
 
   it("reflects the store frozen state into the controller on mount", () => {
@@ -200,7 +222,7 @@ describe("App shell", () => {
 describe("App side panel (GH118-PLAN.md)", () => {
   it("inerts the shell while the side panel is open, and lifts it on close", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     const shell = document.querySelector(".app-shell");
     expect(shell?.hasAttribute("inert")).toBe(true);
 
@@ -213,13 +235,13 @@ describe("App side panel (GH118-PLAN.md)", () => {
     const { unmount } = render(<App createPipelineController={() => stubController()} />);
     expect(useGameStore.getState().overlayOpen).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     expect(useGameStore.getState().overlayOpen).toBe(true);
 
     fireEvent.keyDown(screen.getByRole("dialog", { name: "Side panel" }), { key: "Escape" });
     expect(useGameStore.getState().overlayOpen).toBe(false);
 
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     expect(useGameStore.getState().overlayOpen).toBe(true);
     unmount();
     expect(useGameStore.getState().overlayOpen).toBe(false);
@@ -238,14 +260,14 @@ describe("App side panel (GH118-PLAN.md)", () => {
         inertAtPublish.push(document.querySelector(".app-shell")?.hasAttribute("inert"));
       }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     unsubscribe();
     expect(inertAtPublish).toEqual([true]);
   });
 
-  it("opens the panel from the Topbar's Algorithm button on the algorithm tab", () => {
+  it("opens the panel from the hamburger button, then the Algorithm tab", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Algorithm" }));
+    openPanelOnTab(/algorithm/i);
     expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
       "true",
     );
@@ -300,7 +322,7 @@ describe("App place dialog (GH124-PLAN.md Checkpoint 4)", () => {
 
   it("is mutually exclusive with the side panel: a map click while it is open never also opens the place dialog", () => {
     render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Central" }));
@@ -333,7 +355,7 @@ describe("App event dialog opener guard (GH124-PLAN.md Checkpoint 5, consistency
     act(() => {
       useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
     });
-    fireEvent.click(screen.getByRole("button", { name: "Chaos ladder" }));
+    openPanel();
     expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
 
     fireEvent.click(screen.getByTestId("log-row-5"));
@@ -597,37 +619,38 @@ describe("App onboarding", () => {
     expect(scrollTargets).toEqual([]);
   });
 
-  it("restores focus to the Topbar's Chaos ladder button when the panel opened via Cause chaos then closes (the intro's own button is gone)", () => {
+  it("restores focus to the hamburger menu trigger when the panel opened via Cause chaos then closes (the intro's own button is gone)", () => {
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
     const panel = screen.getByRole("dialog", { name: "Side panel" });
-    const chaosButton = screen.getByRole("button", { name: "Chaos ladder" });
+    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
 
     fireEvent.keyDown(panel, { key: "Escape" });
 
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
-    expect(document.activeElement).toBe(chaosButton);
+    expect(document.activeElement).toBe(hamburgerTrigger);
   });
 
-  it("restores focus to the Topbar's Algorithm button when the panel opened via Edit the Engine then closes", () => {
+  it("restores focus to the hamburger menu trigger when the panel opened via Edit the Engine then closes", () => {
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
     const panel = screen.getByRole("dialog", { name: "Side panel" });
-    const algorithmButton = screen.getByRole("button", { name: "Algorithm" });
+    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
 
     fireEvent.keyDown(panel, { key: "Escape" });
 
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
-    expect(document.activeElement).toBe(algorithmButton);
+    expect(document.activeElement).toBe(hamburgerTrigger);
   });
 
-  it("reopens the overlay from the topbar without clearing the seen flag", () => {
+  it("reopens the overlay from the side panel's Options tab without clearing the seen flag", () => {
     const { unmount } = render(<App createPipelineController={() => stubController()} />);
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /how this works/i }));
+    reopenIntroFromOptions();
     expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
 
     // Reopen must not clear the flag. Unmount first so only one App tree is ever
@@ -637,20 +660,22 @@ describe("App onboarding", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("returns focus to the reopen control after a reopen and dismiss", () => {
+  it("returns focus to the hamburger trigger after a reopen (via Options) and dismiss, since the Options button is already gone", () => {
     render(<App createPipelineController={() => stubController()} />);
     // The overlay is open on first load. Dismiss it, so the shell is live again.
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
     expect(screen.queryByRole("dialog")).toBeNull();
 
-    // Reopen from the topbar, then dismiss again. Focus returns to the reopen button.
-    const reopen = screen.getByRole("button", { name: /how this works/i });
-    fireEvent.click(reopen);
+    // Reopen via the Options tab (which closes the panel first), then dismiss
+    // again. The Options button that triggered the reopen is gone by the time the
+    // intro closes, so focus falls back to the hamburger trigger.
+    reopenIntroFromOptions();
     expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
+    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(reopen);
+    expect(document.activeElement).toBe(hamburgerTrigger);
   });
 
   it("does not restart or dispose the controller when the overlay dismisses", () => {
@@ -706,6 +731,7 @@ describe("App map toggle (GH117: one engine, the map is a display toggle)", () =
     // station/site/train button on the map unreachable to assistive tech.
     expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
 
+    openPanelOnTab(/options/i);
     fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
     expect(screen.queryByRole("group", { name: "Metro network map" })).toBeNull();
 

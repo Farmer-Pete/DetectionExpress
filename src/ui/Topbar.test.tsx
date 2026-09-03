@@ -1,11 +1,11 @@
 /**
- * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the run-status
- * pill, the embedded metro map's show/hide toggle, the two side-panel openers
- * (GH118-PLAN.md), the "How this works" reopen button, and Hire Me. It consumes
- * `reopenRef`/`onReopen` from `useIntroOverlay` and `onOpenChaos`/`onOpenAlgorithm`
- * from `useSidePanel` rather than owning either, so these tests stub all of it.
- * `StatusPill` reads the game store itself, so these tests seed the store rather
- * than a prop.
+ * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the
+ * run-status pill, the hamburger button, and Hire Me. GH132-PLAN.md M1 (design
+ * revision): the hamburger is a plain icon button that opens the side panel
+ * directly (`onOpenMenu`) — it renders no popup of its own, so these tests only
+ * assert it exists, is wired to the given ref, and fires `onOpenMenu` on click.
+ * `StatusPill` reads the game store itself, so these tests seed the store
+ * rather than a prop.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
@@ -21,14 +21,8 @@ beforeEach(() => {
 
 function renderTopbar(overrides: Partial<Parameters<typeof Topbar>[0]> = {}) {
   const props: Parameters<typeof Topbar>[0] = {
-    mapShown: true,
-    onToggleMap: vi.fn(),
-    reopenRef: createRef<HTMLButtonElement>(),
-    onReopen: vi.fn(),
-    onOpenChaos: vi.fn(),
-    onOpenAlgorithm: vi.fn(),
-    chaosButtonRef: createRef<HTMLButtonElement>(),
-    algorithmButtonRef: createRef<HTMLButtonElement>(),
+    onOpenMenu: vi.fn(),
+    hamburgerTriggerRef: createRef<HTMLButtonElement>(),
     ...overrides,
   };
   return { ...render(<Topbar {...props} />), props };
@@ -39,56 +33,40 @@ describe("Topbar", () => {
     renderTopbar();
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
-    expect(screen.getByText("Observe the Engine, then cause chaos")).toBeDefined();
+    expect(
+      screen.getByText("The Engine brings the detections. You bring the chaos."),
+    ).toBeDefined();
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
   });
 
-  it("labels the map toggle for the hidden map and flips it once shown", () => {
-    const { rerender, props } = renderTopbar({ mapShown: false });
-    expect(screen.getByRole("button", { name: "Show metro view" })).toBeDefined();
-
-    rerender(<Topbar {...props} mapShown={true} />);
-    expect(screen.getByRole("button", { name: "Hide metro view" })).toBeDefined();
+  it("renders the hamburger button, wired to hamburgerTriggerRef, with no popup of its own", () => {
+    const hamburgerTriggerRef = createRef<HTMLButtonElement>();
+    renderTopbar({ hamburgerTriggerRef });
+    const trigger = screen.getByRole("button", { name: /menu/i });
+    expect(hamburgerTriggerRef.current).toBe(trigger);
+    expect(trigger.getAttribute("aria-haspopup")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("calls onToggleMap when the map toggle is clicked", () => {
-    const onToggleMap = vi.fn();
-    renderTopbar({ mapShown: false, onToggleMap });
-    fireEvent.click(screen.getByRole("button", { name: "Show metro view" }));
-    expect(onToggleMap).toHaveBeenCalledTimes(1);
+  it("clicking the hamburger calls onOpenMenu", () => {
+    const onOpenMenu = vi.fn();
+    renderTopbar({ onOpenMenu });
+    fireEvent.click(screen.getByRole("button", { name: /menu/i }));
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
   });
 
-  it("wires the reopen button to reopenRef and calls onReopen when clicked", () => {
-    const onReopen = vi.fn();
-    const reopenRef = createRef<HTMLButtonElement>();
-    renderTopbar({ onReopen, reopenRef });
-    const reopen = screen.getByRole("button", { name: /how this works/i });
-    expect(reopenRef.current).toBe(reopen);
-    fireEvent.click(reopen);
-    expect(onReopen).toHaveBeenCalledTimes(1);
+  it("the hamburger is the last, rightmost child of the topbar actions row, after Hire Me", () => {
+    const { container } = renderTopbar();
+    const actions = container.querySelector(".topbar-actions");
+    expect(actions).not.toBeNull();
+    const children = actions ? [...actions.children] : [];
+    expect(children.at(-1)).toBe(screen.getByRole("button", { name: /menu/i }));
   });
 
-  it("shows the chaos ladder and algorithm openers, wired to their refs and callbacks", () => {
-    const onOpenChaos = vi.fn();
-    const onOpenAlgorithm = vi.fn();
-    const chaosButtonRef = createRef<HTMLButtonElement>();
-    const algorithmButtonRef = createRef<HTMLButtonElement>();
-    renderTopbar({
-      onOpenChaos,
-      onOpenAlgorithm,
-      chaosButtonRef,
-      algorithmButtonRef,
-    });
-
-    const chaosButton = screen.getByRole("button", { name: "Chaos ladder" });
-    const algorithmButton = screen.getByRole("button", { name: "Algorithm" });
-    expect(chaosButtonRef.current).toBe(chaosButton);
-    expect(algorithmButtonRef.current).toBe(algorithmButton);
-
-    fireEvent.click(chaosButton);
-    expect(onOpenChaos).toHaveBeenCalledTimes(1);
-    fireEvent.click(algorithmButton);
-    expect(onOpenAlgorithm).toHaveBeenCalledTimes(1);
+  it("no longer renders a standalone map toggle or How this works button", () => {
+    renderTopbar();
+    expect(screen.queryByRole("button", { name: /metro view/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /how this works/i })).toBeNull();
   });
 
   it("no longer renders a Metrics opener", () => {

@@ -23,11 +23,23 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
   const onSelectTab = overrides.onSelectTab ?? vi.fn();
   const onClose = overrides.onClose ?? vi.fn();
   const onApply = overrides.onApply ?? vi.fn();
+  const onToggleMap = overrides.onToggleMap ?? vi.fn();
+  const onReopenIntro = overrides.onReopenIntro ?? vi.fn();
+  const mapShown = overrides.mapShown ?? true;
   const tab = overrides.tab ?? "chaos";
   const utils = render(
-    <SidePanel tab={tab} onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
+    <SidePanel
+      tab={tab}
+      onSelectTab={onSelectTab}
+      onClose={onClose}
+      onApply={onApply}
+      mapShown={mapShown}
+      onToggleMap={onToggleMap}
+      onReopenIntro={onReopenIntro}
+      fallbackFocusRef={overrides.fallbackFocusRef}
+    />,
   );
-  return { ...utils, onSelectTab, onClose, onApply };
+  return { ...utils, onSelectTab, onClose, onApply, onToggleMap, onReopenIntro };
 }
 
 describe("SidePanel", () => {
@@ -38,14 +50,16 @@ describe("SidePanel", () => {
     expect(container.querySelector(".app-shell")).toBeNull();
   });
 
-  it("renders two tabs, chaos active when tab is chaos", () => {
+  it("renders three tabs, chaos active when tab is chaos", () => {
     renderPanel({ tab: "chaos" });
     const tabs = screen.getAllByRole("tab");
-    expect(tabs).toHaveLength(2);
+    expect(tabs).toHaveLength(3);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
     const algorithmTab = screen.getByRole("tab", { name: /algorithm/i });
+    const optionsTab = screen.getByRole("tab", { name: /options/i });
     expect(chaosTab.getAttribute("aria-selected")).toBe("true");
     expect(algorithmTab.getAttribute("aria-selected")).toBe("false");
+    expect(optionsTab.getAttribute("aria-selected")).toBe("false");
   });
 
   it("marks the algorithm tab selected when tab is algorithm", () => {
@@ -64,14 +78,16 @@ describe("SidePanel", () => {
     expect(panel.getAttribute("aria-labelledby")).toBe(tab.id);
   });
 
-  it("renders both tabpanels, hides the inactive one, so every tab's aria-controls resolves", () => {
+  it("renders all three tabpanels, hides the inactive ones, so every tab's aria-controls resolves", () => {
     const { container } = renderPanel({ tab: "chaos" });
     const panels = container.querySelectorAll<HTMLElement>('[role="tabpanel"]');
-    expect(panels).toHaveLength(2);
+    expect(panels).toHaveLength(3);
     const chaosPanel = document.getElementById("sidepanel-tabpanel-chaos");
     const algorithmPanel = document.getElementById("sidepanel-tabpanel-algorithm");
+    const optionsPanel = document.getElementById("sidepanel-tabpanel-options");
     expect(chaosPanel?.hasAttribute("hidden")).toBe(false);
     expect(algorithmPanel?.hasAttribute("hidden")).toBe(true);
+    expect(optionsPanel?.hasAttribute("hidden")).toBe(true);
     for (const tab of screen.getAllByRole("tab")) {
       const controls = tab.getAttribute("aria-controls");
       expect(controls).not.toBeNull();
@@ -92,13 +108,21 @@ describe("SidePanel", () => {
     expect(onSelectTab).toHaveBeenCalledWith("algorithm");
   });
 
-  it("ArrowRight/ArrowLeft move between tabs and move DOM focus with them", () => {
+  it("ArrowRight/ArrowLeft move between all three tabs and move DOM focus with them", () => {
     const onSelectTab = vi.fn();
     const onClose = vi.fn();
     const onApply = vi.fn();
-    const { rerender } = render(
-      <SidePanel tab="chaos" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
-    );
+    const onToggleMap = vi.fn();
+    const onReopenIntro = vi.fn();
+    const baseProps = {
+      onSelectTab,
+      onClose,
+      onApply,
+      mapShown: true,
+      onToggleMap,
+      onReopenIntro,
+    };
+    const { rerender } = render(<SidePanel tab="chaos" {...baseProps} />);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
     chaosTab.focus();
     fireEvent.keyDown(chaosTab, { key: "ArrowRight" });
@@ -106,21 +130,24 @@ describe("SidePanel", () => {
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: /algorithm/i }));
 
     // Simulate the controlling parent (use-side-panel.tsx) applying the reported tab.
-    rerender(
-      <SidePanel tab="algorithm" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
-    );
-    // ArrowRight from the last tab wraps around to the first.
+    rerender(<SidePanel tab="algorithm" {...baseProps} />);
     const algorithmTab = screen.getByRole("tab", { name: /algorithm/i });
     fireEvent.keyDown(algorithmTab, { key: "ArrowRight" });
+    expect(onSelectTab).toHaveBeenCalledWith("options");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /options/i }));
+
+    // ArrowRight from the last tab wraps around to the first.
+    rerender(<SidePanel tab="options" {...baseProps} />);
+    const optionsTab = screen.getByRole("tab", { name: /options/i });
+    fireEvent.keyDown(optionsTab, { key: "ArrowRight" });
     expect(onSelectTab).toHaveBeenCalledWith("chaos");
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: /chaos/i }));
 
-    rerender(
-      <SidePanel tab="algorithm" onSelectTab={onSelectTab} onClose={onClose} onApply={onApply} />,
-    );
-    fireEvent.keyDown(screen.getByRole("tab", { name: /algorithm/i }), { key: "ArrowLeft" });
-    expect(onSelectTab).toHaveBeenCalledWith("chaos");
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /chaos/i }));
+    // ArrowLeft from the first tab wraps around to the last.
+    rerender(<SidePanel tab="chaos" {...baseProps} />);
+    fireEvent.keyDown(screen.getByRole("tab", { name: /chaos/i }), { key: "ArrowLeft" });
+    expect(onSelectTab).toHaveBeenCalledWith("options");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /options/i }));
   });
 
   it("renders the chaos ladder in the chaos tab", () => {
@@ -162,6 +189,26 @@ describe("SidePanel", () => {
     const { onApply } = renderPanel({ tab: "algorithm" });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(onApply).toHaveBeenCalledTimes(1);
+  });
+
+  it("the options tab shows a map toggle labeled Hide when mapShown is true, and calls onToggleMap", () => {
+    const { onToggleMap } = renderPanel({ tab: "options", mapShown: true });
+    const toggle = screen.getByRole("button", { name: "Hide metro view" });
+    expect(screen.queryByRole("button", { name: "Show metro view" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(onToggleMap).toHaveBeenCalledTimes(1);
+  });
+
+  it("the options tab's map toggle reads Show when mapShown is false", () => {
+    renderPanel({ tab: "options", mapShown: false });
+    expect(screen.getByRole("button", { name: "Show metro view" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Hide metro view" })).toBeNull();
+  });
+
+  it("the options tab's How this works button calls onReopenIntro", () => {
+    const { onReopenIntro } = renderPanel({ tab: "options" });
+    fireEvent.click(screen.getByRole("button", { name: "How this works" }));
+    expect(onReopenIntro).toHaveBeenCalledTimes(1);
   });
 
   it("Escape calls onClose", () => {
@@ -214,15 +261,7 @@ describe("SidePanel", () => {
     }
     expect(document.activeElement).toBe(document.body);
 
-    const { unmount } = render(
-      <SidePanel
-        tab="chaos"
-        onSelectTab={() => {}}
-        onClose={() => {}}
-        onApply={() => {}}
-        fallbackFocusRef={{ current: fallback }}
-      />,
-    );
+    const { unmount } = renderPanel({ fallbackFocusRef: { current: fallback } });
     unmount();
     expect(document.activeElement).toBe(fallback);
     fallback.remove();
@@ -238,15 +277,7 @@ describe("SidePanel", () => {
     document.body.append(trigger);
     trigger.focus();
 
-    const { unmount } = render(
-      <SidePanel
-        tab="chaos"
-        onSelectTab={() => {}}
-        onClose={() => {}}
-        onApply={() => {}}
-        fallbackFocusRef={fallbackFocusRef}
-      />,
-    );
+    const { unmount } = renderPanel({ fallbackFocusRef });
     trigger.remove(); // the trigger is gone before close, e.g. the intro path (next stage)
     unmount();
     expect(document.activeElement).toBe(fallback);
