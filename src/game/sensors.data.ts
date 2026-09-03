@@ -11,7 +11,7 @@ export const sensorsData = {
       id: "kiosk",
       name: "Account kiosk",
       description:
-        "The touchscreen where riders sign in, check a balance, or reset a PIN. It is the front door to an account, and attackers knock on it first.",
+        "The touchscreen where riders sign in, check a balance, or reset a PIN. Wash your hands after using it, because everyone touches this thing.",
       foundAt: {
         summary: "In the public concourse of every station, before the fare gates.",
         zones: ["z0"],
@@ -58,7 +58,7 @@ export const sensorsData = {
       id: "fare-gate",
       name: "Fare gate",
       description:
-        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
+        "The turnstile that guards the paid area. You must have a sufficient balance or no train for you.",
       foundAt: {
         summary: "At the paid-area boundary of every station.",
         zones: ["z0", "z1"],
@@ -107,8 +107,7 @@ export const sensorsData = {
         {
           manufacturerId: "railsense",
           model: "RailSense GateNode",
-          quirk:
-            "Everything is a code. Line 3 means red, d:1 means in, rc:0 means ok. You need the lookup table to read a single event.",
+          quirk: "Everything is a code. You need the lookup table to read a single event.",
           exampleRaw: {
             t: 1756433643000,
             card: "C09",
@@ -125,7 +124,7 @@ export const sensorsData = {
       id: "tvm",
       name: "Ticket vending machine",
       description:
-        "The machine that sells fares, tops up cards, and issues refunds. It handles money, so it draws fraud like a picnic draws ants.",
+        "The machine that sells fares, tops up cards, and issues refunds. It handles money, so it draws fraud like ants to a picnic.",
       foundAt: {
         summary: "In the public concourse of every station.",
         zones: ["z0"],
@@ -160,10 +159,10 @@ export const sensorsData = {
       id: "door-reader",
       name: "Door reader",
       description:
-        "The badge reader on a staff or restricted door. It decides who crosses from one trust zone into the next.",
+        "The badge reader on a staff or restricted door. If you don't have the right badge, it hates you. If you have the right one, it'll let you in, but it still hates you.",
       foundAt: {
         summary:
-          "On every door between zones Z1 and Z4, at stations, depots, signal cabins, and the control center.",
+          "On every door between the paid area and the control zone, at stations, depots, signal cabins, the substation, and the control center.",
         zones: ["z1", "z2", "z3", "z4"],
         stations: ["all"],
         sites: ["dep", "sig", "sub", "occ"],
@@ -211,7 +210,7 @@ export const sensorsData = {
       id: "door-contact",
       name: "Door contact sensor",
       description:
-        "The magnetic sensor that reports whether a door is open, closed, forced, or propped. It watches the door itself, not the badge.",
+        "The magnetic sensor that reports whether a door is open, closed, forced, or propped. It feels lonely and unseen.",
       foundAt: {
         summary: "On the same doors as the readers, at stations and staff sites.",
         zones: ["z1", "z2", "z3", "z4"],
@@ -255,7 +254,7 @@ export const sensorsData = {
       id: "platform-camera",
       name: "Platform camera",
       description:
-        "The camera over a fare gate that counts bodies against grants. It turns a picture into two numbers: how many taps, how many people.",
+        "The camera over a fare gate that counts people vs grants. Remember to wave and say 'cheese'!",
       foundAt: {
         summary: "Above the fare gates of every station.",
         zones: ["z0", "z1"],
@@ -301,7 +300,7 @@ export const sensorsData = {
       id: "train-tracker",
       name: "Train tracker",
       description:
-        "The trackside sensor that logs a train arriving at or leaving a station, and on which track. It is the pulse of the moving system.",
+        "The trackside sensor that logs a train arriving and leaving a station. It helps you know how far behind schedule the trains are running.",
       foundAt: {
         summary: "Along every line, at platforms and on the operational tracks.",
         zones: ["z1", "z3"],
@@ -351,7 +350,7 @@ export const sensorsData = {
       id: "occ-console",
       name: "Control console",
       description:
-        "The dispatcher's console in the control center. It logs every command sent to a signal, switch, or data store. This is the most sensitive telemetry in the system.",
+        "The dispatcher's console on the control floor. It logs every command sent to a signal, switch, or data store. This is the most sensitive telemetry in the system, and it has no sense of humor.",
       foundAt: {
         summary: "Only on the control floor of the Operations Control Center.",
         zones: ["z4"],
@@ -397,7 +396,7 @@ export const sensorsData = {
       id: "network-relay",
       name: "Network relay",
       description:
-        "A node on the control backbone that links a station to the control center. It reports which host talked to which destination, and how many bytes moved.",
+        "A node on the control backbone that links a station to the control center. It reports which host talked to which destination. Voted most likely to spill the tea.",
       foundAt: {
         summary:
           "At every station and staff site, on the network that carries departure boards, signals, and staff traffic.",

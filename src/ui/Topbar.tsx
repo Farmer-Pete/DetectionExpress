@@ -48,7 +48,7 @@ export function Topbar({
   return (
     <header className="topbar">
       <h1>Detection Express</h1>
-      <span className="slice-tag">Observe the Engine, then cause chaos</span>
+      <span className="slice-tag">The Engine brings the detections. You bring the chaos.</span>
       <StatusPill />
       <div className="topbar-actions">
         <button
@@ -65,7 +65,7 @@ export function Topbar({
           className="topbar-panel-open"
           onClick={onOpenAlgorithm}
         >
-          Algorithm
+          Edit Engine
         </button>
         <button type="button" className="view-toggle" onClick={onToggleMap}>
           {mapShown ? "Hide metro view" : "Show metro view"}

@@ -62,10 +62,10 @@ export const REPO_URL = "https://github.com/Farmer-Pete/DetectionExpress";
 export const introCopy: IntroCopy = {
   title: "Detection Express",
   paragraphs: [
-    "This is a working metro, modeled down to the last detail. Every rider, every fare tap, every door, every camera. It all runs live.",
-    "Watching over it is a finished detection Engine. It reads the whole stream of sensor data and finds the threats hiding inside ordinary traffic. It stays fast under heavy load.",
+    "This is a live simulation of a working metro. Riders tap fare cards, trigger door sensors, board and exit trains, even get spotted by cameras.",
+    "Watching over it is a detection Engine that looks for attackers trying to abuse the system. It reads the whole stream of sensor data and finds threats hiding inside ordinary traffic.",
   ],
-  invitation: "Watch it run clean. Then cause chaos and see it hold.",
+  invitation: "The simulation loads in a clean, steady state. It's your job to introduce chaos!",
   observeLabel: "Observe the simulation",
   chaosLabel: "Cause chaos",
   sourceLabel: "Get the source",
@@ -85,38 +85,42 @@ export const hireMe: HireMeCopy = {
 export const chaosLevels: readonly ChaosLevel[] = [
   {
     level: 0,
-    label: "No chaos",
-    blurb: "The metro runs clean. Benign riders only, no attackers.",
+    label: "All good",
+    blurb: "The metro runs in a clean, steady state. Enjoy it while it lasts.",
     playable: true,
   },
   {
     level: 1,
-    label: "First Cracks",
-    blurb: "A handful of bad actors fan out across the crowd. Quiet probes, one PIN at a time.",
+    label: "Uh oh",
+    blurb: "A handful of bad actors fan out across the crowd. Good thing they are easy to detect.",
     playable: true,
   },
   {
     level: 2,
-    label: "Under Load",
-    blurb: "More attackers arrive. The Engine holds state and leans in.",
+    label: "Welp, that's not good",
+    blurb:
+      "Oh, joy... in addition to the previous attackers, more attackers arrive. Plus some attackers are trying to hide their activity in the noise of normal activity.",
     playable: false,
   },
   {
     level: 3,
-    label: "Heavy Load",
-    blurb: "Timed patterns per rider. The stream thickens and speeds up.",
+    label: "This is fine, everything is fine",
+    blurb:
+      "See!? This is why we can't have nice things. Attackers join that require the Engine to spot things that look normal in isolation but add up to a big pile of nasty.",
     playable: false,
   },
   {
     level: 4,
-    label: "Overload",
-    blurb: "Attacks cross sensors. The network map itself is in play.",
+    label: "Awwww, hell no!",
+    blurb:
+      "Now stuff gets weird. Now stuff happens that causes sensor readings that should be impossible. I think it might be time to call the Ghostbusters!",
     playable: false,
   },
   {
     level: 5,
-    label: "Nightmare",
-    blurb: "Everything at once. The Engine learns normal and scores the drift.",
+    label: "HEEEEEEEEEEELLLLLLLLP!",
+    blurb:
+      "Now this ain't fair!! There are insider threats and coordinated attacks. Oh, and of course like previously, all previous attackers are there, resulting in a total of 30 different types of attacks.",
     playable: false,
   },
 ];
