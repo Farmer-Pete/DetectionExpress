@@ -55,6 +55,23 @@ describe("parseCliArgs", () => {
   it("throws on an invalid --mode", () => {
     expect(() => parseCliArgs(["--scenario", "x", "--mode", "bogus"])).toThrow(/--mode/);
   });
+
+  it("rejects a --seed with trailing junk", () => {
+    expect(() => parseCliArgs(["--scenario", "x", "--seed", "1junk"])).toThrow(/--seed/);
+  });
+
+  it("rejects a non-integer --ticks", () => {
+    expect(() => parseCliArgs(["--scenario", "x", "--ticks", "2.5"])).toThrow(/--ticks/);
+  });
+
+  it("rejects a --service-rate with trailing junk", () => {
+    expect(() => parseCliArgs(["--scenario", "x", "--service-rate", "3/2junk"])).toThrow(
+      /--service-rate/,
+    );
+    expect(() => parseCliArgs(["--scenario", "x", "--service-rate", "500x"])).toThrow(
+      /--service-rate/,
+    );
+  });
 });
 
 describe("sim-run CLI end to end", () => {

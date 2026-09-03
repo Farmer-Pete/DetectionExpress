@@ -183,10 +183,12 @@ export async function runScenarioHeadless(opts: HeadlessRunOptions): Promise<Hea
     },
   };
 
-  createRunController(deps).run();
+  const controller = createRunController(deps);
+  controller.run();
 
+  let startTimer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
-    setTimeout(() => {
+    startTimer = setTimeout(() => {
       reject(
         new Error(
           `runScenarioHeadless: startup did not complete within ${START_GATE_TIMEOUT_MS}ms ` +
@@ -195,7 +197,14 @@ export async function runScenarioHeadless(opts: HeadlessRunOptions): Promise<Hea
       );
     }, START_GATE_TIMEOUT_MS);
   });
-  await Promise.race([startGate, timeout]);
+  try {
+    await Promise.race([startGate, timeout]);
+  } finally {
+    // Clear the gate timer on every path, so a settled gate leaves no live timer.
+    if (startTimer !== undefined) {
+      clearTimeout(startTimer);
+    }
+  }
 
   if (handle === null || capturedScorer === null) {
     throw new Error("runScenarioHeadless: the engine never started.");
@@ -203,56 +212,81 @@ export async function runScenarioHeadless(opts: HeadlessRunOptions): Promise<Hea
   const liveHandle: EngineHandle = handle;
   const liveScorer: Scorer = capturedScorer;
 
-  if (opts.mode === "wave") {
-    // Checkpoints end a wave run on their own (GH128-PLAN.md "wave mode detail"):
-    // pump ticks until `whenStopped` resolves, or until the safety cap is hit,
-    // which is a run error, never a stop-then-verdict.
-    let stoppedNaturally = false;
-    void liveHandle.whenStopped.then(() => {
-      stoppedNaturally = true;
-    });
-    const cap = opts.ticks ?? defaultWaveTickCap(run);
-    for (let i = 0; i < cap && !stoppedNaturally; i++) {
-      driver.tick();
+  // Tear the run down on every exit path, so a throw never parks the engine's
+  // pipeline tasks. `stop()` and `dispose()` are both safe to call after a
+  // natural stop.
+  try {
+    if (opts.mode === "wave") {
+      // Checkpoints end a wave run on their own (GH128-PLAN.md "wave mode detail"):
+      // pump ticks until `whenStopped` resolves, or until the safety cap is hit,
+      // which is a run error, never a stop-then-verdict.
+      let stoppedNaturally = false;
+      void liveHandle.whenStopped.then(() => {
+        stoppedNaturally = true;
+      });
+      const cap = opts.ticks ?? defaultWaveTickCap(run);
+      for (let i = 0; i < cap && !stoppedNaturally; i++) {
+        driver.tick();
+        await flush(FLUSH_ROUNDS);
+      }
+      if (!stoppedNaturally) {
+        throw new Error(
+          `runScenarioHeadless: the wave run did not stop within its safety tick cap ` +
+            `(${cap} ticks); this is a run error, not a detection failure.`,
+        );
+      }
+      await liveHandle.whenStopped;
+    } else {
+      // The endless baseline never self-terminates (GH128-PLAN.md "normal mode
+      // detail"): pump a fixed tick budget, then stop explicitly.
+      const budget = opts.ticks ?? DEFAULT_NORMAL_TICKS;
+      for (let i = 0; i < budget; i++) {
+        driver.tick();
+        await flush(FLUSH_ROUNDS);
+      }
+      liveHandle.stop();
+      await liveHandle.whenStopped;
       await flush(FLUSH_ROUNDS);
     }
-    if (!stoppedNaturally) {
-      throw new Error(
-        `runScenarioHeadless: the wave run did not stop within its safety tick cap ` +
-          `(${cap} ticks); this is a run error, not a detection failure.`,
-      );
+
+    // Recheck after the run ends (GH128-PLAN.md "Run errors vs detection failures"):
+    // a Rule or task can fail through `onError` after the start gate already resolved.
+    if (recordedError !== null) {
+      throw new HeadlessRunError(recordedError);
     }
-    await liveHandle.whenStopped;
-  } else {
-    // The endless baseline never self-terminates (GH128-PLAN.md "normal mode
-    // detail"): pump a fixed tick budget, then stop explicitly.
-    const budget = opts.ticks ?? DEFAULT_NORMAL_TICKS;
-    for (let i = 0; i < budget; i++) {
-      driver.tick();
-      await flush(FLUSH_ROUNDS);
+
+    // Authoritative and sampling-independent: read the captured scorer directly,
+    // never a published snapshot (GH128-PLAN.md "How the helper reads the result").
+    const reading: CorrectnessReading = liveScorer.reading();
+
+    // A queue or correctness failure also resolves `whenStopped` (engine.ts), so a
+    // wave run can stop early and leave later attacks pending and uncounted; the
+    // scorer would then read zero missed and zero false and look falsely `clean`.
+    // Guard it: every attack must have resolved to caught or missed. If not, the
+    // run did not complete and is a run error, never a verdict.
+    if (opts.mode === "wave") {
+      const resolved = reading.caught + reading.missed;
+      if (resolved !== run.attacks.length) {
+        throw new Error(
+          `runScenarioHeadless: the wave run stopped before resolving every attack ` +
+            `(${resolved} of ${run.attacks.length} resolved); this is a run error, ` +
+            `not a detection failure.`,
+        );
+      }
     }
+
+    return {
+      scenarioId: opts.scenarioId,
+      mode: opts.mode,
+      seed,
+      reading,
+      decisions: liveScorer.decisions(),
+      findings: liveScorer.liveFindings(),
+      run,
+      verdict: verdictOf(reading, opts.mode),
+    };
+  } finally {
     liveHandle.stop();
-    await liveHandle.whenStopped;
-    await flush(FLUSH_ROUNDS);
+    controller.dispose();
   }
-
-  // Recheck after the run ends (GH128-PLAN.md "Run errors vs detection failures"):
-  // a Rule or task can fail through `onError` after the start gate already resolved.
-  if (recordedError !== null) {
-    throw new HeadlessRunError(recordedError);
-  }
-
-  // Authoritative and sampling-independent: read the captured scorer directly,
-  // never a published snapshot (GH128-PLAN.md "How the helper reads the result").
-  const reading: CorrectnessReading = liveScorer.reading();
-  return {
-    scenarioId: opts.scenarioId,
-    mode: opts.mode,
-    seed,
-    reading,
-    decisions: liveScorer.decisions(),
-    findings: liveScorer.liveFindings(),
-    run,
-    verdict: verdictOf(reading, opts.mode),
-  };
 }

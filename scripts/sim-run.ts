@@ -31,30 +31,28 @@ function isRunMode(value: string): value is RunMode {
   return value === "normal" || value === "wave";
 }
 
-/** `--service-rate`: an integer `N` (`{ num: N, den: 1 }`), or `"num/den"`. */
-function parseServiceRate(raw: string): { num: number; den: number } {
-  const slash = raw.indexOf("/");
-  if (slash === -1) {
-    const num = Number.parseInt(raw, 10);
-    if (!Number.isSafeInteger(num) || num < 1) {
-      throw new Error(`--service-rate must be a positive integer or "num/den", got "${raw}".`);
-    }
-    return { num, den: 1 };
-  }
-  const num = Number.parseInt(raw.slice(0, slash), 10);
-  const den = Number.parseInt(raw.slice(slash + 1), 10);
-  if (!Number.isSafeInteger(num) || !Number.isSafeInteger(den) || num < 1 || den < 1) {
-    throw new Error(`--service-rate "num/den" must both be positive integers, got "${raw}".`);
-  }
-  return { num, den };
-}
-
+/** Parse a bare positive integer with NO trailing or leading junk (a strict `^\d+$`). */
 function parsePositiveInt(raw: string, flag: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`${flag} must be a positive integer, got "${raw}".`);
+  }
   const value = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(`${flag} must be a positive integer, got "${raw}".`);
   }
   return value;
+}
+
+/** `--service-rate`: an integer `N` (`{ num: N, den: 1 }`), or `"num/den"`. */
+function parseServiceRate(raw: string): { num: number; den: number } {
+  const slash = raw.indexOf("/");
+  if (slash === -1) {
+    return { num: parsePositiveInt(raw, "--service-rate"), den: 1 };
+  }
+  return {
+    num: parsePositiveInt(raw.slice(0, slash), "--service-rate"),
+    den: parsePositiveInt(raw.slice(slash + 1), "--service-rate"),
+  };
 }
 
 /** Parse the CLI's flags into a plain, validated shape. Throws on any usage error. */
@@ -87,9 +85,12 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
   }
 
   const seedRaw = values.seed ?? "1";
+  if (!/^\d+$/.test(seedRaw)) {
+    throw new Error(`--seed must be a non-negative integer, got "${seedRaw}".`);
+  }
   const seed = Number.parseInt(seedRaw, 10);
   if (!Number.isSafeInteger(seed)) {
-    throw new Error(`--seed must be an integer, got "${seedRaw}".`);
+    throw new Error(`--seed must be a non-negative integer, got "${seedRaw}".`);
   }
 
   const args: ParsedCliArgs = { scenarios, mode: modeRaw, seed, out: values.out ?? "out/" };
