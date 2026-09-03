@@ -24,24 +24,24 @@ import { randomLcg } from "d3-random";
 import { type Actor, runActors, type TimedReading } from "../../sim/actors/actor";
 import { composeRun } from "../../sim/actors/compose";
 import { isRawKioskV1, kioskV1, type RawKioskV1 } from "../../sim/endpoints/kiosk/formats/kiosk-v1";
+import { corpus as pinBruteForceCorpus } from "../../sim/scenarios/pin-brute-force/index";
 import { PIN_BRUTE_FORCE_THRESHOLD } from "../../sim/scenarios/pin-brute-force/tuning";
 import { distanceTable } from "../../sim/world/distance";
 import { buildTimetable } from "../../sim/world/timetable";
 import { world } from "../../sim/world/world";
 import type { WorldEnv, WorldReading } from "../../sim/world-reading";
-import { scenarioEntry } from "../registry";
 import { CORPUS_ACCOUNTS, GAME_SECONDS_PER_TICK } from "../tuning";
 
-/** The registered pin-brute-force entry, looked up by id rather than assumed to sort
- *  first, so a second registered scenario can never silently swap in its corpus. */
-const pinBruteForceEntry = scenarioEntry("pin-brute-force");
-if (pinBruteForceEntry === undefined) {
-  throw new Error('profiler/corpus: no "pin-brute-force" entry is registered.');
-}
-
-/** The cast primitives, read through the registry's corpus contract, never a
- *  scenario folder directly (GH42 code review). */
-const pinBruteForceCorpus = pinBruteForceEntry.corpus;
+/**
+ * The cast primitives, imported by name from the scenario itself ("pin-brute-force",
+ * never a positional or first-registered assumption), not through `../registry`
+ * (GH128-PLAN.md): the registry gathers scenarios through `import.meta.glob`, a
+ * Vite-only feature that throws under the headless CLI's plain `tsx` runtime
+ * (`scripts/sim-run.ts`), and this module sits on `run-controller.ts`'s import
+ * graph via `profile.ts`. Importing the named export directly is also strictly
+ * typed against the scenario's own `corpus` object, so it needs no runtime shape
+ * check the way a module gathered through the untyped glob boundary would.
+ */
 
 /** One corpus Event: an engine envelope over a raw kiosk-v1 payload. */
 export interface CorpusEvent {

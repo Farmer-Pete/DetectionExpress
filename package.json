@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "knip": "knip",
+    "sim:run": "tsx scripts/sim-run.ts",
     "verify:static": "tsx scripts/verify-static.ts",
     "verify:worker-build": "tsx scripts/verify-worker-build.ts",
     "m1:check": "tsx scripts/m1-calibrate-check.ts",
