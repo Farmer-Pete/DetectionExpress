@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { sensorsData } from "../../game/sensors.data";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import { world } from "../../sim/world/world";
+import { worldData } from "../../sim/world/world.data";
 import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import {
@@ -98,14 +100,15 @@ describe("devicesForNode", () => {
   });
 
   it("sets each device's name, description, and vendors from the sensor catalogue", () => {
+    const fareGate = sensorsData.sensors.find((sensor) => sensor.id === "fare-gate");
+    if (!fareGate) throw new Error("fixture assumes a fare-gate sensor exists");
     const devices = devicesForNode("cen", world);
     const gate = devices.find((device) => device.code === "G");
     expect(gate).toMatchObject({
-      name: "Fare gate",
-      description:
-        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
+      name: fareGate.name,
+      description: fareGate.description,
     });
-    expect(gate?.vendors).toEqual(["Gatekeep TurnKey 5", "VeriTap FlowGate", "RailSense GateNode"]);
+    expect(gate?.vendors).toEqual(fareGate.manufacturers.map((m) => m.model));
   });
 
   it("lists a depot/signal site's restricted sensor set (R, D, T, N)", () => {
@@ -216,9 +219,7 @@ describe("placeView", () => {
     const view = placeView({ kind: "node", id: "occ" }, emptySnapshot(), world);
     expect(view.title).toBe("Operations Control Center");
     expect(view.iconKind).toBe("control-center");
-    expect(view.description).toBe(
-      "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost.",
-    );
+    expect(view.description).toBe(worldData.controlCenter.description);
     // The OCC's zonesPresent (z2, z3, z4) dominate at z4, "Control".
     expect(view.zone).toEqual({
       name: "Control",
@@ -247,10 +248,10 @@ describe("placeView", () => {
   });
 
   it("sets a train's description from its line, and no zone (a train has none)", () => {
+    const redLine = worldData.lines.find((line) => line.id === "red");
+    if (!redLine) throw new Error("fixture assumes T1 derives from the Red Line");
     const view = placeView({ kind: "train", actorId: "T1" }, emptySnapshot(), world);
-    expect(view.description).toBe(
-      "The workhorse. Longest, busiest, and always a minute late. Runs coast to coast, Harbor to World's End.",
-    );
+    expect(view.description).toBe(redLine.description);
     expect(view.zone).toBeUndefined();
   });
 });

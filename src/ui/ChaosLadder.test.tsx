@@ -34,14 +34,7 @@ describe("ChaosLadder", () => {
     const labels = [...container.querySelectorAll(".chaos-ladder-label")].map(
       (node) => node.textContent,
     );
-    expect(labels).toEqual([
-      "No chaos",
-      "First Cracks",
-      "Under Load",
-      "Heavy Load",
-      "Overload",
-      "Nightmare",
-    ]);
+    expect(labels).toEqual(chaosLevels.map((level) => level.label));
   });
 
   it("renders the #chaos-ladder scroll anchor", () => {
