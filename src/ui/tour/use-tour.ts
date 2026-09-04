@@ -44,6 +44,7 @@ import {
   type TourDriverFactory,
   type TourDriverInstance,
   type TourDriveStepConfig,
+  type TourPopoverDom,
 } from "./driver-factory";
 import { tourSteps } from "./tour-steps.data";
 
@@ -147,6 +148,52 @@ function buildSteps(isNarrow: boolean): TourDriveStepConfig[] {
   });
 }
 
+/** One badge in the footer hint, plain DOM (`kbd.kbd`, `aria-hidden`), matching
+ *  `Kbd.tsx`'s own React output. */
+function buildHintBadge(glyph: string): HTMLElement {
+  const kbd = document.createElement("kbd");
+  kbd.className = "kbd";
+  kbd.setAttribute("aria-hidden", "true");
+  kbd.textContent = glyph;
+  return kbd;
+}
+
+/** Appends the tour footer's shortcut hint, "← → move · Esc exit" (GH137-PLAN.md
+ *  M3), to a step's popover footer. Built as plain DOM, not a mounted `<ShortcutHint>`
+ *  (`shortcuts/Kbd.tsx`): driver.js renders its own popover DOM entirely outside
+ *  React, so this hand-builds the same markup/CSS classes that component would
+ *  produce, rather than mounting a second React root into a node this hook does not
+ *  own past the step's own lifetime. Static text — the tour already disables
+ *  animation under reduced motion (`animate: !reducedMotion` in `startTour` below),
+ *  so no extra reduced-motion handling is needed here. Runs on every step (driver.js
+ *  calls `onPopoverRender` once per step's own popover build), so it never needs to
+ *  guard against appending twice to the SAME footer node. */
+function appendShortcutHint(popover: TourPopoverDom): void {
+  const hint = document.createElement("p");
+  hint.className = "shortcut-hint";
+
+  const move = document.createElement("span");
+  move.className = "shortcut-hint-entry";
+  move.append(
+    buildHintBadge("←"),
+    document.createTextNode(" "),
+    buildHintBadge("→"),
+    document.createTextNode(" move"),
+  );
+
+  const sep = document.createElement("span");
+  sep.className = "shortcut-hint-sep";
+  sep.setAttribute("aria-hidden", "true");
+  sep.textContent = " · ";
+
+  const exit = document.createElement("span");
+  exit.className = "shortcut-hint-entry";
+  exit.append(buildHintBadge("Esc"), document.createTextNode(" exit"));
+
+  hint.append(move, sep, exit);
+  popover.footer.append(hint);
+}
+
 export function useTour({
   triggerRef,
   createDriver = createTourDriver,
@@ -244,6 +291,7 @@ export function useTour({
       steps: buildSteps(isNarrow),
       disableActiveInteraction: true,
       animate: !reducedMotion,
+      onPopoverRender: appendShortcutHint,
       onNextClick: () => navigate(1),
       onPrevClick: () => navigate(-1),
       onDestroyed: () => {

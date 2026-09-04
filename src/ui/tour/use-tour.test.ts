@@ -434,6 +434,61 @@ describe("useTour auto-start (GH132-PLAN.md M3)", () => {
   });
 });
 
+// GH137-PLAN.md M3: the tour footer's shortcut hint (`← → move · Esc exit`).
+// driver.js renders its own popover DOM entirely outside React (module doc,
+// driver-factory.ts), so `onPopoverRender` is how `use-tour.ts` reaches it; these
+// tests fire that hook directly against a bare-DOM footer node, the same way real
+// driver.js would call it once per step.
+describe("useTour popover shortcut hint (GH137-PLAN.md M3)", () => {
+  it("passes an onPopoverRender that appends the shortcut hint to the step's footer", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const hint = footer.querySelector(".shortcut-hint");
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toBe("← → move · Esc exit");
+  });
+
+  it("renders the hint's keys as aria-hidden .kbd badges, not plain text", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const badges = footer.querySelectorAll(".shortcut-hint kbd.kbd");
+    expect(badges).toHaveLength(3); // ←, →, Esc
+    for (const badge of badges) {
+      expect(badge.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it("appends a fresh hint to each step's own footer, without disturbing existing footer content", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    const existingButton = document.createElement("button");
+    footer.append(existingButton);
+    configs[0]?.onPopoverRender?.({ footer });
+
+    expect(footer.contains(existingButton)).toBe(true);
+    expect(footer.querySelectorAll(".shortcut-hint")).toHaveLength(1);
+  });
+});
+
 // GH137-PLAN.md: `tourOwnsKeyboardRef` is the synchronous flag the shortcuts
 // dispatcher's bail check #1 reads (`use-shortcuts.tsx`). `App` owns the ref and hands
 // it to both the provider and this hook; `useTour` is the one that flips it.

@@ -22,7 +22,9 @@
  * correctly) and wires every composite dialog/panel scope: `sidepanel:*` (Close badge,
  * plus Options' Retake tour/Map toggle and Algorithm's Reset/Apply), `mapDialog:event` /
  * `mapDialog:place` (Back, Close badge, Event's own Open place), `trace` and `legend`
- * (Close badge each). M3 still owes the tour popover hint and the operability sweep.
+ * (Close badge each). M3 adds the tour popover hint (`tour/use-tour.ts`'s
+ * `appendShortcutHint`) and the operability/focus-ring sweep (`src/index.css`); it
+ * touches no `ShortcutDef` here.
  */
 
 /** One complete visible surface. See the module doc for what "complete" means. */
