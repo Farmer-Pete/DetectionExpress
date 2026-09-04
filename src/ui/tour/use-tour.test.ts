@@ -601,4 +601,26 @@ describe("useTour tourOwnsKeyboardRef (GH137-PLAN.md)", () => {
     expect(tourOwnsKeyboardRef.current).toBe(true);
     expect(result.current.active).toBe(true);
   });
+
+  it("clears keyboard ownership from onDestroyed even when closeDrawer throws (Codex review: internal state resets before the external callback)", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const closeDrawer = () => {
+      throw new Error("closeDrawer boom");
+    };
+    const { createDriver, configs } = spyFactory();
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver, closeDrawer, tourOwnsKeyboardRef }),
+    );
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    // onDestroyed runs closeDrawer LAST and guarded, so its throw cannot leave the
+    // shortcuts dispatcher permanently bailed.
+    act(() => configs[0]?.onDestroyed?.());
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
 });

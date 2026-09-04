@@ -306,8 +306,11 @@ export function useTour({
         onNextClick: () => navigate(1),
         onPrevClick: () => navigate(-1),
         onDestroyed: () => {
+          // Clear the synchronous internal state FIRST (Codex review): the session
+          // guard, the drawer flag, `active`, and — critically — keyboard ownership, so
+          // a `closeDrawer` that throws below can never leave the shortcuts dispatcher
+          // permanently bailed.
           sessionRef.current += 1; // abort any pending drawer wait
-          closeDrawer?.(); // a tour ended on the drawer step must close the panel
           drawerOpenRef.current = false;
           setActive(false);
           if (tourOwnsKeyboardRef !== undefined) {
@@ -324,6 +327,14 @@ export function useTour({
               triggerRef.current?.focus();
             }
           });
+          // External callback LAST, and guarded: the invariants above already hold, so a
+          // throw here (a tour ended on the drawer step must still close the panel) can
+          // no longer strand ownership.
+          try {
+            closeDrawer?.();
+          } catch {
+            // internal state is already reset; a drawer-close failure must not undo it
+          }
         },
       });
       driverRef.current = instance;
@@ -332,12 +343,24 @@ export function useTour({
       }
       instance.drive();
     } catch (err) {
+      // A partially-started driver may already have added its global listeners, so make
+      // a best-effort `destroy()` (Codex review): it re-enters the reordered
+      // `onDestroyed` above, which clears state and closes the drawer. The start never
+      // ran, so suppress its seen-write. Guarded — a half-built instance may not destroy
+      // cleanly, and nothing here may mask the original error.
+      const failed = driverRef.current;
       driverRef.current = null;
-      sessionRef.current += 1; // abort any pending drawer wait, same as onDestroyed
-      if (drawerOpenRef.current) {
-        closeDrawer?.(); // this attempt may have opened the drawer before failing
-        drawerOpenRef.current = false;
+      suppressSeenRef.current = true;
+      try {
+        failed?.destroy();
+      } catch {
+        // a half-initialized driver may not tear down cleanly; the throw below matters
       }
+      suppressSeenRef.current = false;
+      // Re-assert the synchronous invariants UNCONDITIONALLY, whether or not
+      // destroy()/onDestroyed ran, so keyboard ownership can never be left stuck.
+      sessionRef.current += 1;
+      drawerOpenRef.current = false;
       setActive(false);
       if (tourOwnsKeyboardRef !== undefined) {
         tourOwnsKeyboardRef.current = false; // never leave the dispatcher permanently bailed
