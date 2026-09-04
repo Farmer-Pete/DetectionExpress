@@ -13,6 +13,7 @@ function renderLadder(
     selectedLevel: number;
     phase: ChaosPhase;
     onSelectLevel: (level: number) => void;
+    disabled: boolean;
   }> = {},
 ) {
   const onSelectLevel = overrides.onSelectLevel ?? vi.fn();
@@ -23,6 +24,7 @@ function renderLadder(
       selectedLevel={overrides.selectedLevel ?? 0}
       phase={overrides.phase ?? idlePhase}
       onSelectLevel={onSelectLevel}
+      disabled={overrides.disabled}
     />,
   );
   return { ...utils, onSelectLevel };
@@ -34,14 +36,7 @@ describe("ChaosLadder", () => {
     const labels = [...container.querySelectorAll(".chaos-ladder-label")].map(
       (node) => node.textContent,
     );
-    expect(labels).toEqual([
-      "No chaos",
-      "First Cracks",
-      "Under Load",
-      "Heavy Load",
-      "Overload",
-      "Nightmare",
-    ]);
+    expect(labels).toEqual(chaosLevels.map((level) => level.label));
   });
 
   it("renders the #chaos-ladder scroll anchor", () => {
@@ -123,5 +118,19 @@ describe("ChaosLadder", () => {
     });
     expect(screen.queryByText(/cooldown/i)).toBeNull();
     expect(screen.queryByText(/wave active/i)).toBeNull();
+  });
+
+  // GH132-PLAN.md M2, "Step 2 drawer-open: Codex fixes (accepted)" rule 3: the tour
+  // narrates the ladder, never lets the player click through it — `SidePanel` passes
+  // `disabled` while it renders in tour mode, semantically disabling every level's
+  // radio, playable or not (`disableActiveInteraction` on driver.js's own config is
+  // only a CSS effect, not an AT-level disable).
+  it("disables every level's radio, playable or not, when disabled is true", () => {
+    const { onSelectLevel } = renderLadder({ disabled: true });
+    for (const radio of screen.getAllByRole("radio")) {
+      expect(radio).toHaveProperty("disabled", true);
+    }
+    fireEvent.click(screen.getByRole("radio", { name: /level 0/i }));
+    expect(onSelectLevel).not.toHaveBeenCalled();
   });
 });

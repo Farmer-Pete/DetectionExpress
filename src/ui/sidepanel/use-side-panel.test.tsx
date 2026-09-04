@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { createRef, StrictMode } from "react";
+import { createRef, type RefObject, StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunController } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
@@ -15,6 +15,18 @@ beforeEach(() => {
     error: null,
   });
 });
+
+/** The three GH132-PLAN.md M1 Options-tab args every `useSidePanel` call now
+ *  needs; the tests below never inspect the Options tab's own rendering (that
+ *  lives in `SidePanel.test.tsx`), so a stable default suffices. */
+function baseArgs(controllerRef: RefObject<RunController | null>) {
+  return {
+    controllerRef,
+    mapShown: true,
+    onToggleMap: vi.fn(),
+    onStartTour: vi.fn(),
+  };
+}
 
 /** A no-op controller: run() never settles, for tests that never touch Apply's edge. */
 function stubController(run: () => void = () => {}): RunController {
@@ -57,7 +69,7 @@ function asyncRunController(error: { phase: string; message: string } | null): R
 describe("useSidePanel", () => {
   it("starts closed, on the chaos tab, with no panel node", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     expect(result.current.open).toBe(false);
     expect(result.current.tab).toBe("chaos");
     expect(result.current.sidePanel).toBeNull();
@@ -65,7 +77,7 @@ describe("useSidePanel", () => {
 
   it("openChaos opens the panel on the chaos tab", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(result.current.open).toBe(true);
     expect(result.current.tab).toBe("chaos");
@@ -74,15 +86,41 @@ describe("useSidePanel", () => {
 
   it("openAlgorithm opens the panel on the algorithm tab", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     expect(result.current.open).toBe(true);
     expect(result.current.tab).toBe("algorithm");
   });
 
+  it("openPanel opens on the chaos tab by default (nothing opened yet)", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
+    act(() => result.current.openPanel());
+    expect(result.current.open).toBe(true);
+    expect(result.current.tab).toBe("chaos");
+  });
+
+  it("openPanel reopens on whatever tab was last active", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
+    act(() => result.current.openAlgorithm());
+    act(() => result.current.close());
+    act(() => result.current.openPanel());
+    expect(result.current.open).toBe(true);
+    expect(result.current.tab).toBe("algorithm");
+  });
+
+  it("openPanel is a no-op while a finding trace is open", () => {
+    useGameStore.setState({ selection: { seq: 1 } });
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
+    act(() => result.current.openPanel());
+    expect(result.current.open).toBe(false);
+  });
+
   it("close() closes the panel", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     act(() => result.current.close());
     expect(result.current.open).toBe(false);
@@ -91,7 +129,7 @@ describe("useSidePanel", () => {
 
   it("opening saves the current freeze, then freezes the run", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     expect(useGameStore.getState().transport.frozen).toBe(false);
     act(() => result.current.openChaos());
     expect(useGameStore.getState().transport.frozen).toBe(true);
@@ -99,7 +137,7 @@ describe("useSidePanel", () => {
 
   it("a dismiss-close restores the freeze saved on open", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     act(() => result.current.close());
     expect(useGameStore.getState().transport.frozen).toBe(false);
@@ -108,7 +146,7 @@ describe("useSidePanel", () => {
   it("a run already frozen before open stays frozen after a dismiss-close", () => {
     useGameStore.getState().setFrozen(true);
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(useGameStore.getState().transport.frozen).toBe(true);
     act(() => result.current.close());
@@ -118,7 +156,7 @@ describe("useSidePanel", () => {
   it("openChaos is a no-op while a finding trace is open", () => {
     useGameStore.setState({ selection: { seq: 1 } });
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(result.current.open).toBe(false);
     expect(useGameStore.getState().transport.frozen).toBe(false);
@@ -127,7 +165,7 @@ describe("useSidePanel", () => {
   it("openAlgorithm is a no-op while a decision trace is open", () => {
     useGameStore.setState({ decisionSelection: { seq: 1 } });
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     expect(result.current.open).toBe(false);
   });
@@ -137,7 +175,7 @@ describe("useSidePanel", () => {
       mapDialogStack: [{ kind: "place", selection: { kind: "node", id: "cen" } }],
     });
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(result.current.open).toBe(false);
     expect(useGameStore.getState().transport.frozen).toBe(false);
@@ -146,7 +184,7 @@ describe("useSidePanel", () => {
   it("openAlgorithm is a no-op while the event dialog is open (GH124-PLAN.md Checkpoint 5, Codex review gap)", () => {
     useGameStore.setState({ mapDialogStack: [{ kind: "event", id: 5 }] });
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     expect(result.current.open).toBe(false);
   });
@@ -159,7 +197,7 @@ describe("useSidePanel", () => {
       ],
     });
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(result.current.open).toBe(false);
   });
@@ -167,7 +205,7 @@ describe("useSidePanel", () => {
   it("Apply-success closes the panel and unfreezes", async () => {
     const controllerRef = createRef<RunController | null>();
     controllerRef.current = asyncRunController(null);
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     expect(useGameStore.getState().transport.frozen).toBe(true);
     act(() => result.current.onApply());
@@ -178,7 +216,7 @@ describe("useSidePanel", () => {
   it("Apply-failure keeps the panel open and frozen, clearing the intent", async () => {
     const controllerRef = createRef<RunController | null>();
     controllerRef.current = asyncRunController({ phase: "load", message: "boom" });
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     act(() => result.current.onApply());
     await waitFor(() =>
@@ -190,7 +228,7 @@ describe("useSidePanel", () => {
 
   it("onApply does nothing when the controllerRef is null", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     expect(() => act(() => result.current.onApply())).not.toThrow();
     expect(result.current.open).toBe(true);
@@ -198,7 +236,9 @@ describe("useSidePanel", () => {
 
   it("mounts safely under React Strict Mode", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result } = renderHook(() => useSidePanel({ controllerRef }), { wrapper: StrictMode });
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)), {
+      wrapper: StrictMode,
+    });
     expect(result.current.open).toBe(false);
     act(() => result.current.openChaos());
     expect(result.current.open).toBe(true);
@@ -207,7 +247,7 @@ describe("useSidePanel", () => {
 
   it("unmounting while open releases the freeze it holds", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result, unmount } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result, unmount } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openChaos());
     expect(useGameStore.getState().transport.frozen).toBe(true);
     unmount();
@@ -216,7 +256,7 @@ describe("useSidePanel", () => {
 
   it("unmounting while open under Strict Mode still releases the freeze exactly once", () => {
     const controllerRef = createRef<RunController | null>();
-    const { result, unmount } = renderHook(() => useSidePanel({ controllerRef }), {
+    const { result, unmount } = renderHook(() => useSidePanel(baseArgs(controllerRef)), {
       wrapper: StrictMode,
     });
     act(() => result.current.openChaos());
@@ -225,11 +265,37 @@ describe("useSidePanel", () => {
     expect(useGameStore.getState().transport.frozen).toBe(false);
   });
 
+  it("openForTour is a no-op while the modal panel is open, but opens tour mode once the panel is closed (Codex §6 fix 5)", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
+
+    act(() => result.current.openChaos());
+    expect(result.current.open).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => result.current.openForTour("chaos"));
+    // No-op: App always closes the modal panel before entering tour mode (see App.tsx's
+    // start-tour transition), so this must never bypass close()'s freeze restore or
+    // switch a mounted modal panel into tour mode in place.
+    expect(result.current.tourOpen).toBe(false);
+    expect(result.current.open).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => result.current.close());
+    expect(result.current.open).toBe(false);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    act(() => result.current.openForTour("chaos"));
+    expect(result.current.tourOpen).toBe(true);
+    expect(result.current.tab).toBe("chaos");
+    expect(result.current.open).toBe(false);
+  });
+
   it("run() is invoked when Apply is triggered through a live controller", () => {
     const run = vi.fn();
     const controllerRef = createRef<RunController | null>();
     controllerRef.current = stubController(run);
-    const { result } = renderHook(() => useSidePanel({ controllerRef }));
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
     act(() => result.current.openAlgorithm());
     act(() => result.current.onApply());
     expect(run).toHaveBeenCalledTimes(1);

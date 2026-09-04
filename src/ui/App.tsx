@@ -2,14 +2,11 @@
  * The app shell: thin wiring over four extracted concerns (GH109-PLAN.md,
  * GH118-PLAN.md). It holds only the `mapShown` toggle, the wave shake, the
  * modal-open derivation, the two panel refs shared with
- * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the two Topbar button refs
- * shared with the side panel; everything else is composed from a hook or a
- * component that owns its own lifecycle and its own tests:
+ * `InspectorShell`/`DecisionsPanel`/`TraceOverlay`, and the hamburger trigger
+ * ref shared with the side panel (GH132-PLAN.md M1); everything else is
+ * composed from a hook or a component that owns its own lifecycle and its own
+ * tests:
  *
- * - `useIntroOverlay` (intro/) owns the overlay's seen-flag state, its three dismiss
- *   actions, and the post-close focus-return effect. Its "Cause chaos"/"Edit the
- *   Engine" actions report the side-panel tab they want through the
- *   `onRequestPanel` callback this file injects (see "The intro transition" below).
  * - `usePipelineController` (run/) builds the one merged-engine `RunController` on
  *   mount and disposes it (permanently) on unmount. React Strict Mode's
  *   mount/unmount/mount cycle is safe: the factory yields a new controller per epoch
@@ -19,37 +16,45 @@
  *   panel) reloads the current Algorithm source. GH117 unified the metro map onto
  *   this same engine, so there is only one controller and one loop now — the
  *   standalone `useWorldController` and `WorldRunController` are retired.
- * - `useSidePanel` (sidepanel/) owns the chaos-ladder/Algorithm side panel: its
- *   `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
- *   Apply-on-success-only wiring. `Topbar`'s two openers and the intro's two actions
- *   all route through it.
- * - `Topbar` renders the header: the title, the slice tag, the map show/hide toggle,
- *   the two side-panel openers, the "How this works" reopen button (wired to
- *   `useIntroOverlay`'s `reopenRef` and `onReopen`), and Hire Me.
+ * - `useSidePanel` (sidepanel/) owns the chaos-ladder/Algorithm/Options side panel:
+ *   its `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
+ *   Apply-on-success-only wiring. The hamburger's own opener (`openPanel`) routes
+ *   through it. `mapShown`/`onToggleMap`/`onStartTour` (GH132-PLAN.md M2, see "The
+ *   start-tour transition" below) feed its Options tab.
+ * - `useTour` (tour/) owns the one driver.js instance behind an injected factory
+ *   (`createTourDriver`, `tour/driver-factory.ts`; `App`'s own `createTourDriver` prop
+ *   overrides it for tests, mirroring `createPipelineController`). It auto-starts once
+ *   on first load whenever `hasSeenTour()` reads false (GH132-PLAN.md M3; the hook's
+ *   own module doc covers the StrictMode-safe deferred-task/session-guard mechanics).
+ *   `startTour` is also user-triggered, from the Options tab's "Retake tour" button,
+ *   which always starts regardless of the seen flag or the session guard. The tour is
+ *   NOT a modal (docs/adr/0012), so it never feeds `modalOpen` below.
+ * - `Topbar` renders the header: the title, the slice tag, the hamburger button
+ *   (GH132-PLAN.md M1, design revision — a plain icon button that opens the side
+ *   panel directly, no popup), and Hire Me. The map toggle lives in the side panel's
+ *   own Options tab instead of a standalone Topbar button.
  *
- * Only the run-status pill (`StatusPill`, read by `Topbar`) lives in the top bar;
- * the sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
- * nothing currently displays them. The pending side-panel-tab dispatch below (see
- * "The intro transition") switches over both tabs instead of treating "not chaos"
- * as "algorithm".
+ * The sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
+ * nothing currently displays them; the top bar's own run-status pill (`StatusPill`,
+ * the "RUNNING" badge) is gone too (GH132-PLAN.md M2).
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
- * derives `modalOpen` — `introOpen || traceOpen || sidePanel.open || stackOpen` —
- * and hands it in along with all five overlays, `IntroOverlay`, `TraceOverlay`,
- * `PlaceDialog` (GH124-PLAN.md Checkpoint 4), `EventDialog` (Checkpoint 5), and the
- * side panel, as `ModalHost`'s `overlays` prop. `PlaceDialog` and `EventDialog` are
- * both always mounted, but share one bounded stack (`mapDialogStack`, store.ts) and
- * each self-selects rendering off its TOP entry, so only one of the two is ever
- * actually on screen — pushing a second dialog from within the first (its "Open
- * place" link, or a scoped-log row) swaps which of the two renders without emptying
- * the stack, so a "‹ Back" control in the newly-topmost dialog can pop back to the
- * one underneath. All five overlays render as siblings of the inert shell, so a
- * screen reader's browse mode and the keyboard cannot reach shell content behind any
- * of them. `openChaos`/`openAlgorithm` are mutually exclusive with the trace overlay
- * (`useSidePanel`'s own concern), and `onMapSelect`/`onEventSelect` below enforce the
- * same exclusivity against the whole map/event stack, so the shell never stacks a
- * third dim backdrop behind it.
+ * derives `modalOpen` — `traceOpen || sidePanel.open || stackOpen` — and hands it in
+ * along with all four overlays, `TraceOverlay`, `PlaceDialog` (GH124-PLAN.md
+ * Checkpoint 4), `EventDialog` (Checkpoint 5), and the side panel, as `ModalHost`'s
+ * `overlays` prop. `PlaceDialog` and `EventDialog` are both always mounted, but
+ * share one bounded stack (`mapDialogStack`, store.ts) and each self-selects
+ * rendering off its TOP entry, so only one of the two is ever actually on screen —
+ * pushing a second dialog from within the first (its "Open place" link, or a
+ * scoped-log row) swaps which of the two renders without emptying the stack, so a
+ * "‹ Back" control in the newly-topmost dialog can pop back to the one underneath.
+ * All four overlays render as siblings of the inert shell, so a screen reader's
+ * browse mode and the keyboard cannot reach shell content behind any of them.
+ * `sidePanel.openChaos`/`openAlgorithm` are mutually exclusive with the trace
+ * overlay (`useSidePanel`'s own concern), and `onMapSelect`/`onEventSelect` below
+ * enforce the same exclusivity against the whole map/event stack, so the shell
+ * never stacks a second dim backdrop behind it.
  *
  * `App` also publishes `modalOpen` to the store as `overlayOpen`, with
  * `useLayoutEffect` (not a passive effect) so it lands in the same commit as
@@ -58,26 +63,18 @@
  * see or reach. A second effect resets `overlayOpen` to false on unmount, so an
  * unmount while an overlay is open can never leave it stuck true.
  *
- * ## The intro transition (GH118-PLAN.md)
- * The intro's "Cause chaos" and "Edit the Engine" must open the side panel, but
- * `setIntroOpen(false)` is asynchronous, so the intro still reads open at the
- * moment either fires — calling `sidePanel.openChaos()`/`openAlgorithm()` right then
- * would trip the exclusivity check the trace overlay guards against (and there is no
- * trace overlay open here; the check that matters is simply "don't open two modals
- * at once"). So the protocol is: the action (via `onRequestPanel`, injected into
- * `useIntroOverlay` below) records the requested tab in `pendingPanelTabRef` and
- * closes the intro; a plain `useEffect` here opens the panel once `intro.introOpen`
- * has actually gone false. This never fires the panel while the intro still renders,
- * since the intro is gone by the time the effect runs.
- *
- * The intro button that triggered this is unmounted before the panel could restore
- * focus to it, so the panel falls back to a stable Topbar button instead:
- * `chaosButtonRef`/`algorithmButtonRef` are handed to both
- * `Topbar` (which attaches them to its two openers) and `useSidePanel` (which
- * forwards whichever one matches the active tab as `SidePanel`'s
- * `fallbackFocusRef`), the same fallback-focus pattern `TraceOverlay` already uses.
- * The pending-tab switch below covers both tabs explicitly, rather than treating
- * "not chaos" as "algorithm".
+ * ## The start-tour transition (GH132-PLAN.md M2)
+ * The side panel's Options tab carries a "Retake tour" button that starts the guided
+ * tour. The panel is a modal (the shell goes `inert` behind it) and the tour's targets
+ * — including the hamburger itself — sit inside that shell, so `onStartTour` cannot
+ * start the tour while the panel is still open: the shell must be interactive again
+ * first. It records the request (`pendingStartTourRef`) and closes the panel first; a
+ * plain `useEffect` here starts the tour once `sidePanel.open` has actually gone
+ * false. `closeSidePanelRef` exists only to break the circularity of handing
+ * `onStartTour` INTO `useSidePanel` while it needs `useSidePanel`'s own `close`
+ * function: the ref is written every render (not in an effect, so it is never one
+ * render stale) and `onStartTour` reads it lazily, at click time, not at definition
+ * time.
  *
  * ## Pause ownership (GH118-PLAN.md)
  * The pause runs through the store's `transport.frozen`, not a direct controller
@@ -107,14 +104,15 @@ import { useGameStore } from "../game/store";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
-import { useIntroOverlay } from "./intro/use-intro-overlay";
 import { EventDialog } from "./log/EventDialog";
 import { MetroView } from "./MetroView";
 import { ModalHost } from "./ModalHost";
 import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
-import { type SidePanelTab, useSidePanel } from "./sidepanel/use-side-panel";
+import { useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
+import type { TourDriverFactory } from "./tour/driver-factory";
+import { useTour } from "./tour/use-tour";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
@@ -125,9 +123,13 @@ interface AppProps {
   // The controller FACTORY: builds a FRESH controller on mount and disposes it on
   // unmount (disposal is permanent). Tests inject a stub factory.
   createPipelineController?: () => RunController;
+  // The tour's driver.js factory (GH132-PLAN.md M2), forwarded to `useTour`. Tests
+  // inject a fake, mirroring `createPipelineController` above; defaults to the real
+  // driver.js wrapper (`useTour`'s own default) when omitted.
+  createTourDriver?: TourDriverFactory;
 }
 
-export function App({ createPipelineController }: AppProps = {}) {
+export function App({ createPipelineController, createTourDriver }: AppProps = {}) {
   // Whether the embedded metro map region shows (GH117 Part F). Purely a display
   // toggle now: the one merged engine keeps running underneath either way, so
   // flipping it never builds or tears down a controller.
@@ -161,11 +163,11 @@ export function App({ createPipelineController }: AppProps = {}) {
   // of whichever dialog opened the session rather than whichever one is on top when
   // it closes — see `dialog-stack-focus.ts`.
   const mapDialogRootFallbackRef = useRef<RefObject<HTMLElement | null> | null>(null);
-  // Shared with Topbar (which attaches them to its two openers) and useSidePanel
-  // (which forwards them as the panel's intro-path focus fallback, see the module
-  // doc's "The intro transition").
-  const chaosButtonRef = useRef<HTMLButtonElement>(null);
-  const algorithmButtonRef = useRef<HTMLButtonElement>(null);
+  // Shared with Topbar (which attaches it to the hamburger button, GH132-PLAN.md
+  // M1) and useSidePanel (which forwards it as the chaos, algorithm, AND options
+  // tab's focus fallback, since one trigger opens all three — the same
+  // fallback-focus pattern `TraceOverlay` already uses).
+  const hamburgerTriggerRef = useRef<HTMLButtonElement>(null);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -179,11 +181,11 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   // Whether the trace dialog is open (GH105-PLAN.md): `selection !== null` OR
   // `decisionSelection !== null` IS "the dialog is open" (GH34-35-PLAN.md decision 2).
-  // Feeds ModalHost's modalOpen alongside introOpen and the side panel's open state,
-  // so the shell goes inert whenever any of the three is showing. This derivation is
-  // sound only because the store now validates a selection against the live snapshot
-  // before storing it (store.ts), so a set selection always implies TraceOverlay
-  // actually renders a dialog.
+  // Feeds ModalHost's modalOpen alongside the side panel's open state and the map/
+  // event dialog stack, so the shell goes inert whenever any of the three is
+  // showing. This derivation is sound only because the store now validates a
+  // selection against the live snapshot before storing it (store.ts), so a set
+  // selection always implies TraceOverlay actually renders a dialog.
   const selection = useGameStore((s) => s.selection);
   const decisionSelection = useGameStore((s) => s.decisionSelection);
   const traceOpen = selection !== null || decisionSelection !== null;
@@ -205,20 +207,6 @@ export function App({ createPipelineController }: AppProps = {}) {
   const selectMapTrain = useGameStore((s) => s.selectMapTrain);
   const selectWorldEvent = useGameStore((s) => s.selectWorldEvent);
 
-  // The intro transition (GH118-PLAN.md, see the module doc): a dismiss that
-  // requests a side-panel tab records it here instead of opening the panel
-  // directly, since the intro is still (asynchronously) open at call time. Stable
-  // identity, so useIntroOverlay's onCauseChaos/onEditEngine never churn.
-  const pendingPanelTabRef = useRef<SidePanelTab | null>(null);
-  const onRequestPanel = useCallback((tab: SidePanelTab) => {
-    pendingPanelTabRef.current = tab;
-  }, []);
-
-  // The intro overlay, extracted to its own hook (GH109-PLAN.md): the seen-flag lazy
-  // init, the three dismiss actions, the post-close focus-return effect, and the
-  // reopen control's ref/handler.
-  const intro = useIntroOverlay({ onRequestPanel });
-
   // The pipeline controller lifecycle, extracted to its own hook (GH109-PLAN.md): a
   // fresh controller per epoch, seeded from the store transport, disposed (with the
   // F024 empty-snapshot repaint and cleared selection) on unmount, plus the two
@@ -229,14 +217,66 @@ export function App({ createPipelineController }: AppProps = {}) {
     createController: createPipelineController,
   });
 
-  // The side panel (GH118-PLAN.md, sidepanel/): the chaos ladder and Algorithm
-  // editor tabs, moved off the main column behind a right-edge overlay. Owns its own
-  // open/tab state, the pause protocol, and the Apply-on-success wiring.
+  // The tour (GH132-PLAN.md M2, see the module doc): `startTour` is user-triggered
+  // this milestone, from the Options tab's "Retake tour" button. Focus restores to
+  // the same hamburger trigger ref the side panel already falls back to.
+  //
+  // Drawer-open wiring ("Step 2 drawer-open"): the tour opens the side panel to
+  // spotlight the chaos ladder. `useTour` is created before `useSidePanel` (whose own
+  // `onStartTour` depends on the tour), so these refs bridge the cycle the same way
+  // `closeSidePanelRef` does below: written every render, read lazily at click time.
+  const openDrawerRef = useRef<() => void>(() => {});
+  const closeDrawerRef = useRef<() => void>(() => {});
+  const tour = useTour({
+    triggerRef: hamburgerTriggerRef,
+    createDriver: createTourDriver,
+    openDrawer: () => openDrawerRef.current(),
+    closeDrawer: () => closeDrawerRef.current(),
+  });
+
+  // The start-tour transition (GH132-PLAN.md M2, see the module doc): the Options
+  // tab's "Retake tour" button closes the panel first, then this effect starts the
+  // tour once the panel has actually closed. `closeSidePanelRef` breaks the
+  // circularity of `onStartTour` needing `sidePanel.close` while it is itself an
+  // argument to the `useSidePanel` call that produces `sidePanel` — written every
+  // render, read lazily at click time.
+  const closeSidePanelRef = useRef<() => void>(() => {});
+  const pendingStartTourRef = useRef(false);
+  const onStartTour = useCallback(() => {
+    // Restore the map before the tour runs (Codex §6 fix 2): a retake after "Hide metro
+    // view" must have the map anchor for steps 1, 3, and 8. Batched with the panel close,
+    // so the map is committed by the time the start-tour effect fires post-close.
+    setMapShown(true);
+    pendingStartTourRef.current = true;
+    closeSidePanelRef.current();
+  }, []);
+
+  // The side panel (GH118-PLAN.md, sidepanel/): the chaos ladder, Algorithm editor,
+  // and Options tabs, moved off the main column behind a right-edge overlay. Owns
+  // its own open/tab state, the pause protocol, and the Apply-on-success wiring.
   const sidePanel = useSidePanel({
     controllerRef,
-    chaosFocusRef: chaosButtonRef,
-    algorithmFocusRef: algorithmButtonRef,
+    chaosFocusRef: hamburgerTriggerRef,
+    algorithmFocusRef: hamburgerTriggerRef,
+    optionsFocusRef: hamburgerTriggerRef,
+    mapShown,
+    onToggleMap: () => setMapShown(!mapShown),
+    onStartTour,
   });
+  closeSidePanelRef.current = sidePanel.close;
+  openDrawerRef.current = () => sidePanel.openForTour("chaos");
+  closeDrawerRef.current = sidePanel.closeForTour;
+
+  useEffect(() => {
+    if (sidePanel.open) {
+      return;
+    }
+    if (!pendingStartTourRef.current) {
+      return;
+    }
+    pendingStartTourRef.current = false;
+    tour.startTour();
+  }, [sidePanel.open, tour.startTour]);
 
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
   // exclusivity check): the shell being inert already blocks a real pointer/keyboard
@@ -248,7 +288,7 @@ export function App({ createPipelineController }: AppProps = {}) {
   // consistent (a Codex review once caught the event opener going unguarded here).
   const onMapSelect = useCallback(
     (next: MapSelection) => {
-      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
+      if (traceOpen || sidePanel.open || stackOpen) {
         return;
       }
       if (next.kind === "node") {
@@ -257,7 +297,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         selectMapTrain(next.actorId);
       }
     },
-    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectMapNode, selectMapTrain],
+    [traceOpen, sidePanel.open, stackOpen, selectMapNode, selectMapTrain],
   );
 
   // The event opener's guard, mirroring `onMapSelect` above. Forwarded to `LogPanel`
@@ -265,48 +305,28 @@ export function App({ createPipelineController }: AppProps = {}) {
   // guard instead of calling the store directly.
   const onEventSelect = useCallback(
     (id: number) => {
-      if (intro.introOpen || traceOpen || sidePanel.open || stackOpen) {
+      if (traceOpen || sidePanel.open || stackOpen) {
         return;
       }
       selectWorldEvent(id);
     },
-    [intro.introOpen, traceOpen, sidePanel.open, stackOpen, selectWorldEvent],
+    [traceOpen, sidePanel.open, stackOpen, selectWorldEvent],
   );
 
-  // Complete the intro transition: once the intro has actually closed, act on
-  // whatever tab a dismiss recorded (see the module doc's "The intro transition").
-  // A no-op on every other render, since `pendingPanelTabRef` only ever holds a
-  // value between an intro dismiss and this effect's next run. A switch over both
-  // tabs, not an if/else that treats "not chaos" as "algorithm".
-  useEffect(() => {
-    if (intro.introOpen) {
-      return;
-    }
-    const tab = pendingPanelTabRef.current;
-    if (tab === null) {
-      return;
-    }
-    pendingPanelTabRef.current = null;
-    switch (tab) {
-      case "chaos":
-        sidePanel.openChaos();
-        break;
-      case "algorithm":
-        sidePanel.openAlgorithm();
-        break;
-    }
-  }, [intro.introOpen, sidePanel.openChaos, sidePanel.openAlgorithm]);
+  const modalOpen = traceOpen || sidePanel.open || stackOpen;
 
-  const modalOpen = intro.introOpen || traceOpen || sidePanel.open || stackOpen;
-
-  // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
-  // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
-  // LogPanel's Space-to-freeze listener has no idea the shell is inert, so this is
-  // what keeps Space from resuming a run hidden behind an overlay.
+  // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
+  // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
+  // listener has no idea the shell is inert, so this is what keeps Space from resuming a
+  // run hidden behind an overlay. The guided tour is NOT a modal (it never inerts the
+  // shell), but Space must stay suppressed while it runs (GH132-PLAN.md M2, Codex fix
+  // 1), so `tour.active` is ORed in HERE only — ModalHost's inert below still keys on
+  // `modalOpen` alone, so the shell stays interactive during the tour.
+  const overlayOrTourActive = modalOpen || tour.active;
   const setOverlayOpen = useGameStore((s) => s.setOverlayOpen);
   useLayoutEffect(() => {
-    setOverlayOpen(modalOpen);
-  }, [modalOpen, setOverlayOpen]);
+    setOverlayOpen(overlayOrTourActive);
+  }, [overlayOrTourActive, setOverlayOpen]);
   // A separate effect, not the cleanup of the one above: its cleanup should fire
   // only on a real App unmount, not on every modalOpen change. Guards against an
   // unmount while an overlay is open leaving `overlayOpen` stuck true forever.
@@ -316,26 +336,27 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   return (
     // ModalHost owns `.app` / `.app-shell` and the shell-inert invariant
-    // (GH105-PLAN.md). `modalOpen` covers all five overlays, so the shell goes
-    // inert while ANY of the intro, the trace dialog, the place dialog, the event
-    // dialog, or the side panel is open, and a screen reader's browse mode and the
-    // keyboard cannot reach shell content behind any of them. The shake class lands
-    // on the shell class it manages, not the outer `.app` wrapper, so its transform
-    // never turns into a containing block for an overlay's `position: fixed` backdrop
-    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"`, so an
+    // (GH105-PLAN.md). `modalOpen` covers all four overlays, so the shell goes
+    // inert while ANY of the trace dialog, the place dialog, the event dialog, or
+    // the side panel is open, and a screen reader's browse mode and the keyboard
+    // cannot reach shell content behind any of them. The shake class lands on the
+    // shell class it manages, not the outer `.app` wrapper, so its transform never
+    // turns into a containing block for an overlay's `position: fixed` backdrop
+    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"` and
+    // `!tour.active` (GH132-PLAN.md M2, Codex fix 12: a shake would drift the tour's
+    // spotlight target away from driver.js's fixed overlay), so an
     // in-flight shake clears immediately if the run concludes mid-animation, instead
-    // of running out its own timer over a frozen frame (CodeRabbit review). All five
-    // overlays are ModalHost's `overlays` siblings: `IntroOverlay` when `introOpen`,
-    // `TraceOverlay` unconditionally (it renders null itself when neither selection
-    // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
-    // unless it is the KIND named by `mapDialogStack`'s top entry), and the side
-    // panel when `sidePanel.open`.
+    // of running out its own timer over a frozen frame (CodeRabbit review). All four
+    // overlays are ModalHost's `overlays` siblings: `TraceOverlay` unconditionally
+    // (it renders null itself when neither selection is set), `PlaceDialog` and
+    // `EventDialog` unconditionally too (each renders null unless it is the KIND
+    // named by `mapDialogStack`'s top entry), and the side panel when
+    // `sidePanel.open`.
     <ModalHost
       modalOpen={modalOpen}
-      shellExtraClass={shaking && status === "running" ? "shake" : undefined}
+      shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
       overlays={
         <>
-          {intro.introOverlay}
           <TraceOverlay
             fallbackFocusRef={findingsPanelRef}
             decisionsFallbackFocusRef={decisionsPanelRef}
@@ -354,16 +375,7 @@ export function App({ createPipelineController }: AppProps = {}) {
         </>
       }
     >
-      <Topbar
-        mapShown={mapShown}
-        onToggleMap={() => setMapShown(!mapShown)}
-        reopenRef={intro.reopenRef}
-        onReopen={intro.onReopen}
-        onOpenChaos={sidePanel.openChaos}
-        onOpenAlgorithm={sidePanel.openAlgorithm}
-        chaosButtonRef={chaosButtonRef}
-        algorithmButtonRef={algorithmButtonRef}
-      />
+      <Topbar onOpenMenu={sidePanel.openPanel} hamburgerTriggerRef={hamburgerTriggerRef} />
       {mapShown ? <MetroView onSelect={onMapSelect} mapRegionRef={metroMapRegionRef} /> : null}
       <InspectorShell
         findingsPanelRef={findingsPanelRef}

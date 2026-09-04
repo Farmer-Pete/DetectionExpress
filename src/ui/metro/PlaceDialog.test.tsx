@@ -1,9 +1,11 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { RefObject } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
+import { sensorsData } from "../../game/sensors.data";
 import type { MapModalEntry } from "../../game/store";
 import { useGameStore } from "../../game/store";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
+import { worldData } from "../../sim/world/world.data";
 import type { WorldLogEvent } from "../../sim/world-log";
 import type { ActorView } from "../../sim/world-snapshot";
 import { PlaceDialog } from "./PlaceDialog";
@@ -91,6 +93,8 @@ describe("PlaceDialog", () => {
   });
 
   it("renders each device's sensors.data description and vendor list, not the raw sensor id", () => {
+    const fareGate = sensorsData.sensors.find((sensor) => sensor.id === "fare-gate");
+    if (!fareGate) throw new Error("fixture assumes a fare-gate sensor exists");
     useGameStore.setState({ mapDialogStack: placeStack("cen") });
     render(
       <PlaceDialog
@@ -99,14 +103,8 @@ describe("PlaceDialog", () => {
         rootFallbackFocusRef={noRootFallback()}
       />,
     );
-    expect(
-      screen.getByText(
-        "The turnstile that guards the paid area. A tap either opens it or does not. It is the Z0 to Z1 boundary in physical form.",
-      ),
-    ).toBeDefined();
-    expect(
-      screen.getByText("Gatekeep TurnKey 5, VeriTap FlowGate, RailSense GateNode"),
-    ).toBeDefined();
+    expect(screen.getByText(fareGate.description)).toBeDefined();
+    expect(screen.getByText(fareGate.manufacturers.map((m) => m.model).join(", "))).toBeDefined();
     expect(screen.queryByText("fare-gate")).toBeNull();
   });
 
@@ -171,11 +169,7 @@ describe("PlaceDialog", () => {
         rootFallbackFocusRef={noRootFallback()}
       />,
     );
-    expect(
-      screen.getByText(
-        "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost.",
-      ),
-    ).toBeDefined();
+    expect(screen.getByText(worldData.controlCenter.description)).toBeDefined();
     expect(screen.getByText("Control")).toBeDefined();
     expect(screen.getByText("Dispatchers and the duty manager.")).toBeDefined();
   });
@@ -215,6 +209,8 @@ describe("PlaceDialog", () => {
   });
 
   it("shows a train's description, sourced from its line (no train entity exists)", () => {
+    const redLine = worldData.lines.find((line) => line.id === "red");
+    if (!redLine) throw new Error("fixture assumes T1 derives from the Red Line");
     useGameStore.setState({
       mapDialogStack: [{ kind: "place", selection: { kind: "train", actorId: "T1" } }],
     });
@@ -226,11 +222,7 @@ describe("PlaceDialog", () => {
       />,
     );
     // T1 derives from the Red Line, so its flavor text is the Red Line's description.
-    expect(
-      screen.getByText(
-        "The workhorse. Longest, busiest, and always a minute late. Runs coast to coast, Harbor to World's End.",
-      ),
-    ).toBeDefined();
+    expect(screen.getByText(redLine.description)).toBeDefined();
   });
 
   it("re-renders live as the snapshot changes, without ever freezing the engine", () => {

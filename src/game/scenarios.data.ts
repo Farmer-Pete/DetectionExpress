@@ -46,12 +46,12 @@ export const scenariosData = {
       flavor: {
         tagline: "One angry rider, one PIN pad, a thousand guesses.",
         intro:
-          "Someone at a Harbor kiosk is mashing PINs like a claw machine. Five wrong tries in five minutes on one account is not a forgetful commuter. Raise one alarm per burst, not one per tap, or the control room will mute you by lunch.",
+          "Someone at a Harbor kiosk is mashing PINs like a claw machine. Five wrong tries in five minutes on one account isn't a forgetful commuter. Raise one alarm per burst, not one per tap, or the control room will mute you by lunch.",
       },
       security: {
         realWorldConcept: "Brute-force authentication (single-account password guessing).",
         briefing:
-          "A brute-force attack tries many passwords against one account. Here the account is a rider login and the kiosk is the login screen. The Engine reads every kiosk PIN attempt live. It counts the wrong PINs per account inside a five-minute window. When one account reaches five, it raises one Alert for the whole burst, never one per tap. Real systems watch failed logins the same way, one account at a time.",
+          "A brute-force attack tries many passwords against one account. Here the account is a rider login and the kiosk is the login screen. The Engine reads every kiosk PIN attempt live. It counts the wrong PINs per account inside a five-minute window. When one account reaches five, it raises one flag for the whole burst, never one per tap. Real systems watch failed logins the same way, one account at a time.",
         mitre: ["T1110"],
       },
       resources: [
@@ -107,7 +107,7 @@ export const scenariosData = {
       flavor: {
         tagline: "Access denied, and yet here we are again.",
         intro:
-          "A cancelled staff account keeps trying to sign in. The card is dead. The person holding it did not get the memo, or does not want to. One attempt on a revoked account is worth a look.",
+          "A cancelled staff account keeps trying to sign in. The card is dead. The person holding it didn't get the memo, or doesn't want to. One attempt on a revoked account is worth a look.",
       },
       security: {
         realWorldConcept: "Disabled or terminated account use.",
@@ -164,7 +164,7 @@ export const scenariosData = {
       flavor: {
         tagline: "The 2 a.m. badge is always the interesting one.",
         intro:
-          "A day-shift badge just opened a tunnel door at two in the morning. The badge is valid. The hour is not. Access that is fine at noon can be an alarm at night, and this one lands in a high zone.",
+          "A day-shift badge just opened a tunnel door at two in the morning. The badge is valid. The hour isn't. Access that is fine at noon can be an alarm at night, and this one lands in a high zone.",
       },
       security: {
         realWorldConcept: "After-hours access.",
@@ -199,7 +199,7 @@ export const scenariosData = {
       security: {
         realWorldConcept: "Repeated access denial (credential guessing at a door).",
         briefing:
-          "A valid badge is denied once, then the holder walks away. An attacker keeps trying. Count the denials at one door for one badge in a window. Many denials in a row is a flag. It is the physical cousin of a brute-force login.",
+          "A valid badge is denied once, then the holder walks away. An attacker keeps trying. Count the denials at one door for one badge in a window. Many denials in a row is a flag. It's the physical cousin of a brute-force login.",
         mitre: ["T1110"],
       },
       resources: [
@@ -225,7 +225,7 @@ export const scenariosData = {
       flavor: {
         tagline: "One curious terminal, every door on the floor.",
         intro:
-          "A staff terminal at Parkside is pinging every device on the control network, one after another. It is trying doorknobs to see which turn. On a network that is called a scan, and it usually comes before something worse.",
+          "A staff terminal at Parkside is pinging every device on the control network, one after another. It's trying doorknobs to see which turn. On a network that's called a scan, and it usually comes before something worse.",
       },
       security: {
         realWorldConcept: "Network reconnaissance and host or port scanning.",
@@ -256,7 +256,7 @@ export const scenariosData = {
       flavor: {
         tagline: "Testing stolen cards, one tiny top-up at a time.",
         intro:
-          "A single ticket machine at World's End is running a dollar top-up on card after card after card. Nobody buys forty fares in a row. Someone is fishing a stack of stolen numbers to see which still swim.",
+          "A single ticket machine at World's End is running a tiny top-up on card after card after card. Nobody buys forty fares in a row. Someone is fishing a stack of stolen numbers to see which still swim.",
       },
       security: {
         realWorldConcept: "Card testing (stolen-card enumeration).",
@@ -321,7 +321,7 @@ export const scenariosData = {
       security: {
         realWorldConcept: "Password spraying.",
         briefing:
-          "A spray tries a few common passwords across many accounts. It stays under the per-account limit on purpose. So do not group by account. Group by the source and count how many distinct accounts it hits. A source that touches many accounts with a few tries each is spraying. Watch the fan-out, not the depth.",
+          "A spray tries a few common passwords across many accounts. It stays under the per-account limit on purpose. So don't group by account. Group by the source and count how many distinct accounts it hits. A source that touches many accounts with a few tries each is spraying. Watch the fan-out, not the depth.",
         mitre: ["T1110.003"],
       },
       resources: [
@@ -378,12 +378,12 @@ export const scenariosData = {
       flavor: {
         tagline: "The door opened. Nobody knocked.",
         intro:
-          "A depot door swung open, but the reader logged no badge. Doors do not open themselves. Someone pried, shimmed, or defeated the latch. This one needs two sensors to see, the reader and the contact, working together.",
+          "A depot door swung open, but the reader logged no badge. Doors don't open themselves. Someone pried, shimmed, or defeated the latch. This one needs two sensors to see, the reader and the contact, working together.",
       },
       security: {
         realWorldConcept: "Forced door (physical intrusion without authorization).",
         briefing:
-          "A normal entry has two events. The reader grants, then the door opens. A forced entry has only the second. Join the two streams for one door. An open with no matching grant just before it is a forced door. You cannot see it from one sensor alone.",
+          "A normal entry has two events. The reader grants, then the door opens. A forced entry has only the second. Join the two streams for one door. An open with no matching grant just before it is a forced door. You can't see it from one sensor alone.",
       },
       resources: [
         {
@@ -499,7 +499,7 @@ export const scenariosData = {
       flavor: {
         tagline: "You cannot be in two stations at once. And yet.",
         intro:
-          "The same account just signed in at Harbor and at Parkside within a minute. The map says that ride takes nine minutes at best. One of these logins is not the real rider. Use the travel-time map to prove it.",
+          "The same account just signed in at Harbor and at Parkside within a minute. The map says that ride takes nine minutes at best. One of these logins isn't the real rider. Use the travel-time map to prove it.",
       },
       security: {
         realWorldConcept: "Impossible travel.",
@@ -561,7 +561,7 @@ export const scenariosData = {
       flavor: {
         tagline: "Straight to the control floor, no stops.",
         intro:
-          "A badge just granted at the OCC control floor, the highest zone in the building. But it never crossed the lobby or the ops floor to get there. You do not reach the top of the trust ladder by teleporting. Check the climb, not just the door.",
+          "A badge just granted at the OCC control floor, the highest zone in the building. But it never crossed the lobby or the ops floor to get there. You don't reach the top of the trust ladder by teleporting. Check the climb, not just the door.",
       },
       security: {
         realWorldConcept: "Segmentation and trust-boundary violation.",
@@ -598,7 +598,7 @@ export const scenariosData = {
         realWorldConcept:
           "Unexpected operational activity (an OT anomaly against a baseline of planned work).",
         briefing:
-          "Every train movement should match a planned run. Compare each arrival and departure against the schedule. A movement with no matching plan is a flag. On a closed track it is worse. This is how you catch machines acting outside their approved work. It is an operational technology detection, not an office one.",
+          "Every train movement should match a planned run. Compare each arrival and departure against the schedule. A movement with no matching plan is a flag. On a closed track it is worse. This is how you catch machines acting outside their approved work. It's an operational technology detection, not an office one.",
       },
       resources: [
         {
@@ -623,7 +623,7 @@ export const scenariosData = {
       flavor: {
         tagline: "One card, two ends of the city, sixty seconds.",
         intro:
-          "A fare card taps in at Harbor, then taps in at Summit a minute later. The map puts those fifteen minutes apart. This is not one rider. It is a cloned card riding the whole network at once. Prove the path is impossible.",
+          "A fare card taps in at Harbor, then taps in at Summit a minute later. The map puts those thirteen minutes apart. This isn't one rider. It's a cloned card riding the whole network at once. Prove the path is impossible.",
       },
       security: {
         realWorldConcept: "Credential cloning at network scale (physical impossible travel).",
@@ -651,9 +651,9 @@ export const scenariosData = {
       },
       sensors: ["fare-gate"],
       flavor: {
-        tagline: "One pass, three interchanges, no delorean.",
+        tagline: "One pass, three interchanges, no DeLorean.",
         intro:
-          "A transfer pass opens journeys at Market, then Junction, then Central, all inside the free-transfer window. Three interchanges, minutes apart, on one pass. One rider cannot be in three places. The pass is shared, and the transfer window is the loophole.",
+          "A transfer pass opens journeys at Market, then Junction, then Central, all inside the free-transfer window. Three interchanges, minutes apart, on one pass. One rider can't be in three places. The pass is shared, and the transfer window is the loophole.",
       },
       security: {
         realWorldConcept: "Pass sharing and transfer abuse.",
@@ -713,7 +713,7 @@ export const scenariosData = {
       flavor: {
         tagline: "The login was odd. The next move was worse.",
         intro:
-          "An account signed in from a place it has never used, and seconds later changed its own PIN and added a new device. Each step looks minor. In order, they are a takeover in progress. The story is the sequence, not any single event.",
+          "An account signed in from a place it has never used, and seconds later changed its own PIN and added a new device. Each step looks minor. In order, they're a takeover in progress. The story is the sequence, not any single event.",
       },
       security: {
         realWorldConcept: "Account takeover (post-compromise action).",
@@ -748,7 +748,7 @@ export const scenariosData = {
       flavor: {
         tagline: "One badge, two sites, no way to travel between them in time.",
         intro:
-          "A staff badge granted at the Eastyard Depot, then at the control center minutes later. Those sites are across the city. One badge, two distant doors, too fast. It is a cloned badge, and the higher the zone it reaches, the more it matters.",
+          "A staff badge granted at the Eastyard Depot, then at the control center minutes later. Those sites are across the city. One badge, two distant doors, too fast. It's a cloned badge, and the higher the zone it reaches, the more it matters.",
       },
       security: {
         realWorldConcept: "Badge cloning across sites (physical impossible travel).",
@@ -783,7 +783,7 @@ export const scenariosData = {
       security: {
         realWorldConcept: "Command-and-control beaconing.",
         briefing:
-          "Malware calls its controller on a timer. The calls come at a steady beat. Track the gaps between one host's calls to a destination. A low spread in those gaps means a machine, not a person. Legitimate traffic varies. A metronome does not. Measuring the rhythm is the work.",
+          "Malware calls its controller on a timer. The calls come at a steady beat. Track the gaps between one host's calls to a destination. A low spread in those gaps means a machine, not a person. Legitimate traffic varies. A metronome doesn't. Measuring the rhythm is the work.",
         mitre: ["T1071"],
       },
       resources: [
@@ -814,7 +814,7 @@ export const scenariosData = {
       security: {
         realWorldConcept: "Control command injection (unauthorized operation of a safety system).",
         briefing:
-          "Signals and switches take commands. Each command must come from an authorized operator and console. Join the command with the list of who and what is allowed to send it. A command from an unknown source is a flag. In operational systems this can be a safety event, so it ranks high. It is an ICS detection.",
+          "Signals and switches take commands. Each command must come from an authorized operator and console. Join the command with the list of who and what is allowed to send it. A command from an unknown source is a flag. In operational systems this can be a safety event, so it ranks high. It's an ICS detection.",
       },
       resources: [
         {
@@ -874,7 +874,7 @@ export const scenariosData = {
       security: {
         realWorldConcept: "Lateral movement toward the crown jewels.",
         briefing:
-          "An attacker rarely lands on the target. They move host to host, climbing trust as they go. Watch one credential make new host and site pairs in order, heading up the zones. A path that converges on the control center is the danger. You correlate across the network and score the direction. It is the hardest shape to catch, because every step alone looks small.",
+          "An attacker rarely lands on the target. They move host to host, climbing trust as they go. Watch one credential make new host and site pairs in order, heading up the zones. A path that converges on the control center is the danger. You correlate across the network and score the direction. It's the hardest shape to catch, because every step alone looks small.",
         mitre: ["T1021"],
       },
       resources: [
@@ -900,7 +900,7 @@ export const scenariosData = {
       flavor: {
         tagline: "The insider already has the keys. Now they're using all of them.",
         intro:
-          "A Green Line dispatcher just issued commands across every line and pulled the entire rider database. Their job touches one line and a handful of records. This is not an outsider breaking in. It is a trusted insider reaching far past their lane. The only way to see it is to know their normal.",
+          "A Green Line dispatcher just issued commands across every line and pulled the entire rider database. Their job touches one line and a handful of records. This isn't an outsider breaking in. It's a trusted insider reaching far past their lane. The only way to see it is to know their normal.",
       },
       security: {
         realWorldConcept: "Insider mass-access and abuse of scope.",
@@ -931,7 +931,7 @@ export const scenariosData = {
       flavor: {
         tagline: "The whole network is failing to log in at once.",
         intro:
-          "Sign-in failures just spiked across every station at the same moment, and a few of them are quietly succeeding. This is not a bad morning. It is a botnet replaying stolen passwords at scale, and the wins are hiding in the flood. You need a sense of normal to see it.",
+          "Sign-in failures just spiked across every station at the same moment, and a few of them are quietly succeeding. This isn't a bad morning. It's a botnet replaying stolen passwords at scale, and the wins are hiding in the flood. You need a sense of normal to see it.",
       },
       security: {
         realWorldConcept: "Credential stuffing.",

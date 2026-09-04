@@ -299,6 +299,7 @@ export function LogPanel({
       ref={panelRef}
       className={flashing && running ? "log-panel waveflash" : "log-panel"}
       tabIndex={-1}
+      data-tour="log"
     >
       <div className="log-header">
         <div className="transport">

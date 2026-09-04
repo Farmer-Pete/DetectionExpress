@@ -1,3 +1,5 @@
+@import "driver.js/dist/driver.css";
+
 :root {
   color-scheme: dark;
   font-family: system-ui, sans-serif;
@@ -154,31 +156,6 @@ body {
 .slice-tag {
   color: var(--dim);
   font-size: 0.85rem;
-}
-
-/* Run-status pill (GH124-PLAN.md Checkpoint 2): the one line of outcome text that
-   used to sit at the end of the HUD strip, now living in the top bar next to the
-   slice tag, since the strip itself moved into the Metrics side-panel tab below. */
-.status-pill {
-  padding: 0.2rem 0.7rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.status-pill-won {
-  border-color: var(--ok);
-  color: var(--ok);
-}
-
-.status-pill-failed {
-  border-color: var(--threat);
-  color: var(--threat);
 }
 
 /* Visually hidden, but read by assistive tech. Used for spoken separators and labels
@@ -1270,19 +1247,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* View toggle in the topbar. */
-.view-toggle {
-  margin-left: auto;
-  padding: 0.3rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--ink);
-  font-weight: 700;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
 /* ---- Embedded metro map region (GH117 Part F) ---- */
 /* The map embeds inline in the page flow, between the HUD and the inspector shell,
    sized to a bounded box rather than filling the viewport. No panel overlays the map,
@@ -1551,10 +1515,11 @@ body {
   height: 13px;
 }
 
-/* Topbar actions: the reopen control and the Hire Me surface, pushed to the right.
-   flex-wrap so the row (now up to five controls, with the two side-panel openers)
-   drops to a second line instead of overflowing at narrow widths; .topbar's own
-   flex-wrap only breaks BETWEEN top-level children, not within this nested row. */
+/* Topbar actions: the Hire Me surface and the hamburger button, pushed to the
+   right. flex-wrap so the row drops to a second line instead of overflowing at
+   narrow widths; .topbar's own flex-wrap only breaks BETWEEN top-level
+   children, not within this nested row. DOM order is Hire Me then the
+   hamburger, so the hamburger is the row's last, rightmost child. */
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -1563,19 +1528,24 @@ body {
   margin-left: auto;
 }
 
-.topbar-reopen,
-.topbar-panel-open {
-  padding: 0.3rem 0.8rem;
+/* The hamburger button (GH132-PLAN.md M1, design revision): a plain icon
+   button that opens the side panel directly. It carries no popup of its own
+   (that shipped, then got scrapped — see GH132-PLAN.md's "Design revision"
+   section); the actions that used to live behind it now live in the side
+   panel's own Options tab. */
+.topbar-menu-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel2);
   color: var(--ink);
-  font-size: 0.8rem;
   cursor: pointer;
 }
 
-.topbar-reopen:hover,
-.topbar-panel-open:hover {
+.topbar-menu-button:hover {
   border-color: var(--a1);
 }
 
@@ -1998,24 +1968,29 @@ body {
   box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
 }
 
+/* The header's own bottom border IS the tab strip's shared baseline (GH132-PLAN.md
+   M1, design revision: the tabs must "look like tabs", not detached pill buttons).
+   `align-items: flex-end` + zero bottom padding puts the tabs flush against that
+   border; the close button rides slightly higher, given its own bottom margin
+   below, so it doesn't visually merge with the strip. */
 .sidepanel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 0.6rem;
-  padding: 0.8rem 1rem;
+  padding: 0.7rem 1rem 0;
   border-bottom: 1px solid var(--line);
 }
 
 .sidepanel-tablist {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.2rem;
 }
 
 .sidepanel-tab {
-  padding: 0.35rem 0.9rem;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-radius: 8px 8px 0 0;
   background: transparent;
   /* Brightened from --dim (~3.09:1 on --panel) to clear WCAG AA, the same mix the
      rest of the sheet uses for de-emphasized-but-legible text (e.g. line 685). */
@@ -2025,13 +2000,23 @@ body {
   cursor: pointer;
 }
 
-.sidepanel-tab-active {
-  border-color: var(--a1);
-  background: color-mix(in srgb, var(--a1) 20%, transparent);
+.sidepanel-tab:hover {
   color: var(--ink);
 }
 
+/* The active indicator: an INSET shadow, not a border, so it paints ON TOP of
+   the header's shared bottom border instead of adding its own line beside it —
+   the active tab's edge breaks the gray baseline with the accent color exactly
+   where it joins the panel body underneath, instead of floating a rounded pill
+   above it. */
+.sidepanel-tab-active {
+  background: color-mix(in srgb, var(--a1) 16%, transparent);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 0 var(--a1);
+}
+
 .sidepanel-close {
+  margin-bottom: 0.5rem;
   padding: 0.1rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -2049,6 +2034,124 @@ body {
 .sidepanel-body {
   flex: 1 1 auto;
   overflow-y: auto;
+}
+
+/* The Options tab (GH132-PLAN.md M1, design revision): the metro-view toggle and
+   the tour button (M2: "Retake tour", replacing M1's intro-reopen "How this
+   works"), formerly the popup hamburger menu's items and the Topbar's own
+   standalone reopen button. */
+.sidepanel-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+}
+
+.sidepanel-options-button {
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidepanel-options-button:hover {
+  border-color: var(--a1);
+}
+
+/* Guided tour (GH132-PLAN.md M2, docs/adr/0012-guided-tour.md): driver.js's own
+   `driver.css` is imported once at the entry (`main.tsx`) — the one allowed
+   exception to "all CSS lives here" (ADR 0012's "Consequences"), since hand-
+   maintaining a vendor stylesheet across upgrades would be worse. This block
+   retunes ITS classes to the HUD palette: the popover surface, its title and
+   description text, the footer buttons, the close button, the progress text, the
+   arrow (recolored to match the popover surface, each side's three transparent
+   edges re-asserted so the arrow keeps pointing instead of squaring off), and the
+   spotlighted element's own outline (driver.js's overlay already dims everything
+   else; this box-shadow ring is what makes the live target pop, echoing the HUD's
+   own glow treatment elsewhere in this sheet). Matches the modal-surface pattern
+   already used by `.intro-overlay`/`.sidepanel` (14px radius, the same drop
+   shadow), so the tour reads as one more member of that family, not a foreign
+   widget. */
+.driver-popover {
+  background-color: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  color: var(--ink);
+}
+
+.driver-popover-title {
+  color: var(--ink);
+}
+
+.driver-popover-description {
+  color: var(--ink);
+}
+
+.driver-popover-progress-text {
+  /* Brightened from --dim (~3.09:1 on --panel) to clear WCAG AA, the same mix the
+     sidepanel tab strip uses for de-emphasized-but-legible text (line 2020). */
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+}
+
+.driver-popover-close-btn {
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+}
+
+.driver-popover-close-btn:hover,
+.driver-popover-close-btn:focus {
+  color: var(--ink);
+}
+
+.driver-popover-footer-btn {
+  background-color: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+}
+
+.driver-popover-footer-btn:hover,
+.driver-popover-footer-btn:focus {
+  background-color: var(--panel2);
+  border-color: var(--a1);
+}
+
+.driver-popover-arrow {
+  border-color: var(--panel);
+}
+
+.driver-popover-arrow-side-left {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+
+.driver-popover-arrow-side-right {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+}
+
+.driver-popover-arrow-side-top {
+  border-bottom-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.driver-popover-arrow-side-bottom {
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-right-color: transparent;
+}
+
+.driver-active-element {
+  box-shadow:
+    0 0 0 2px var(--a1),
+    0 0 20px color-mix(in srgb, var(--a1) 35%, transparent);
 }
 
 /* Log panel: it fills the inspector-stream cell, which supplies the panel chrome. */

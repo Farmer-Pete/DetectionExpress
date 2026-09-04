@@ -34,10 +34,10 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 There is no `widgets/` or `components/` folder. "Widget" is a narrow domain term for the
 four `Finding.context` renderers in `src/ui/findings/widgets.tsx`. The real convention:
 
-- **One feature folder per concern.** `intro/`, `decisions/`, `hud/`, `sidepanel/`.
+- **One feature folder per concern.** `tour/`, `decisions/`, `hud/`, `sidepanel/`.
 - **A presentational component, paired with a controller hook.** `Foo.tsx` renders. A
   `use-foo.ts(x)` hook owns its state, effects, and lifecycle. A hook that returns JSX
-  is a `.tsx` file, like `use-intro-overlay.tsx`. A hook may return the ready-to-mount
+  is a `.tsx` file, like `use-side-panel.tsx`. A hook may return the ready-to-mount
   node itself, so the caller drops it straight into the tree instead of assembling it.
 - **Pure display logic goes in a DOM-free `view-model.ts`.** No React, no DOM reads, so
   it tests as a plain function (`src/ui/findings/view-model.ts`,
@@ -52,9 +52,11 @@ four `Finding.context` renderers in `src/ui/findings/widgets.tsx`. The real conv
 - **Tests sit next to the code they test and use React Testing Library.** They assert
   accessible roles and text, not implementation detail.
 
-`src/ui/sidepanel/` and `src/ui/intro/` follow this exactly: a presentational component
-(`SidePanel.tsx`, `IntroOverlay.tsx`), a controller hook that returns the mounted node
-(`use-side-panel.tsx`, `use-intro-overlay.tsx`), and co-located tests for both.
+`src/ui/sidepanel/` follows this exactly: a presentational component (`SidePanel.tsx`), a
+controller hook that returns the mounted node (`use-side-panel.tsx`), and co-located tests
+for both. `src/ui/tour/` is controller-only (`use-tour.ts`, `tour-steps.data.ts`): the tour
+library renders its own DOM, so there is no presentational component, but the controller and
+its data still carry co-located tests.
 
 ## The rules
 

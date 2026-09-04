@@ -2,10 +2,10 @@
  * The side panel's controller: the chaos ladder and Algorithm editor tabs, moved
  * off the main column and behind a right-edge overlay (GH118-PLAN.md). It owns
  * `open` and `tab`, the two intake actions `openChaos`/`openAlgorithm`, the
- * dismiss action `close`, and the panel-owned Apply protocol `onApply`. It returns the ready-to-mount
- * `sidePanel` node, mirroring `useIntroOverlay`'s shape: `SidePanel` is only ever
- * mounted while `open` is true, so `SidePanel`'s own mount/unmount lifecycle IS the
- * panel's open/close lifecycle.
+ * dismiss action `close`, and the panel-owned Apply protocol `onApply`. It returns the
+ * ready-to-mount `sidePanel` node: `SidePanel` is only ever mounted while `open` (or
+ * `tourOpen`) is true, so `SidePanel`'s own mount/unmount lifecycle IS the panel's
+ * open/close lifecycle.
  *
  * Pause ownership runs through the store's `transport.frozen`, not a direct controller
  * call — the reflection effect in `use-pipeline-controller.ts` mirrors it onto
@@ -42,27 +42,46 @@
  * Focus fallback for that intro path (GH118-PLAN.md): the intro button that
  * triggered the open is unmounted by the time the panel closes, so `SidePanel`'s own
  * focus-restore effect falls back to `fallbackFocusRef`. `chaosFocusRef`/
- * `algorithmFocusRef` are App's two Topbar button refs; this hook
- * forwards whichever one matches the active tab, mirroring the fallback-focus refs
- * `TraceOverlay` already takes.
+ * `algorithmFocusRef`/`optionsFocusRef` are App's Topbar hamburger button ref,
+ * forwarded once per tab; this hook picks whichever one matches the active tab,
+ * mirroring the fallback-focus refs `TraceOverlay` already takes.
+ *
+ * GH132-PLAN.md M1 (design revision, "SUPERSEDES the popup menu"): `openPanel`
+ * is the hamburger's own opener — it opens on whatever tab was last active
+ * (`tab` isn't reset on close), defaulting to "chaos" on first open, since the
+ * hamburger no longer knows or cares which tab it is opening. `mapShown`,
+ * `onToggleMap`, and `onStartTour` are forwarded straight into `SidePanel`'s
+ * Options tab; this hook does not interpret them.
+ *
+ * GH132-PLAN.md M2: `onStartTour` replaces M1's `onReopenIntro` — same shape (a
+ * callback `App.tsx` owns and threads through unchanged), new target (the guided
+ * tour instead of the intro overlay).
  */
 import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import type { RunController } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
 import { SidePanel, type SidePanelTab } from "./SidePanel";
 
-export type { SidePanelTab } from "./SidePanel";
-
 export interface UseSidePanelArgs {
   controllerRef: RefObject<RunController | null>;
   /** Focus-restore fallback for the chaos tab, for when the trigger element is gone
-   *  on unmount (the intro's "Cause chaos" path). Typically the Topbar chaos-ladder
+   *  on unmount (the intro's "Cause chaos" path). Typically the Topbar hamburger
    *  button's ref. */
   chaosFocusRef?: RefObject<HTMLElement | null> | undefined;
   /** Focus-restore fallback for the algorithm tab, for when the trigger element is
    *  gone on unmount (the intro's "Edit the Engine" path). Typically the Topbar
-   *  Algorithm button's ref. */
+   *  hamburger button's ref. */
   algorithmFocusRef?: RefObject<HTMLElement | null> | undefined;
+  /** Focus-restore fallback for the options tab. Typically the Topbar hamburger
+   *  button's ref, same as the other two. */
+  optionsFocusRef?: RefObject<HTMLElement | null> | undefined;
+  /** Whether the embedded metro map region currently shows. Forwarded to
+   *  `SidePanel`'s Options tab. */
+  mapShown: boolean;
+  /** Flips `mapShown`. Forwarded to `SidePanel`'s Options tab. */
+  onToggleMap: () => void;
+  /** Starts the guided tour. Forwarded to `SidePanel`'s Options tab. */
+  onStartTour: () => void;
 }
 
 export interface SidePanelController {
@@ -76,6 +95,19 @@ export interface SidePanelController {
   /** Open on the algorithm tab. No-op while the trace dialog or the map/event dialog
    *  stack is open. */
   openAlgorithm: () => void;
+  /** Open on whatever tab was last active (chaos by default). The hamburger
+   *  button's opener. No-op while the trace dialog or the map/event dialog stack
+   *  is open. */
+  openPanel: () => void;
+  /** True while the panel renders in tour mode (GH132-PLAN.md M2, "Step 2 drawer-open"):
+   *  a non-modal region the guided tour opens to spotlight the chaos ladder. Distinct
+   *  from `open`, and mutually exclusive with it. */
+  tourOpen: boolean;
+  /** The tour opens the panel to `tab` in NON-modal mode. Changes only `tab`/`tourOpen`;
+   *  never touches the freeze protocol, so the sim keeps running during the tour. */
+  openForTour: (tab: SidePanelTab) => void;
+  /** The tour closes its non-modal panel. Clears only `tourOpen`. */
+  closeForTour: () => void;
   /** Dismiss (Esc, backdrop, or the X button): restores the freeze saved on open. */
   close: () => void;
   /** The Algorithm tab's Apply: runs the source, closes only on success. */
@@ -88,8 +120,13 @@ export function useSidePanel({
   controllerRef,
   chaosFocusRef,
   algorithmFocusRef,
+  optionsFocusRef,
+  mapShown,
+  onToggleMap,
+  onStartTour,
 }: UseSidePanelArgs): SidePanelController {
   const [open, setOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const [tab, setTab] = useState<SidePanelTab>("chaos");
 
   const selection = useGameStore((state) => state.selection);
@@ -117,14 +154,40 @@ export function useSidePanel({
         setFrozen(true);
         holdsFreezeRef.current = true;
       }
+      setTourOpen(false); // mutually exclusive with tour mode
       setTab(nextTab);
       setOpen(true);
     },
     [selection, decisionSelection, mapDialogStack, setFrozen],
   );
 
+  // Tour mode (GH132-PLAN.md M2, "Step 2 drawer-open"): the guided tour opens THIS panel
+  // to spotlight the chaos ladder. Mutually exclusive with a modal `open`, and it never
+  // touches the freeze protocol — the sim keeps running behind the tour. Changes only
+  // `tab` and `tourOpen`.
+  const openForTour = useCallback(
+    (nextTab: SidePanelTab): void => {
+      // No-op while the modal panel is open (Codex §6 fix 5): App always closes it
+      // first, so entering tour mode never bypasses close()'s freeze restore and never
+      // switches a mounted modal panel into tour mode without a remount.
+      if (open) {
+        return;
+      }
+      setTab(nextTab);
+      setTourOpen(true);
+    },
+    [open],
+  );
+  const closeForTour = useCallback((): void => {
+    setTourOpen(false);
+  }, []);
+
   const openChaos = useCallback(() => openWith("chaos"), [openWith]);
   const openAlgorithm = useCallback(() => openWith("algorithm"), [openWith]);
+  // The hamburger's opener (GH132-PLAN.md M1): reopens on whatever tab was last
+  // active. `tab` state isn't reset on close, so its current value already IS
+  // "the last-active tab" — this needs no extra bookkeeping of its own.
+  const openPanel = useCallback(() => openWith(tab), [openWith, tab]);
 
   // The panel-owned Apply intent (decision 5): `onApply` sets it, the falling-edge
   // effect below clears it (on success or failure), and `close()` clears it too, so a
@@ -192,17 +255,35 @@ export function useSidePanel({
     };
   }, [setFrozen]);
 
-  const fallbackFocusRef = tab === "chaos" ? chaosFocusRef : algorithmFocusRef;
+  const fallbackFocusRef =
+    tab === "chaos" ? chaosFocusRef : tab === "algorithm" ? algorithmFocusRef : optionsFocusRef;
 
-  const sidePanel = open ? (
-    <SidePanel
-      tab={tab}
-      onSelectTab={setTab}
-      onClose={close}
-      onApply={onApply}
-      fallbackFocusRef={fallbackFocusRef}
-    />
-  ) : null;
+  const sidePanel =
+    open || tourOpen ? (
+      <SidePanel
+        mode={tourOpen ? "tour" : "modal"}
+        tab={tab}
+        onSelectTab={setTab}
+        onClose={close}
+        onApply={onApply}
+        mapShown={mapShown}
+        onToggleMap={onToggleMap}
+        onStartTour={onStartTour}
+        fallbackFocusRef={fallbackFocusRef}
+      />
+    ) : null;
 
-  return { open, tab, openChaos, openAlgorithm, close, onApply, sidePanel };
+  return {
+    open,
+    tab,
+    openChaos,
+    openAlgorithm,
+    openPanel,
+    tourOpen,
+    openForTour,
+    closeForTour,
+    close,
+    onApply,
+    sidePanel,
+  };
 }

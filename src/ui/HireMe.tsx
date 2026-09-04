@@ -7,6 +7,10 @@
  * nudge (both in `src/index.css`). Opening it dims the rest of the app behind a
  * full-screen scrim and lifts the button and card above it, and fires a one-shot
  * confetti burst from the button (`celebrate`, which itself honors reduced motion).
+ *
+ * The toggle carries `data-tour="hire"` (GH132-PLAN.md M2, the 8-step tour's step 7):
+ * the one tour anchor `App.tsx` never has to reach into a deeper child for, since
+ * `Topbar` mounts this component directly.
  */
 import { useEffect, useRef, useState } from "react";
 import { type ConfettiOrigin, celebrate as fireConfetti, originOf } from "./confetti";
@@ -80,6 +84,7 @@ export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
         className="hire-me-toggle"
         aria-expanded={open}
         aria-controls={CARD_ID}
+        data-tour="hire"
         onClick={() => (open ? setOpen(false) : openCard())}
       >
         {copy.heading}

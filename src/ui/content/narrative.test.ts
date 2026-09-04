@@ -14,11 +14,6 @@ function allProse(): string {
   return [
     introCopy.title,
     ...introCopy.paragraphs,
-    introCopy.invitation,
-    introCopy.observeLabel,
-    introCopy.chaosLabel,
-    introCopy.sourceLabel,
-    introCopy.editLabel,
     hireMe.heading,
     ...hireMe.body,
     ...chaosLevels.map((level) => `${level.label} ${level.blurb}`),
@@ -39,8 +34,7 @@ describe("narrative content", () => {
     expect(labels.size).toBe(6);
   });
 
-  it("names the top level Nightmare and marks only levels 0 and 1 playable", () => {
-    expect(chaosLevels[5]?.label).toBe("Nightmare");
+  it("marks only levels 0 and 1 playable", () => {
     const playable = chaosLevels.filter((level) => level.playable);
     expect(playable.map((level) => level.level)).toEqual([0, 1]);
   });

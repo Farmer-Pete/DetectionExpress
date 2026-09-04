@@ -35,10 +35,40 @@
  * `"tabpanel"`, `aria-selected`, each tab's `aria-controls` names its panel and the
  * panel's `aria-labelledby` names its tab, and ArrowRight/ArrowLeft both select and
  * move DOM focus to the adjacent tab (roving tabindex: only the active tab is in the
- * Tab order). BOTH tabpanels render at all times, the inactive one carrying `hidden`.
- * That keeps every tab's `aria-controls` pointing at an element that exists, and a
- * `hidden` subtree is excluded from `focusableControls`, so the off-screen panel's
- * controls never enter the focus trap.
+ * Tab order). ALL THREE tabpanels render at all times, the inactive ones carrying
+ * `hidden`. That keeps every tab's `aria-controls` pointing at an element that
+ * exists, and a `hidden` subtree is excluded from `focusableControls`, so an
+ * off-screen panel's controls never enter the focus trap.
+ *
+ * GH132-PLAN.md M1 (design revision, "SUPERSEDES the popup menu"): a third tab,
+ * "Options", holds the two actions that used to live in the popup hamburger menu
+ * and the Topbar's standalone reopen button — the metro-view toggle and the tour
+ * button. The tab strip itself is restyled in `src/index.css` to read as real tabs
+ * (the active tab's underline joins the panel body's own border), not detached pill
+ * buttons; the ARIA above is unchanged.
+ *
+ * GH132-PLAN.md M2: the Options tab's second button is now "Retake tour", wired to
+ * `onStartTour` (`App.tsx`'s `use-tour`), replacing M1's "How this works" reopen of
+ * the intro overlay. Same wiring shape as the button it replaces: both the panel and
+ * a subsequent overlay-ish action need the panel gone first, so `App.tsx` still
+ * closes this panel before acting, on `sidePanel.open` actually going false.
+ *
+ * GH132-PLAN.md M2, "Tour redesign: 8 steps, drawer-open step 2" — "Step 2
+ * drawer-open: Codex fixes (accepted)" rule 3: the tour's step 2 opens THIS panel
+ * itself, mid-tour, through a second, non-modal `mode` (`use-side-panel.tsx`'s
+ * `tourOpen`/`openForTour`/`closeForTour`, distinct from `open`). driver.js is
+ * already running its own focus trap and Escape handling for the tour popover, so
+ * this component's own modal machinery would fight it. `mode="tour"` therefore
+ * drops every piece of that machinery instead of layering a second one on top:
+ * no `role="dialog"`/`aria-modal` (a labelled `role="region"` instead), no
+ * mount-focus or unmount-focus-restore effect, no outside-pointer-dismiss, no
+ * Escape-close, no Tab trap — driver.js owns focus and Escape while the tour
+ * drives this panel. The tabs, the close button, and (via `ChaosLadder`'s own
+ * `disabled` prop) every chaos level are also semantically disabled: a native
+ * `disabled` on each control, not just a CSS/`disableActiveInteraction` dimming,
+ * so the narrated ladder can never be clicked through by a stray keyboard or AT
+ * interaction. `mode` defaults to `"modal"`, so every pre-existing call site
+ * (and every test above this comment) is unaffected.
  */
 import { type RefObject, useEffect, useRef } from "react";
 import { defaultEntry } from "../../game/registry";
@@ -48,16 +78,24 @@ import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
 
-export type SidePanelTab = "chaos" | "algorithm";
+export type SidePanelTab = "chaos" | "algorithm" | "options";
+
+/** `"modal"` (default): the pre-existing real dialog, described above. `"tour"`
+ *  (GH132-PLAN.md M2): the panel renders open, but as a non-modal region driver.js
+ *  narrates over — see the module doc. */
+type SidePanelMode = "modal" | "tour";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 const TABS: ReadonlyArray<{ id: SidePanelTab; label: string }> = [
   { id: "chaos", label: "Chaos ladder" },
   { id: "algorithm", label: "Algorithm" },
+  { id: "options", label: "Options" },
 ];
 
 export interface SidePanelProps {
+  /** `"modal"` (default) or `"tour"` (GH132-PLAN.md M2) — see the module doc. */
+  mode?: SidePanelMode | undefined;
   /** The active tab. */
   tab: SidePanelTab;
   /** Called on a tab click or an arrow-key move. */
@@ -66,18 +104,34 @@ export interface SidePanelProps {
   onClose: () => void;
   /** The Algorithm tab's Apply, wired to `AlgorithmEditor`'s `onRun`. */
   onApply: () => void;
+  /** Whether the embedded metro map region currently shows, so the Options tab's
+   *  toggle button can label itself "Hide"/"Show". */
+  mapShown: boolean;
+  /** Flips `mapShown`, wired to the Options tab's metro-view toggle button. */
+  onToggleMap: () => void;
+  /** Starts the guided tour, wired to the Options tab's "Retake tour" button
+   *  (GH132-PLAN.md M2, replacing M1's "How this works" intro-reopen). The panel is
+   *  a modal and the tour needs the shell live (its targets, including the
+   *  hamburger, sit inside `.app-shell`), so `App.tsx` closes this panel first, then
+   *  starts the tour once it has actually unmounted. */
+  onStartTour: () => void;
   /** Focus-restore fallback for when the trigger element is gone on unmount (decision
    *  14's TraceOverlay pattern), e.g. the intro path in a later stage. */
   fallbackFocusRef?: RefObject<HTMLElement | null> | undefined;
 }
 
 export function SidePanel({
+  mode = "modal",
   tab,
   onSelectTab,
   onClose,
   onApply,
+  mapShown,
+  onToggleMap,
+  onStartTour,
   fallbackFocusRef,
 }: SidePanelProps) {
+  const isTour = mode === "tour";
   const dialogRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
 
@@ -90,8 +144,17 @@ export function SidePanel({
 
   // Move focus into the dialog on mount, onto its first control; restore it on
   // unmount to whatever triggered the open, or the fallback if that trigger is gone.
+  // Skipped entirely in tour mode (GH132-PLAN.md M2, "Codex fixes" rule 3):
+  // driver.js owns focus while it drives this panel, so a competing auto-focus or
+  // focus-restore here would fight it. `mode` is fixed for a given mount (`open`
+  // and `tourOpen` are mutually exclusive, so a mounted instance is always
+  // entirely one or the other), so reading `isTour` here without listing it as a
+  // dependency is safe.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally mount/unmount-only (F001, mirrors TraceOverlay.tsx's own focus effect); the parent only ever mounts this component while `open` is true, so its mount/unmount lifecycle IS the open/close lifecycle, and re-running this on a `fallbackFocusRef` identity change would move focus mid-session.
   useEffect(() => {
+    if (isTour) {
+      return;
+    }
     const dialog = dialogRef.current;
     const active = document.activeElement;
     // `body` is excluded up front (see the module doc): it is never a meaningful
@@ -111,12 +174,19 @@ export function SidePanel({
 
   // A gesture outside the dialog, on the backdrop scrim, dismisses it. See
   // `installOutsidePointerDismiss` for why only a gesture that both starts AND ends
-  // outside counts.
+  // outside counts. Skipped in tour mode: outside clicks never close a tour-opened
+  // panel (rule 3 above) — driver.js's own overlay owns dismissal while it drives.
   useEffect(() => {
+    if (isTour) {
+      return;
+    }
     return installOutsidePointerDismiss(dialogRef, onClose);
-  }, [onClose]);
+  }, [onClose, isTour]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (isTour) {
+      return; // driver.js owns Escape and Tab while the tour drives this panel
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -144,17 +214,20 @@ export function SidePanel({
     tablistRef.current?.querySelector<HTMLButtonElement>(`#sidepanel-tab-${next.id}`)?.focus();
   };
 
+  // In tour mode the panel is a labelled NON-modal region (Codex fixes rule 3): no
+  // role="dialog", no aria-modal, and no Escape/keydown handling (driver owns Escape
+  // and focus). Spread the mode-specific a11y props so each shape is statically valid.
+  const surfaceProps = isTour
+    ? { role: "region" as const, "aria-label": "Side panel" }
+    : {
+        role: "dialog" as const,
+        "aria-modal": true as const,
+        "aria-label": "Side panel",
+        onKeyDown,
+      };
   return (
-    <div className="sidepanel-backdrop">
-      <div
-        ref={dialogRef}
-        className="sidepanel"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Side panel"
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-      >
+    <div className={isTour ? "sidepanel-backdrop sidepanel-backdrop-tour" : "sidepanel-backdrop"}>
+      <div ref={dialogRef} className="sidepanel" tabIndex={-1} {...surfaceProps}>
         <div className="sidepanel-header">
           <div
             className="sidepanel-tablist"
@@ -173,8 +246,13 @@ export function SidePanel({
                   aria-selected={active}
                   aria-controls={`sidepanel-tabpanel-${entry.id}`}
                   tabIndex={active ? 0 : -1}
+                  disabled={isTour}
                   className={active ? "sidepanel-tab sidepanel-tab-active" : "sidepanel-tab"}
-                  onClick={() => onSelectTab(entry.id)}
+                  onClick={() => {
+                    if (!isTour) {
+                      onSelectTab(entry.id);
+                    }
+                  }}
                   onKeyDown={onTabKeyDown}
                 >
                   {entry.label}
@@ -186,7 +264,12 @@ export function SidePanel({
             type="button"
             className="sidepanel-close"
             aria-label="Close panel"
-            onClick={onClose}
+            disabled={isTour}
+            onClick={() => {
+              if (!isTour) {
+                onClose();
+              }
+            }}
           >
             <span aria-hidden="true">×</span>
           </button>
@@ -204,6 +287,7 @@ export function SidePanel({
             selectedLevel={chaosLevel}
             phase={chaosPhase}
             onSelectLevel={setChaosLevel}
+            disabled={isTour}
           />
         </div>
         <div
@@ -214,6 +298,22 @@ export function SidePanel({
           hidden={tab !== "algorithm"}
         >
           <AlgorithmEditor onRun={onApply} />
+        </div>
+        <div
+          role="tabpanel"
+          id="sidepanel-tabpanel-options"
+          aria-labelledby="sidepanel-tab-options"
+          className="sidepanel-body"
+          hidden={tab !== "options"}
+        >
+          <div className="sidepanel-options">
+            <button type="button" className="sidepanel-options-button" onClick={onToggleMap}>
+              {mapShown ? "Hide metro view" : "Show metro view"}
+            </button>
+            <button type="button" className="sidepanel-options-button" onClick={onStartTour}>
+              Retake tour
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,8 +1,9 @@
 /**
  * The single source of the onboarding prose. This is UI copy, not simulation
- * logic, so it lives in `ui/`. It holds the intro overlay text, the Hire Me pitch,
- * the chaos ladder (levels 0 through 5, GH126-PLAN.md M3), and the source repo
- * link. No React. Each type is
+ * logic, so it lives in `ui/`. It holds the guided tour's premise (step 1, reused
+ * from the old intro overlay's opening paragraphs), the Hire Me pitch, the chaos
+ * ladder (levels 0 through 5, GH126-PLAN.md M3), and the source repo link. No
+ * React. Each type is
  * consumed by a component through its props, so the values reach the screen and
  * Knip stays clean.
  *
@@ -21,15 +22,36 @@ import type { ScenarioRegistryEntry } from "../../game/registry";
  *  0 is the calm baseline (no attack); 1 through 5 escalate (GH126-PLAN.md M3, Q3). */
 type ChaosLevelNumber = 0 | 1 | 2 | 3 | 4 | 5;
 
-/** The intro overlay copy: premise, invitation, and the action and link labels. */
+/** The onboarding premise: title and body paragraphs. GH132-PLAN.md M3 removed the
+ *  old intro overlay; this survives only because the guided tour's step 1 (`tourCopy.
+ *  map`) reuses it verbatim, so the two never say two different things about what the
+ *  map shows. */
 export interface IntroCopy {
   title: string;
   paragraphs: string[];
-  invitation: string;
-  observeLabel: string;
-  chaosLabel: string;
-  sourceLabel: string;
-  editLabel: string;
+}
+
+/** One tour step's popover content: a title and one paragraph of body copy. Not
+ *  exported beyond this file: every other module reaches it only through `TourCopy`'s
+ *  own fields. */
+interface TourStepCopy {
+  title: string;
+  description: string;
+}
+
+/** The guided tour's prose (GH132-PLAN.md "Tour redesign (M2 feedback): 8 steps,
+ *  drawer-open step 2", docs/adr/0012-guided-tour.md), keyed by `TourStep.copyKey`
+ *  (`ui/tour/tour-steps.data.ts`). Lives here, not in `ui/tour/`, so this file
+ *  stays the one home for onboarding prose. */
+export interface TourCopy {
+  map: TourStepCopy;
+  chaos: TourStepCopy;
+  click: TourStepCopy;
+  log: TourStepCopy;
+  findings: TourStepCopy;
+  decisions: TourStepCopy;
+  hire: TourStepCopy;
+  summary: TourStepCopy;
 }
 
 /** The Hire Me card copy: heading, body paragraphs, and the two contact links. */
@@ -62,14 +84,56 @@ export const REPO_URL = "https://github.com/Farmer-Pete/DetectionExpress";
 export const introCopy: IntroCopy = {
   title: "Detection Express",
   paragraphs: [
-    "This is a working metro, modeled down to the last detail. Every rider, every fare tap, every door, every camera. It all runs live.",
-    "Watching over it is a finished detection Engine. It reads the whole stream of sensor data and finds the threats hiding inside ordinary traffic. It stays fast under heavy load.",
+    "This is a live simulation of a working metro. Riders tap fare cards, trigger door sensors, board and exit trains, even get spotted by cameras.",
+    "Watching over it is a detection Engine that looks for attackers trying to abuse the system. It reads the whole stream of sensor data and finds threats hiding inside ordinary traffic.",
   ],
-  invitation: "Watch it run clean. Then cause chaos and see it hold.",
-  observeLabel: "Observe the simulation",
-  chaosLabel: "Cause chaos",
-  sourceLabel: "Get the source",
-  editLabel: "Edit the Engine",
+};
+
+/** The guided tour's eight steps, in `tourSteps`' order (`ui/tour/tour-steps.data.ts`,
+ *  GH132-PLAN.md "Tour redesign (M2 feedback): 8 steps, drawer-open step 2"). Step 1
+ *  reuses the intro's own premise, so the two never say two different things about
+ *  what the map shows. Step 2, "cause chaos", opens the side panel itself (in tour
+ *  mode) rather than telling the player to find a menu — see `ui/tour/use-tour.ts`'s
+ *  destination-aware navigation. */
+export const tourCopy: TourCopy = {
+  map: {
+    title: introCopy.title,
+    description: introCopy.paragraphs.join(" "),
+  },
+  chaos: {
+    title: "Cause chaos",
+    description:
+      "Pick a level to unleash attackers on the metro. Each level includes every level below it, so the chaos only ever piles up.",
+  },
+  click: {
+    title: "Click the map",
+    description:
+      "Stations, trains, and sensors on the map are all clickable. Click any of them to inspect it.",
+  },
+  log: {
+    title: "The sensor log",
+    description:
+      "Every sensor reading lands here the instant it happens. Fare taps, door sensors, camera spots, all of it.",
+  },
+  findings: {
+    title: "Findings",
+    description:
+      '"Watching" means the Engine is building a case on a pattern in the log. An alert means it\'s confident. Click any finding for its full trace.',
+  },
+  decisions: {
+    title: "Decisions",
+    description:
+      "Every judgment the Engine makes lands in this strip, newest first: caught, missed, or a false alert. Click one to see why.",
+  },
+  hire: {
+    title: "Hire me",
+    description: "I've built a lot of data processing engines and I'm looking for work!",
+  },
+  summary: {
+    title: "You're ready",
+    description:
+      "That's the loop: watch the map, turn up the chaos, and see what the Engine catches. Have fun!",
+  },
 };
 
 export const hireMe: HireMeCopy = {
@@ -85,38 +149,42 @@ export const hireMe: HireMeCopy = {
 export const chaosLevels: readonly ChaosLevel[] = [
   {
     level: 0,
-    label: "No chaos",
-    blurb: "The metro runs clean. Benign riders only, no attackers.",
+    label: "All good",
+    blurb: "The metro runs in a clean, steady state. Enjoy it while it lasts.",
     playable: true,
   },
   {
     level: 1,
-    label: "First Cracks",
-    blurb: "A handful of bad actors fan out across the crowd. Quiet probes, one PIN at a time.",
+    label: "Uh oh",
+    blurb: "A handful of bad actors fan out across the crowd. Good thing they are easy to detect.",
     playable: true,
   },
   {
     level: 2,
-    label: "Under Load",
-    blurb: "More attackers arrive. The Engine holds state and leans in.",
+    label: "Welp, that's not good",
+    blurb:
+      "Oh, joy... in addition to the previous attackers, more attackers arrive. Plus some attackers are trying to hide their activity in the noise of normal activity.",
     playable: false,
   },
   {
     level: 3,
-    label: "Heavy Load",
-    blurb: "Timed patterns per rider. The stream thickens and speeds up.",
+    label: "This is fine, everything is fine",
+    blurb:
+      "See!? This is why we can't have nice things. Attackers join that require the Engine to spot things that look normal in isolation but add up to a big pile of nasty.",
     playable: false,
   },
   {
     level: 4,
-    label: "Overload",
-    blurb: "Attacks cross sensors. The network map itself is in play.",
+    label: "Awwww, hell no!",
+    blurb:
+      "Now stuff gets weird. Now stuff happens that causes sensor readings that should be impossible. I think it might be time to call the Ghostbusters!",
     playable: false,
   },
   {
     level: 5,
-    label: "Nightmare",
-    blurb: "Everything at once. The Engine learns normal and scores the drift.",
+    label: "HEEEEEEEEEEELLLLLLLLP!",
+    blurb:
+      "Now this ain't fair!! There are insider threats and coordinated attacks. Oh, and of course like previously, all previous attackers are there, resulting in a total of 30 different types of attacks.",
     playable: false,
   },
 ];

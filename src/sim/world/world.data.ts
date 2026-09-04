@@ -69,7 +69,7 @@ export const worldData = {
       stations: ["har", "mkt", "cen", "riv", "end"],
       loop: false,
       description:
-        "The workhorse. Longest, busiest, and always a minute late. Runs coast to coast, Harbor to World's End.",
+        "The workhorse. Longest, busiest, and always late. Runs coast to coast, Harbor to World's End.",
       trainName: "Red Line train",
     },
     {
@@ -202,7 +202,7 @@ export const worldData = {
         },
       ],
       description:
-        "Pretty views and damp platforms. The substation next door hums a note only dogs enjoy.",
+        "Nice views and damp platforms. I hope you packed your umbrella; there's a guy who sells them, but you'll pay a pretty penny.",
     },
     {
       id: "end",
@@ -217,7 +217,7 @@ export const worldData = {
         },
       ],
       description:
-        "The last stop on the Red Line. Nobody means to come here. Everybody eventually does.",
+        "The last stop on the Red Line. Some people come here on purpose, but most people come here by accident.",
     },
     {
       id: "prk",
@@ -237,7 +237,7 @@ export const worldData = {
         },
       ],
       description:
-        "Leafy, quiet, and faintly smug. The kind of station with strong opinions about litter.",
+        "Leafy, quiet, and faintly smug. Its staff have strong opinions about you and your litter.",
     },
     {
       id: "bay",
@@ -291,7 +291,8 @@ export const worldData = {
           minutes: 3,
         },
       ],
-      description: "Where Green meets the Circle. Trains loiter here and schedules come to die.",
+      description:
+        "Where Green meets the Circle. Lots of food trucks outside, and worth the trip just for the falafel.",
     },
   ],
   sites: [
@@ -310,7 +311,8 @@ export const worldData = {
       type: "signal-cabin",
       zonesPresent: ["z3"],
       nearestStation: "jct",
-      description: "A shed full of levers that decide who lives. Please do not touch the levers.",
+      description:
+        "A shed full of small levers that could cause big problems. Please do not touch the levers.",
     },
     {
       id: "sub",
@@ -318,7 +320,7 @@ export const worldData = {
       type: "substation",
       zonesPresent: ["z3"],
       nearestStation: "riv",
-      description: "It hums, it sparks, it powers the line. It does not forgive a careless hand.",
+      description: "It hums with high voltage and the occasional shower of sparks.",
     },
   ],
   controlCenter: {
@@ -327,7 +329,7 @@ export const worldData = {
     type: "control-center",
     zonesPresent: ["z2", "z3", "z4"],
     description:
-      "The brain of the network. One room runs every train, signal, and gate. If an attacker reaches this floor, the run is already lost.",
+      "The brain of the network. Always alive with flashing lights, flickering screens, and people yelling.",
   },
   doors: [
     {

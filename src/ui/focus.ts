@@ -1,8 +1,8 @@
 /**
- * Shared modal-dialog plumbing: the focus trap `IntroOverlay` and `TraceOverlay`
- * both wrap Tab/Shift+Tab with, and the outside-pointer dismissal both wire to
- * their backdrop. This is the one place that logic lives, so the two never
- * drift apart.
+ * Shared modal-dialog plumbing: the focus trap `TraceOverlay`, `SidePanel`, and
+ * `MapDialogShell` all wrap Tab/Shift+Tab with, and the outside-pointer dismissal
+ * they all wire to their backdrop. This is the one place that logic lives, so none
+ * of them drift apart.
  */
 import type { RefObject } from "react";
 
