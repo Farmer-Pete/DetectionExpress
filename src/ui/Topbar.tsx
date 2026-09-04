@@ -46,7 +46,7 @@ export function Topbar({ onOpenMenu, hamburgerTriggerRef }: TopbarProps) {
           type="button"
           ref={hamburgerTriggerRef}
           className="topbar-menu-button"
-          aria-label="Open menu"
+          aria-label="Open side panel"
           onClick={onOpenMenu}
         >
           <MenuIcon aria-hidden="true" size={18} />

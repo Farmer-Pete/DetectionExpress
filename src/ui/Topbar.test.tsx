@@ -43,7 +43,7 @@ describe("Topbar", () => {
   it("renders the hamburger button, wired to hamburgerTriggerRef, with no popup of its own", () => {
     const hamburgerTriggerRef = createRef<HTMLButtonElement>();
     renderTopbar({ hamburgerTriggerRef });
-    const trigger = screen.getByRole("button", { name: /menu/i });
+    const trigger = screen.getByRole("button", { name: /side panel/i });
     expect(hamburgerTriggerRef.current).toBe(trigger);
     expect(trigger.getAttribute("aria-haspopup")).toBeNull();
     expect(screen.queryByRole("menu")).toBeNull();
@@ -52,7 +52,7 @@ describe("Topbar", () => {
   it("clicking the hamburger calls onOpenMenu", () => {
     const onOpenMenu = vi.fn();
     renderTopbar({ onOpenMenu });
-    fireEvent.click(screen.getByRole("button", { name: /menu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /side panel/i }));
     expect(onOpenMenu).toHaveBeenCalledTimes(1);
   });
 
@@ -61,7 +61,7 @@ describe("Topbar", () => {
     const actions = container.querySelector(".topbar-actions");
     expect(actions).not.toBeNull();
     const children = actions ? [...actions.children] : [];
-    expect(children.at(-1)).toBe(screen.getByRole("button", { name: /menu/i }));
+    expect(children.at(-1)).toBe(screen.getByRole("button", { name: /side panel/i }));
   });
 
   it("no longer renders a standalone map toggle or How this works button", () => {

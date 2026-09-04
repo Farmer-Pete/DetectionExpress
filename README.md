@@ -21,9 +21,10 @@ Detection Express is built to be taken apart.
 - **Detection practice.** 30 scenarios, from a single brute-forced PIN to network-wide
   credential stuffing, most grounded in a real MITRE ATT&CK technique. Write a rule that
   catches the attack and leaves the benign traffic alone.
-- **Rewrite the engine live.** Click Edit Engine in the app. The side panel holds the
-  assembled JavaScript engine as editable text. Edit it and press Apply. A failed edit
-  shows its error in the panel and leaves the running engine untouched.
+- **Rewrite the engine live.** Open the side panel from the hamburger button and switch to
+  its Algorithm tab. It holds the assembled JavaScript engine as editable text. Edit it and
+  press Apply. A failed edit shows its error in the panel and leaves the running engine
+  untouched.
 - **Score it headless.** Run any scenario through the real engine with no browser and no UI:
 
   ```bash

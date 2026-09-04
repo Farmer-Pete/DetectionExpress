@@ -218,7 +218,7 @@ describe("App browse-mode isolation (GH105)", () => {
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(useGameStore.getState().transport.frozen).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /menu/i }));
+    fireEvent.click(screen.getByRole("button", { name: /side panel/i }));
 
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
     expect(screen.getByRole("dialog")).toBeDefined();

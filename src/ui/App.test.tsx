@@ -39,7 +39,7 @@ beforeEach(() => {
  *  (chaos, by default). GH132-PLAN.md M1 (design revision): the hamburger no
  *  longer opens a popup — it opens the panel directly. */
 function openPanel(): void {
-  fireEvent.click(screen.getByRole("button", { name: /menu/i }));
+  fireEvent.click(screen.getByRole("button", { name: /side panel/i }));
 }
 
 /** Opens the panel (via the hamburger) and switches it to the named tab. */
@@ -227,7 +227,7 @@ describe("App shell", () => {
   it("carries the Hire Me button and the hamburger button in the topbar", () => {
     render(<App createPipelineController={() => stubController()} />);
     expect(screen.getByRole("button", { name: hireMe.heading })).toBeDefined();
-    expect(screen.getByRole("button", { name: /menu/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /side panel/i })).toBeDefined();
   });
 
   it("reflects the store frozen state into the controller on mount", () => {
@@ -758,7 +758,7 @@ describe("App tour (GH132-PLAN.md M2)", () => {
     render(
       <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
     );
-    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
+    const hamburgerTrigger = screen.getByRole("button", { name: /side panel/i });
 
     startTourFromOptions();
     await act(async () => {
