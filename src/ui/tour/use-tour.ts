@@ -49,6 +49,11 @@ import { tourSteps } from "./tour-steps.data";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
+/** The mobile breakpoint (GH133-PLAN.md): the identical string `src/index.css` uses
+ *  for `.metro-view`/`.metro-key`'s own mobile rules, so `startTour`'s one-time read
+ *  and the CSS never drift apart. */
+const NARROW_QUERY = "(max-width: 719.98px)";
+
 // In-memory, module-scoped (deliberately NOT component state): "at most one auto-start
 // per loaded session" (GH132-PLAN.md M3, "Session guard" finding 9) has to survive past
 // any single hook instance's lifetime — a ref would reset on a fresh mount, defeating
@@ -74,6 +79,12 @@ export interface UseTourArgs {
   openDrawer?: (() => void) | undefined;
   /** Closes the tour-mode side panel. Wired to `useSidePanel`'s `closeForTour`. */
   closeDrawer?: (() => void) | undefined;
+  /** Whether a modal currently owns the shell (Codex round 3 MAJOR). The auto-start
+   *  defers — without consuming its one-shot session guard — while this reads true, so
+   *  a first-load tour never drives over an open modal such as the legend dialog. Read
+   *  lazily at the auto-start timer, so `App.tsx` can back it with a ref it writes
+   *  after `modalOpen` is derived. Omitted (or absent) means "never blocked". */
+  isModalOpen?: (() => boolean) | undefined;
 }
 
 export interface TourController {
@@ -107,8 +118,13 @@ function waitFor(predicate: () => boolean, isCurrent: () => boolean): Promise<vo
   });
 }
 
-/** `tourSteps` + `tourCopy`, resolved into driver.js's own step shape. */
-function buildSteps(): TourDriveStepConfig[] {
+/** `tourSteps` + `tourCopy`, resolved into driver.js's own step shape. On a narrow
+ *  screen (GH133-PLAN.md), every step's `side` is forced to `"bottom"`: the desktop
+ *  `side` values in `tour-steps.data.ts` assume room to a step's left/right/top that
+ *  a phone viewport does not have, and driver.js itself flips to top near the page
+ *  bottom when there is no room below. Not exported: only `startTour` (below) ever
+ *  needs it, so it stays this module's own concern. */
+function buildSteps(isNarrow: boolean): TourDriveStepConfig[] {
   return tourSteps.map((step) => {
     const copy = tourCopy[step.copyKey];
     return {
@@ -116,7 +132,7 @@ function buildSteps(): TourDriveStepConfig[] {
       popover: {
         title: copy.title,
         description: copy.description,
-        side: step.side,
+        side: isNarrow ? "bottom" : step.side,
       },
     };
   });
@@ -127,6 +143,7 @@ export function useTour({
   createDriver = createTourDriver,
   openDrawer,
   closeDrawer,
+  isModalOpen,
 }: UseTourArgs): TourController {
   const [active, setActive] = useState(false);
   // A pure, one-time read (GH132-PLAN.md M3): taken in a lazy initializer, so it can
@@ -208,9 +225,13 @@ export function useTour({
     };
 
     const reducedMotion = window.matchMedia(REDUCED_MOTION_QUERY).matches;
+    // A one-time read (GH133-PLAN.md), not a listener: driver.js recomputes its own
+    // popover geometry on resize and falls back to a fitting side, so a rotated
+    // popover stays usable even though this value does not re-place mid-tour.
+    const isNarrow = window.matchMedia(NARROW_QUERY).matches;
 
     const instance = createDriver({
-      steps: buildSteps(),
+      steps: buildSteps(isNarrow),
       disableActiveInteraction: true,
       animate: !reducedMotion,
       onNextClick: () => navigate(1),
@@ -245,12 +266,21 @@ export function useTour({
   // called locally, from the effect's own timer — never passed down (unlike App.tsx's
   // `openDrawer`/`closeDrawer` refs, which are handed to `useTour` and so cannot be
   // Effect Events).
-  const autoStart = useEffectEvent((): void => {
+  // Returns whether the auto-start is settled — either it started, or a prior mount
+  // this session already did. Returns false ONLY when a modal is open (Codex round 3
+  // MAJOR): the tour must not drive over an open legend/dialog, so it defers WITHOUT
+  // consuming the one-shot session guard, and the effect below re-arms until the modal
+  // closes. On first load no modal is open, so this starts immediately as before.
+  const autoStart = useEffectEvent((): boolean => {
     if (autoStartedThisSession) {
-      return; // a prior mount (this session) already auto-started; retake is unaffected
+      return true; // a prior mount (this session) already auto-started; retake is unaffected
+    }
+    if (isModalOpen?.() === true) {
+      return false; // a modal owns the shell; wait — do not consume the session guard
     }
     autoStartedThisSession = true;
     startTour();
+    return true;
   });
 
   // Auto-start on first load, StrictMode-safe (GH132-PLAN.md M3, see the module doc):
@@ -260,11 +290,19 @@ export function useTour({
   // effect it replaces.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
+    // Re-arm while the auto-start is blocked by an open modal (Codex round 3): each
+    // tick either settles (started, or already started this session) or re-defers, so
+    // a modal open at load only delays the tour until it closes — it never suppresses
+    // it. `pending` stays the single cancellable handle the cleanup below clears, so
+    // Strict Mode's teardown still cancels a not-yet-fired start exactly as before.
+    const tick = (): void => {
+      pending = null;
+      if (!autoStart()) {
+        pending = setTimeout(tick, 100);
+      }
+    };
     if (!hasSeenAtMount) {
-      pending = setTimeout(() => {
-        pending = null;
-        autoStart();
-      }, 0);
+      pending = setTimeout(tick, 0);
     }
     return () => {
       if (pending !== null) {

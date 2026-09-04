@@ -112,6 +112,37 @@ describe("LogPanel", () => {
     expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 1 }]);
   });
 
+  it("gives the row button an accessible name that includes the sensor, who, where, and result (GH133-PLAN.md, survives the narrow-screen who/where collapse)", () => {
+    setSnapshot([kioskEvent(3)]);
+    render(<LogPanel />);
+    const name = screen.getByTestId("log-row-3").getAttribute("aria-label");
+    expect(name).toContain("Account kiosk"); // the sensor label, from sensorLabel(view.sensor)
+    expect(name).toContain("acct-3");
+    expect(name).toContain("K1");
+    expect(name).toContain("OK");
+  });
+
+  it("drops an empty who field from the accessible name instead of a bare comma", () => {
+    // door-contact carries no actor: `toLogRow` gives it who: "".
+    setSnapshot([
+      {
+        id: 7,
+        ts: 12,
+        sensor: "door-contact",
+        placeId: "dep",
+        reading: {
+          sensor: "door-contact",
+          reading: { ts: 12, site: "dep", door: "D1", event: "open" },
+        },
+        scored: false,
+      },
+    ]);
+    render(<LogPanel />);
+    const name = screen.getByTestId("log-row-7").getAttribute("aria-label");
+    expect(name).not.toMatch(/,\s*,/);
+    expect(name).toContain("OPENED");
+  });
+
   it("carries data-scored-event-id only on a scored row, keyed by scoredEventId (not the world id)", () => {
     setSnapshot([
       kioskEvent(5, { scored: true, scoredEventId: 42 }),

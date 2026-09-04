@@ -67,7 +67,7 @@ import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
-import { formatClock, toLogRow } from "./formatters";
+import { formatClock, type LogRow as LogRowView, sensorLabel, toLogRow } from "./formatters";
 
 /** Matches the CSS `waveflash` keyframes' 0.6s duration (`src/index.css`). */
 const WAVEFLASH_MS = 600;
@@ -154,6 +154,19 @@ interface CitedRowStyle extends CSSProperties {
   "--hunt-color"?: string;
 }
 
+/** The row button's accessible name (GH133-PLAN.md Codex MAJOR): below 480px the
+ *  row's who/where cells go `display: none` (`src/index.css`), which removes them
+ *  from the screen-reader tree along with the visual layout. This carries the same
+ *  fields — sensor, who, where, result — in the accessible name regardless of the
+ *  viewport, so a screen reader never loses information a sighted narrow-screen
+ *  player still gets from the tap-through event dialog. `who`/`where` are blank for
+ *  some sensor kinds (`toLogRow`, e.g. door-contact, platform-camera); an empty part
+ *  is dropped rather than rendered as a bare comma. */
+function logRowAriaLabel(view: LogRowView): string {
+  const parts = [sensorLabel(view.sensor), view.who, view.where, view.result];
+  return parts.filter((part) => part !== "").join(", ");
+}
+
 interface LogRowProps {
   event: WorldLogEvent;
   /** Present while this row is cited evidence for a just-landed finding. Only a
@@ -176,6 +189,7 @@ const LogRow = memo(function LogRow({ event, flash, onSelect }: LogRowProps) {
       className={classes.join(" ")}
       data-testid={`log-row-${event.id}`}
       data-scored-event-id={event.scored ? event.scoredEventId : undefined}
+      aria-label={logRowAriaLabel(view)}
       style={style}
       onClick={(clickEvent) => {
         // Safari does not focus a clicked <button> by default; force it so the event

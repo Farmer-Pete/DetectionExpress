@@ -965,6 +965,161 @@ describe("App wave shake (#38 juice item 1)", () => {
   });
 });
 
+// The mobile legend dialog (GH133-PLAN.md): a fifth overlay, routed through
+// ModalHost like the other four, with the same overlay-exclusivity guards
+// `onMapSelect`/`onEventSelect` already carry.
+describe("App legend dialog (GH133-PLAN.md)", () => {
+  function openLegend(): void {
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+  }
+
+  it("opens the legend dialog, inerts the shell, and sets overlayOpen", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openLegend();
+
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(true);
+    expect(useGameStore.getState().overlayOpen).toBe(true);
+  });
+
+  it("closes on Escape and lifts the shell's inert state", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openLegend();
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Legend" }), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+    expect(useGameStore.getState().overlayOpen).toBe(false);
+  });
+
+  it("openLegend no-ops while the side panel is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openPanel();
+
+    openLegend();
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("openLegend no-ops while the trace dialog is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ selection: { seq: 1 } });
+    });
+
+    openLegend();
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+  });
+
+  it("openLegend no-ops while the map/event dialog stack is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    openLegend();
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+  });
+
+  it("a map click no-ops while the legend is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openLegend();
+
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+  });
+
+  it("a log-row click no-ops while the legend is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    openLegend();
+
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+  });
+
+  it("the hamburger no-ops while the legend is open", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openLegend();
+
+    fireEvent.click(screen.getByRole("button", { name: /side panel/i }));
+
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+  });
+
+  it("closes the legend on a resize to >=720px and restores focus off <body>", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    window.innerWidth = 500;
+    openLegend();
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+
+    act(() => {
+      window.innerWidth = 720;
+      fireEvent(window, new Event("resize"));
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+    // The restore ran rather than dropping focus to <body>. happy-dom applies no media
+    // query, so the chip stays focusable and the restore lands on it; a real browser
+    // hides the chip at this width and the dialog's fallback (the map region) takes it
+    // instead — the branch `LegendDialog.test.tsx` covers directly (Codex round 3).
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show legend" }));
+  });
+
+  it("openLegend no-ops while the tour is active", async () => {
+    localStorage.clear();
+    resetTourAutoStartForTests();
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    // Let the first-load tour auto-start, so `tour.active` is true.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(createDriver).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+  });
+
+  it("defers the tour auto-start while the legend is open, then starts once it closes", async () => {
+    localStorage.clear();
+    resetTourAutoStartForTests();
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    // Open the legend before the deferred auto-start fires.
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+
+    // The 0ms auto-start tick sees a modal open, so it re-defers without starting.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(createDriver).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+
+    // Close the legend; the re-armed tick (100ms) then finds no modal and starts.
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Legend" }), { key: "Escape" });
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    });
+    expect(createDriver).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006)", () => {
   function setWaveAndStatus(wave: SimSnapshot["wave"], status: SimSnapshot["status"]): void {
     useGameStore.setState({ snapshot: { ...emptySnapshot(), wave, status } });

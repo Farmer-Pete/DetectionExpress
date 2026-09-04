@@ -70,6 +70,18 @@ function stubReducedMotion(matches: boolean): void {
   }));
 }
 
+/** Stubs `window.matchMedia` so the narrow-screen query (`(max-width: 719.98px)`,
+ *  `use-tour.ts`'s `NARROW_QUERY`) reads `narrow`, independent of any other query
+ *  (e.g. reduced-motion) `startTour` also reads. */
+function stubNarrow(narrow: boolean): void {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(max-width: 719.98px)" ? narrow : false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
+}
+
 /** Flushes the auto-start effect's deferred macrotask (`setTimeout(fn, 0)`). */
 async function flushDeferredAutoStart(): Promise<void> {
   await act(async () => {
@@ -107,6 +119,32 @@ describe("useTour", () => {
       expect(built?.popover.description).toBe(tourCopy[step.copyKey].description);
       expect(built?.popover.side).toBe(step.side);
     });
+  });
+
+  it("uses each step's desktop side (tour-steps.data.ts) on a wide screen", () => {
+    stubNarrow(false);
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    tourSteps.forEach((step, index) => {
+      expect(configs[0]?.steps[index]?.popover.side).toBe(step.side);
+    });
+  });
+
+  it("forces every step's side to bottom on a narrow screen (GH133-PLAN.md)", () => {
+    stubNarrow(true);
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    for (const built of configs[0]?.steps ?? []) {
+      expect(built.popover.side).toBe("bottom");
+    }
   });
 
   it("calls drive() on the built instance", () => {
