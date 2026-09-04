@@ -46,19 +46,23 @@ describe("LegendDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("traps Tab within the dialog", () => {
+  it("traps Tab from the dialog container onto its focusable control", () => {
     render(
       <LegendDialog onClose={() => {}} triggerRef={createRef()} fallbackFocusRef={noFallback()} />,
     );
     const dialog = screen.getByRole("dialog", { name: "Legend" });
     const close = screen.getByRole("button", { name: "Close" });
-    close.focus();
 
-    // The close button is the dialog's only focusable control, so a Tab from it wraps
-    // back to it — proving `trapTab` is wired into onKeyDown and keeps focus inside.
-    fireEvent.keyDown(dialog, { key: "Tab" });
+    // Focus starts on the container (not a focusable control), so `trapTab` must MOVE
+    // focus onto the close button and prevent the default. Starting off-control makes
+    // this fail if `trapTab` is unwired — unlike a same-control assertion, which
+    // synthetic keydown would satisfy even with the trap removed (Codex round 3, r2).
+    dialog.focus();
+    const tabNotPrevented = fireEvent.keyDown(dialog, { key: "Tab" });
     expect(document.activeElement).toBe(close);
+    expect(tabNotPrevented).toBe(false); // default prevented -> the trap intercepted it
 
+    dialog.focus();
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(close);
   });

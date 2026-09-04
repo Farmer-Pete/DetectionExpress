@@ -253,9 +253,9 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   const openDrawerRef = useRef<() => void>(() => {});
   const closeDrawerRef = useRef<() => void>(() => {});
   // Whether any modal owns the shell, read lazily by the tour's auto-start (Codex
-  // round 3 MAJOR). Written every render below, once `modalOpen` is derived — the same
-  // late-write-read-lazily bridge as `openDrawerRef`/`closeSidePanelRef`, needed
-  // because `useTour` is created before `modalOpen` exists. The auto-start defers
+  // round 3). A ref bridges the cycle because `useTour` is created before `modalOpen`
+  // exists; it is written on COMMIT by a `useLayoutEffect` below (never during render,
+  // which could record an uncommitted concurrent-render value). The auto-start defers
   // (without consuming its one-shot session guard) while this reads true, so the tour
   // never drives over an open legend.
   const modalOpenRef = useRef(false);
@@ -394,11 +394,15 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   }, [legendOpen]);
 
   const modalOpen = traceOpen || sidePanel.open || stackOpen || legendOpen;
-  // Bridge `modalOpen` to the tour's auto-start guard (see `modalOpenRef` above): a
-  // render-phase ref write, the same pattern as `openDrawerRef`/`closeSidePanelRef`,
-  // so the auto-start reads the latest value lazily at its timer without `useTour`
-  // depending on a value derived after it is created.
-  modalOpenRef.current = modalOpen;
+  // Bridge `modalOpen` to the tour's auto-start guard (see `modalOpenRef` above) on
+  // COMMIT, not during render (Codex round 3, round 2): a render-phase ref write can
+  // record an uncommitted value from a discarded concurrent render, which the
+  // auto-start timer could then read and start the tour over a still-open modal. A
+  // `useLayoutEffect` lands the write in the same commit as the inert change below, so
+  // the timer only ever reads committed modal state.
+  useLayoutEffect(() => {
+    modalOpenRef.current = modalOpen;
+  }, [modalOpen]);
 
   // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
   // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
