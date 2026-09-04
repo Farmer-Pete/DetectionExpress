@@ -50,6 +50,9 @@ import { useGameStore } from "../../game/store";
 import { outcomeLabel } from "../decisions/view-model";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { formatClock } from "../log/formatters";
+import { Kbd } from "../shortcuts/Kbd";
+import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { useShortcut } from "../shortcuts/use-shortcut";
 import {
   buildDecisionTraceViewModel,
   buildTraceViewModel,
@@ -346,9 +349,24 @@ function DecisionTraceContent({
 }
 
 function CloseButton({ onClose }: { onClose: () => void }) {
+  // GH137-PLAN.md M2: badge-only (dispatch: false) — Escape already closes the trace
+  // dialog via this component's own onKeyDown handler above.
+  const { key } = useShortcut({
+    scope: "trace",
+    id: "close",
+    onActivate: () => {},
+    enabled: true,
+  });
   return (
-    <button type="button" className="trace-close" aria-label="Close trace" onClick={onClose}>
+    <button
+      type="button"
+      className="trace-close"
+      aria-label="Close trace"
+      aria-keyshortcuts={key === undefined ? undefined : kbdGlyph(key)}
+      onClick={onClose}
+    >
       <span aria-hidden="true">×</span>
+      {key !== undefined ? <Kbd shortcutKey={key} /> : null}
     </button>
   );
 }

@@ -16,15 +16,13 @@
  * single field is what both the invariant test and `use-shortcuts.tsx`'s registration
  * path read to tell a badge-only entry from a live one.
  *
- * MILESTONE NOTE (GH137-PLAN.md M1): only the `shell` scope is wired into real controls
- * this milestone (Topbar hamburger, LogPanel Freeze/speeds, FindingsPanel "+N more").
- * The other scopes are declared here too — `SHORTCUTS` is a `Record` over the whole
- * `Scope` union, so every member needs an entry — transcribed from the plan's audited
- * "Command inventory" table, but nothing outside `shell` is wired to a real component
- * yet (M2 lifts Hire Me and wires the composite dialog/panel scopes; M3 adds the tour
- * hint and the operability sweep). `shell` itself does not yet carry Hire Me's `H`
- * either: Hire Me still owns its `open` state privately, so `resolveActiveScope`
- * (`use-shortcuts.tsx`) cannot see it — that binding ships in M2 with the state lift.
+ * MILESTONE NOTE (GH137-PLAN.md M2): M1 wired only the `shell` scope (Topbar hamburger,
+ * LogPanel Freeze/speeds, FindingsPanel "+N more"). M2 lifts Hire Me's `open` state into
+ * `App` (so `shell`'s `H` opener and the `hireMe` scope's own `H`/Escape both resolve
+ * correctly) and wires every composite dialog/panel scope: `sidepanel:*` (Close badge,
+ * plus Options' Retake tour/Map toggle and Algorithm's Reset/Apply), `mapDialog:event` /
+ * `mapDialog:place` (Back, Close badge, Event's own Open place), `trace` and `legend`
+ * (Close badge each). M3 still owes the tour popover hint and the operability sweep.
  */
 
 /** One complete visible surface. See the module doc for what "complete" means. */
@@ -36,6 +34,7 @@ export type Scope =
   | "mapDialog:event"
   | "mapDialog:place"
   | "trace"
+  | "legend"
   | "hireMe";
 
 export interface ShortcutDef {
@@ -69,10 +68,12 @@ export const SHORTCUTS: Readonly<Record<Scope, readonly ShortcutDef[]>> = {
     { id: "speed-1x", key: "2", label: "1x" },
     { id: "speed-2x", key: "3", label: "2x" },
     { id: "findings-more", key: "F", label: "Show more findings" },
+    { id: "legend-open", key: "L", label: "Show legend" },
+    // Opens the Hire Me card (it is closed while this scope is active — the card
+    // owns its own "hireMe" scope once open, with its own "H" entry below that
+    // closes it, GH137-PLAN.md M2).
+    { id: "hire-me-open", key: "H", label: "Hire me" },
   ],
-  // Declared for completeness (SHORTCUTS is a Record over the whole Scope union) and
-  // transcribed from GH137-PLAN.md's audited "Command inventory" table. Not wired to a
-  // real control until M2.
   "sidepanel:chaos": [{ id: "close", key: "Escape", label: "Close panel", dispatch: false }],
   "sidepanel:algorithm": [
     { id: "close", key: "Escape", label: "Close panel", dispatch: false },
@@ -94,6 +95,7 @@ export const SHORTCUTS: Readonly<Record<Scope, readonly ShortcutDef[]>> = {
     { id: "close", key: "Escape", label: "Close", dispatch: false },
   ],
   trace: [{ id: "close", key: "Escape", label: "Close trace", dispatch: false }],
+  legend: [{ id: "close", key: "Escape", label: "Close legend", dispatch: false }],
   hireMe: [
     { id: "hire-me-close", key: "H", label: "Hire me" },
     { id: "dismiss", key: "Escape", label: "Dismiss", dispatch: false },

@@ -11,29 +11,47 @@
  * The toggle carries `data-tour="hire"` (GH132-PLAN.md M2, the 8-step tour's step 7):
  * the one tour anchor `App.tsx` never has to reach into a deeper child for, since
  * `Topbar` mounts this component directly.
+ *
+ * GH137-PLAN.md M2: `open` is now a controlled prop (`onOpenChange` reports every
+ * change back) instead of a private `useState` — lifted into `App` so
+ * `resolveActiveScope` (`use-shortcuts.tsx`) can see it and give it its own `"hireMe"`
+ * scope, instead of shell shortcuts staying live underneath its scrim. This component
+ * still owns the open-card Escape/outside-click listeners and the confetti call; it
+ * just reports the resulting open/close through `onOpenChange` rather than setting its
+ * own state. It also carries its own two `useShortcut` registrations: the shell
+ * scope's "H" (opens while closed) and the hireMe scope's own "H" (closes while open),
+ * plus the hireMe scope's badge-only "Escape" (already handled by the listener below;
+ * this only renders the Dismiss scrim's badge).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { type ConfettiOrigin, celebrate as fireConfetti, originOf } from "./confetti";
 import type { HireMeCopy } from "./content/narrative";
+import { Kbd } from "./shortcuts/Kbd";
+import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface HireMeProps {
   copy: HireMeCopy;
+  /** Whether the card is open. Owned by `App` (GH137-PLAN.md M2). */
+  open: boolean;
+  /** Reports every open/close this component would otherwise have set itself: the
+   *  toggle click, Escape, and an outside click. */
+  onOpenChange: (open: boolean) => void;
   // The confetti seam, injectable like the app's controller factories so a test can
   // pass a spy instead of running canvas-confetti. Defaults to the real burst.
-  celebrate?: (origin: ConfettiOrigin) => void;
+  celebrate?: ((origin: ConfettiOrigin) => void) | undefined;
 }
 
 const CARD_ID = "hire-me-card";
 
-export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
-  const [open, setOpen] = useState(false);
+export function HireMe({ copy, open, onOpenChange, celebrate = fireConfetti }: HireMeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   // Open the card, dim the app, and celebrate. Extracted so the toggle and any other
-  // caller take the same path; closing is the plain `setOpen(false)`.
+  // caller take the same path; closing is the plain `onOpenChange(false)`.
   const openCard = (): void => {
-    setOpen(true);
+    onOpenChange(true);
     if (toggleRef.current !== null) {
       celebrate(originOf(toggleRef.current));
     }
@@ -49,13 +67,13 @@ export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape" && !event.defaultPrevented) {
-        setOpen(false);
+        onOpenChange(false);
       }
     };
     const onClick = (event: MouseEvent): void => {
       const container = containerRef.current;
       if (container !== null && event.target instanceof Node && !container.contains(event.target)) {
-        setOpen(false);
+        onOpenChange(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -64,7 +82,32 @@ export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
       window.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("click", onClick);
     };
-  }, [open]);
+  }, [open, onOpenChange]);
+
+  // GH137-PLAN.md M2: the shell scope's opener, live only while the card is closed —
+  // the same physical "H" the hireMe scope's closer (just below) answers to while
+  // open, but the two never collide: `resolveActiveScope` never reports both scopes
+  // active at once, and `enabled` here mirrors the toggle's own closed/open state.
+  const { key: openKey } = useShortcut({
+    scope: "shell",
+    id: "hire-me-open",
+    onActivate: openCard,
+    enabled: !open,
+  });
+  const { key: closeKey } = useShortcut({
+    scope: "hireMe",
+    id: "hire-me-close",
+    onActivate: () => onOpenChange(false),
+    enabled: open,
+  });
+  // Badge-only: the key already has an owner (the Escape listener above).
+  const { key: dismissKey } = useShortcut({
+    scope: "hireMe",
+    id: "dismiss",
+    onActivate: () => {},
+    enabled: open,
+  });
+  const toggleKey = open ? closeKey : openKey;
 
   return (
     <div className={open ? "hire-me open" : "hire-me"} ref={containerRef}>
@@ -75,8 +118,11 @@ export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
           type="button"
           className="hire-me-scrim"
           aria-label="Dismiss"
-          onClick={() => setOpen(false)}
-        />
+          aria-keyshortcuts={dismissKey === undefined ? undefined : kbdGlyph(dismissKey)}
+          onClick={() => onOpenChange(false)}
+        >
+          {dismissKey !== undefined ? <Kbd shortcutKey={dismissKey} /> : null}
+        </button>
       ) : null}
       <button
         type="button"
@@ -84,10 +130,12 @@ export function HireMe({ copy, celebrate = fireConfetti }: HireMeProps) {
         className="hire-me-toggle"
         aria-expanded={open}
         aria-controls={CARD_ID}
+        aria-keyshortcuts={toggleKey === undefined ? undefined : kbdGlyph(toggleKey)}
         data-tour="hire"
-        onClick={() => (open ? setOpen(false) : openCard())}
+        onClick={() => (open ? onOpenChange(false) : openCard())}
       >
         {copy.heading}
+        {toggleKey !== undefined ? <Kbd shortcutKey={toggleKey} /> : null}
       </button>
       {open ? (
         <div id={CARD_ID} className="hire-me-card">

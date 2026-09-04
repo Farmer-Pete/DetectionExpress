@@ -19,6 +19,9 @@
  */
 import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
+import { Kbd } from "../shortcuts/Kbd";
+import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { useShortcut } from "../shortcuts/use-shortcut";
 import { LegendSections } from "./LegendSections";
 
 interface LegendDialogProps {
@@ -37,6 +40,15 @@ interface LegendDialogProps {
 
 export function LegendDialog({ onClose, triggerRef, fallbackFocusRef }: LegendDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+
+  // GH137-PLAN.md M2: badge-only (dispatch: false) — Escape already closes this
+  // dialog via the onKeyDown handler below.
+  const { key: closeKey } = useShortcut({
+    scope: "legend",
+    id: "close",
+    onActivate: () => {},
+    enabled: true,
+  });
 
   // Move focus into the dialog on mount; restore it on unmount. This component only
   // ever mounts while `legendOpen`, so "mount"/"unmount" IS "open"/"close" here —
@@ -95,9 +107,11 @@ export function LegendDialog({ onClose, triggerRef, fallbackFocusRef }: LegendDi
             type="button"
             className="legend-dialog-close"
             aria-label="Close"
+            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
             onClick={onClose}
           >
             <span aria-hidden="true">×</span>
+            {closeKey !== undefined ? <Kbd shortcutKey={closeKey} /> : null}
           </button>
         </header>
         <div className="legend-dialog-body">

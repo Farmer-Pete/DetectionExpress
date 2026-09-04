@@ -6,15 +6,15 @@
  *
  * ## `activeScope` is derived, not pushed/popped
  * `App` already owns the state that decides which surface is on screen (`traceOpen`,
- * the map-dialog stack's top kind, the side panel's open+tab, and — from M2, once Hire
- * Me is lifted — `hireMeOpen`). `resolveActiveScope` is a pure function of exactly that
- * state, so there is one source of truth and no lifecycle-ordering hazard (the
- * alternative, a mount-driven push/pop stack, breaks under Strict Mode's double-invoke
- * and any out-of-order cleanup). When more than one flag is briefly true it applies a
- * fixed precedence, highest first: `trace` > `mapDialog:*` > `sidepanel:*` > `hireMe` >
- * `shell`. `App` already keeps trace, the side panel, and the map dialog mutually
- * exclusive, so the only real overlap this precedence has to settle is `hireMeOpen`
- * against one of the other three.
+ * the map-dialog stack's top kind, `legendOpen`, the side panel's open+tab, and
+ * `hireMeOpen`, lifted into `App` in M2). `resolveActiveScope` is a pure function of
+ * exactly that state, so there is one source of truth and no lifecycle-ordering hazard
+ * (the alternative, a mount-driven push/pop stack, breaks under Strict Mode's
+ * double-invoke and any out-of-order cleanup). When more than one flag is briefly true
+ * it applies a fixed precedence, highest first: `trace` > `mapDialog:*` > `legend` >
+ * `sidepanel:*` > `hireMe` > `shell`. `App` already keeps trace, the side panel, the
+ * map dialog, and the legend mutually exclusive, so the only real overlap this
+ * precedence has to settle is `hireMeOpen` against one of the other four.
  *
  * ## Commit-fresh reads
  * The dispatcher is one long-lived listener, so it must never read a stale
@@ -65,24 +65,28 @@ import { RESERVED, type Scope, type ShortcutDef } from "./shortcuts.data";
 import { isTextEntry } from "./text-entry";
 
 /** The slice of `App`'s own state `resolveActiveScope` needs to pick the one active
- *  surface. M1 note: `hireMeOpen` is always `false` from `App.tsx` this milestone — Hire
- *  Me still owns its `open` state privately; it is lifted into `App` in M2. */
+ *  surface. */
 export interface ShortcutsAppState {
   traceOpen: boolean;
   mapDialogKind: "event" | "place" | null;
+  legendOpen: boolean;
   sidePanelOpen: boolean;
   sidePanelTab: SidePanelTab;
   hireMeOpen: boolean;
 }
 
 /** The single topmost complete surface, or `"shell"` when nothing is open. Pure — see
- *  the module doc for the fixed precedence order. */
+ *  the module doc for the fixed precedence order: `trace` > `mapDialog:*` > `legend` >
+ *  `sidepanel:*` > `hireMe` > `shell`. */
 export function resolveActiveScope(appState: ShortcutsAppState): Scope {
   if (appState.traceOpen) {
     return "trace";
   }
   if (appState.mapDialogKind !== null) {
     return `mapDialog:${appState.mapDialogKind}`;
+  }
+  if (appState.legendOpen) {
+    return "legend";
   }
   if (appState.sidePanelOpen) {
     return `sidepanel:${appState.sidePanelTab}`;

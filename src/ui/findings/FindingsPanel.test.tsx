@@ -12,6 +12,7 @@ import { InspectorShell } from "./InspectorShell";
 const SHELL_APP_STATE: ShortcutsAppState = {
   traceOpen: false,
   mapDialogKind: null,
+  legendOpen: false,
   sidePanelOpen: false,
   sidePanelTab: "chaos",
   hireMeOpen: false,

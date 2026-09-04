@@ -64,3 +64,27 @@ describe("AlgorithmEditor", () => {
     expect(screen.queryByRole("button", { name: /download/i })).toBeNull();
   });
 });
+
+// GH137-PLAN.md M2: Reset ("R") and Apply ("A") carry the sidepanel:algorithm scope's
+// badges. Actual keyboard dispatch (through a real ShortcutsProvider + SidePanel's own
+// scope) is covered at the App level; these check the badge/aria-keyshortcuts data and
+// that neither control's accessible name changes.
+describe("AlgorithmEditor keyboard shortcut badges (GH137-PLAN.md M2)", () => {
+  it("shows an R badge on Reset and an A badge on Apply, aria-keyshortcuts set, names unchanged", () => {
+    render(<AlgorithmEditor onRun={() => {}} />);
+    const reset = screen.getByRole("button", { name: /reset to default/i });
+    expect(reset.getAttribute("aria-keyshortcuts")).toBe("R");
+    expect(reset.querySelector(".kbd")?.textContent).toBe("R");
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply.getAttribute("aria-keyshortcuts")).toBe("A");
+    expect(apply.querySelector(".kbd")?.textContent).toBe("A");
+  });
+
+  it("renders no A badge while Checking... (Apply disabled)", () => {
+    useGameStore.setState({ runPending: true });
+    render(<AlgorithmEditor onRun={() => {}} />);
+    const apply = screen.getByRole("button", { name: "Checking..." });
+    expect(apply.querySelector(".kbd")).toBeNull();
+  });
+});

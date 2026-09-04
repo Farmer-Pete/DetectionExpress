@@ -17,6 +17,12 @@ import { resetTourAutoStartForTests } from "./tour/use-tour";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
+/** The GH137-PLAN.md M2 Hire Me keyboard tests open the real card through `App`'s own
+ *  Topbar, which would otherwise run canvas-confetti's real burst against happy-dom's
+ *  DOM (no real 2D canvas context there). `App`'s `celebrateHireMe` prop is the
+ *  injectable seam for that, mirroring `createPipelineController`/`createTourDriver`. */
+function noCelebrate(): void {}
+
 // The zustand store is a singleton shared across test files, so reset the fields
 // this file reads before each test. Mirrors the reset pattern in store.test.ts.
 //
@@ -1356,5 +1362,246 @@ describe("App keyboard shortcuts, shell scope (GH137-PLAN.md M1)", () => {
 
     // If the tour bail did not fire, M would reopen the side panel here.
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+  });
+});
+
+// GH137-PLAN.md M2: the composite side-panel scopes, wired end-to-end through the real
+// App-owned ShortcutsProvider — the same "not a hand-wrapped test provider" rationale
+// the M1 section above states. Component-level badge/aria-keyshortcuts assertions live
+// in SidePanel.test.tsx/AlgorithmEditor.test.tsx; these cover actual dispatch, scope
+// isolation (a control's key firing only while its own tab is active), and freshness
+// across a tab-change/runPending transition.
+describe("App keyboard shortcuts, side panel composite scopes (GH137-PLAN.md M2)", () => {
+  it("pressing T retakes the tour from the Options tab", () => {
+    const { createDriver, instances } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    openPanelOnTab(/options/i);
+
+    fireEvent.keyDown(document.body, { key: "t" });
+
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+    expect(createDriver).toHaveBeenCalledTimes(1);
+    expect(instances[0]?.driveCalls).toBe(1);
+  });
+
+  it("pressing P toggles the map from the Options tab", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openPanelOnTab(/options/i);
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
+
+    fireEvent.keyDown(document.body, { key: "p" });
+
+    expect(screen.queryByRole("group", { name: "Metro network map" })).toBeNull();
+  });
+
+  it("T and P do not fire while the Chaos tab is active (scope isolation)", () => {
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    openPanel(); // opens on the chaos tab by default
+
+    fireEvent.keyDown(document.body, { key: "t" });
+    fireEvent.keyDown(document.body, { key: "p" });
+
+    expect(createDriver).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Metro network map" })).toBeDefined();
+  });
+
+  it("pressing R resets the source only while the Algorithm tab is active (freshness across a tab switch)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.getState().setAlgorithmSource("// a custom edit");
+    });
+    openPanel(); // chaos tab active
+
+    fireEvent.keyDown(document.body, { key: "r" });
+    expect(useGameStore.getState().source).toBe("// a custom edit"); // unaffected
+
+    fireEvent.click(screen.getByRole("tab", { name: /algorithm/i }));
+    fireEvent.keyDown(document.body, { key: "r" });
+    expect(useGameStore.getState().source).toBe(referenceSource);
+  });
+
+  it("pressing A applies the algorithm; it does not fire while a run is pending (freshness across a runPending flip)", () => {
+    const controller = stubController();
+    render(<App createPipelineController={() => controller} />);
+    openPanelOnTab(/algorithm/i);
+    const baseline = controller.runs;
+
+    fireEvent.keyDown(document.body, { key: "a" });
+    expect(controller.runs).toBe(baseline + 1);
+
+    act(() => {
+      useGameStore.setState({ runPending: true });
+    });
+    fireEvent.keyDown(document.body, { key: "a" });
+    expect(controller.runs).toBe(baseline + 1); // unchanged: Apply is disabled while pending
+  });
+
+  it("every wired sidepanel:* control's accessible name is unchanged and carries aria-keyshortcuts", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openPanelOnTab(/options/i);
+
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    const retake = screen.getByRole("button", { name: "Retake tour" });
+    expect(retake.getAttribute("aria-keyshortcuts")).toBe("T");
+    const mapToggle = screen.getByRole("button", { name: "Hide metro view" });
+    expect(mapToggle.getAttribute("aria-keyshortcuts")).toBe("P");
+
+    fireEvent.click(screen.getByRole("tab", { name: /algorithm/i }));
+    const reset = screen.getByRole("button", { name: /reset to default/i });
+    expect(reset.getAttribute("aria-keyshortcuts")).toBe("R");
+    const apply = screen.getByRole("button", { name: "Apply" });
+    expect(apply.getAttribute("aria-keyshortcuts")).toBe("A");
+  });
+});
+
+describe("App keyboard shortcuts, map/event dialog scopes (GH137-PLAN.md M2)", () => {
+  it("pressing O (Open place) from the event dialog pushes the place dialog on top", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByTestId("log-row-5"));
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+
+    fireEvent.keyDown(document.body, { key: "o" });
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "event", id: 5 },
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+    expect(screen.getByRole("dialog", { name: "Central" })).toBeDefined();
+  });
+
+  it("pressing B goes back from the pushed place dialog to the event dialog underneath (freshness across a push)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByTestId("log-row-5"));
+    fireEvent.click(screen.getByRole("button", { name: "Open place" }));
+    expect(useGameStore.getState().mapDialogStack).toHaveLength(2);
+
+    fireEvent.keyDown(document.body, { key: "b" });
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([{ kind: "event", id: 5 }]);
+  });
+
+  it("B does not fire at the root (single-entry) stack: no Back control to answer it", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Central" }));
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+
+    fireEvent.keyDown(document.body, { key: "b" });
+
+    expect(useGameStore.getState().mapDialogStack).toEqual([
+      { kind: "place", selection: { kind: "node", id: "cen" } },
+    ]);
+  });
+
+  it("B and O do not fire once no map dialog is open (scope isolation)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "b" });
+    fireEvent.keyDown(document.body, { key: "o" });
+    expect(useGameStore.getState().mapDialogStack).toEqual([]);
+  });
+
+  it("every wired mapDialog:* control's accessible name is unchanged and carries aria-keyshortcuts", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    act(() => {
+      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
+    });
+    fireEvent.click(screen.getByTestId("log-row-5"));
+
+    const openPlace = screen.getByRole("button", { name: "Open place" });
+    expect(openPlace.getAttribute("aria-keyshortcuts")).toBe("O");
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+
+    fireEvent.click(openPlace);
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back.getAttribute("aria-keyshortcuts")).toBe("B");
+  });
+});
+
+describe("App keyboard shortcuts, legend (GH137-PLAN.md M2)", () => {
+  it("pressing L opens the legend dialog", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "l" });
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+  });
+
+  it("L does not open the legend while the side panel is open (scope precedence)", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openPanel();
+    fireEvent.keyDown(document.body, { key: "l" });
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+  });
+
+  it("shows an Esc badge on the legend Close, aria-keyshortcuts set", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "l" });
+    const close = screen
+      .getByRole("dialog", { name: "Legend" })
+      .querySelector(".legend-dialog-close");
+    expect(close?.getAttribute("aria-keyshortcuts")).toBe("Esc");
+  });
+});
+
+describe("App keyboard shortcuts, Hire Me (GH137-PLAN.md M2)", () => {
+  it("pressing H opens the Hire Me card from the shell scope", () => {
+    render(<App createPipelineController={() => stubController()} celebrateHireMe={noCelebrate} />);
+    fireEvent.keyDown(document.body, { key: "h" });
+    expect(screen.getByText(/25 years/)).toBeDefined();
+  });
+
+  it("pressing H again closes it (the hireMe scope's own H)", () => {
+    render(<App createPipelineController={() => stubController()} celebrateHireMe={noCelebrate} />);
+    fireEvent.keyDown(document.body, { key: "h" });
+    fireEvent.keyDown(document.body, { key: "h" });
+    expect(screen.queryByText(/25 years/)).toBeNull();
+  });
+
+  it("H does not open Hire Me while the side panel is open (scope precedence)", () => {
+    render(<App createPipelineController={() => stubController()} celebrateHireMe={noCelebrate} />);
+    openPanel();
+    fireEvent.keyDown(document.body, { key: "h" });
+    expect(screen.queryByText(/25 years/)).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("does not fire H while the tour drives (tourOwnsKeyboardRef)", () => {
+    localStorage.clear();
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App
+        createPipelineController={() => stubController()}
+        createTourDriver={createDriver}
+        celebrateHireMe={noCelebrate}
+      />,
+    );
+    startTourFromOptions();
+
+    fireEvent.keyDown(document.body, { key: "h" });
+
+    expect(screen.queryByText(/25 years/)).toBeNull();
+  });
+
+  it("the toggle's accessible name is unchanged and carries aria-keyshortcuts H in both states", () => {
+    render(<App createPipelineController={() => stubController()} celebrateHireMe={noCelebrate} />);
+    const toggle = screen.getByRole("button", { name: hireMe.heading });
+    expect(toggle.getAttribute("aria-keyshortcuts")).toBe("H");
+
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("button", { name: hireMe.heading }).getAttribute("aria-keyshortcuts"),
+    ).toBe("H");
   });
 });

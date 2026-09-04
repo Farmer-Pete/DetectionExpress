@@ -38,6 +38,9 @@ import { placeName } from "../../sim/world/world";
 import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { MapDialogShell } from "../MapDialogShell";
+import { Kbd } from "../shortcuts/Kbd";
+import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { useShortcut } from "../shortcuts/use-shortcut";
 import { eventDetail } from "./event-detail";
 import { formatClock, sensorLabel } from "./formatters";
 
@@ -88,6 +91,7 @@ export function EventDialog({
   return (
     <MapDialogShell
       ariaLabel={`${sensorLabel(ev.sensor)} reading`}
+      scope="mapDialog:event"
       title={sensorLabel(ev.sensor)}
       icon={<Icon className="place-overlay-icon" size={20} color={token} aria-hidden="true" />}
       meta={<span className="place-meta-badge">{formatClock(ev.ts)}</span>}
@@ -145,9 +149,24 @@ function OpenPlaceButton({
   placeId: MapNodeId;
   onOpenPlace: (placeId: MapNodeId) => void;
 }) {
+  // GH137-PLAN.md M2: "Open place" is the mapDialog:event scope's own body command
+  // (not shared chrome, unlike Back/Close), so it registers here rather than in
+  // MapDialogShell.
+  const { key } = useShortcut({
+    scope: "mapDialog:event",
+    id: "open-place",
+    onActivate: () => onOpenPlace(placeId),
+    enabled: true,
+  });
   return (
-    <button type="button" className="event-open-place" onClick={() => onOpenPlace(placeId)}>
+    <button
+      type="button"
+      className="event-open-place"
+      aria-keyshortcuts={key === undefined ? undefined : kbdGlyph(key)}
+      onClick={() => onOpenPlace(placeId)}
+    >
       Open place
+      {key !== undefined ? <Kbd shortcutKey={key} /> : null}
     </button>
   );
 }

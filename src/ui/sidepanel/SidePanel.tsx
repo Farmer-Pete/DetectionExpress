@@ -77,6 +77,9 @@ import { AlgorithmEditor } from "../AlgorithmEditor";
 import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
+import { Kbd } from "../shortcuts/Kbd";
+import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { useShortcut } from "../shortcuts/use-shortcut";
 
 export type SidePanelTab = "chaos" | "algorithm" | "options";
 
@@ -134,6 +137,32 @@ export function SidePanel({
   const isTour = mode === "tour";
   const dialogRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
+
+  // GH137-PLAN.md M2: the Close button is one physical control shared by all three
+  // tabs, so its badge-only Escape entry tracks whichever `sidepanel:*` scope is
+  // currently active. TypeScript narrows this template literal to the `Scope` union
+  // via `tab`'s own `SidePanelTab` union.
+  const closeScope = `sidepanel:${tab}` as const;
+  const { key: closeKey } = useShortcut({
+    scope: closeScope,
+    id: "close",
+    onActivate: () => {},
+    enabled: true,
+  });
+  // The Options tab's two command buttons: always mounted (only their `hidden`
+  // tabpanel ancestor changes), so `enabled` mirrors that real visibility.
+  const { key: retakeTourKey } = useShortcut({
+    scope: "sidepanel:options",
+    id: "retake-tour",
+    onActivate: onStartTour,
+    enabled: tab === "options",
+  });
+  const { key: mapToggleKey } = useShortcut({
+    scope: "sidepanel:options",
+    id: "map-toggle",
+    onActivate: onToggleMap,
+    enabled: tab === "options",
+  });
 
   // The chaos ladder's live wiring (GH126-PLAN.md M3b): one narrow selector per
   // value (ARCHITECTURE.md), read here since this is the ladder's mount site.
@@ -264,6 +293,7 @@ export function SidePanel({
             type="button"
             className="sidepanel-close"
             aria-label="Close panel"
+            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
             disabled={isTour}
             onClick={() => {
               if (!isTour) {
@@ -272,6 +302,7 @@ export function SidePanel({
             }}
           >
             <span aria-hidden="true">×</span>
+            {closeKey !== undefined ? <Kbd shortcutKey={closeKey} /> : null}
           </button>
         </div>
         <div
@@ -297,7 +328,7 @@ export function SidePanel({
           className="sidepanel-body"
           hidden={tab !== "algorithm"}
         >
-          <AlgorithmEditor onRun={onApply} />
+          <AlgorithmEditor onRun={onApply} active={tab === "algorithm"} />
         </div>
         <div
           role="tabpanel"
@@ -307,11 +338,23 @@ export function SidePanel({
           hidden={tab !== "options"}
         >
           <div className="sidepanel-options">
-            <button type="button" className="sidepanel-options-button" onClick={onToggleMap}>
+            <button
+              type="button"
+              className="sidepanel-options-button"
+              aria-keyshortcuts={mapToggleKey === undefined ? undefined : kbdGlyph(mapToggleKey)}
+              onClick={onToggleMap}
+            >
               {mapShown ? "Hide metro view" : "Show metro view"}
+              {mapToggleKey !== undefined ? <Kbd shortcutKey={mapToggleKey} /> : null}
             </button>
-            <button type="button" className="sidepanel-options-button" onClick={onStartTour}>
+            <button
+              type="button"
+              className="sidepanel-options-button"
+              aria-keyshortcuts={retakeTourKey === undefined ? undefined : kbdGlyph(retakeTourKey)}
+              onClick={onStartTour}
+            >
               Retake tour
+              {retakeTourKey !== undefined ? <Kbd shortcutKey={retakeTourKey} /> : null}
             </button>
           </div>
         </div>

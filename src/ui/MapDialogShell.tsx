@@ -35,8 +35,15 @@ import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef }
 import { useGameStore } from "../game/store";
 import { useMapDialogFocus } from "./dialog-stack-focus";
 import { installOutsidePointerDismiss, trapTab } from "./focus";
+import { Kbd } from "./shortcuts/Kbd";
+import type { Scope } from "./shortcuts/shortcuts.data";
+import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface MapDialogShellProps {
+  /** Which `mapDialog:*` scope this instance's Back/Close shortcuts register under
+   *  (GH137-PLAN.md M2) — `EventDialog`/`PlaceDialog` each pass their own. */
+  scope: Scope;
   /** The dialog's accessible name (`aria-label`). Distinct from `title` because the
    *  event dialog labels itself "<sensor> reading" while its header shows just the
    *  sensor name. */
@@ -70,6 +77,7 @@ interface MapDialogShellProps {
 
 export function MapDialogShell({
   ariaLabel,
+  scope,
   title,
   icon,
   meta,
@@ -87,6 +95,21 @@ export function MapDialogShell({
   // can pop back to it. The stack's length is the single source for this rule now,
   // rather than each dialog re-deriving `> 1` on its own.
   const canGoBack = stackLength > 1;
+
+  // GH137-PLAN.md M2: Back's `enabled` mirrors `canGoBack` above, the same predicate
+  // that decides whether the button itself even renders. Close is badge-only.
+  const { key: backKey } = useShortcut({
+    scope,
+    id: "back",
+    onActivate: popMapDialog,
+    enabled: canGoBack,
+  });
+  const { key: closeKey } = useShortcut({
+    scope,
+    id: "close",
+    onActivate: () => {},
+    enabled: true,
+  });
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -140,8 +163,14 @@ export function MapDialogShell({
       >
         <header className="place-overlay-header">
           {canGoBack ? (
-            <button type="button" className="place-overlay-back" onClick={popMapDialog}>
+            <button
+              type="button"
+              className="place-overlay-back"
+              aria-keyshortcuts={backKey === undefined ? undefined : kbdGlyph(backKey)}
+              onClick={popMapDialog}
+            >
               <span aria-hidden="true">‹</span> Back
+              {backKey !== undefined ? <Kbd shortcutKey={backKey} /> : null}
             </button>
           ) : null}
           {icon}
@@ -151,9 +180,11 @@ export function MapDialogShell({
             type="button"
             className="place-overlay-close"
             aria-label="Close"
+            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
             onClick={clearMapDialogStack}
           >
             <span aria-hidden="true">×</span>
+            {closeKey !== undefined ? <Kbd shortcutKey={closeKey} /> : null}
           </button>
         </header>
 

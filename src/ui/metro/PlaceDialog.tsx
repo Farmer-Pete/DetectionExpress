@@ -85,6 +85,7 @@ export function PlaceDialog({
   return (
     <MapDialogShell
       ariaLabel={view.title}
+      scope="mapDialog:place"
       title={view.title}
       icon={
         Icon !== null ? <Icon className="place-overlay-icon" size={20} aria-hidden="true" /> : null

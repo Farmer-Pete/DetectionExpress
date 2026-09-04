@@ -14,6 +14,7 @@ import { resolveActiveScope, type ShortcutsAppState, ShortcutsProvider } from ".
 const SHELL_STATE: ShortcutsAppState = {
   traceOpen: false,
   mapDialogKind: null,
+  legendOpen: false,
   sidePanelOpen: false,
   sidePanelTab: "chaos",
   hireMeOpen: false,
@@ -75,6 +76,32 @@ describe("resolveActiveScope", () => {
   it("prefers a map dialog over a simultaneous Hire Me card", () => {
     expect(resolveActiveScope({ ...SHELL_STATE, mapDialogKind: "event", hireMeOpen: true })).toBe(
       "mapDialog:event",
+    );
+  });
+
+  it("returns legend when only the legend dialog is open (GH137-PLAN.md M2)", () => {
+    expect(resolveActiveScope({ ...SHELL_STATE, legendOpen: true })).toBe("legend");
+  });
+
+  it("prefers trace over a simultaneous legend dialog", () => {
+    expect(resolveActiveScope({ ...SHELL_STATE, traceOpen: true, legendOpen: true })).toBe("trace");
+  });
+
+  it("prefers a map dialog over a simultaneous legend dialog", () => {
+    expect(resolveActiveScope({ ...SHELL_STATE, mapDialogKind: "place", legendOpen: true })).toBe(
+      "mapDialog:place",
+    );
+  });
+
+  it("prefers the legend dialog over a simultaneous side panel", () => {
+    expect(resolveActiveScope({ ...SHELL_STATE, legendOpen: true, sidePanelOpen: true })).toBe(
+      "legend",
+    );
+  });
+
+  it("prefers the legend dialog over a simultaneous Hire Me card", () => {
+    expect(resolveActiveScope({ ...SHELL_STATE, legendOpen: true, hireMeOpen: true })).toBe(
+      "legend",
     );
   });
 });

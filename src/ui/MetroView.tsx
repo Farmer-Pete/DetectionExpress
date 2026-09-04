@@ -27,6 +27,12 @@
  * `MetroMap`/the map region — App owns the actual selection state (the store's
  * `mapDialogStack`) and the place dialog's focus-restore fallback, so this component
  * stays a thin relay for both, the same way it already relays nothing else of its own.
+ *
+ * GH137-PLAN.md M2: the "Show legend" chip carries the shell scope's `L` shortcut. It
+ * is CSS-hidden at >=720px (the module doc above), not React-conditionally rendered,
+ * so `enabled: true` mirrors its real mount state the same way Topbar's always-mounted
+ * hamburger does; `onOpenLegend` itself already no-ops while another overlay or the
+ * tour owns the shell (`App.tsx`'s `openLegend`), so this needs no extra guard.
  */
 
 import { List } from "lucide-react";
@@ -34,6 +40,9 @@ import type { RefObject } from "react";
 import type { MapSelection } from "../game/store";
 import { MetroMap } from "./MetroMap";
 import { LegendSections } from "./metro/LegendSections";
+import { Kbd } from "./shortcuts/Kbd";
+import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { useShortcut } from "./shortcuts/use-shortcut";
 import { WaveOutcomeBanner } from "./wave/WaveOutcomeBanner";
 
 /**
@@ -72,6 +81,12 @@ export function MetroView({
   onOpenLegend,
   legendTriggerRef,
 }: MetroViewProps) {
+  const { key: legendKey } = useShortcut({
+    scope: "shell",
+    id: "legend-open",
+    onActivate: () => onOpenLegend?.(),
+    enabled: true,
+  });
   return (
     <div className="metro-view">
       {/* Two grid children, not overlays: the map region (so the full map, Harbor to
@@ -86,9 +101,11 @@ export function MetroView({
           ref={legendTriggerRef}
           onClick={onOpenLegend}
           aria-label="Show legend"
+          aria-keyshortcuts={legendKey === undefined ? undefined : kbdGlyph(legendKey)}
         >
           <List aria-hidden="true" size={14} />
           Legend
+          {legendKey !== undefined ? <Kbd shortcutKey={legendKey} /> : null}
         </button>
       </div>
       <MetroKey />

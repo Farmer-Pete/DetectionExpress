@@ -295,6 +295,35 @@ describe("SidePanel", () => {
   });
 });
 
+// GH137-PLAN.md M2: badge/aria-keyshortcuts data for the composite sidepanel:* scopes.
+// Actual keyboard dispatch through a real ShortcutsProvider is covered at the App
+// level (App.test.tsx), mirroring how Topbar.test.tsx only checks the M1 badge data.
+describe("SidePanel keyboard shortcut badges (GH137-PLAN.md M2)", () => {
+  it("shows an Esc badge on Close, aria-keyshortcuts set, accessible name unchanged", () => {
+    renderPanel({ tab: "chaos" });
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    expect(close.querySelector(".kbd")?.textContent).toBe("Esc");
+  });
+
+  it("shows the same Esc badge on Close regardless of which tab is active", () => {
+    renderPanel({ tab: "options" });
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+  });
+
+  it("shows a T badge on Retake tour and a P badge on the map toggle, on the options tab", () => {
+    renderPanel({ tab: "options" });
+    const retake = screen.getByRole("button", { name: "Retake tour" });
+    expect(retake.getAttribute("aria-keyshortcuts")).toBe("T");
+    expect(retake.querySelector(".kbd")?.textContent).toBe("T");
+
+    const mapToggle = screen.getByRole("button", { name: "Hide metro view" });
+    expect(mapToggle.getAttribute("aria-keyshortcuts")).toBe("P");
+    expect(mapToggle.querySelector(".kbd")?.textContent).toBe("P");
+  });
+});
+
 // GH132-PLAN.md M2, "Tour redesign: 8 steps, drawer-open step 2" — "Step 2 drawer-open:
 // Codex fixes (accepted)" rule 3. `mode="tour"` is how `use-tour.ts`'s `openForTour`
 // renders this component mid-tour: open, but non-modal, with driver.js (not this

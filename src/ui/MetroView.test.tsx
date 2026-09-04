@@ -93,6 +93,13 @@ describe("MetroView mobile legend chip (GH133-PLAN.md)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
     expect(onOpenLegend).toHaveBeenCalledTimes(1);
   });
+
+  it("shows an L badge, aria-keyshortcuts set, accessible name unchanged (GH137-PLAN.md M2)", () => {
+    render(<MetroView onSelect={() => {}} onOpenLegend={vi.fn()} />);
+    const chip = screen.getByRole("button", { name: "Show legend" });
+    expect(chip.getAttribute("aria-keyshortcuts")).toBe("L");
+    expect(chip.querySelector(".kbd")?.textContent).toBe("L");
+  });
 });
 
 describe("MetroView wave outcome banner (GH126-PLAN.md M3b, replaces the retired won/lost end screen)", () => {

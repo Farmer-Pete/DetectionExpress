@@ -13,6 +13,7 @@ const SCOPES: readonly Scope[] = [
   "mapDialog:event",
   "mapDialog:place",
   "trace",
+  "legend",
   "hireMe",
 ];
 
@@ -64,11 +65,20 @@ describe("SHORTCUTS invariants (every declared scope)", () => {
   });
 });
 
-describe("the M1 shell inventory (GH137-PLAN.md M1)", () => {
-  it("carries exactly the M1 command set: menu, freeze, three speeds, findings-more", () => {
+describe("the shell inventory (GH137-PLAN.md M1 + M2)", () => {
+  it("carries exactly the shell command set: menu, freeze, three speeds, findings-more, legend-open, hire-me-open", () => {
     const ids = SHORTCUTS.shell.map((entry) => entry.id).sort();
     expect(ids).toEqual(
-      ["findings-more", "freeze", "menu", "speed-0.5x", "speed-1x", "speed-2x"].sort(),
+      [
+        "findings-more",
+        "freeze",
+        "menu",
+        "speed-0.5x",
+        "speed-1x",
+        "speed-2x",
+        "legend-open",
+        "hire-me-open",
+      ].sort(),
     );
   });
 
@@ -87,5 +97,53 @@ describe("the M1 shell inventory (GH137-PLAN.md M1)", () => {
   it("assigns Menu M and Findings-more F", () => {
     expect(assignedKey("shell", "menu")).toBe("M");
     expect(assignedKey("shell", "findings-more")).toBe("F");
+  });
+
+  it("assigns Show legend L and Hire me H (GH137-PLAN.md M2)", () => {
+    expect(assignedKey("shell", "legend-open")).toBe("L");
+    expect(assignedKey("shell", "hire-me-open")).toBe("H");
+  });
+});
+
+describe("the M2 composite scopes (GH137-PLAN.md M2)", () => {
+  it("sidepanel:algorithm carries close, reset, and apply", () => {
+    const ids = SHORTCUTS["sidepanel:algorithm"].map((entry) => entry.id).sort();
+    expect(ids).toEqual(["apply", "close", "reset"].sort());
+    expect(assignedKey("sidepanel:algorithm", "reset")).toBe("R");
+    expect(assignedKey("sidepanel:algorithm", "apply")).toBe("A");
+  });
+
+  it("sidepanel:options carries close, retake-tour, and map-toggle", () => {
+    expect(assignedKey("sidepanel:options", "retake-tour")).toBe("T");
+    expect(assignedKey("sidepanel:options", "map-toggle")).toBe("P");
+  });
+
+  it("mapDialog:event carries back, close, and open-place", () => {
+    expect(assignedKey("mapDialog:event", "back")).toBe("B");
+    expect(assignedKey("mapDialog:event", "open-place")).toBe("O");
+    const close = SHORTCUTS["mapDialog:event"].find((entry) => entry.id === "close");
+    expect(close?.dispatch).toBe(false);
+  });
+
+  it("mapDialog:place carries back and close only (no open-place)", () => {
+    expect(assignedKey("mapDialog:place", "back")).toBe("B");
+    expect(assignedKey("mapDialog:place", "open-place")).toBeUndefined();
+  });
+
+  it("legend carries only a badge-only close", () => {
+    const close = SHORTCUTS.legend.find((entry) => entry.id === "close");
+    expect(close?.key).toBe("Escape");
+    expect(close?.dispatch).toBe(false);
+  });
+
+  it("hireMe carries hire-me-close (H) and a badge-only dismiss (Escape)", () => {
+    expect(assignedKey("hireMe", "hire-me-close")).toBe("H");
+    const dismiss = SHORTCUTS.hireMe.find((entry) => entry.id === "dismiss");
+    expect(dismiss?.dispatch).toBe(false);
+  });
+
+  it("the Hire me toggle's H lives in two different scopes (shell open, hireMe close), never colliding", () => {
+    expect(assignedKey("shell", "hire-me-open")).toBe("H");
+    expect(assignedKey("hireMe", "hire-me-close")).toBe("H");
   });
 });

@@ -116,6 +116,7 @@ import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import type { RunController } from "../game/run-controller";
 import type { MapSelection } from "../game/store";
 import { topMapDialogEntry, useGameStore } from "../game/store";
+import type { ConfettiOrigin } from "./confetti";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
@@ -145,9 +146,19 @@ interface AppProps {
   // inject a fake, mirroring `createPipelineController` above; defaults to the real
   // driver.js wrapper (`useTour`'s own default) when omitted.
   createTourDriver?: TourDriverFactory;
+  // The Hire Me confetti seam (GH137-PLAN.md M2), forwarded to `Topbar` -> `<HireMe>`.
+  // Mirrors `createPipelineController`/`createTourDriver` above: tests inject a spy so
+  // exercising the real "H" shortcut/click never runs canvas-confetti against
+  // happy-dom's DOM (which carries no real 2D canvas context); defaults to the real
+  // burst (`HireMe`'s own default) when omitted.
+  celebrateHireMe?: ((origin: ConfettiOrigin) => void) | undefined;
 }
 
-export function App({ createPipelineController, createTourDriver }: AppProps = {}) {
+export function App({
+  createPipelineController,
+  createTourDriver,
+  celebrateHireMe,
+}: AppProps = {}) {
   // Whether the embedded metro map region shows (GH117 Part F). Purely a display
   // toggle now: the one merged engine keeps running underneath either way, so
   // flipping it never builds or tears down a controller.
@@ -195,6 +206,13 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   // The mobile legend dialog (GH133-PLAN.md): opened from MetroView's floating chip,
   // closed from LegendDialog itself, and force-closed by the resize effect below.
   const [legendOpen, setLegendOpen] = useState(false);
+
+  // The Hire Me card's open state (GH137-PLAN.md M2): lifted here from HireMe's own
+  // private useState, so resolveActiveScope (shortcutsAppState below) can see it and
+  // give it its own "hireMe" scope, instead of shell shortcuts staying live underneath
+  // its scrim. HireMe still owns the Escape/outside-click listeners and the confetti
+  // call; it only reports the resulting open/close through this callback now.
+  const [hireMeOpen, setHireMeOpen] = useState(false);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -412,15 +430,15 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
 
   // The shortcuts provider's active-scope input (GH137-PLAN.md), derived from exactly
   // the same flags `modalOpen` already reads, plus the map dialog's own KIND (mapDialog:
-  // event vs. mapDialog:place are separate scopes) and the side panel's active tab.
-  // `hireMeOpen` is hardcoded false this milestone — Hire Me still owns its `open` state
-  // privately; M2 lifts it into `App` and feeds the real value here.
+  // event vs. mapDialog:place are separate scopes), the side panel's active tab, and
+  // (M2) the real `hireMeOpen`, now that Hire Me's `open` state is lifted here.
   const shortcutsAppState: ShortcutsAppState = {
     traceOpen,
     mapDialogKind: topMapDialogEntry(mapDialogStack)?.kind ?? null,
+    legendOpen,
     sidePanelOpen: sidePanel.open,
     sidePanelTab: sidePanel.tab,
-    hireMeOpen: false,
+    hireMeOpen,
   };
 
   // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
@@ -494,7 +512,13 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
           </>
         }
       >
-        <Topbar onOpenMenu={onOpenMenu} hamburgerTriggerRef={hamburgerTriggerRef} />
+        <Topbar
+          onOpenMenu={onOpenMenu}
+          hamburgerTriggerRef={hamburgerTriggerRef}
+          hireMeOpen={hireMeOpen}
+          onHireMeOpenChange={setHireMeOpen}
+          celebrateHireMe={celebrateHireMe}
+        />
         {mapShown ? (
           <MetroView
             onSelect={onMapSelect}
