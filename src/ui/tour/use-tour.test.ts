@@ -264,6 +264,51 @@ describe("useTour", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a reversal during a pending drawer-entry closes the drawer instead of stranding it open (Codex §6 loop-2)", async () => {
+    vi.useFakeTimers();
+    try {
+      markTourSeen(); // keep the auto-start deferred task from competing with this test
+      const { createDriver, configs, instances } = spyFactory();
+      const triggerRef = createRef<HTMLButtonElement>();
+      const openDrawer = vi.fn();
+      const closeDrawer = vi.fn();
+      const { result } = renderHook(() =>
+        useTour({ triggerRef, createDriver, openDrawer, closeDrawer }),
+      );
+
+      act(() => result.current.startTour());
+      const instance = instances[0];
+      expect(instance).toBeDefined();
+      if (instance === undefined) {
+        return;
+      }
+      instance.getActiveIndex = () => 0; // sitting on step 0 (map)
+
+      // Next (map -> chaos) opens the drawer and starts waiting for its anchor.
+      const chaosAnchor = document.createElement("div");
+      chaosAnchor.setAttribute("data-tour", "chaos");
+      document.body.append(chaosAnchor);
+      act(() => configs[0]?.onNextClick?.());
+      expect(openDrawer).toHaveBeenCalledTimes(1);
+
+      // A reversal (Previous) BEFORE the entry commits: the destination does not want the
+      // drawer, but this session opened it, so the tour must close it, not leave it open.
+      act(() => configs[0]?.onPrevClick?.());
+      chaosAnchor.remove(); // model the drawer closing: the anchor leaves the DOM
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16);
+      });
+
+      // The fix: navigation closes the drawer based on the destination step, so the
+      // reversal closes it. Without `drawerOpenRef`, `from` (the map, not a drawer step)
+      // would make this a plain move and the drawer would stay open.
+      expect(closeDrawer).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // GH132-PLAN.md M3: the auto-start-on-first-load effect. `beforeEach` above already

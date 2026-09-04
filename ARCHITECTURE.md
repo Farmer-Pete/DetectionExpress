@@ -34,10 +34,10 @@ The simulation is pure TypeScript. The UI is React. They never blur together.
 There is no `widgets/` or `components/` folder. "Widget" is a narrow domain term for the
 four `Finding.context` renderers in `src/ui/findings/widgets.tsx`. The real convention:
 
-- **One feature folder per concern.** `intro/`, `decisions/`, `hud/`, `sidepanel/`.
+- **One feature folder per concern.** `tour/`, `decisions/`, `hud/`, `sidepanel/`.
 - **A presentational component, paired with a controller hook.** `Foo.tsx` renders. A
   `use-foo.ts(x)` hook owns its state, effects, and lifecycle. A hook that returns JSX
-  is a `.tsx` file, like `use-intro-overlay.tsx`. A hook may return the ready-to-mount
+  is a `.tsx` file, like `use-side-panel.tsx`. A hook may return the ready-to-mount
   node itself, so the caller drops it straight into the tree instead of assembling it.
 - **Pure display logic goes in a DOM-free `view-model.ts`.** No React, no DOM reads, so
   it tests as a plain function (`src/ui/findings/view-model.ts`,

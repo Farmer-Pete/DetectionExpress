@@ -149,6 +149,10 @@ export function useTour({
   // or a Previous during a pending drawer wait — can never move the driver (Codex §6
   // fix 3). Finer-grained than `sessionRef`, which only changes per whole tour.
   const navGenerationRef = useRef(0);
+  // Whether the tour currently holds the drawer open. Navigation closes it based on the
+  // DESTINATION step, not just on leaving the drawer step, so a reversal made mid-entry
+  // (which already opened the drawer) still closes it (Codex §6 loop-2).
+  const drawerOpenRef = useRef(false);
 
   const startTour = useCallback((): void => {
     focusGenerationRef.current += 1;
@@ -159,6 +163,7 @@ export function useTour({
     // A fresh start owns the seen-flag: clear any suppression a cancelled Strict Mode
     // setup may have armed (Codex §6 fix 1), so this run's real dismissal marks seen.
     suppressSeenRef.current = false;
+    drawerOpenRef.current = false;
     setActive(true);
 
     // Own the wait (Codex fix 4/5): driver.js has no cancel for its internal element
@@ -185,13 +190,17 @@ export function useTour({
           inst.movePrevious();
         }
       };
-      const leavingDrawer = tourSteps[from]?.opensDrawer === true;
-      const enteringDrawer = tourSteps[to]?.opensDrawer === true;
-      if (enteringDrawer) {
+      const destinationWantsDrawer = tourSteps[to]?.opensDrawer === true;
+      if (destinationWantsDrawer) {
         openDrawer?.();
+        drawerOpenRef.current = true;
         void waitFor(() => document.querySelector(CHAOS_SELECTOR) !== null, isCurrent).then(move);
-      } else if (leavingDrawer) {
+      } else if (drawerOpenRef.current) {
+        // The drawer is open — from this step, or from a superseded entry a reversal
+        // interrupted — but the destination does not want it. Close it and wait for its
+        // removal before moving, so a reversal mid-entry never strands the panel open.
         closeDrawer?.();
+        drawerOpenRef.current = false;
         void waitFor(() => document.querySelector(CHAOS_SELECTOR) === null, isCurrent).then(move);
       } else {
         move();
@@ -209,6 +218,7 @@ export function useTour({
       onDestroyed: () => {
         sessionRef.current += 1; // abort any pending drawer wait
         closeDrawer?.(); // a tour ended on the drawer step must close the panel
+        drawerOpenRef.current = false;
         setActive(false);
         if (!suppressSeenRef.current) {
           markTourSeen();
