@@ -2649,3 +2649,25 @@ body {
     min-width: 44px;
   }
 }
+
+/* Keyboard shortcut badges (GH137-PLAN.md M1). `.kbd` is decorative and always
+   `aria-hidden` (`shortcuts/Kbd.tsx`) — the binding itself reaches assistive tech
+   through the owning control's own `aria-keyshortcuts`, never this text. A small
+   monospace chip that sits inline after a control's own label, never widening its
+   click target or displacing its layout beyond a small gap. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.3em;
+  margin-left: 0.4em;
+  padding: 0.05em 0.35em;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  color: var(--dim);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1.4;
+}

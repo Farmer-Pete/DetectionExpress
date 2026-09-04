@@ -5,6 +5,8 @@ import { referenceSource } from "../game/engine-source";
 import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
 import { useGameStore } from "../game/store";
+import type { LiveFinding } from "../sim/correctness";
+import type { Finding } from "../sim/finding";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldLogEvent } from "../sim/world-log";
 import { App } from "./App";
@@ -1248,5 +1250,111 @@ describe("App wave shake gates on run conclusion (GH38 review round 3, F004+F006
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// GH137-PLAN.md M1: the shell scope, wired end-to-end through the real App-owned
+// ShortcutsProvider (not a hand-wrapped test provider — the other describe blocks
+// above already cover that at the unit level for each control).
+describe("App keyboard shortcuts, shell scope (GH137-PLAN.md M1)", () => {
+  /** Build a LiveFinding, mirroring `findings/FindingsPanel.test.tsx`'s own helper. */
+  function live(seq: number, entity: string): LiveFinding {
+    const finding: Finding = {
+      alert: { eventIds: [seq], reason: "pin_brute_force", at: 0 },
+      eventId: seq,
+      subjectType: "account",
+    };
+    return {
+      finding,
+      state: "hit",
+      reason: "pin_brute_force",
+      eventIds: [seq],
+      at: seq,
+      seq,
+      citedEvents: [],
+      entity,
+    };
+  }
+
+  function publishManyFindings(count: number): void {
+    const findings = Array.from({ length: count }, (_, i) => live(i + 1, `e${i}`));
+    useGameStore.setState({ snapshot: { ...emptySnapshot(), findings } });
+  }
+
+  it("pressing M opens the side panel, same as clicking the hamburger", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("pressing 1/2/3 sets the transport speed to 0.5x/1x/2x", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "1" });
+    expect(useGameStore.getState().transport.speed).toBe(0.5);
+    expect(screen.getByRole("button", { name: "0.5x" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.keyDown(document.body, { key: "3" });
+    expect(useGameStore.getState().transport.speed).toBe(2);
+    expect(screen.getByRole("button", { name: "2x" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.keyDown(document.body, { key: "2" });
+    expect(useGameStore.getState().transport.speed).toBe(1);
+    expect(screen.getByRole("button", { name: "1x" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("pressing F expands the findings list", () => {
+    publishManyFindings(15);
+    render(<App createPipelineController={() => stubController()} />);
+    expect(screen.getByRole("button", { name: /\+3 more/i })).toBeDefined();
+
+    fireEvent.keyDown(document.body, { key: "f" });
+
+    expect(screen.queryByRole("button", { name: /more/i })).toBeNull();
+  });
+
+  it("shows a Space badge on Freeze; the shell dispatcher never toggles it — only LogPanel's own Space listener does, exactly once", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    const freeze = screen.getByRole("button", { name: "Freeze" });
+    expect(freeze.getAttribute("aria-keyshortcuts")).toBe("Space");
+    expect(freeze.querySelector(".kbd")?.textContent).toBe("Space");
+
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("every wired control's accessible name is unchanged and carries aria-keyshortcuts", () => {
+    publishManyFindings(15);
+    render(<App createPipelineController={() => stubController()} />);
+
+    const hamburger = screen.getByRole("button", { name: "Open side panel" });
+    expect(hamburger.getAttribute("aria-keyshortcuts")).toBe("M");
+
+    const freeze = screen.getByRole("button", { name: "Freeze" });
+    expect(freeze.getAttribute("aria-keyshortcuts")).toBe("Space");
+
+    expect(screen.getByRole("button", { name: "0.5x" }).getAttribute("aria-keyshortcuts")).toBe(
+      "1",
+    );
+    expect(screen.getByRole("button", { name: "1x" }).getAttribute("aria-keyshortcuts")).toBe("2");
+    expect(screen.getByRole("button", { name: "2x" }).getAttribute("aria-keyshortcuts")).toBe("3");
+
+    const more = screen.getByRole("button", { name: /\+3 more/i });
+    expect(more.getAttribute("aria-keyshortcuts")).toBe("F");
+  });
+
+  it("does not fire the M shortcut while the tour drives (tourOwnsKeyboardRef)", () => {
+    localStorage.clear(); // start unseen, so this file's beforeEach markTourSeen() is undone
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    startTourFromOptions();
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+
+    fireEvent.keyDown(document.body, { key: "m" });
+
+    // If the tour bail did not fire, M would reopen the side panel here.
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
   });
 });

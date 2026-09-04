@@ -433,3 +433,47 @@ describe("useTour auto-start (GH132-PLAN.md M3)", () => {
     expect(second.createDriver).not.toHaveBeenCalled();
   });
 });
+
+// GH137-PLAN.md: `tourOwnsKeyboardRef` is the synchronous flag the shortcuts
+// dispatcher's bail check #1 reads (`use-shortcuts.tsx`). `App` owns the ref and hands
+// it to both the provider and this hook; `useTour` is the one that flips it.
+describe("useTour tourOwnsKeyboardRef (GH137-PLAN.md)", () => {
+  it("sets it true before drive() and clears it once onDestroyed fires (a real dismissal)", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver, tourOwnsKeyboardRef }));
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    act(() => configs[0]?.onDestroyed?.());
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+  });
+
+  it("clears it on an unmount that never fired a real dismissal", () => {
+    const { createDriver } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const { result, unmount } = renderHook(() =>
+      useTour({ triggerRef, createDriver, tourOwnsKeyboardRef }),
+    );
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    unmount(); // cleanup calls destroy(), which fires the captured onDestroyed too
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+  });
+
+  it("never throws when tourOwnsKeyboardRef is omitted", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    expect(() => {
+      act(() => result.current.startTour());
+      act(() => configs[0]?.onDestroyed?.());
+    }).not.toThrow();
+  });
+});

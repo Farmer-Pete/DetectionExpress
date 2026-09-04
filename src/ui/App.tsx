@@ -115,7 +115,7 @@
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
 import type { MapSelection } from "../game/store";
-import { useGameStore } from "../game/store";
+import { topMapDialogEntry, useGameStore } from "../game/store";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
@@ -125,6 +125,8 @@ import { ModalHost } from "./ModalHost";
 import { LegendDialog } from "./metro/LegendDialog";
 import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
+import type { ShortcutsAppState } from "./shortcuts/use-shortcuts";
+import { ShortcutsProvider } from "./shortcuts/use-shortcuts";
 import { useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
 import type { TourDriverFactory } from "./tour/driver-factory";
@@ -259,12 +261,16 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   // (without consuming its one-shot session guard) while this reads true, so the tour
   // never drives over an open legend.
   const modalOpenRef = useRef(false);
+  // The shortcuts dispatcher's bail-check-1 flag (GH137-PLAN.md): owned here, shared
+  // with both `useTour` (which flips it) and `ShortcutsProvider` below (which reads it).
+  const tourOwnsKeyboardRef = useRef(false);
   const tour = useTour({
     triggerRef: hamburgerTriggerRef,
     createDriver: createTourDriver,
     openDrawer: () => openDrawerRef.current(),
     closeDrawer: () => closeDrawerRef.current(),
     isModalOpen: () => modalOpenRef.current,
+    tourOwnsKeyboardRef,
   });
 
   // The start-tour transition (GH132-PLAN.md M2, see the module doc): the Options
@@ -404,6 +410,19 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     modalOpenRef.current = modalOpen;
   }, [modalOpen]);
 
+  // The shortcuts provider's active-scope input (GH137-PLAN.md), derived from exactly
+  // the same flags `modalOpen` already reads, plus the map dialog's own KIND (mapDialog:
+  // event vs. mapDialog:place are separate scopes) and the side panel's active tab.
+  // `hireMeOpen` is hardcoded false this milestone — Hire Me still owns its `open` state
+  // privately; M2 lifts it into `App` and feeds the real value here.
+  const shortcutsAppState: ShortcutsAppState = {
+    traceOpen,
+    mapDialogKind: topMapDialogEntry(mapDialogStack)?.kind ?? null,
+    sidePanelOpen: sidePanel.open,
+    sidePanelTab: sidePanel.tab,
+    hireMeOpen: false,
+  };
+
   // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
   // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
   // listener has no idea the shell is inert, so this is what keeps Space from resuming a
@@ -441,51 +460,56 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
     // unless it is the KIND named by `mapDialogStack`'s top entry), the side panel
     // when `sidePanel.open`, and `LegendDialog` when `legendOpen` (GH133-PLAN.md).
-    <ModalHost
-      modalOpen={modalOpen}
-      shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
-      overlays={
-        <>
-          <TraceOverlay
-            fallbackFocusRef={findingsPanelRef}
-            decisionsFallbackFocusRef={decisionsPanelRef}
-          />
-          <PlaceDialog
-            fallbackFocusRef={metroMapRegionRef}
-            rootTriggerRef={mapDialogRootTriggerRef}
-            rootFallbackFocusRef={mapDialogRootFallbackRef}
-          />
-          <EventDialog
-            fallbackFocusRef={logPanelRef}
-            rootTriggerRef={mapDialogRootTriggerRef}
-            rootFallbackFocusRef={mapDialogRootFallbackRef}
-          />
-          {sidePanel.sidePanel}
-          {legendOpen ? (
-            <LegendDialog
-              onClose={() => setLegendOpen(false)}
-              triggerRef={legendTriggerRef}
-              fallbackFocusRef={metroMapRegionRef}
+    // The `ShortcutsProvider` wraps the whole shell (GH137-PLAN.md): it hosts the one
+    // keyboard-shortcut dispatcher, reading `shortcutsAppState` for the active scope
+    // and `tourOwnsKeyboardRef` to stand down while the tour drives.
+    <ShortcutsProvider appState={shortcutsAppState} tourOwnsKeyboardRef={tourOwnsKeyboardRef}>
+      <ModalHost
+        modalOpen={modalOpen}
+        shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
+        overlays={
+          <>
+            <TraceOverlay
+              fallbackFocusRef={findingsPanelRef}
+              decisionsFallbackFocusRef={decisionsPanelRef}
             />
-          ) : null}
-        </>
-      }
-    >
-      <Topbar onOpenMenu={onOpenMenu} hamburgerTriggerRef={hamburgerTriggerRef} />
-      {mapShown ? (
-        <MetroView
-          onSelect={onMapSelect}
-          mapRegionRef={metroMapRegionRef}
-          onOpenLegend={openLegend}
-          legendTriggerRef={legendTriggerRef}
+            <PlaceDialog
+              fallbackFocusRef={metroMapRegionRef}
+              rootTriggerRef={mapDialogRootTriggerRef}
+              rootFallbackFocusRef={mapDialogRootFallbackRef}
+            />
+            <EventDialog
+              fallbackFocusRef={logPanelRef}
+              rootTriggerRef={mapDialogRootTriggerRef}
+              rootFallbackFocusRef={mapDialogRootFallbackRef}
+            />
+            {sidePanel.sidePanel}
+            {legendOpen ? (
+              <LegendDialog
+                onClose={() => setLegendOpen(false)}
+                triggerRef={legendTriggerRef}
+                fallbackFocusRef={metroMapRegionRef}
+              />
+            ) : null}
+          </>
+        }
+      >
+        <Topbar onOpenMenu={onOpenMenu} hamburgerTriggerRef={hamburgerTriggerRef} />
+        {mapShown ? (
+          <MetroView
+            onSelect={onMapSelect}
+            mapRegionRef={metroMapRegionRef}
+            onOpenLegend={openLegend}
+            legendTriggerRef={legendTriggerRef}
+          />
+        ) : null}
+        <InspectorShell
+          findingsPanelRef={findingsPanelRef}
+          logPanelRef={logPanelRef}
+          onSelectEvent={onEventSelect}
         />
-      ) : null}
-      <InspectorShell
-        findingsPanelRef={findingsPanelRef}
-        logPanelRef={logPanelRef}
-        onSelectEvent={onEventSelect}
-      />
-      <DecisionsPanel panelRef={decisionsPanelRef} />
-    </ModalHost>
+        <DecisionsPanel panelRef={decisionsPanelRef} />
+      </ModalHost>
+    </ShortcutsProvider>
   );
 }

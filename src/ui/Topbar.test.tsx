@@ -64,6 +64,14 @@ describe("Topbar", () => {
     expect(children.at(-1)).toBe(screen.getByRole("button", { name: /side panel/i }));
   });
 
+  it("shows an M badge on the hamburger, with aria-keyshortcuts set and its accessible name unchanged (GH137-PLAN.md M1)", () => {
+    renderTopbar();
+    const trigger = screen.getByRole("button", { name: /side panel/i });
+    expect(trigger.getAttribute("aria-label")).toBe("Open side panel");
+    expect(trigger.getAttribute("aria-keyshortcuts")).toBe("M");
+    expect(trigger.querySelector(".kbd")?.textContent).toBe("M");
+  });
+
   it("no longer renders a standalone map toggle or How this works button", () => {
     renderTopbar();
     expect(screen.queryByRole("button", { name: /metro view/i })).toBeNull();

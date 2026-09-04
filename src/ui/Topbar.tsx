@@ -26,6 +26,9 @@ import { Menu as MenuIcon } from "lucide-react";
 import type { RefObject } from "react";
 import { hireMe } from "./content/narrative";
 import { HireMe } from "./HireMe";
+import { Kbd } from "./shortcuts/Kbd";
+import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface TopbarProps {
   /** Opens the side panel (to whatever tab was last active, chaos by default). */
@@ -36,6 +39,14 @@ interface TopbarProps {
 }
 
 export function Topbar({ onOpenMenu, hamburgerTriggerRef }: TopbarProps) {
+  // GH137-PLAN.md M1: the hamburger's shell-scope shortcut. `aria-label` already sets
+  // the button's accessible name, so the badge below (aria-hidden) can never touch it.
+  const { key: menuKey } = useShortcut({
+    scope: "shell",
+    id: "menu",
+    onActivate: onOpenMenu,
+    enabled: true,
+  });
   return (
     <header className="topbar">
       <h1>Detection Express</h1>
@@ -47,9 +58,11 @@ export function Topbar({ onOpenMenu, hamburgerTriggerRef }: TopbarProps) {
           ref={hamburgerTriggerRef}
           className="topbar-menu-button"
           aria-label="Open side panel"
+          aria-keyshortcuts={menuKey === undefined ? undefined : kbdGlyph(menuKey)}
           onClick={onOpenMenu}
         >
           <MenuIcon aria-hidden="true" size={18} />
+          {menuKey !== undefined ? <Kbd shortcutKey={menuKey} /> : null}
         </button>
       </div>
     </header>

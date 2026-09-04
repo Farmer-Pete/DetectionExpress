@@ -85,6 +85,15 @@ export interface UseTourArgs {
    *  lazily at the auto-start timer, so `App.tsx` can back it with a ref it writes
    *  after `modalOpen` is derived. Omitted (or absent) means "never blocked". */
   isModalOpen?: (() => boolean) | undefined;
+  /**
+   * The synchronous "the tour owns the keyboard" flag (GH137-PLAN.md): owned by
+   * `App.tsx`, shared with `shortcuts/use-shortcuts.tsx`'s dispatcher, which bails on it
+   * before looking up a mnemonic — driver.js owns the keyboard while the tour drives.
+   * Set `true` here right before `instance.drive()`, cleared in `onDestroyed` and on
+   * unmount. Optional: omitted entirely, this hook just never touches it (a test with
+   * no shortcuts provider in the tree, or a caller that predates GH137).
+   */
+  tourOwnsKeyboardRef?: RefObject<boolean> | undefined;
 }
 
 export interface TourController {
@@ -144,6 +153,7 @@ export function useTour({
   openDrawer,
   closeDrawer,
   isModalOpen,
+  tourOwnsKeyboardRef,
 }: UseTourArgs): TourController {
   const [active, setActive] = useState(false);
   // A pure, one-time read (GH132-PLAN.md M3): taken in a lazy initializer, so it can
@@ -241,6 +251,9 @@ export function useTour({
         closeDrawer?.(); // a tour ended on the drawer step must close the panel
         drawerOpenRef.current = false;
         setActive(false);
+        if (tourOwnsKeyboardRef !== undefined) {
+          tourOwnsKeyboardRef.current = false; // the shortcuts dispatcher is live again
+        }
         if (!suppressSeenRef.current) {
           markTourSeen();
         }
@@ -255,8 +268,11 @@ export function useTour({
       },
     });
     driverRef.current = instance;
+    if (tourOwnsKeyboardRef !== undefined) {
+      tourOwnsKeyboardRef.current = true; // driver.js owns the keyboard until onDestroyed
+    }
     instance.drive();
-  }, [createDriver, triggerRef, openDrawer, closeDrawer]);
+  }, [createDriver, triggerRef, openDrawer, closeDrawer, tourOwnsKeyboardRef]);
 
   // The auto-start action, as an Effect Event. It always reads the LATEST COMMITTED
   // `startTour` (whose identity churns as App.tsx rebuilds `openDrawer`/`closeDrawer`
@@ -308,6 +324,9 @@ export function useTour({
       if (pending !== null) {
         clearTimeout(pending); // cancel FIRST: a Strict Mode teardown must never fire this
       }
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = false; // defensive: `onDestroyed` below already clears it
+      }
       focusGenerationRef.current += 1;
       sessionRef.current += 1;
       // Only arm suppression when a live driver exists to destroy. A Strict Mode first
@@ -319,7 +338,7 @@ export function useTour({
         driverRef.current.destroy();
       }
     };
-  }, [hasSeenAtMount]);
+  }, [hasSeenAtMount, tourOwnsKeyboardRef]);
 
   return { startTour, active };
 }

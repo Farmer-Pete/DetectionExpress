@@ -21,6 +21,9 @@
  */
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
+import { Kbd } from "../shortcuts/Kbd";
+import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { useShortcut } from "../shortcuts/use-shortcut";
 import {
   buildFindingGroups,
   countActiveHits,
@@ -63,6 +66,16 @@ export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}
   const selectedSeq = selection?.seq ?? null;
   const { groups, hiddenCount } = buildFindingGroups(findings, selectedSeq);
   const visible = expanded ? groups : groups.slice(0, VISIBLE_CAP);
+  // GH137-PLAN.md M1: the shell scope's Findings "+N more" shortcut. `enabled` mirrors
+  // exactly the condition the button itself renders under, just below — the same
+  // predicate twice, once for the DOM and once for the dispatcher.
+  const moreShown = hiddenCount > 0 && !expanded;
+  const { key: moreKey } = useShortcut({
+    scope: "shell",
+    id: "findings-more",
+    onActivate: () => setExpanded(true),
+    enabled: moreShown,
+  });
   const { count: activeCount, urgent } = countActiveHits(findings);
   // Severity COLOR persists on a frozen terminal frame; the ANIMATED pulse gates
   // on run conclusion, the same family rule LogPanel and Hud follow (F004+F006).
@@ -117,9 +130,15 @@ export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}
               />
             ))}
           </ul>
-          {hiddenCount > 0 && !expanded ? (
-            <button type="button" className="findings-more" onClick={() => setExpanded(true)}>
+          {moreShown ? (
+            <button
+              type="button"
+              className="findings-more"
+              aria-keyshortcuts={moreKey === undefined ? undefined : kbdGlyph(moreKey)}
+              onClick={() => setExpanded(true)}
+            >
               +{hiddenCount} more
+              {moreKey !== undefined ? <Kbd shortcutKey={moreKey} /> : null}
             </button>
           ) : null}
         </>
