@@ -26,23 +26,38 @@ interface LegendDialogProps {
    *  `legendOpen` in response; this component holds no open state of its own. */
   onClose: () => void;
   /** The chip that opened this dialog (`MetroView.tsx`'s `.metro-legend-button`,
-   *  owned by App). Focus restores here on unmount, regardless of what actually held
-   *  focus at open time. */
+   *  owned by App). Focus restores here on unmount when it is still focusable. */
   triggerRef: RefObject<HTMLElement | null>;
+  /** A visible fallback for close paths where the chip is no longer focusable — the
+   *  resize-to-desktop close (Codex round 3 MAJOR): at >=720px the chip is
+   *  `display: none`, so focusing it is a no-op and focus would fall to `<body>`. App
+   *  passes the always-present map region here. */
+  fallbackFocusRef: RefObject<HTMLElement | null>;
 }
 
-export function LegendDialog({ onClose, triggerRef }: LegendDialogProps) {
+export function LegendDialog({ onClose, triggerRef, fallbackFocusRef }: LegendDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Move focus into the dialog on mount; restore it to the trigger ref on unmount.
-  // This component only ever mounts while `legendOpen`, so "mount"/"unmount" IS
-  // "open"/"close" here — unlike `MapDialogShell`, there is no isTop flag to track.
+  // Move focus into the dialog on mount; restore it on unmount. This component only
+  // ever mounts while `legendOpen`, so "mount"/"unmount" IS "open"/"close" here —
+  // unlike `MapDialogShell`, there is no isTop flag to track. Restore to the chip, but
+  // fall back to a visible element when the chip cannot take focus: on the
+  // resize-to-desktop close the chip is `display: none`, so `focus()` is a no-op and
+  // focus would otherwise land on `<body>` (Codex round 3 MAJOR). Focusing then
+  // checking `activeElement` detects that in a real browser, and keeps the common
+  // mobile close restoring straight to the chip — including under happy-dom, which
+  // applies no media query, so the chip stays focusable there and the fallback branch
+  // only fires when the trigger genuinely cannot take focus.
   useEffect(() => {
     dialogRef.current?.focus();
     return () => {
-      triggerRef.current?.focus();
+      const trigger = triggerRef.current;
+      trigger?.focus();
+      if (trigger === null || document.activeElement !== trigger) {
+        fallbackFocusRef.current?.focus();
+      }
     };
-  }, [triggerRef]);
+  }, [triggerRef, fallbackFocusRef]);
 
   // A genuine outside click on the backdrop scrim dismisses, mirroring
   // `MapDialogShell`/`TraceOverlay`.

@@ -1057,7 +1057,7 @@ describe("App legend dialog (GH133-PLAN.md)", () => {
     expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
   });
 
-  it("closes the legend on a resize to >=720px", () => {
+  it("closes the legend on a resize to >=720px and restores focus off <body>", () => {
     render(<App createPipelineController={() => stubController()} />);
     window.innerWidth = 500;
     openLegend();
@@ -1069,6 +1069,54 @@ describe("App legend dialog (GH133-PLAN.md)", () => {
     });
 
     expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+    // The restore ran rather than dropping focus to <body>. happy-dom applies no media
+    // query, so the chip stays focusable and the restore lands on it; a real browser
+    // hides the chip at this width and the dialog's fallback (the map region) takes it
+    // instead — the branch `LegendDialog.test.tsx` covers directly (Codex round 3).
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show legend" }));
+  });
+
+  it("openLegend no-ops while the tour is active", async () => {
+    localStorage.clear();
+    resetTourAutoStartForTests();
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    // Let the first-load tour auto-start, so `tour.active` is true.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(createDriver).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+  });
+
+  it("defers the tour auto-start while the legend is open, then starts once it closes", async () => {
+    localStorage.clear();
+    resetTourAutoStartForTests();
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    // Open the legend before the deferred auto-start fires.
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+
+    // The 0ms auto-start tick sees a modal open, so it re-defers without starting.
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(createDriver).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
+
+    // Close the legend; the re-armed tick (100ms) then finds no modal and starts.
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Legend" }), { key: "Escape" });
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 120));
+    });
+    expect(createDriver).toHaveBeenCalledTimes(1);
   });
 });
 

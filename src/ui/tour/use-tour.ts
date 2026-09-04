@@ -79,6 +79,12 @@ export interface UseTourArgs {
   openDrawer?: (() => void) | undefined;
   /** Closes the tour-mode side panel. Wired to `useSidePanel`'s `closeForTour`. */
   closeDrawer?: (() => void) | undefined;
+  /** Whether a modal currently owns the shell (Codex round 3 MAJOR). The auto-start
+   *  defers — without consuming its one-shot session guard — while this reads true, so
+   *  a first-load tour never drives over an open modal such as the legend dialog. Read
+   *  lazily at the auto-start timer, so `App.tsx` can back it with a ref it writes
+   *  after `modalOpen` is derived. Omitted (or absent) means "never blocked". */
+  isModalOpen?: (() => boolean) | undefined;
 }
 
 export interface TourController {
@@ -137,6 +143,7 @@ export function useTour({
   createDriver = createTourDriver,
   openDrawer,
   closeDrawer,
+  isModalOpen,
 }: UseTourArgs): TourController {
   const [active, setActive] = useState(false);
   // A pure, one-time read (GH132-PLAN.md M3): taken in a lazy initializer, so it can
@@ -259,12 +266,21 @@ export function useTour({
   // called locally, from the effect's own timer — never passed down (unlike App.tsx's
   // `openDrawer`/`closeDrawer` refs, which are handed to `useTour` and so cannot be
   // Effect Events).
-  const autoStart = useEffectEvent((): void => {
+  // Returns whether the auto-start is settled — either it started, or a prior mount
+  // this session already did. Returns false ONLY when a modal is open (Codex round 3
+  // MAJOR): the tour must not drive over an open legend/dialog, so it defers WITHOUT
+  // consuming the one-shot session guard, and the effect below re-arms until the modal
+  // closes. On first load no modal is open, so this starts immediately as before.
+  const autoStart = useEffectEvent((): boolean => {
     if (autoStartedThisSession) {
-      return; // a prior mount (this session) already auto-started; retake is unaffected
+      return true; // a prior mount (this session) already auto-started; retake is unaffected
+    }
+    if (isModalOpen?.() === true) {
+      return false; // a modal owns the shell; wait — do not consume the session guard
     }
     autoStartedThisSession = true;
     startTour();
+    return true;
   });
 
   // Auto-start on first load, StrictMode-safe (GH132-PLAN.md M3, see the module doc):
@@ -274,11 +290,19 @@ export function useTour({
   // effect it replaces.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | null = null;
+    // Re-arm while the auto-start is blocked by an open modal (Codex round 3): each
+    // tick either settles (started, or already started this session) or re-defers, so
+    // a modal open at load only delays the tour until it closes — it never suppresses
+    // it. `pending` stays the single cancellable handle the cleanup below clears, so
+    // Strict Mode's teardown still cancels a not-yet-fired start exactly as before.
+    const tick = (): void => {
+      pending = null;
+      if (!autoStart()) {
+        pending = setTimeout(tick, 100);
+      }
+    };
     if (!hasSeenAtMount) {
-      pending = setTimeout(() => {
-        pending = null;
-        autoStart();
-      }, 0);
+      pending = setTimeout(tick, 0);
     }
     return () => {
       if (pending !== null) {

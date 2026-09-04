@@ -252,11 +252,19 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   // `closeSidePanelRef` does below: written every render, read lazily at click time.
   const openDrawerRef = useRef<() => void>(() => {});
   const closeDrawerRef = useRef<() => void>(() => {});
+  // Whether any modal owns the shell, read lazily by the tour's auto-start (Codex
+  // round 3 MAJOR). Written every render below, once `modalOpen` is derived — the same
+  // late-write-read-lazily bridge as `openDrawerRef`/`closeSidePanelRef`, needed
+  // because `useTour` is created before `modalOpen` exists. The auto-start defers
+  // (without consuming its one-shot session guard) while this reads true, so the tour
+  // never drives over an open legend.
+  const modalOpenRef = useRef(false);
   const tour = useTour({
     triggerRef: hamburgerTriggerRef,
     createDriver: createTourDriver,
     openDrawer: () => openDrawerRef.current(),
     closeDrawer: () => closeDrawerRef.current(),
+    isModalOpen: () => modalOpenRef.current,
   });
 
   // The start-tour transition (GH132-PLAN.md M2, see the module doc): the Options
@@ -343,15 +351,19 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   );
 
   // The legend chip's opener (GH133-PLAN.md): no-ops while another overlay already
-  // owns the shell, mirroring `useSidePanel`'s own `openWith` guard. The reverse
-  // direction — `onMapSelect`/`onEventSelect`/the hamburger opener rejecting while
-  // `legendOpen` — is enforced at each of those call sites instead.
+  // owns the shell, mirroring `useSidePanel`'s own `openWith` guard, and also while
+  // the tour is active (Codex round 3 MAJOR) — the tour is not a modal, so it leaves
+  // the map-region chip interactive, and a mid-tour click on it would otherwise open
+  // the legend over the running tour. The reverse direction —
+  // `onMapSelect`/`onEventSelect`/the hamburger opener rejecting while `legendOpen`,
+  // and the auto-start deferring while a modal is open — is enforced at each of those
+  // sites instead.
   const openLegend = useCallback(() => {
-    if (traceOpen || sidePanel.open || stackOpen) {
+    if (traceOpen || sidePanel.open || stackOpen || tour.active) {
       return;
     }
     setLegendOpen(true);
-  }, [traceOpen, sidePanel.open, stackOpen]);
+  }, [traceOpen, sidePanel.open, stackOpen, tour.active]);
 
   // The hamburger's own opener no-ops while the legend dialog is open (GH133-PLAN.md,
   // the reverse direction of `openLegend`'s guard above): the legend chip that opened
@@ -382,6 +394,11 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   }, [legendOpen]);
 
   const modalOpen = traceOpen || sidePanel.open || stackOpen || legendOpen;
+  // Bridge `modalOpen` to the tour's auto-start guard (see `modalOpenRef` above): a
+  // render-phase ref write, the same pattern as `openDrawerRef`/`closeSidePanelRef`,
+  // so the auto-start reads the latest value lazily at its timer without `useTour`
+  // depending on a value derived after it is created.
+  modalOpenRef.current = modalOpen;
 
   // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
   // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
@@ -441,7 +458,11 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
           />
           {sidePanel.sidePanel}
           {legendOpen ? (
-            <LegendDialog onClose={() => setLegendOpen(false)} triggerRef={legendTriggerRef} />
+            <LegendDialog
+              onClose={() => setLegendOpen(false)}
+              triggerRef={legendTriggerRef}
+              fallbackFocusRef={metroMapRegionRef}
+            />
           ) : null}
         </>
       }

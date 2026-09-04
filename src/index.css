@@ -2621,21 +2621,19 @@ body {
 }
 
 /* Touch targets (GH133-PLAN.md defect #4): a coarse pointer (touch, not a mouse or
-   trackpad) gets a 44px minimum in both dimensions on every primary control below —
-   the WCAG 2.5.5 AAA target size. `.log-row` takes min-height only: a min-width
-   there would force it wider than its own grid track and break the row layout. */
+   trackpad) gets a 44px minimum in BOTH dimensions on every primary control below —
+   the WCAG 2.5.5 AAA target size. `.log-row` is already full-width (`width: 100%`), so
+   its `min-width: 44px` never binds in normal layout; it is stated only to enforce the
+   agreed lower bound if the row's container is ever narrowed (Codex round 3). */
 @media (pointer: coarse) {
   .transport-freeze,
   .transport-speed,
   .topbar-menu-button,
   .hire-me-toggle,
   .metro-legend-button,
-  .legend-dialog-close {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
+  .legend-dialog-close,
   .log-row {
     min-height: 44px;
+    min-width: 44px;
   }
 }
