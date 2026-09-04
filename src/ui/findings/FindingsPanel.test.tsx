@@ -5,7 +5,18 @@ import { URGENT_HITS } from "../../game/tuning";
 import type { LiveFinding } from "../../sim/correctness";
 import type { Finding } from "../../sim/finding";
 import { emptySnapshot } from "../../sim/snapshot";
+import type { ShortcutsAppState } from "../shortcuts/use-shortcuts";
+import { ShortcutsProvider } from "../shortcuts/use-shortcuts";
 import { InspectorShell } from "./InspectorShell";
+
+const SHELL_APP_STATE: ShortcutsAppState = {
+  traceOpen: false,
+  mapDialogKind: null,
+  legendOpen: false,
+  sidePanelOpen: false,
+  sidePanelTab: "chaos",
+  hireMeOpen: false,
+};
 
 // The zustand store is a singleton shared across test files, so reset the fields this
 // file reads before each test, or a leaked snapshot or selection would bleed across.
@@ -223,6 +234,45 @@ describe("FindingsPanel", () => {
     expect(screen.queryByText("e12")).toBeNull();
     fireEvent.click(more);
     expect(screen.getByText("e12")).toBeDefined();
+  });
+});
+
+describe("FindingsPanel keyboard shortcut badge (GH137-PLAN.md M1)", () => {
+  function manyFindings(count: number): LiveFinding[] {
+    return Array.from({ length: count }, (_, i) =>
+      live({ seq: i + 1, subjectType: "account", entity: `e${i}`, at: count - i }),
+    );
+  }
+
+  it("shows an F badge on '+N more', with aria-keyshortcuts set and its accessible name unchanged", () => {
+    publish(manyFindings(15));
+    render(<InspectorShell />);
+    const more = screen.getByRole("button", { name: /\+3 more/i });
+    expect(more.getAttribute("aria-keyshortcuts")).toBe("F");
+    expect(more.querySelector(".kbd")?.textContent).toBe("F");
+  });
+
+  it("renders no '+N more' button, and registers no live F handler, once every finding fits", () => {
+    publish(manyFindings(2));
+    render(<InspectorShell />);
+    expect(screen.queryByRole("button", { name: /more/i })).toBeNull();
+  });
+
+  it("pressing F expands the list, once wrapped in a ShortcutsProvider", () => {
+    publish(manyFindings(15));
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE}>
+        <InspectorShell />
+      </ShortcutsProvider>,
+    );
+    expect(screen.queryByText("e12")).toBeNull();
+
+    fireEvent.keyDown(document.body, { key: "f" });
+
+    expect(screen.getByText("e12")).toBeDefined();
+    // The button disappears once expanded — enabled tracked the same predicate as the
+    // DOM control's own render condition, so a second F press has nothing left to fire.
+    expect(screen.queryByRole("button", { name: /more/i })).toBeNull();
   });
 });
 

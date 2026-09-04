@@ -16,15 +16,18 @@ beforeEach(() => {
   });
 });
 
-/** The three GH132-PLAN.md M1 Options-tab args every `useSidePanel` call now
- *  needs; the tests below never inspect the Options tab's own rendering (that
- *  lives in `SidePanel.test.tsx`), so a stable default suffices. */
+/** The Options-tab args every `useSidePanel` call now needs (GH132-PLAN.md M1's
+ *  map/tour pair, plus GH137-PLAN.md code review fix 4's shortcuts on/off toggle);
+ *  the tests below never inspect the Options tab's own rendering (that lives in
+ *  `SidePanel.test.tsx`), so a stable default suffices. */
 function baseArgs(controllerRef: RefObject<RunController | null>) {
   return {
     controllerRef,
     mapShown: true,
     onToggleMap: vi.fn(),
     onStartTour: vi.fn(),
+    shortcutsEnabled: true,
+    onToggleShortcuts: vi.fn(),
   };
 }
 

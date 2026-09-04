@@ -44,6 +44,7 @@ import {
   type TourDriverFactory,
   type TourDriverInstance,
   type TourDriveStepConfig,
+  type TourPopoverDom,
 } from "./driver-factory";
 import { tourSteps } from "./tour-steps.data";
 
@@ -85,6 +86,15 @@ export interface UseTourArgs {
    *  lazily at the auto-start timer, so `App.tsx` can back it with a ref it writes
    *  after `modalOpen` is derived. Omitted (or absent) means "never blocked". */
   isModalOpen?: (() => boolean) | undefined;
+  /**
+   * The synchronous "the tour owns the keyboard" flag (GH137-PLAN.md): owned by
+   * `App.tsx`, shared with `shortcuts/use-shortcuts.tsx`'s dispatcher, which bails on it
+   * before looking up a mnemonic — driver.js owns the keyboard while the tour drives.
+   * Set `true` here right before `instance.drive()`, cleared in `onDestroyed` and on
+   * unmount. Optional: omitted entirely, this hook just never touches it (a test with
+   * no shortcuts provider in the tree, or a caller that predates GH137).
+   */
+  tourOwnsKeyboardRef?: RefObject<boolean> | undefined;
 }
 
 export interface TourController {
@@ -138,12 +148,75 @@ function buildSteps(isNarrow: boolean): TourDriveStepConfig[] {
   });
 }
 
+/** One badge in the footer hint, plain DOM (`kbd.kbd`, `aria-hidden`), matching
+ *  `Kbd.tsx`'s own React output. */
+function buildHintBadge(glyph: string): HTMLElement {
+  const kbd = document.createElement("kbd");
+  kbd.className = "kbd";
+  kbd.setAttribute("aria-hidden", "true");
+  kbd.textContent = glyph;
+  return kbd;
+}
+
+/** Appends the tour footer's shortcut hint, "← → move · Esc exit" (GH137-PLAN.md
+ *  M3), to a step's popover footer. Built as plain DOM, not a mounted `<ShortcutHint>`
+ *  (`shortcuts/Kbd.tsx`): driver.js renders its own popover DOM entirely outside
+ *  React, so this hand-builds the same markup/CSS classes that component would
+ *  produce, rather than mounting a second React root into a node this hook does not
+ *  own past the step's own lifetime. Static text — the tour already disables
+ *  animation under reduced motion (`animate: !reducedMotion` in `startTour` below),
+ *  so no extra reduced-motion handling is needed here. Runs on every step (driver.js
+ *  calls `onPopoverRender` once per step's own popover build), so it never needs to
+ *  guard against appending twice to the SAME footer node.
+ *
+ *  Code review fix 3: every `<kbd>` here is already `aria-hidden` (`buildHintBadge`),
+ *  but the plain "move"/"exit" text sitting next to them was NOT — so a screen reader
+ *  used to hear only "move ... exit", naming no keys at all. The glyph row is now
+ *  wrapped in its own `aria-hidden` container (so the whole decorative row is skipped
+ *  as one unit), and a `.visually-hidden` sibling — the same class the rest of the app
+ *  uses for spoken-only text — carries the real accessible sentence instead. The
+ *  sighted layout is unchanged: the glyph row's own markup/classes are untouched. */
+function appendShortcutHint(popover: TourPopoverDom): void {
+  const hint = document.createElement("p");
+  hint.className = "shortcut-hint";
+
+  const glyphRow = document.createElement("span");
+  glyphRow.setAttribute("aria-hidden", "true");
+
+  const move = document.createElement("span");
+  move.className = "shortcut-hint-entry";
+  move.append(
+    buildHintBadge("←"),
+    document.createTextNode(" "),
+    buildHintBadge("→"),
+    document.createTextNode(" move"),
+  );
+
+  const sep = document.createElement("span");
+  sep.className = "shortcut-hint-sep";
+  sep.textContent = " · ";
+
+  const exit = document.createElement("span");
+  exit.className = "shortcut-hint-entry";
+  exit.append(buildHintBadge("Esc"), document.createTextNode(" exit"));
+
+  glyphRow.append(move, sep, exit);
+
+  const hiddenLabel = document.createElement("span");
+  hiddenLabel.className = "visually-hidden";
+  hiddenLabel.textContent = "Left and right arrow keys to move, Escape to exit";
+
+  hint.append(glyphRow, hiddenLabel);
+  popover.footer.append(hint);
+}
+
 export function useTour({
   triggerRef,
   createDriver = createTourDriver,
   openDrawer,
   closeDrawer,
   isModalOpen,
+  tourOwnsKeyboardRef,
 }: UseTourArgs): TourController {
   const [active, setActive] = useState(false);
   // A pure, one-time read (GH132-PLAN.md M3): taken in a lazy initializer, so it can
@@ -230,33 +303,99 @@ export function useTour({
     // popover stays usable even though this value does not re-place mid-tour.
     const isNarrow = window.matchMedia(NARROW_QUERY).matches;
 
-    const instance = createDriver({
-      steps: buildSteps(isNarrow),
-      disableActiveInteraction: true,
-      animate: !reducedMotion,
-      onNextClick: () => navigate(1),
-      onPrevClick: () => navigate(-1),
-      onDestroyed: () => {
-        sessionRef.current += 1; // abort any pending drawer wait
-        closeDrawer?.(); // a tour ended on the drawer step must close the panel
-        drawerOpenRef.current = false;
-        setActive(false);
-        if (!suppressSeenRef.current) {
-          markTourSeen();
-        }
-        suppressSeenRef.current = false;
-        // Deferred to a microtask: driver.js focuses its own saved element right
-        // after onDestroyed returns, which would clobber a synchronous call here.
-        Promise.resolve().then(() => {
-          if (focusGenerationRef.current === generation) {
-            triggerRef.current?.focus();
+    // Code review finding (MAJOR): `createDriver()`/`instance.drive()` can throw (a
+    // hostile fake in tests, or a real driver.js failure). Without this try/catch, a
+    // throw here would leave `tourOwnsKeyboardRef.current` stuck `true` forever — it is
+    // set just below, before `drive()` — so the shortcuts dispatcher's bail check #1
+    // (`use-shortcuts.tsx`) would suppress every mnemonic for the rest of the session,
+    // with no tour actually running to explain why. On a throw, this resets exactly the
+    // state `onDestroyed`/unmount would leave (the ref cleared, `active` false, the
+    // drawer closed if this attempt opened it, `sessionRef` bumped so no stray pending
+    // wait can act, `driverRef` nulled), then rethrows so the caller still learns the
+    // start failed.
+    try {
+      const instance = createDriver({
+        steps: buildSteps(isNarrow),
+        disableActiveInteraction: true,
+        animate: !reducedMotion,
+        onPopoverRender: appendShortcutHint,
+        onNextClick: () => navigate(1),
+        onPrevClick: () => navigate(-1),
+        onDestroyed: () => {
+          // Clear the synchronous internal state FIRST (Codex review): the session
+          // guard, the drawer flag, `active`, and — critically — keyboard ownership, so
+          // a `closeDrawer` that throws below can never leave the shortcuts dispatcher
+          // permanently bailed.
+          sessionRef.current += 1; // abort any pending drawer wait
+          drawerOpenRef.current = false;
+          setActive(false);
+          if (tourOwnsKeyboardRef !== undefined) {
+            tourOwnsKeyboardRef.current = false; // the shortcuts dispatcher is live again
           }
-        });
-      },
-    });
-    driverRef.current = instance;
-    instance.drive();
-  }, [createDriver, triggerRef, openDrawer, closeDrawer]);
+          if (!suppressSeenRef.current) {
+            markTourSeen();
+          }
+          suppressSeenRef.current = false;
+          // Deferred to a microtask: driver.js focuses its own saved element right
+          // after onDestroyed returns, which would clobber a synchronous call here.
+          Promise.resolve().then(() => {
+            if (focusGenerationRef.current === generation) {
+              triggerRef.current?.focus();
+            }
+          });
+          // External callback LAST, and guarded: the invariants above already hold, so a
+          // throw here (a tour ended on the drawer step must still close the panel) can
+          // no longer strand ownership.
+          try {
+            closeDrawer?.();
+          } catch {
+            // internal state is already reset; a drawer-close failure must not undo it
+          }
+        },
+      });
+      driverRef.current = instance;
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = true; // driver.js owns the keyboard until onDestroyed
+      }
+      instance.drive();
+    } catch (err) {
+      // A partially-started driver may already have added its global listeners, so make
+      // a best-effort `destroy()` (Codex review): it re-enters the reordered
+      // `onDestroyed` above, which clears state and closes the drawer. The start never
+      // ran, so suppress its seen-write. Guarded — a half-built instance may not destroy
+      // cleanly, and nothing here may mask the original error.
+      const failed = driverRef.current;
+      driverRef.current = null;
+      const hadDrawer = drawerOpenRef.current;
+      suppressSeenRef.current = true;
+      try {
+        failed?.destroy();
+      } catch {
+        // a half-initialized driver may not tear down cleanly; the throw below matters
+      }
+      suppressSeenRef.current = false;
+      // Close the drawer this attempt opened EXACTLY ONCE (Codex review): a successful
+      // destroy() re-entered `onDestroyed`, which already cleared `drawerOpenRef` and
+      // closed the panel — so `drawerOpenRef` still reading true means `onDestroyed` did
+      // NOT run (destroy() threw or fired no callback), and the panel is still open.
+      if (hadDrawer && drawerOpenRef.current) {
+        try {
+          closeDrawer?.();
+        } catch {
+          // internal state is reset below regardless; the original error still rethrows
+        }
+      }
+      // Re-assert the synchronous invariants UNCONDITIONALLY, whether or not
+      // destroy()/onDestroyed ran, so keyboard ownership can never be left stuck.
+      sessionRef.current += 1;
+      drawerOpenRef.current = false;
+      setActive(false);
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = false; // never leave the dispatcher permanently bailed
+      }
+      throw err;
+    }
+  }, [createDriver, triggerRef, openDrawer, closeDrawer, tourOwnsKeyboardRef]);
 
   // The auto-start action, as an Effect Event. It always reads the LATEST COMMITTED
   // `startTour` (whose identity churns as App.tsx rebuilds `openDrawer`/`closeDrawer`
@@ -308,6 +447,9 @@ export function useTour({
       if (pending !== null) {
         clearTimeout(pending); // cancel FIRST: a Strict Mode teardown must never fire this
       }
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = false; // defensive: `onDestroyed` below already clears it
+      }
       focusGenerationRef.current += 1;
       sessionRef.current += 1;
       // Only arm suppression when a live driver exists to destroy. A Strict Mode first
@@ -319,7 +461,7 @@ export function useTour({
         driverRef.current.destroy();
       }
     };
-  }, [hasSeenAtMount]);
+  }, [hasSeenAtMount, tourOwnsKeyboardRef]);
 
   return { startTour, active };
 }

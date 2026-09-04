@@ -65,6 +65,11 @@ import type { SimSnapshot } from "../../sim/snapshot";
 import type { WorldLogEvent } from "../../sim/world-log";
 import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
+import { Kbd } from "../shortcuts/Kbd";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
+import { isEditableTarget } from "../shortcuts/text-entry";
+import { useShortcut } from "../shortcuts/use-shortcut";
+import { useShortcutsEnabled } from "../shortcuts/use-shortcuts";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
 import { formatClock, type LogRow as LogRowView, sensorLabel, toLogRow } from "./formatters";
@@ -133,21 +138,14 @@ function waveAnnouncement(
   }
 }
 
-/** The speed choices the transport offers, in ascending order, with their labels. */
-const SPEEDS: ReadonlyArray<{ value: Speed; label: string }> = [
-  { value: 0.5, label: "0.5x" },
-  { value: 1, label: "1x" },
-  { value: 2, label: "2x" },
+/** The speed choices the transport offers, in ascending order, with their labels. `id`
+ *  matches the `shell` scope's `speed-*` entries in `shortcuts.data.ts` (GH137-PLAN.md
+ *  M1). */
+const SPEEDS: ReadonlyArray<{ value: Speed; label: string; id: string }> = [
+  { value: 0.5, label: "0.5x", id: "speed-0.5x" },
+  { value: 1, label: "1x", id: "speed-1x" },
+  { value: 2, label: "2x", id: "speed-2x" },
 ];
-
-/** True when a key event targets an editable element, so Space should not toggle. */
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
-}
 
 /** `CSSProperties` plus the one custom property a cited-row flash sets. */
 interface CitedRowStyle extends CSSProperties {
@@ -210,6 +208,38 @@ const LogRow = memo(function LogRow({ event, flash, onSelect }: LogRowProps) {
   );
 });
 
+interface SpeedButtonProps {
+  /** Matches the `shell` scope's `speed-*` entry id (`shortcuts.data.ts`). */
+  id: string;
+  value: Speed;
+  label: string;
+  active: boolean;
+  onSelect: (value: Speed) => void;
+}
+
+/** One transport speed button (GH137-PLAN.md M1): its own `useShortcut` call, since a
+ *  hook cannot be called from inside `SPEEDS.map`'s callback directly. */
+function SpeedButton({ id, value, label, active, onSelect }: SpeedButtonProps) {
+  const { key } = useShortcut({
+    scope: "shell",
+    id,
+    onActivate: () => onSelect(value),
+    enabled: true,
+  });
+  return (
+    <button
+      type="button"
+      className={`transport-speed${active ? " transport-speed-on" : ""}`}
+      aria-pressed={active}
+      aria-keyshortcuts={key === undefined ? undefined : ariaKeyshortcut(key)}
+      onClick={() => onSelect(value)}
+    >
+      {label}
+      {key !== undefined ? <Kbd shortcutKey={key} /> : null}
+    </button>
+  );
+}
+
 interface LogPanelProps {
   /**
    * The event dialog's focus-fallback ref (GH124-PLAN.md Checkpoint 5, mirroring
@@ -235,6 +265,13 @@ export function LogPanel({
 }: LogPanelProps = {}) {
   const ownRef = useRef<HTMLDivElement>(null);
   const panelRef = externalRef ?? ownRef;
+  // The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4): Space-to-freeze is a
+  // genuinely global single-character shortcut (unlike Escape/the arrows, it is not
+  // scoped to a focused component), so it needs its own bail below, distinct from
+  // `useShortcut`'s badge suppression — Space is dispatched through THIS component's
+  // own `window` listener, never through the shell shortcut dispatcher (Space already
+  // has that owner there; see `shortcuts.data.ts`).
+  const shortcutsEnabled = useShortcutsEnabled();
   const worldEvents = useGameStore((s) => s.snapshot.worldEvents);
   const wave = useGameStore((s) => s.snapshot.wave);
   const status = useGameStore((s) => s.snapshot.status);
@@ -284,6 +321,9 @@ export function LogPanel({
       if (event.repeat || isEditableTarget(event.target)) {
         return;
       }
+      if (!shortcutsEnabled) {
+        return; // WCAG 2.1.4 off-switch: this global shortcut does nothing while OFF
+      }
       if (useGameStore.getState().overlayOpen) {
         return; // an overlay owns the run; the inert shell must not resume it
       }
@@ -301,12 +341,24 @@ export function LogPanel({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setFrozen]);
+  }, [setFrozen, shortcutsEnabled]);
 
   const newestFirst = worldEvents.slice().reverse();
   // `running` (F003) also gates the readout text: a concluded run's stale
   // reading must not keep showing.
   const readout = running ? waveReadout(wave) : null;
+
+  // Freeze's own shortcut entry is badge-only (`dispatch: false`, GH137-PLAN.md M1):
+  // `Space` already has an owner, the Space-to-freeze listener just above. This call
+  // only ever gets `{key}` back for the badge; `onActivate` is unreachable by design —
+  // `use-shortcuts.tsx` refuses to register a live handler for a `dispatch: false`
+  // entry — so a no-op is the honest thing to pass.
+  const { key: freezeKey } = useShortcut({
+    scope: "shell",
+    id: "freeze",
+    onActivate: () => {},
+    enabled: true,
+  });
 
   return (
     <div
@@ -321,26 +373,24 @@ export function LogPanel({
             type="button"
             className={`transport-freeze${frozen ? " transport-freeze-on" : ""}`}
             aria-pressed={frozen}
+            aria-keyshortcuts={freezeKey === undefined ? undefined : ariaKeyshortcut(freezeKey)}
             onClick={() => setFrozen(!frozen)}
           >
             <span className="transport-dot" aria-hidden="true" />
             Freeze
+            {freezeKey !== undefined ? <Kbd shortcutKey={freezeKey} /> : null}
           </button>
           <div className="transport-speeds">
-            {SPEEDS.map(({ value, label }) => {
-              const active = speed === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  className={`transport-speed${active ? " transport-speed-on" : ""}`}
-                  aria-pressed={active}
-                  onClick={() => setSpeed(value)}
-                >
-                  {label}
-                </button>
-              );
-            })}
+            {SPEEDS.map(({ value, label, id }) => (
+              <SpeedButton
+                key={value}
+                id={id}
+                value={value}
+                label={label}
+                active={speed === value}
+                onSelect={setSpeed}
+              />
+            ))}
           </div>
           {readout ? (
             <span

@@ -25,7 +25,9 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
   const onApply = overrides.onApply ?? vi.fn();
   const onToggleMap = overrides.onToggleMap ?? vi.fn();
   const onStartTour = overrides.onStartTour ?? vi.fn();
+  const onToggleShortcuts = overrides.onToggleShortcuts ?? vi.fn();
   const mapShown = overrides.mapShown ?? true;
+  const shortcutsEnabled = overrides.shortcutsEnabled ?? true;
   const tab = overrides.tab ?? "chaos";
   const utils = render(
     <SidePanel
@@ -37,10 +39,20 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
       mapShown={mapShown}
       onToggleMap={onToggleMap}
       onStartTour={onStartTour}
+      shortcutsEnabled={shortcutsEnabled}
+      onToggleShortcuts={onToggleShortcuts}
       fallbackFocusRef={overrides.fallbackFocusRef}
     />,
   );
-  return { ...utils, onSelectTab, onClose, onApply, onToggleMap, onStartTour };
+  return {
+    ...utils,
+    onSelectTab,
+    onClose,
+    onApply,
+    onToggleMap,
+    onStartTour,
+    onToggleShortcuts,
+  };
 }
 
 describe("SidePanel", () => {
@@ -115,6 +127,7 @@ describe("SidePanel", () => {
     const onApply = vi.fn();
     const onToggleMap = vi.fn();
     const onStartTour = vi.fn();
+    const onToggleShortcuts = vi.fn();
     const baseProps = {
       onSelectTab,
       onClose,
@@ -122,6 +135,8 @@ describe("SidePanel", () => {
       mapShown: true,
       onToggleMap,
       onStartTour,
+      shortcutsEnabled: true,
+      onToggleShortcuts,
     };
     const { rerender } = render(<SidePanel tab="chaos" {...baseProps} />);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
@@ -216,6 +231,51 @@ describe("SidePanel", () => {
     expect(onStartTour).toHaveBeenCalledTimes(1);
   });
 
+  // GH137-PLAN.md code review fix 4: WCAG 2.1.4's "turn off" mechanism, surfaced as a
+  // real, labeled, keyboard-operable checkbox — not a button (a toggle needs
+  // checked-state semantics a plain button doesn't carry), and deliberately wired
+  // through NO `useShortcut` call: giving the shortcuts on/off control its own
+  // mnemonic would be circular (turning shortcuts off would disable the very control
+  // that turns them back on).
+  describe("the options tab's Keyboard shortcuts toggle", () => {
+    it("is a real checkbox, labeled, reflecting shortcutsEnabled", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      expect(toggle).toHaveProperty("checked", true);
+    });
+
+    it("reflects shortcutsEnabled: false as unchecked", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: false });
+      expect(screen.getByRole("checkbox", { name: "Keyboard shortcuts" })).toHaveProperty(
+        "checked",
+        false,
+      );
+    });
+
+    it("clicking it calls onToggleShortcuts", () => {
+      const { onToggleShortcuts } = renderPanel({ tab: "options", shortcutsEnabled: true });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+      expect(onToggleShortcuts).toHaveBeenCalledTimes(1);
+    });
+
+    it("is keyboard-operable: Space toggles a focused checkbox via its native activation", () => {
+      const { onToggleShortcuts } = renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      toggle.focus();
+      // happy-dom's native checkbox activation fires a real click on Space, exactly
+      // like a browser; the control needs no keydown handler of its own.
+      fireEvent.click(toggle);
+      expect(onToggleShortcuts).toHaveBeenCalledTimes(1);
+    });
+
+    it("carries no aria-keyshortcuts and no Kbd badge of its own (no mnemonic, avoiding circularity)", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      expect(toggle.hasAttribute("aria-keyshortcuts")).toBe(false);
+      expect(toggle.closest("label")?.querySelector(".kbd")).toBeNull();
+    });
+  });
+
   it("Escape calls onClose", () => {
     const { onClose } = renderPanel();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
@@ -292,6 +352,89 @@ describe("SidePanel", () => {
   it("renders the chaos tabpanel content with the data-tour anchor the tour's step 2 targets", () => {
     renderPanel({ tab: "chaos" });
     expect(document.querySelector('[data-tour="chaos"]')).not.toBeNull();
+  });
+});
+
+// GH137-PLAN.md M2: badge/aria-keyshortcuts data for the composite sidepanel:* scopes.
+// Actual keyboard dispatch through a real ShortcutsProvider is covered at the App
+// level (App.test.tsx), mirroring how Topbar.test.tsx only checks the M1 badge data.
+describe("SidePanel keyboard shortcut badges (GH137-PLAN.md M2)", () => {
+  it("shows an Esc badge on Close, aria-keyshortcuts set to the canonical Escape token, accessible name unchanged", () => {
+    renderPanel({ tab: "chaos" });
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
+    expect(close.querySelector(".kbd")?.textContent).toBe("Esc");
+  });
+
+  it("shows the same Escape aria-keyshortcuts on Close regardless of which tab is active", () => {
+    renderPanel({ tab: "options" });
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
+  });
+
+  it("shows a T badge on Retake tour and a P badge on the map toggle, on the options tab", () => {
+    renderPanel({ tab: "options" });
+    const retake = screen.getByRole("button", { name: "Retake tour" });
+    expect(retake.getAttribute("aria-keyshortcuts")).toBe("T");
+    expect(retake.querySelector(".kbd")?.textContent).toBe("T");
+
+    const mapToggle = screen.getByRole("button", { name: "Hide metro view" });
+    expect(mapToggle.getAttribute("aria-keyshortcuts")).toBe("P");
+    expect(mapToggle.querySelector(".kbd")?.textContent).toBe("P");
+  });
+});
+
+// Code review finding (MAJOR): the plan lists the tab strip's ←/→ move as a badge-only
+// entry (no dispatch: the roving-tabindex handler already owns the arrows), but the
+// tabs had no visible badge and no aria-keyshortcuts to say so. One hint on the
+// tablist itself (not per-tab, to avoid repeating it three times) plus
+// aria-keyshortcuts="ArrowLeft ArrowRight" on each tab.
+describe("SidePanel tab strip's arrow-key hint (GH137 review)", () => {
+  it("shows one ←/→ badge hint on the tablist, aria-hidden, not per-tab", () => {
+    renderPanel({ tab: "chaos" });
+    const tablist = screen.getByRole("tablist", { name: /side panel tabs/i });
+    const badges = tablist.querySelectorAll(".kbd");
+    // Exactly two badges (← and →), not one per tab (which would be six for three tabs).
+    expect(badges).toHaveLength(2);
+    for (const badge of badges) {
+      expect(badge.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it('sets aria-keyshortcuts="ArrowLeft ArrowRight" on every tab', () => {
+    renderPanel({ tab: "chaos" });
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab.getAttribute("aria-keyshortcuts")).toBe("ArrowLeft ArrowRight");
+    }
+  });
+
+  it("never registers the arrows with the mnemonic dispatcher (RESERVED, badge-only) — roving nav still moves focus and reports the tab", () => {
+    const onSelectTab = vi.fn();
+    const onClose = vi.fn();
+    const onApply = vi.fn();
+    const onToggleMap = vi.fn();
+    const onStartTour = vi.fn();
+    const onToggleShortcuts = vi.fn();
+    render(
+      <SidePanel
+        tab="chaos"
+        onSelectTab={onSelectTab}
+        onClose={onClose}
+        onApply={onApply}
+        mapShown={true}
+        onToggleMap={onToggleMap}
+        onStartTour={onStartTour}
+        shortcutsEnabled={true}
+        onToggleShortcuts={onToggleShortcuts}
+      />,
+    );
+    const chaosTab = screen.getByRole("tab", { name: /chaos/i });
+    chaosTab.focus();
+
+    fireEvent.keyDown(chaosTab, { key: "ArrowRight" });
+
+    expect(onSelectTab).toHaveBeenCalledWith("algorithm");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /algorithm/i }));
   });
 });
 

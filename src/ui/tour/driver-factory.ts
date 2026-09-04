@@ -20,6 +20,15 @@ interface TourPopoverConfig {
   side?: "top" | "right" | "bottom" | "left";
 }
 
+/** The subset of driver.js's own `PopoverDOM` (`driver.js/dist/driver.js.d.ts`)
+ *  `use-tour.ts` touches (GH137-PLAN.md M3): just the footer node it appends the
+ *  `.shortcut-hint` line into. Kept loose and structurally compatible with the real,
+ *  wider `PopoverDOM` — same convention the rest of this file follows — so passing
+ *  `onPopoverRender` straight through to `driver()` below needs no cast. */
+export interface TourPopoverDom {
+  footer: HTMLElement;
+}
+
 /** One step, already resolved to a `[data-tour="..."]` element selector. */
 export interface TourDriveStepConfig {
   element: string;
@@ -41,6 +50,10 @@ export interface TourDriverConfig {
   onNextClick?: (element?: Element, step?: unknown, options?: unknown) => void;
   /** Overrides the Previous button, symmetric to `onNextClick`. */
   onPrevClick?: (element?: Element, step?: unknown, options?: unknown) => void;
+  /** Fires once per step, right after driver.js builds that step's popover DOM
+   *  (GH137-PLAN.md M3). `use-tour.ts` uses it to append the `.shortcut-hint` footer
+   *  line (`← → move · Esc exit`) to every step's popover. */
+  onPopoverRender?: (popover: TourPopoverDom) => void;
 }
 
 /** The driver.js instance surface `use-tour.ts` calls. */

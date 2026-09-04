@@ -400,6 +400,45 @@ describe("PlaceDialog navigation stack (GH124 follow-up: Back)", () => {
 
     expect(useGameStore.getState().mapDialogStack).toEqual([]);
   });
+
+  // GH137-PLAN.md code review fix 2: at depth 1, Escape on the dialog's own onKeyDown
+  // closes the whole stack, so Close's Esc badge/aria-keyshortcuts are accurate. At
+  // depth > 1, that same Escape instead pops one entry (routes to Back) — so Close's
+  // Esc badge/aria-keyshortcuts would misdescribe what the key actually does there,
+  // and must not render.
+  it("at depth 1 (no Back), the Close button carries the Esc badge and aria-keyshortcuts=Escape", () => {
+    useGameStore.setState({ mapDialogStack: placeStack("cen") });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
+    expect(close.querySelector(".kbd")?.textContent).toBe("Esc");
+  });
+
+  it("at depth > 1 (Back available), the Close button carries neither the Esc badge nor aria-keyshortcuts, while Back still shows its own B badge", () => {
+    useGameStore.setState({
+      mapDialogStack: [{ kind: "event", id: 5 }, ...placeStack("cen")],
+    });
+    render(
+      <PlaceDialog
+        fallbackFocusRef={noFallback()}
+        rootTriggerRef={noRootTrigger()}
+        rootFallbackFocusRef={noRootFallback()}
+      />,
+    );
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.hasAttribute("aria-keyshortcuts")).toBe(false);
+    expect(close.querySelector(".kbd")).toBeNull();
+
+    const back = screen.getByRole("button", { name: "Back" });
+    expect(back.getAttribute("aria-keyshortcuts")).toBe("B");
+    expect(back.querySelector(".kbd")?.textContent).toBe("B");
+  });
 });
 
 describe("PlaceDialog actors table (GH124-PLAN.md Checkpoint 4 Part 4)", () => {

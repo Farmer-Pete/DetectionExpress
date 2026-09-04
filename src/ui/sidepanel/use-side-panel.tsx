@@ -82,6 +82,11 @@ export interface UseSidePanelArgs {
   onToggleMap: () => void;
   /** Starts the guided tour. Forwarded to `SidePanel`'s Options tab. */
   onStartTour: () => void;
+  /** The player's persisted keyboard-shortcuts on/off preference (GH137-PLAN.md code
+   *  review fix 4). Forwarded to `SidePanel`'s Options tab toggle. */
+  shortcutsEnabled: boolean;
+  /** Flips `shortcutsEnabled`. Forwarded to `SidePanel`'s Options tab toggle. */
+  onToggleShortcuts: () => void;
 }
 
 export interface SidePanelController {
@@ -124,6 +129,8 @@ export function useSidePanel({
   mapShown,
   onToggleMap,
   onStartTour,
+  shortcutsEnabled,
+  onToggleShortcuts,
 }: UseSidePanelArgs): SidePanelController {
   const [open, setOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
@@ -269,6 +276,8 @@ export function useSidePanel({
         mapShown={mapShown}
         onToggleMap={onToggleMap}
         onStartTour={onStartTour}
+        shortcutsEnabled={shortcutsEnabled}
+        onToggleShortcuts={onToggleShortcuts}
         fallbackFocusRef={fallbackFocusRef}
       />
     ) : null;

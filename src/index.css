@@ -322,7 +322,13 @@ body {
   cursor: pointer;
 }
 
-.findings-row:hover {
+/* :focus-visible added GH137-PLAN.md M3 (operability sweep): the row is a native
+   <button>, so it always got the browser's own default ring, but no themed one — the
+   only unbounded list row still missing one alongside `.log-row`'s and
+   `.decisions-row`'s own. Shares the hover treatment, the same convention those two
+   already use. */
+.findings-row:hover,
+.findings-row:focus-visible {
   border-color: var(--line);
 }
 
@@ -364,7 +370,10 @@ body {
   font-size: 0.82rem;
 }
 
-.findings-card:hover .findings-card-line {
+/* :focus-visible added GH137-PLAN.md M3 (operability sweep), same reasoning as
+   `.findings-row` above. */
+.findings-card:hover .findings-card-line,
+.findings-card:focus-visible .findings-card-line {
   border-color: var(--line);
 }
 
@@ -1111,7 +1120,10 @@ body {
   cursor: pointer;
 }
 
-.decisions-row:hover {
+/* :focus-visible added GH137-PLAN.md M3 (operability sweep), same reasoning as
+   `.findings-row` above. */
+.decisions-row:hover,
+.decisions-row:focus-visible {
   border-color: var(--line);
 }
 
@@ -2113,6 +2125,17 @@ body {
   gap: 0.2rem;
 }
 
+/* The tab strip's ←/→ roving-nav hint (GH137-PLAN.md review fix): one badge pair for
+   the whole strip, not one per tab — decorative (`aria-hidden`), the binding is on
+   each tab's own `aria-keyshortcuts="ArrowLeft ArrowRight"` instead. */
+.sidepanel-tablist-hint {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 0.15rem;
+  margin-left: 0.4rem;
+}
+
 .sidepanel-tab {
   padding: 0.5rem 0.9rem;
   border: none;
@@ -2186,6 +2209,28 @@ body {
 
 .sidepanel-options-button:hover {
   border-color: var(--a1);
+}
+
+/* The keyboard-shortcuts on/off toggle (GH137-PLAN.md code review fix 4, WCAG
+   2.1.4's "turn off" mechanism): a real labeled checkbox, styled to sit alongside
+   the two buttons above it without reading as one itself. */
+.sidepanel-options-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sidepanel-options-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.sidepanel-options-toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--a3);
+  outline-offset: 2px;
 }
 
 /* Guided tour (GH132-PLAN.md M2, docs/adr/0012-guided-tour.md): driver.js's own
@@ -2287,6 +2332,28 @@ body {
   .driver-popover {
     max-width: calc(100vw - 24px);
   }
+}
+
+/* Shortcut hint (GH137-PLAN.md M3): the tour footer's static "← → move · Esc exit"
+   line (`use-tour.ts`'s `appendShortcutHint`, mirrored in React by `Kbd.tsx`'s
+   `ShortcutHint`). Sits below driver.js's own footer buttons, in the same dim,
+   de-emphasized tone the sheet already uses for secondary copy (matching
+   `.driver-popover-progress-text`). Wraps rather than overflows the popover at any
+   width, including the 480px-capped `.driver-popover` above. */
+.shortcut-hint {
+  margin: 0.5rem 0 0;
+  color: color-mix(in srgb, var(--dim) 55%, var(--ink));
+  font-size: 0.75rem;
+}
+
+.shortcut-hint-entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.shortcut-hint-sep {
+  padding: 0 0.15em;
 }
 
 /* Log panel: it fills the inspector-stream cell, which supplies the panel chrome. */
@@ -2648,4 +2715,65 @@ body {
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+/* Normalized keyboard focus ring (GH137-PLAN.md M3, operability sweep). Every
+   control below is a real `<button>`, so it always got the browser's own default
+   ring — but every one of them relied on that default alone, with no themed ring of
+   its own, unlike `.metro-map [role="button"]`/`.metro-train-hit` (already themed)
+   or the list rows just above (now themed too). One shared rule instead of
+   repeating the same declaration in each control's own block: the same outline
+   already used by those two map controls, so every keyboard-focused control in the
+   app now draws from one consistent ring instead of the browser's un-themed
+   default. */
+.topbar-menu-button:focus-visible,
+.hire-me-toggle:focus-visible,
+.hire-me-scrim:focus-visible,
+.transport-freeze:focus-visible,
+.transport-speed:focus-visible,
+.trace-close:focus-visible,
+.place-overlay-close:focus-visible,
+.place-overlay-back:focus-visible,
+.legend-dialog-close:focus-visible,
+.metro-legend-button:focus-visible,
+.editor-apply:focus-visible,
+.editor-reset:focus-visible,
+.event-open-place:focus-visible,
+.findings-more:focus-visible,
+.sidepanel-tab:focus-visible,
+.sidepanel-close:focus-visible,
+.sidepanel-options-button:focus-visible {
+  outline: 2px solid var(--a3);
+  outline-offset: 2px;
+}
+
+/* Keyboard shortcut badges (GH137-PLAN.md M1). `.kbd` is decorative and always
+   `aria-hidden` (`shortcuts/Kbd.tsx`) — the binding itself reaches assistive tech
+   through the owning control's own `aria-keyshortcuts`, never this text. A small
+   monospace chip that sits inline after a control's own label, never widening its
+   click target or displacing its layout beyond a small gap.
+
+   Responsive check (GH137-PLAN.md M3, part D): verified against the real rendered
+   app (a headless Chrome pass over the shell, the side panel's three tabs, the
+   legend dialog, a place dialog, and the Hire Me card/toggle) at 720/640/480px. No
+   badge wraps its own control, overflows its container, or forces horizontal
+   scroll at any of the three widths, so `.kbd` needed no width/wrap changes here —
+   every button-shaped control it sits inside already shrinks to its content, and
+   the containers around them (`.topbar-actions`, `.transport`, `.sidepanel-*`,
+   `.place-overlay-header`) already wrap or stack below 720px. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.3em;
+  margin-left: 0.4em;
+  padding: 0.05em 0.35em;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  color: var(--dim);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72em;
+  font-weight: 700;
+  line-height: 1.4;
 }

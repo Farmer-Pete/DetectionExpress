@@ -10,7 +10,7 @@ import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tourCopy } from "../content/narrative";
 import { hasSeenTour, markTourSeen } from "../onboarding-storage";
-import type { TourDriverConfig, TourDriverInstance } from "./driver-factory";
+import type { TourDriverConfig, TourDriverFactory, TourDriverInstance } from "./driver-factory";
 import { tourSteps } from "./tour-steps.data";
 import { resetTourAutoStartForTests, useTour } from "./use-tour";
 
@@ -431,5 +431,251 @@ describe("useTour auto-start (GH132-PLAN.md M3)", () => {
     renderHook(() => useTour({ triggerRef, createDriver: second.createDriver }));
     await flushDeferredAutoStart();
     expect(second.createDriver).not.toHaveBeenCalled();
+  });
+});
+
+// GH137-PLAN.md M3: the tour footer's shortcut hint (`← → move · Esc exit`).
+// driver.js renders its own popover DOM entirely outside React (module doc,
+// driver-factory.ts), so `onPopoverRender` is how `use-tour.ts` reaches it; these
+// tests fire that hook directly against a bare-DOM footer node, the same way real
+// driver.js would call it once per step.
+describe("useTour popover shortcut hint (GH137-PLAN.md M3)", () => {
+  it("passes an onPopoverRender that appends the shortcut hint's decorative glyph row to the step's footer", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const hint = footer.querySelector(".shortcut-hint");
+    expect(hint).not.toBeNull();
+    // The visible glyph row, scoped past the visually-hidden accessible label added
+    // below it (code review fix 3) so this assertion still pins the exact sighted
+    // layout ("← → move · Esc exit") on its own.
+    const glyphRow = hint?.querySelector(":scope > [aria-hidden='true']");
+    expect(glyphRow?.textContent).toBe("← → move · Esc exit");
+  });
+
+  it("renders the hint's keys as aria-hidden .kbd badges inside an aria-hidden glyph row, not plain text", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const badges = footer.querySelectorAll(".shortcut-hint kbd.kbd");
+    expect(badges).toHaveLength(3); // ←, →, Esc
+    for (const badge of badges) {
+      expect(badge.getAttribute("aria-hidden")).toBe("true");
+      expect(badge.closest("[aria-hidden='true']")).not.toBeNull();
+    }
+  });
+
+  // Code review fix 3: the decorative row above is entirely aria-hidden (every <kbd>,
+  // now also its own wrapper), so a screen reader used to hear only the plain text
+  // sitting next to those badges — "move ... exit" — naming no keys at all. This
+  // visually-hidden span (the same `.visually-hidden` class the rest of the app uses)
+  // carries the real accessible text instead, without changing what a sighted player
+  // sees (the glyph row above is unchanged).
+  it("names the arrow keys and Escape in a visually-hidden span, for a screen reader", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const hidden = footer.querySelector(".shortcut-hint .visually-hidden");
+    expect(hidden).not.toBeNull();
+    expect(hidden?.hasAttribute("aria-hidden")).toBe(false);
+    expect(hidden?.textContent).toBe("Left and right arrow keys to move, Escape to exit");
+  });
+
+  it("appends a fresh hint to each step's own footer, without disturbing existing footer content", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    const existingButton = document.createElement("button");
+    footer.append(existingButton);
+    configs[0]?.onPopoverRender?.({ footer });
+
+    expect(footer.contains(existingButton)).toBe(true);
+    expect(footer.querySelectorAll(".shortcut-hint")).toHaveLength(1);
+  });
+});
+
+// GH137-PLAN.md: `tourOwnsKeyboardRef` is the synchronous flag the shortcuts
+// dispatcher's bail check #1 reads (`use-shortcuts.tsx`). `App` owns the ref and hands
+// it to both the provider and this hook; `useTour` is the one that flips it.
+describe("useTour tourOwnsKeyboardRef (GH137-PLAN.md)", () => {
+  it("sets it true before drive() and clears it once onDestroyed fires (a real dismissal)", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver, tourOwnsKeyboardRef }));
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    act(() => configs[0]?.onDestroyed?.());
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+  });
+
+  it("clears it on an unmount that never fired a real dismissal", () => {
+    const { createDriver } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const { result, unmount } = renderHook(() =>
+      useTour({ triggerRef, createDriver, tourOwnsKeyboardRef }),
+    );
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    unmount(); // cleanup calls destroy(), which fires the captured onDestroyed too
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+  });
+
+  it("never throws when tourOwnsKeyboardRef is omitted", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    expect(() => {
+      act(() => result.current.startTour());
+      act(() => configs[0]?.onDestroyed?.());
+    }).not.toThrow();
+  });
+
+  // Code review finding (MAJOR): a throw from `createDriver()`/`instance.drive()` used
+  // to leave `tourOwnsKeyboardRef.current` stuck `true` forever — driver.js never got
+  // a chance to run its own keyboard handling, and the shortcuts dispatcher's bail
+  // check #1 would suppress every mnemonic for the rest of the session. `startTour`
+  // must reset to the same state an unmount/onDestroyed would leave: the ref cleared,
+  // `active` false, and the session/driver refs reset, then rethrow so the caller still
+  // learns about the failure.
+  it("a factory whose drive() throws leaves tourOwnsKeyboardRef.current false and active false", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingCreateDriver: TourDriverFactory = () => ({
+      drive() {
+        throw new Error("drive() boom");
+      },
+      destroy() {},
+      moveNext() {},
+      movePrevious() {},
+      moveTo() {},
+      getActiveIndex() {
+        return 0;
+      },
+    });
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingCreateDriver, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow("drive() boom");
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
+  it("a factory that itself throws (before drive()) also leaves the ref/active reset", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingFactory: TourDriverFactory = () => {
+      throw new Error("createDriver boom");
+    };
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingFactory, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow("createDriver boom");
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
+  it("a later, real startTour still works after a prior failed start (session/driver refs reset)", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    let shouldThrow = true;
+    const flakyFactory: TourDriverFactory = (config) => {
+      if (shouldThrow) {
+        throw new Error("first attempt boom");
+      }
+      return fakeDriverInstance(config);
+    };
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: flakyFactory, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow();
+    shouldThrow = false;
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+    expect(result.current.active).toBe(true);
+  });
+
+  it("a failed start whose destroy() also throws still resets ownership and rethrows the original drive() error", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingBothFactory: TourDriverFactory = () => ({
+      drive() {
+        throw new Error("drive() boom");
+      },
+      destroy() {
+        throw new Error("destroy() boom");
+      },
+      moveNext() {},
+      movePrevious() {},
+      moveTo() {},
+      getActiveIndex() {
+        return 0;
+      },
+    });
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingBothFactory, tourOwnsKeyboardRef }),
+    );
+
+    // The original drive() error propagates (the swallowed destroy() failure never masks
+    // it), and keyboard ownership is still released.
+    expect(() => act(() => result.current.startTour())).toThrow("drive() boom");
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
+  it("clears keyboard ownership from onDestroyed even when closeDrawer throws (Codex review: internal state resets before the external callback)", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const closeDrawer = () => {
+      throw new Error("closeDrawer boom");
+    };
+    const { createDriver, configs } = spyFactory();
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver, closeDrawer, tourOwnsKeyboardRef }),
+    );
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+
+    // onDestroyed runs closeDrawer LAST and guarded, so its throw cannot leave the
+    // shortcuts dispatcher permanently bailed.
+    act(() => configs[0]?.onDestroyed?.());
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
   });
 });

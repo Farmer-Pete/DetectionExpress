@@ -1,8 +1,32 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../game/store";
 import { emptySnapshot } from "../sim/snapshot";
 import { MetroView } from "./MetroView";
+import type { ShortcutsAppState } from "./shortcuts/use-shortcuts";
+import { ShortcutsProvider } from "./shortcuts/use-shortcuts";
+
+const SHELL_STATE: ShortcutsAppState = {
+  traceOpen: false,
+  mapDialogKind: null,
+  legendOpen: false,
+  sidePanelOpen: false,
+  sidePanelTab: "chaos",
+  hireMeOpen: false,
+};
+
+/** Stubs `window.matchMedia` so the narrow-screen query
+ *  (`(max-width: 719.98px)`, matching the CSS breakpoint `.metro-legend-button` and
+ *  `use-tour.ts`'s own `NARROW_QUERY` both key on) reads `narrow`, independent of any
+ *  other query the component might read. */
+function stubNarrow(narrow: boolean): void {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(max-width: 719.98px)" ? narrow : false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
+}
 
 beforeEach(() => {
   // Seed a snapshot carrying a live train, so the Actors key column has real train
@@ -27,6 +51,10 @@ beforeEach(() => {
       ],
     },
   });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("MetroView", () => {
@@ -92,6 +120,56 @@ describe("MetroView mobile legend chip (GH133-PLAN.md)", () => {
     render(<MetroView onSelect={() => {}} onOpenLegend={onOpenLegend} />);
     fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
     expect(onOpenLegend).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an L badge, aria-keyshortcuts set, accessible name unchanged, on a narrow screen (GH137-PLAN.md M2)", () => {
+    stubNarrow(true);
+    render(<MetroView onSelect={() => {}} onOpenLegend={vi.fn()} />);
+    const chip = screen.getByRole("button", { name: "Show legend" });
+    expect(chip.getAttribute("aria-keyshortcuts")).toBe("L");
+    expect(chip.querySelector(".kbd")?.textContent).toBe("L");
+  });
+});
+
+// Code review finding (MAJOR): the legend chip is CSS-hidden at >=720px, so a desktop
+// "L" used to open a redundant dialog with no visible badge — the shortcut must gate on
+// the same breakpoint the chip's own CSS uses, mirroring how `use-tour.ts` reads its
+// `NARROW_QUERY`.
+describe("MetroView legend shortcut, gated on the narrow breakpoint (GH137 review)", () => {
+  function renderWithProvider(onOpenLegend: () => void) {
+    return render(
+      <ShortcutsProvider appState={SHELL_STATE}>
+        <MetroView onSelect={() => {}} onOpenLegend={onOpenLegend} />
+      </ShortcutsProvider>,
+    );
+  }
+
+  it("on a desktop-width screen, pressing L does not open the legend (the shortcut is not registered)", () => {
+    stubNarrow(false);
+    const onOpenLegend = vi.fn();
+    renderWithProvider(onOpenLegend);
+
+    fireEvent.keyDown(document.body, { key: "l" });
+
+    expect(onOpenLegend).not.toHaveBeenCalled();
+  });
+
+  it("on a narrow screen, pressing L opens the legend", () => {
+    stubNarrow(true);
+    const onOpenLegend = vi.fn();
+    renderWithProvider(onOpenLegend);
+
+    fireEvent.keyDown(document.body, { key: "l" });
+
+    expect(onOpenLegend).toHaveBeenCalledTimes(1);
+  });
+
+  it("on a desktop-width screen, the chip renders no L badge and no aria-keyshortcuts", () => {
+    stubNarrow(false);
+    render(<MetroView onSelect={() => {}} onOpenLegend={vi.fn()} />);
+    const chip = screen.getByRole("button", { name: "Show legend" });
+    expect(chip.querySelector(".kbd")).toBeNull();
+    expect(chip.hasAttribute("aria-keyshortcuts")).toBe(false);
   });
 });
 

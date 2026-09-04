@@ -24,6 +24,8 @@ function renderTopbar(overrides: Partial<Parameters<typeof Topbar>[0]> = {}) {
   const props: Parameters<typeof Topbar>[0] = {
     onOpenMenu: vi.fn(),
     hamburgerTriggerRef: createRef<HTMLButtonElement>(),
+    hireMeOpen: false,
+    onHireMeOpenChange: vi.fn(),
     ...overrides,
   };
   return { ...render(<Topbar {...props} />), props };
@@ -64,6 +66,14 @@ describe("Topbar", () => {
     expect(children.at(-1)).toBe(screen.getByRole("button", { name: /side panel/i }));
   });
 
+  it("shows an M badge on the hamburger, with aria-keyshortcuts set and its accessible name unchanged (GH137-PLAN.md M1)", () => {
+    renderTopbar();
+    const trigger = screen.getByRole("button", { name: /side panel/i });
+    expect(trigger.getAttribute("aria-label")).toBe("Open side panel");
+    expect(trigger.getAttribute("aria-keyshortcuts")).toBe("M");
+    expect(trigger.querySelector(".kbd")?.textContent).toBe("M");
+  });
+
   it("no longer renders a standalone map toggle or How this works button", () => {
     renderTopbar();
     expect(screen.queryByRole("button", { name: /metro view/i })).toBeNull();
@@ -78,5 +88,18 @@ describe("Topbar", () => {
   it("renders no run-status pill (GH132-PLAN.md M2: the RUNNING badge is gone)", () => {
     renderTopbar();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("forwards hireMeOpen/onHireMeOpenChange to HireMe, and shows an H badge while closed (GH137-PLAN.md M2)", () => {
+    renderTopbar({ hireMeOpen: false });
+    const toggle = screen.getByRole("button", { name: hireMe.heading });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-keyshortcuts")).toBe("H");
+    expect(toggle.querySelector(".kbd")?.textContent).toBe("H");
+  });
+
+  it("renders the card open when hireMeOpen is true, driven by the controlled prop", () => {
+    renderTopbar({ hireMeOpen: true });
+    expect(screen.getByText(/25 years/)).toBeDefined();
   });
 });

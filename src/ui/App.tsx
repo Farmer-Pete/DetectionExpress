@@ -115,7 +115,8 @@
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RunController } from "../game/run-controller";
 import type { MapSelection } from "../game/store";
-import { useGameStore } from "../game/store";
+import { topMapDialogEntry, useGameStore } from "../game/store";
+import type { ConfettiOrigin } from "./confetti";
 import { DecisionsPanel } from "./decisions/DecisionsPanel";
 import { InspectorShell } from "./findings/InspectorShell";
 import { TraceOverlay } from "./findings/TraceOverlay";
@@ -125,6 +126,9 @@ import { ModalHost } from "./ModalHost";
 import { LegendDialog } from "./metro/LegendDialog";
 import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
+import { readShortcutsEnabled, writeShortcutsEnabled } from "./shortcuts/shortcuts-preference";
+import type { ShortcutsAppState } from "./shortcuts/use-shortcuts";
+import { ShortcutsProvider } from "./shortcuts/use-shortcuts";
 import { useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
 import type { TourDriverFactory } from "./tour/driver-factory";
@@ -143,9 +147,19 @@ interface AppProps {
   // inject a fake, mirroring `createPipelineController` above; defaults to the real
   // driver.js wrapper (`useTour`'s own default) when omitted.
   createTourDriver?: TourDriverFactory;
+  // The Hire Me confetti seam (GH137-PLAN.md M2), forwarded to `Topbar` -> `<HireMe>`.
+  // Mirrors `createPipelineController`/`createTourDriver` above: tests inject a spy so
+  // exercising the real "H" shortcut/click never runs canvas-confetti against
+  // happy-dom's DOM (which carries no real 2D canvas context); defaults to the real
+  // burst (`HireMe`'s own default) when omitted.
+  celebrateHireMe?: ((origin: ConfettiOrigin) => void) | undefined;
 }
 
-export function App({ createPipelineController, createTourDriver }: AppProps = {}) {
+export function App({
+  createPipelineController,
+  createTourDriver,
+  celebrateHireMe,
+}: AppProps = {}) {
   // Whether the embedded metro map region shows (GH117 Part F). Purely a display
   // toggle now: the one merged engine keeps running underneath either way, so
   // flipping it never builds or tears down a controller.
@@ -193,6 +207,13 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   // The mobile legend dialog (GH133-PLAN.md): opened from MetroView's floating chip,
   // closed from LegendDialog itself, and force-closed by the resize effect below.
   const [legendOpen, setLegendOpen] = useState(false);
+
+  // The Hire Me card's open state (GH137-PLAN.md M2): lifted here from HireMe's own
+  // private useState, so resolveActiveScope (shortcutsAppState below) can see it and
+  // give it its own "hireMe" scope, instead of shell shortcuts staying live underneath
+  // its scrim. HireMe still owns the Escape/outside-click listeners and the confetti
+  // call; it only reports the resulting open/close through this callback now.
+  const [hireMeOpen, setHireMeOpen] = useState(false);
 
   // The wave shake (#38 juice item 1). `edgeToken` changes exactly once per
   // incoming -> active edge (`useWavePhaseEdge`); skip its initial `0` so mount
@@ -259,12 +280,30 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   // (without consuming its one-shot session guard) while this reads true, so the tour
   // never drives over an open legend.
   const modalOpenRef = useRef(false);
+  // The shortcuts dispatcher's bail-check-1 flag (GH137-PLAN.md): owned here, shared
+  // with both `useTour` (which flips it) and `ShortcutsProvider` below (which reads it).
+  const tourOwnsKeyboardRef = useRef(false);
+  // The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4): the player's
+  // persisted keyboard-shortcuts on/off preference. Read once, lazily, from
+  // `shortcuts-preference.ts`'s guarded `localStorage` wrapper (mirroring
+  // `useTour`'s own `hasSeenAtMount` read); every toggle writes straight through, so
+  // it survives a reload. `ShortcutsProvider` reads it to bail its dispatcher/
+  // registration; the Options tab's checkbox (via `useSidePanel`) reads and flips it.
+  const [shortcutsEnabled, setShortcutsEnabledState] = useState(() => readShortcutsEnabled());
+  const onToggleShortcuts = useCallback(() => {
+    setShortcutsEnabledState((prev) => {
+      const next = !prev;
+      writeShortcutsEnabled(next);
+      return next;
+    });
+  }, []);
   const tour = useTour({
     triggerRef: hamburgerTriggerRef,
     createDriver: createTourDriver,
     openDrawer: () => openDrawerRef.current(),
     closeDrawer: () => closeDrawerRef.current(),
     isModalOpen: () => modalOpenRef.current,
+    tourOwnsKeyboardRef,
   });
 
   // The start-tour transition (GH132-PLAN.md M2, see the module doc): the Options
@@ -295,6 +334,8 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     mapShown,
     onToggleMap: () => setMapShown(!mapShown),
     onStartTour,
+    shortcutsEnabled,
+    onToggleShortcuts,
   });
   closeSidePanelRef.current = sidePanel.close;
   openDrawerRef.current = () => sidePanel.openForTour("chaos");
@@ -404,6 +445,19 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     modalOpenRef.current = modalOpen;
   }, [modalOpen]);
 
+  // The shortcuts provider's active-scope input (GH137-PLAN.md), derived from exactly
+  // the same flags `modalOpen` already reads, plus the map dialog's own KIND (mapDialog:
+  // event vs. mapDialog:place are separate scopes), the side panel's active tab, and
+  // (M2) the real `hireMeOpen`, now that Hire Me's `open` state is lifted here.
+  const shortcutsAppState: ShortcutsAppState = {
+    traceOpen,
+    mapDialogKind: topMapDialogEntry(mapDialogStack)?.kind ?? null,
+    legendOpen,
+    sidePanelOpen: sidePanel.open,
+    sidePanelTab: sidePanel.tab,
+    hireMeOpen,
+  };
+
   // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
   // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
   // listener has no idea the shell is inert, so this is what keeps Space from resuming a
@@ -441,51 +495,66 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     // is set), `PlaceDialog` and `EventDialog` unconditionally too (each renders null
     // unless it is the KIND named by `mapDialogStack`'s top entry), the side panel
     // when `sidePanel.open`, and `LegendDialog` when `legendOpen` (GH133-PLAN.md).
-    <ModalHost
-      modalOpen={modalOpen}
-      shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
-      overlays={
-        <>
-          <TraceOverlay
-            fallbackFocusRef={findingsPanelRef}
-            decisionsFallbackFocusRef={decisionsPanelRef}
-          />
-          <PlaceDialog
-            fallbackFocusRef={metroMapRegionRef}
-            rootTriggerRef={mapDialogRootTriggerRef}
-            rootFallbackFocusRef={mapDialogRootFallbackRef}
-          />
-          <EventDialog
-            fallbackFocusRef={logPanelRef}
-            rootTriggerRef={mapDialogRootTriggerRef}
-            rootFallbackFocusRef={mapDialogRootFallbackRef}
-          />
-          {sidePanel.sidePanel}
-          {legendOpen ? (
-            <LegendDialog
-              onClose={() => setLegendOpen(false)}
-              triggerRef={legendTriggerRef}
-              fallbackFocusRef={metroMapRegionRef}
-            />
-          ) : null}
-        </>
-      }
+    // The `ShortcutsProvider` wraps the whole shell (GH137-PLAN.md): it hosts the one
+    // keyboard-shortcut dispatcher, reading `shortcutsAppState` for the active scope
+    // and `tourOwnsKeyboardRef` to stand down while the tour drives.
+    <ShortcutsProvider
+      appState={shortcutsAppState}
+      tourOwnsKeyboardRef={tourOwnsKeyboardRef}
+      shortcutsEnabled={shortcutsEnabled}
     >
-      <Topbar onOpenMenu={onOpenMenu} hamburgerTriggerRef={hamburgerTriggerRef} />
-      {mapShown ? (
-        <MetroView
-          onSelect={onMapSelect}
-          mapRegionRef={metroMapRegionRef}
-          onOpenLegend={openLegend}
-          legendTriggerRef={legendTriggerRef}
+      <ModalHost
+        modalOpen={modalOpen}
+        shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
+        overlays={
+          <>
+            <TraceOverlay
+              fallbackFocusRef={findingsPanelRef}
+              decisionsFallbackFocusRef={decisionsPanelRef}
+            />
+            <PlaceDialog
+              fallbackFocusRef={metroMapRegionRef}
+              rootTriggerRef={mapDialogRootTriggerRef}
+              rootFallbackFocusRef={mapDialogRootFallbackRef}
+            />
+            <EventDialog
+              fallbackFocusRef={logPanelRef}
+              rootTriggerRef={mapDialogRootTriggerRef}
+              rootFallbackFocusRef={mapDialogRootFallbackRef}
+            />
+            {sidePanel.sidePanel}
+            {legendOpen ? (
+              <LegendDialog
+                onClose={() => setLegendOpen(false)}
+                triggerRef={legendTriggerRef}
+                fallbackFocusRef={metroMapRegionRef}
+              />
+            ) : null}
+          </>
+        }
+      >
+        <Topbar
+          onOpenMenu={onOpenMenu}
+          hamburgerTriggerRef={hamburgerTriggerRef}
+          hireMeOpen={hireMeOpen}
+          onHireMeOpenChange={setHireMeOpen}
+          celebrateHireMe={celebrateHireMe}
         />
-      ) : null}
-      <InspectorShell
-        findingsPanelRef={findingsPanelRef}
-        logPanelRef={logPanelRef}
-        onSelectEvent={onEventSelect}
-      />
-      <DecisionsPanel panelRef={decisionsPanelRef} />
-    </ModalHost>
+        {mapShown ? (
+          <MetroView
+            onSelect={onMapSelect}
+            mapRegionRef={metroMapRegionRef}
+            onOpenLegend={openLegend}
+            legendTriggerRef={legendTriggerRef}
+          />
+        ) : null}
+        <InspectorShell
+          findingsPanelRef={findingsPanelRef}
+          logPanelRef={logPanelRef}
+          onSelectEvent={onEventSelect}
+        />
+        <DecisionsPanel panelRef={decisionsPanelRef} />
+      </ModalHost>
+    </ShortcutsProvider>
   );
 }

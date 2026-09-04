@@ -3,7 +3,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../../game/store";
 import { emptySnapshot, type SimSnapshot } from "../../sim/snapshot";
 import type { WorldLogEvent } from "../../sim/world-log";
+import type { ShortcutsAppState } from "../shortcuts/use-shortcuts";
+import { ShortcutsProvider } from "../shortcuts/use-shortcuts";
 import { LogPanel } from "./LogPanel";
+
+const SHELL_APP_STATE: ShortcutsAppState = {
+  traceOpen: false,
+  mapDialogKind: null,
+  legendOpen: false,
+  sidePanelOpen: false,
+  sidePanelTab: "chaos",
+  hireMeOpen: false,
+};
 
 /** Publish a snapshot carrying only the given wave reading; everything else stays empty. */
 function setWave(wave: SimSnapshot["wave"]): void {
@@ -275,6 +286,98 @@ describe("LogPanel freeze control", () => {
     });
     fireEvent.keyDown(document.body, { code: "Space" });
     expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+});
+
+describe("LogPanel keyboard shortcut badges (GH137-PLAN.md M1)", () => {
+  it("shows a Space badge on Freeze, with aria-keyshortcuts set, and its accessible name unchanged", () => {
+    render(<LogPanel />);
+    const button = screen.getByRole("button", { name: "Freeze" });
+    expect(button.getAttribute("aria-keyshortcuts")).toBe("Space");
+    expect(button.querySelector(".kbd")?.textContent).toBe("Space");
+  });
+
+  it("shows a 1/2/3 badge on each speed button, with aria-keyshortcuts set, names unchanged", () => {
+    render(<LogPanel />);
+    const expectations: Array<[name: string, badgeKey: string]> = [
+      ["0.5x", "1"],
+      ["1x", "2"],
+      ["2x", "3"],
+    ];
+    for (const [name, badgeKey] of expectations) {
+      const button = screen.getByRole("button", { name });
+      expect(button.getAttribute("aria-keyshortcuts")).toBe(badgeKey);
+      expect(button.querySelector(".kbd")?.textContent).toBe(badgeKey);
+    }
+  });
+
+  it("the Freeze badge shows Space but the letter dispatcher never toggles it — Space still works only through LogPanel's own listener", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    // Toggles exactly once: LogPanel's own listener, never a second time from the new
+    // shell dispatcher (which refuses to register a dispatch:false entry at all).
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("pressing 2 dispatches setSpeed(1) through the shell shortcut, once wrapped in a ShortcutsProvider", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: "2" });
+    expect(useGameStore.getState().transport.speed).toBe(1);
+  });
+});
+
+// GH137-PLAN.md code review fix 4: the WCAG 2.1.4 off-switch. Freeze's Space toggle is
+// genuinely global (not scoped to a focused component), dispatched through LogPanel's
+// OWN `window` listener rather than the shell shortcut dispatcher (Space already has
+// that owner) — so this listener needs its own bail, alongside the badge it already
+// loses via `useShortcut`'s `key: undefined` (asserted above, "keyboard shortcut
+// badges").
+describe("LogPanel Space-to-freeze respects the WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4)", () => {
+  it("does nothing while shortcutsEnabled is false", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("resumes once toggled back to true", () => {
+    const { rerender } = render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    rerender(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={true}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("hides the Freeze badge and aria-keyshortcuts while off", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Freeze" });
+    expect(button.hasAttribute("aria-keyshortcuts")).toBe(false);
+    expect(button.querySelector(".kbd")).toBeNull();
   });
 });
 

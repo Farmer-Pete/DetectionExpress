@@ -24,8 +24,12 @@
  */
 import { Menu as MenuIcon } from "lucide-react";
 import type { RefObject } from "react";
+import type { ConfettiOrigin } from "./confetti";
 import { hireMe } from "./content/narrative";
 import { HireMe } from "./HireMe";
+import { Kbd } from "./shortcuts/Kbd";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
+import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface TopbarProps {
   /** Opens the side panel (to whatever tab was last active, chaos by default). */
@@ -33,23 +37,54 @@ interface TopbarProps {
   /** The hamburger button's ref, owned by `App.tsx` so the same ref also
    *  serves as the side panel's focus-restore fallback. */
   hamburgerTriggerRef: RefObject<HTMLButtonElement | null>;
+  /** Whether the Hire Me card is open. Owned by `App` (GH137-PLAN.md M2, the
+   *  controlled-prop lift), forwarded straight to `<HireMe>`. */
+  hireMeOpen: boolean;
+  /** Reports every Hire Me open/close, forwarded straight to `<HireMe>`. */
+  onHireMeOpenChange: (open: boolean) => void;
+  /** The confetti seam, forwarded straight to `<HireMe>`'s own `celebrate` prop — the
+   *  same injectable-factory pattern `App.tsx`'s `createPipelineController`/
+   *  `createTourDriver` already use, so a test can inject a spy instead of running
+   *  canvas-confetti against happy-dom's DOM (which lacks a real 2D canvas context). */
+  celebrateHireMe?: ((origin: ConfettiOrigin) => void) | undefined;
 }
 
-export function Topbar({ onOpenMenu, hamburgerTriggerRef }: TopbarProps) {
+export function Topbar({
+  onOpenMenu,
+  hamburgerTriggerRef,
+  hireMeOpen,
+  onHireMeOpenChange,
+  celebrateHireMe,
+}: TopbarProps) {
+  // GH137-PLAN.md M1: the hamburger's shell-scope shortcut. `aria-label` already sets
+  // the button's accessible name, so the badge below (aria-hidden) can never touch it.
+  const { key: menuKey } = useShortcut({
+    scope: "shell",
+    id: "menu",
+    onActivate: onOpenMenu,
+    enabled: true,
+  });
   return (
     <header className="topbar">
       <h1>Detection Express</h1>
       <span className="slice-tag">The Engine brings the detections. You bring the chaos.</span>
       <div className="topbar-actions">
-        <HireMe copy={hireMe} />
+        <HireMe
+          copy={hireMe}
+          open={hireMeOpen}
+          onOpenChange={onHireMeOpenChange}
+          celebrate={celebrateHireMe}
+        />
         <button
           type="button"
           ref={hamburgerTriggerRef}
           className="topbar-menu-button"
           aria-label="Open side panel"
+          aria-keyshortcuts={menuKey === undefined ? undefined : ariaKeyshortcut(menuKey)}
           onClick={onOpenMenu}
         >
           <MenuIcon aria-hidden="true" size={18} />
+          {menuKey !== undefined ? <Kbd shortcutKey={menuKey} /> : null}
         </button>
       </div>
     </header>
