@@ -243,6 +243,10 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
   const closeSidePanelRef = useRef<() => void>(() => {});
   const pendingStartTourRef = useRef(false);
   const onStartTour = useCallback(() => {
+    // Restore the map before the tour runs (Codex §6 fix 2): a retake after "Hide metro
+    // view" must have the map anchor for steps 1, 3, and 8. Batched with the panel close,
+    // so the map is committed by the time the start-tour effect fires post-close.
+    setMapShown(true);
     pendingStartTourRef.current = true;
     closeSidePanelRef.current();
   }, []);
@@ -338,7 +342,9 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     // cannot reach shell content behind any of them. The shake class lands on the
     // shell class it manages, not the outer `.app` wrapper, so its transform never
     // turns into a containing block for an overlay's `position: fixed` backdrop
-    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"`, so an
+    // (F006). `shellExtraClass` ANDs `shaking` with `status === "running"` and
+    // `!tour.active` (GH132-PLAN.md M2, Codex fix 12: a shake would drift the tour's
+    // spotlight target away from driver.js's fixed overlay), so an
     // in-flight shake clears immediately if the run concludes mid-animation, instead
     // of running out its own timer over a frozen frame (CodeRabbit review). All four
     // overlays are ModalHost's `overlays` siblings: `TraceOverlay` unconditionally
@@ -348,7 +354,7 @@ export function App({ createPipelineController, createTourDriver }: AppProps = {
     // `sidePanel.open`.
     <ModalHost
       modalOpen={modalOpen}
-      shellExtraClass={shaking && status === "running" ? "shake" : undefined}
+      shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}
       overlays={
         <>
           <TraceOverlay

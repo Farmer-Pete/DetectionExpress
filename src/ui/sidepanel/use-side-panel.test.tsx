@@ -265,6 +265,32 @@ describe("useSidePanel", () => {
     expect(useGameStore.getState().transport.frozen).toBe(false);
   });
 
+  it("openForTour is a no-op while the modal panel is open, but opens tour mode once the panel is closed (Codex §6 fix 5)", () => {
+    const controllerRef = createRef<RunController | null>();
+    const { result } = renderHook(() => useSidePanel(baseArgs(controllerRef)));
+
+    act(() => result.current.openChaos());
+    expect(result.current.open).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => result.current.openForTour("chaos"));
+    // No-op: App always closes the modal panel before entering tour mode (see App.tsx's
+    // start-tour transition), so this must never bypass close()'s freeze restore or
+    // switch a mounted modal panel into tour mode in place.
+    expect(result.current.tourOpen).toBe(false);
+    expect(result.current.open).toBe(true);
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+
+    act(() => result.current.close());
+    expect(result.current.open).toBe(false);
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    act(() => result.current.openForTour("chaos"));
+    expect(result.current.tourOpen).toBe(true);
+    expect(result.current.tab).toBe("chaos");
+    expect(result.current.open).toBe(false);
+  });
+
   it("run() is invoked when Apply is triggered through a live controller", () => {
     const run = vi.fn();
     const controllerRef = createRef<RunController | null>();

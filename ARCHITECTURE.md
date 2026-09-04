@@ -52,9 +52,11 @@ four `Finding.context` renderers in `src/ui/findings/widgets.tsx`. The real conv
 - **Tests sit next to the code they test and use React Testing Library.** They assert
   accessible roles and text, not implementation detail.
 
-`src/ui/sidepanel/` and `src/ui/intro/` follow this exactly: a presentational component
-(`SidePanel.tsx`, `IntroOverlay.tsx`), a controller hook that returns the mounted node
-(`use-side-panel.tsx`, `use-intro-overlay.tsx`), and co-located tests for both.
+`src/ui/sidepanel/` follows this exactly: a presentational component (`SidePanel.tsx`), a
+controller hook that returns the mounted node (`use-side-panel.tsx`), and co-located tests
+for both. `src/ui/tour/` is controller-only (`use-tour.ts`, `tour-steps.data.ts`): the tour
+library renders its own DOM, so there is no presentational component, but the controller and
+its data still carry co-located tests.
 
 ## The rules
 

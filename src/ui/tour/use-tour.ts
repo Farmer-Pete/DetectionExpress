@@ -145,6 +145,10 @@ export function useTour({
   // drawer wait from a superseded or ended tour can never move a dead instance
   // (Codex fix 4: an aborted transition must not act).
   const sessionRef = useRef(0);
+  // Bumped on every navigate() call, so a superseded transition — a rapid second Next,
+  // or a Previous during a pending drawer wait — can never move the driver (Codex §6
+  // fix 3). Finer-grained than `sessionRef`, which only changes per whole tour.
+  const navGenerationRef = useRef(0);
 
   const startTour = useCallback((): void => {
     focusGenerationRef.current += 1;
@@ -152,6 +156,9 @@ export function useTour({
     sessionRef.current += 1;
     const session = sessionRef.current;
     const isCurrent = (): boolean => sessionRef.current === session;
+    // A fresh start owns the seen-flag: clear any suppression a cancelled Strict Mode
+    // setup may have armed (Codex §6 fix 1), so this run's real dismissal marks seen.
+    suppressSeenRef.current = false;
     setActive(true);
 
     // Own the wait (Codex fix 4/5): driver.js has no cancel for its internal element
@@ -164,10 +171,12 @@ export function useTour({
       if (inst === null) {
         return;
       }
+      navGenerationRef.current += 1;
+      const navGeneration = navGenerationRef.current;
       const from = inst.getActiveIndex() ?? 0;
       const to = from + direction;
       const move = (): void => {
-        if (!isCurrent()) {
+        if (!isCurrent() || navGenerationRef.current !== navGeneration) {
           return;
         }
         if (direction > 0) {
@@ -249,8 +258,14 @@ export function useTour({
       }
       focusGenerationRef.current += 1;
       sessionRef.current += 1;
-      suppressSeenRef.current = true;
-      driverRef.current?.destroy();
+      // Only arm suppression when a live driver exists to destroy. A Strict Mode first
+      // cleanup with no driver (its deferred start was cancelled above) must NOT leave
+      // suppression set, or the surviving tour's real dismissal would skip markTourSeen
+      // and the tour would re-auto-start on every reload (Codex §6 fix 1).
+      if (driverRef.current !== null) {
+        suppressSeenRef.current = true;
+        driverRef.current.destroy();
+      }
     };
   }, [hasSeenAtMount]);
 

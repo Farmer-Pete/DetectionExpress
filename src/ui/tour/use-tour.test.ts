@@ -213,6 +213,57 @@ describe("useTour", () => {
 
     trigger.remove();
   });
+
+  it("a rapid second onNextClick supersedes a pending drawer-open move: only the surviving transition reaches the driver (Codex §6 fix 3, navGenerationRef)", async () => {
+    vi.useFakeTimers();
+    try {
+      // Seed "seen" so the auto-start effect's own deferred setTimeout(fn, 0) never
+      // competes with this test's manual startTour() call once fake time advances.
+      markTourSeen();
+      const { createDriver, configs, instances } = spyFactory();
+      const triggerRef = createRef<HTMLButtonElement>();
+      const openDrawer = vi.fn();
+      const closeDrawer = vi.fn();
+      const { result } = renderHook(() =>
+        useTour({ triggerRef, createDriver, openDrawer, closeDrawer }),
+      );
+
+      act(() => result.current.startTour());
+      const instance = instances[0];
+      expect(instance).toBeDefined();
+      if (instance === undefined) {
+        return;
+      }
+      // Sitting on step 0 (map): step 1 (chaos) is the drawer step, so a Next from
+      // here opens the drawer and waits.
+      instance.getActiveIndex = () => 0;
+      const moveNextSpy = vi.spyOn(instance, "moveNext");
+
+      // No `[data-tour="chaos"]` anchor is mounted (this is a controller-only test), so
+      // add one now: both waits below then resolve on their very first poll tick,
+      // landing at (about) the same time — the exact race `navGenerationRef` guards.
+      const chaosAnchor = document.createElement("div");
+      chaosAnchor.setAttribute("data-tour", "chaos");
+      document.body.append(chaosAnchor);
+
+      act(() => configs[0]?.onNextClick?.()); // map -> chaos: opens the drawer, starts waiting
+      act(() => configs[0]?.onNextClick?.()); // a rapid second Next supersedes the first wait
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(16); // both waits' first poll tick
+      });
+
+      expect(openDrawer).toHaveBeenCalledTimes(2);
+      // Only the SURVIVING (second) transition ever reaches the driver: the first
+      // transition's `move()` bails because `navGenerationRef` no longer matches the
+      // token it captured when it started.
+      expect(moveNextSpy).toHaveBeenCalledTimes(1);
+
+      chaosAnchor.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // GH132-PLAN.md M3: the auto-start-on-first-load effect. `beforeEach` above already
@@ -256,6 +307,26 @@ describe("useTour auto-start (GH132-PLAN.md M3)", () => {
     // The surviving tour is still running (no onDestroyed yet), so nothing marks it
     // seen from the cancelled first setup's teardown.
     expect(hasSeenTour()).toBe(false);
+  });
+
+  it("a Strict Mode setup/teardown/setup still marks the tour seen on the surviving tour's real dismissal (Codex §6 fix 1)", async () => {
+    // Guards against the cancelled FIRST setup's cleanup arming `suppressSeenRef` even
+    // though it never had a live driver to destroy: that would leave the flag armed
+    // for the SURVIVING setup's own instance, and its later real dismissal (Done,
+    // close, Escape, or backdrop) would skip `markTourSeen()` — the tour would then
+    // re-auto-start on every reload.
+    const { createDriver, configs, instances } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    renderHook(() => useTour({ triggerRef, createDriver }), { wrapper: StrictMode });
+
+    await flushDeferredAutoStart();
+
+    expect(instances).toHaveLength(1); // the surviving setup's own tour
+    expect(hasSeenTour()).toBe(false);
+
+    act(() => configs[0]?.onDestroyed?.()); // a real dismissal, not the unmount cleanup's destroy()
+
+    expect(hasSeenTour()).toBe(true);
   });
 
   it("a blocked-storage session still auto-starts at most once, across a from-scratch remount", async () => {

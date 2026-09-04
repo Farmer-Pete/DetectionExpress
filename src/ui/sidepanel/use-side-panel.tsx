@@ -165,11 +165,19 @@ export function useSidePanel({
   // to spotlight the chaos ladder. Mutually exclusive with a modal `open`, and it never
   // touches the freeze protocol — the sim keeps running behind the tour. Changes only
   // `tab` and `tourOpen`.
-  const openForTour = useCallback((nextTab: SidePanelTab): void => {
-    setOpen(false);
-    setTab(nextTab);
-    setTourOpen(true);
-  }, []);
+  const openForTour = useCallback(
+    (nextTab: SidePanelTab): void => {
+      // No-op while the modal panel is open (Codex §6 fix 5): App always closes it
+      // first, so entering tour mode never bypasses close()'s freeze restore and never
+      // switches a mounted modal panel into tour mode without a remount.
+      if (open) {
+        return;
+      }
+      setTab(nextTab);
+      setTourOpen(true);
+    },
+    [open],
+  );
   const closeForTour = useCallback((): void => {
     setTourOpen(false);
   }, []);

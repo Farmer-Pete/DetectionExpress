@@ -785,6 +785,22 @@ describe("App tour (GH132-PLAN.md M2)", () => {
 
     expect(hasSeenTour()).toBe(true);
   });
+
+  it('"Retake tour" restores a hidden map, so step 1\'s target exists before the tour starts (Codex §6 fix 2)', () => {
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+
+    openPanelOnTab(/options/i);
+    fireEvent.click(screen.getByRole("button", { name: "Hide metro view" }));
+    expect(document.querySelector('[data-tour="map"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retake tour" }));
+
+    expect(document.querySelector('[data-tour="map"]')).not.toBeNull();
+    expect(createDriver).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("App map toggle (GH117: one engine, the map is a display toggle)", () => {
@@ -918,6 +934,31 @@ describe("App wave shake (#38 juice item 1)", () => {
       // its `position: fixed` backdrop never inherits the shake transform's containing
       // block.
       expect(shell?.contains(overlay)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("suppresses the shake while the tour is active (GH132-PLAN.md M2, Codex fix 12)", () => {
+    vi.useFakeTimers();
+    try {
+      setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
+      const { createDriver } = fakeTourDriverFactory();
+      const { container } = render(
+        <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+      );
+      const shell = container.querySelector(".app-shell");
+      expect(shell?.className).not.toMatch(/shake/);
+
+      startTourFromOptions();
+
+      act(() => {
+        setWave({ phase: "active", index: 0, ticksUntilNext: null, eventsPerTick: 5 });
+      });
+      // Without the tour gate, this incoming -> active edge would add .shake, same as
+      // the plain test above — the tour's spotlight target would drift out from under
+      // driver.js's fixed overlay.
+      expect(shell?.className).not.toMatch(/shake/);
     } finally {
       vi.useRealTimers();
     }

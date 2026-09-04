@@ -1,9 +1,9 @@
 /**
- * The one-line outcome the player reads for a run: running, won, or lost with the
- * reason. Shared by the top-bar `StatusPill` and the Metrics tab's tests, so both
- * read from one source of truth for a given `status` and `failureReason`
- * (GH124-PLAN.md Checkpoint 2 — extracted out of `Hud.tsx`, which used to render
- * this text itself).
+ * The one-line outcome text for a run: running, won, or lost with the reason. A pure
+ * mapper from `status` + `failureReason` to text, with its own co-located tests. The
+ * top-bar `StatusPill` that rendered it was removed in GH132 (the "RUNNING" badge), so
+ * nothing in the UI displays this today; the mapper is kept as the one source of
+ * run-outcome text for when run status is surfaced again (GH124-PLAN.md Checkpoint 2).
  */
 import type { FailureReason, RunStatus } from "../../sim/snapshot";
 

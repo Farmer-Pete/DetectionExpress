@@ -64,9 +64,15 @@ Supporting decisions:
 - The tour runs with `disableActiveInteraction: true`. It is narrated: the player watches and
   clicks Next. So a spotlighted control cannot be activated, and no step can open a modal that
   fights driver's focus trap or the `ModalHost` inert shell.
-- The "cause chaos" tour step spotlights the hamburger button and narrates that it opens the
-  panel. The tour does not open the side panel (a modal) while it runs, so there is no
-  menu-during-tour focus conflict to manage.
+- The "cause chaos" tour step opens the side panel itself, in a non-modal tour mode
+  (`use-side-panel`'s `tourOpen` / `openForTour` / `closeForTour`, distinct from `open`),
+  and spotlights the whole chaos ladder. Tour mode drops the panel's own modal machinery
+  (no `role="dialog"` / `aria-modal`, no focus trap, no Escape or outside-click close) so
+  it does not fight driver.js. `overlayOpen` is ORed with the tour's active flag to keep
+  the Space shortcut suppressed, but `modalOpen` excludes `tourOpen`, so the shell stays
+  interactive. Entering the step opens the panel and waits for the chaos anchor to commit
+  before driving; leaving it closes the panel and waits before moving on. driver.js has no
+  API to cancel its own element wait, so the controller owns the wait and the navigation.
 - The tour is StrictMode-safe: `hasSeenTour()` is a lazy-initializer read, the `drive()` runs
   in an effect via a cancellable deferred task, and the seen-flag is written from `onDestroyed`
   with a cleanup-only suppression flag so a teardown is never marked seen.
