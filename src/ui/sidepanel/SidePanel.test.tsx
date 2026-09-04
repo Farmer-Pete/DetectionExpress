@@ -299,17 +299,17 @@ describe("SidePanel", () => {
 // Actual keyboard dispatch through a real ShortcutsProvider is covered at the App
 // level (App.test.tsx), mirroring how Topbar.test.tsx only checks the M1 badge data.
 describe("SidePanel keyboard shortcut badges (GH137-PLAN.md M2)", () => {
-  it("shows an Esc badge on Close, aria-keyshortcuts set, accessible name unchanged", () => {
+  it("shows an Esc badge on Close, aria-keyshortcuts set to the canonical Escape token, accessible name unchanged", () => {
     renderPanel({ tab: "chaos" });
     const close = screen.getByRole("button", { name: "Close panel" });
-    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
     expect(close.querySelector(".kbd")?.textContent).toBe("Esc");
   });
 
-  it("shows the same Esc badge on Close regardless of which tab is active", () => {
+  it("shows the same Escape aria-keyshortcuts on Close regardless of which tab is active", () => {
     renderPanel({ tab: "options" });
     const close = screen.getByRole("button", { name: "Close panel" });
-    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
   });
 
   it("shows a T badge on Retake tour and a P badge on the map toggle, on the options tab", () => {
@@ -321,6 +321,57 @@ describe("SidePanel keyboard shortcut badges (GH137-PLAN.md M2)", () => {
     const mapToggle = screen.getByRole("button", { name: "Hide metro view" });
     expect(mapToggle.getAttribute("aria-keyshortcuts")).toBe("P");
     expect(mapToggle.querySelector(".kbd")?.textContent).toBe("P");
+  });
+});
+
+// Code review finding (MAJOR): the plan lists the tab strip's ←/→ move as a badge-only
+// entry (no dispatch: the roving-tabindex handler already owns the arrows), but the
+// tabs had no visible badge and no aria-keyshortcuts to say so. One hint on the
+// tablist itself (not per-tab, to avoid repeating it three times) plus
+// aria-keyshortcuts="ArrowLeft ArrowRight" on each tab.
+describe("SidePanel tab strip's arrow-key hint (GH137 review)", () => {
+  it("shows one ←/→ badge hint on the tablist, aria-hidden, not per-tab", () => {
+    renderPanel({ tab: "chaos" });
+    const tablist = screen.getByRole("tablist", { name: /side panel tabs/i });
+    const badges = tablist.querySelectorAll(".kbd");
+    // Exactly two badges (← and →), not one per tab (which would be six for three tabs).
+    expect(badges).toHaveLength(2);
+    for (const badge of badges) {
+      expect(badge.getAttribute("aria-hidden")).toBe("true");
+    }
+  });
+
+  it('sets aria-keyshortcuts="ArrowLeft ArrowRight" on every tab', () => {
+    renderPanel({ tab: "chaos" });
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab.getAttribute("aria-keyshortcuts")).toBe("ArrowLeft ArrowRight");
+    }
+  });
+
+  it("never registers the arrows with the mnemonic dispatcher (RESERVED, badge-only) — roving nav still moves focus and reports the tab", () => {
+    const onSelectTab = vi.fn();
+    const onClose = vi.fn();
+    const onApply = vi.fn();
+    const onToggleMap = vi.fn();
+    const onStartTour = vi.fn();
+    render(
+      <SidePanel
+        tab="chaos"
+        onSelectTab={onSelectTab}
+        onClose={onClose}
+        onApply={onApply}
+        mapShown={true}
+        onToggleMap={onToggleMap}
+        onStartTour={onStartTour}
+      />,
+    );
+    const chaosTab = screen.getByRole("tab", { name: /chaos/i });
+    chaosTab.focus();
+
+    fireEvent.keyDown(chaosTab, { key: "ArrowRight" });
+
+    expect(onSelectTab).toHaveBeenCalledWith("algorithm");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /algorithm/i }));
   });
 });
 

@@ -29,11 +29,21 @@
  * entry outright (the key already has an owner — Space/LogPanel, Escape/`focus.ts`, the
  * arrows/roving-tabs or driver.js — so this file must never take it over); it just skips
  * setting up a live handler; `use-shortcut.ts` still gets `{key, label}` back to render
- * the badge. A genuine duplicate LIVE registration of the same `(scope, key)` — two
- * mounted controls both claiming it, which the static `SHORTCUTS` table cannot catch on
- * its own — throws in dev/test (`import.meta.env.DEV`, true in both) instead of silently
- * overwriting a handler; production silently keeps the newest registration, so a real
- * player's session never crashes over it.
+ * the badge.
+ *
+ * Each `(scope, key)` holds a STACK of registrations, not a single entry (code review
+ * MINOR fix): `register` pushes, the dispatcher always fires the top (most-recent)
+ * entry, and the unregister a caller's cleanup runs removes only ITS OWN entry — if that
+ * was the top and others remain, the next one down becomes live again, and the key is
+ * only removed once the stack is empty. The single-entry version used to lose an older,
+ * still-mounted control's handler entirely once a newer one unregistered, because
+ * deleting "the entry for this key" and deleting "my entry" were the same operation. A
+ * genuine duplicate live registration — the SAME `id` registered twice without an
+ * intervening unregister, which the static `SHORTCUTS` table cannot catch on its own —
+ * still throws in dev/test (`import.meta.env.DEV`, true in both): that is a caller bug
+ * (a leaked registration, or two mounted instances of what should be a singleton
+ * control), unlike two DIFFERENT ids legitimately sharing a key's stack. Production
+ * never throws either way, so a real player's session can't crash over it.
  *
  * ## The dispatcher's six checks, in order
  * 1. `tourOwnsKeyboard.current` -> bail (driver.js owns the keyboard while the guided
@@ -98,6 +108,10 @@ export function resolveActiveScope(appState: ShortcutsAppState): Scope {
 }
 
 interface RegistrationEntry {
+  /** The registering control's own `ShortcutDef.id`, so a genuine duplicate (the SAME
+   *  id registered twice while still live) can be told apart from two DIFFERENT ids
+   *  legitimately stacked on the same key. */
+  id: string;
   handler: () => void;
   enabled: boolean;
 }
@@ -148,8 +162,10 @@ export function ShortcutsProvider({
 
   // Registrations live in a ref, mutated directly by `register`/its returned
   // unregister — never React state, so a control mounting or unmounting never forces
-  // this provider to re-render. Nested `Map`s: scope -> lowercased key -> entry.
-  const handlersRef = useRef<Map<Scope, Map<string, RegistrationEntry>>>(new Map());
+  // this provider to re-render. Nested `Map`s: scope -> lowercased key -> a STACK of
+  // entries (module doc: "Registration mirrors real operability"). The dispatcher
+  // always reads the last (most-recent) entry.
+  const handlersRef = useRef<Map<Scope, Map<string, RegistrationEntry[]>>>(new Map());
   // The one source of truth for "which surface is active right now", refreshed in the
   // layout effect below on every commit (module doc: "commit-fresh reads").
   const activeScopeRef = useRef<Scope>(resolveActiveScope(appState));
@@ -161,20 +177,36 @@ export function ShortcutsProvider({
     const normalizedKey = def.key.toLowerCase();
     let scopeMap = handlersRef.current.get(scope);
     if (scopeMap === undefined) {
-      scopeMap = new Map<string, RegistrationEntry>();
+      scopeMap = new Map<string, RegistrationEntry[]>();
       handlersRef.current.set(scope, scopeMap);
     }
     const liveScopeMap = scopeMap;
-    if (import.meta.env.DEV && liveScopeMap.has(normalizedKey)) {
+    let stack = liveScopeMap.get(normalizedKey);
+    if (stack === undefined) {
+      stack = [];
+      liveScopeMap.set(normalizedKey, stack);
+    }
+    const liveStack = stack;
+    // A genuine duplicate: the SAME id already live on this stack, never unregistered —
+    // a caller bug (a leaked registration, or two mounted instances of what should be a
+    // singleton control). Two DIFFERENT ids sharing a key legitimately stack instead
+    // (module doc): e.g. a control mid-transition whose replacement has already
+    // registered before its own cleanup runs.
+    if (import.meta.env.DEV && liveStack.some((entry) => entry.id === def.id)) {
       throw new Error(
-        `useShortcut: duplicate live registration for scope "${scope}", key "${def.key}". ` +
-          "Two mounted controls are both claiming the same shortcut.",
+        `useShortcut: duplicate live registration for scope "${scope}", key "${def.key}" ` +
+          `(id "${def.id}"). The same control registered twice without unregistering first.`,
       );
     }
-    const entry: RegistrationEntry = { handler, enabled };
-    liveScopeMap.set(normalizedKey, entry);
+    const entry: RegistrationEntry = { id: def.id, handler, enabled };
+    liveStack.push(entry);
     return () => {
-      if (liveScopeMap.get(normalizedKey) === entry) {
+      const index = liveStack.indexOf(entry);
+      if (index === -1) {
+        return;
+      }
+      liveStack.splice(index, 1);
+      if (liveStack.length === 0) {
         liveScopeMap.delete(normalizedKey);
       }
     };
@@ -202,7 +234,8 @@ export function ShortcutsProvider({
       if (isTextEntry(event.target)) {
         return;
       }
-      const entry = handlersRef.current.get(activeScopeRef.current)?.get(event.key.toLowerCase());
+      const stack = handlersRef.current.get(activeScopeRef.current)?.get(event.key.toLowerCase());
+      const entry = stack?.[stack.length - 1]; // the top (most-recent) registration
       if (entry === undefined || !entry.enabled) {
         return;
       }

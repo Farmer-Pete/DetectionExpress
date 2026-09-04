@@ -4,9 +4,10 @@
  * renders `aria-hidden`, so it never enters any control's accessible name or
  * description. A control's own binding is exposed to assistive tech on the OWNING
  * control's own `aria-keyshortcuts` attribute (the consuming component sets that,
- * using `kbdGlyph(key)` for the same text this badge shows), not by this badge's
- * text. So a button reading "Freeze" stays named "Freeze" even once this badge sits
- * inside it.
+ * using `ariaKeyshortcut(key)` — the canonical WAI-ARIA token, distinct from this
+ * badge's own `kbdGlyph(key)` display text, since a short glyph like `Esc` is not a
+ * valid `aria-keyshortcuts` token), not by this badge's text. So a button reading
+ * "Freeze" stays named "Freeze" even once this badge sits inside it.
  */
 import { kbdGlyph } from "./shortcuts.data";
 

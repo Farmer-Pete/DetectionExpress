@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConfettiOrigin } from "./confetti";
 import { hireMe } from "./content/narrative";
 import { HireMe } from "./HireMe";
-import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
 import type { ShortcutsAppState } from "./shortcuts/use-shortcuts";
 import { ShortcutsProvider } from "./shortcuts/use-shortcuts";
 
@@ -235,7 +235,7 @@ describe("HireMe keyboard shortcuts (GH137-PLAN.md M2)", () => {
     const onOpenChange = vi.fn();
     renderWithProvider(true, onOpenChange);
     const scrim = screen.getByRole("button", { name: "Dismiss" });
-    expect(scrim.getAttribute("aria-keyshortcuts")).toBe(kbdGlyph("Escape"));
+    expect(scrim.getAttribute("aria-keyshortcuts")).toBe(ariaKeyshortcut("Escape"));
     expect(scrim.querySelector(".kbd")?.textContent).toBe("Esc");
 
     fireEvent.keyDown(document.body, { key: "Escape" });

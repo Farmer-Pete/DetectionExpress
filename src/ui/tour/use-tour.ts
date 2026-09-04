@@ -287,39 +287,63 @@ export function useTour({
     // popover stays usable even though this value does not re-place mid-tour.
     const isNarrow = window.matchMedia(NARROW_QUERY).matches;
 
-    const instance = createDriver({
-      steps: buildSteps(isNarrow),
-      disableActiveInteraction: true,
-      animate: !reducedMotion,
-      onPopoverRender: appendShortcutHint,
-      onNextClick: () => navigate(1),
-      onPrevClick: () => navigate(-1),
-      onDestroyed: () => {
-        sessionRef.current += 1; // abort any pending drawer wait
-        closeDrawer?.(); // a tour ended on the drawer step must close the panel
-        drawerOpenRef.current = false;
-        setActive(false);
-        if (tourOwnsKeyboardRef !== undefined) {
-          tourOwnsKeyboardRef.current = false; // the shortcuts dispatcher is live again
-        }
-        if (!suppressSeenRef.current) {
-          markTourSeen();
-        }
-        suppressSeenRef.current = false;
-        // Deferred to a microtask: driver.js focuses its own saved element right
-        // after onDestroyed returns, which would clobber a synchronous call here.
-        Promise.resolve().then(() => {
-          if (focusGenerationRef.current === generation) {
-            triggerRef.current?.focus();
+    // Code review finding (MAJOR): `createDriver()`/`instance.drive()` can throw (a
+    // hostile fake in tests, or a real driver.js failure). Without this try/catch, a
+    // throw here would leave `tourOwnsKeyboardRef.current` stuck `true` forever — it is
+    // set just below, before `drive()` — so the shortcuts dispatcher's bail check #1
+    // (`use-shortcuts.tsx`) would suppress every mnemonic for the rest of the session,
+    // with no tour actually running to explain why. On a throw, this resets exactly the
+    // state `onDestroyed`/unmount would leave (the ref cleared, `active` false, the
+    // drawer closed if this attempt opened it, `sessionRef` bumped so no stray pending
+    // wait can act, `driverRef` nulled), then rethrows so the caller still learns the
+    // start failed.
+    try {
+      const instance = createDriver({
+        steps: buildSteps(isNarrow),
+        disableActiveInteraction: true,
+        animate: !reducedMotion,
+        onPopoverRender: appendShortcutHint,
+        onNextClick: () => navigate(1),
+        onPrevClick: () => navigate(-1),
+        onDestroyed: () => {
+          sessionRef.current += 1; // abort any pending drawer wait
+          closeDrawer?.(); // a tour ended on the drawer step must close the panel
+          drawerOpenRef.current = false;
+          setActive(false);
+          if (tourOwnsKeyboardRef !== undefined) {
+            tourOwnsKeyboardRef.current = false; // the shortcuts dispatcher is live again
           }
-        });
-      },
-    });
-    driverRef.current = instance;
-    if (tourOwnsKeyboardRef !== undefined) {
-      tourOwnsKeyboardRef.current = true; // driver.js owns the keyboard until onDestroyed
+          if (!suppressSeenRef.current) {
+            markTourSeen();
+          }
+          suppressSeenRef.current = false;
+          // Deferred to a microtask: driver.js focuses its own saved element right
+          // after onDestroyed returns, which would clobber a synchronous call here.
+          Promise.resolve().then(() => {
+            if (focusGenerationRef.current === generation) {
+              triggerRef.current?.focus();
+            }
+          });
+        },
+      });
+      driverRef.current = instance;
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = true; // driver.js owns the keyboard until onDestroyed
+      }
+      instance.drive();
+    } catch (err) {
+      driverRef.current = null;
+      sessionRef.current += 1; // abort any pending drawer wait, same as onDestroyed
+      if (drawerOpenRef.current) {
+        closeDrawer?.(); // this attempt may have opened the drawer before failing
+        drawerOpenRef.current = false;
+      }
+      setActive(false);
+      if (tourOwnsKeyboardRef !== undefined) {
+        tourOwnsKeyboardRef.current = false; // never leave the dispatcher permanently bailed
+      }
+      throw err;
     }
-    instance.drive();
   }, [createDriver, triggerRef, openDrawer, closeDrawer, tourOwnsKeyboardRef]);
 
   // The auto-start action, as an Effect Event. It always reads the LATEST COMMITTED

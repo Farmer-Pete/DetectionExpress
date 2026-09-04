@@ -27,7 +27,7 @@ import { useEffect, useRef } from "react";
 import { type ConfettiOrigin, celebrate as fireConfetti, originOf } from "./confetti";
 import type { HireMeCopy } from "./content/narrative";
 import { Kbd } from "./shortcuts/Kbd";
-import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
 import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface HireMeProps {
@@ -118,7 +118,7 @@ export function HireMe({ copy, open, onOpenChange, celebrate = fireConfetti }: H
           type="button"
           className="hire-me-scrim"
           aria-label="Dismiss"
-          aria-keyshortcuts={dismissKey === undefined ? undefined : kbdGlyph(dismissKey)}
+          aria-keyshortcuts={dismissKey === undefined ? undefined : ariaKeyshortcut(dismissKey)}
           onClick={() => onOpenChange(false)}
         >
           {dismissKey !== undefined ? <Kbd shortcutKey={dismissKey} /> : null}
@@ -130,7 +130,7 @@ export function HireMe({ copy, open, onOpenChange, celebrate = fireConfetti }: H
         className="hire-me-toggle"
         aria-expanded={open}
         aria-controls={CARD_ID}
-        aria-keyshortcuts={toggleKey === undefined ? undefined : kbdGlyph(toggleKey)}
+        aria-keyshortcuts={toggleKey === undefined ? undefined : ariaKeyshortcut(toggleKey)}
         data-tour="hire"
         onClick={() => (open ? onOpenChange(false) : openCard())}
       >

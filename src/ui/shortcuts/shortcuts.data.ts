@@ -110,7 +110,10 @@ export function assignedKey(scope: Scope, id: string): string | undefined {
 }
 
 /** Display glyphs for keys whose `KeyboardEvent.key` spelling reads poorly as a badge.
- *  Anything else (a plain letter or digit) passes through unchanged. */
+ *  Anything else (a plain letter or digit) passes through unchanged. For the visible
+ *  `<kbd>` badge ONLY (`Kbd.tsx`) — never for `aria-keyshortcuts`, see `ariaKeyshortcut`
+ *  below (code review MAJOR fix: this table's short glyphs are not valid WAI-ARIA
+ *  tokens, e.g. `"Esc"` is not `"Escape"`). */
 const GLYPHS: Readonly<Record<string, string>> = {
   " ": "Space",
   Escape: "Esc",
@@ -118,7 +121,29 @@ const GLYPHS: Readonly<Record<string, string>> = {
   ArrowRight: "→",
 };
 
-/** The badge/`aria-keyshortcuts` text for a key, e.g. `" "` -> `"Space"`, `"M"` -> `"M"`. */
+/** The `<kbd>` badge's display text for a key, e.g. `" "` -> `"Space"`, `"M"` -> `"M"`.
+ *  Display only — do not use this for `aria-keyshortcuts`; use `ariaKeyshortcut`. */
 export function kbdGlyph(key: string): string {
   return GLYPHS[key] ?? key;
+}
+
+/** Canonical WAI-ARIA `aria-keyshortcuts` tokens
+ *  (https://www.w3.org/TR/wai-aria-1.1/#aria-keyshortcuts). Distinct from `kbdGlyph`'s
+ *  short on-screen glyphs: `Escape`/`ArrowLeft`/`ArrowRight` are valid tokens spelled
+ *  out in full, unlike `kbdGlyph`'s `Esc`/`←`/`→`, which read fine on a badge but are
+ *  not valid ARIA key names. */
+const ARIA_TOKENS: Readonly<Record<string, string>> = {
+  " ": "Space",
+  Escape: "Escape",
+  ArrowLeft: "ArrowLeft",
+  ArrowRight: "ArrowRight",
+};
+
+/** The `aria-keyshortcuts` text for a key, e.g. `"Escape"` -> `"Escape"`,
+ *  `" "` -> `"Space"`, `"m"` -> `"M"`. A plain letter or digit passes through
+ *  uppercased, matching this file's own key spelling convention (`SHORTCUTS` always
+ *  declares letters in upper case). Every call site that sets `aria-keyshortcuts` on an
+ *  owning control uses this, never `kbdGlyph`. */
+export function ariaKeyshortcut(key: string): string {
+  return ARIA_TOKENS[key] ?? key.toUpperCase();
 }

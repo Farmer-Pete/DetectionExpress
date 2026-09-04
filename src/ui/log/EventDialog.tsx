@@ -39,7 +39,7 @@ import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { MapDialogShell } from "../MapDialogShell";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { useShortcut } from "../shortcuts/use-shortcut";
 import { eventDetail } from "./event-detail";
 import { formatClock, sensorLabel } from "./formatters";
@@ -162,7 +162,7 @@ function OpenPlaceButton({
     <button
       type="button"
       className="event-open-place"
-      aria-keyshortcuts={key === undefined ? undefined : kbdGlyph(key)}
+      aria-keyshortcuts={key === undefined ? undefined : ariaKeyshortcut(key)}
       onClick={() => onOpenPlace(placeId)}
     >
       Open place

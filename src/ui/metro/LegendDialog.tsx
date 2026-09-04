@@ -20,7 +20,7 @@
 import { type KeyboardEvent, type RefObject, useEffect, useRef } from "react";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { useShortcut } from "../shortcuts/use-shortcut";
 import { LegendSections } from "./LegendSections";
 
@@ -107,7 +107,7 @@ export function LegendDialog({ onClose, triggerRef, fallbackFocusRef }: LegendDi
             type="button"
             className="legend-dialog-close"
             aria-label="Close"
-            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
+            aria-keyshortcuts={closeKey === undefined ? undefined : ariaKeyshortcut(closeKey)}
             onClick={onClose}
           >
             <span aria-hidden="true">×</span>

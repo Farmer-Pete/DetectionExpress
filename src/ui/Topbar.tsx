@@ -28,7 +28,7 @@ import type { ConfettiOrigin } from "./confetti";
 import { hireMe } from "./content/narrative";
 import { HireMe } from "./HireMe";
 import { Kbd } from "./shortcuts/Kbd";
-import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
 import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface TopbarProps {
@@ -80,7 +80,7 @@ export function Topbar({
           ref={hamburgerTriggerRef}
           className="topbar-menu-button"
           aria-label="Open side panel"
-          aria-keyshortcuts={menuKey === undefined ? undefined : kbdGlyph(menuKey)}
+          aria-keyshortcuts={menuKey === undefined ? undefined : ariaKeyshortcut(menuKey)}
           onClick={onOpenMenu}
         >
           <MenuIcon aria-hidden="true" size={18} />

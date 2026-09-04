@@ -37,7 +37,7 @@ import { useMapDialogFocus } from "./dialog-stack-focus";
 import { installOutsidePointerDismiss, trapTab } from "./focus";
 import { Kbd } from "./shortcuts/Kbd";
 import type { Scope } from "./shortcuts/shortcuts.data";
-import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
 import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface MapDialogShellProps {
@@ -166,7 +166,7 @@ export function MapDialogShell({
             <button
               type="button"
               className="place-overlay-back"
-              aria-keyshortcuts={backKey === undefined ? undefined : kbdGlyph(backKey)}
+              aria-keyshortcuts={backKey === undefined ? undefined : ariaKeyshortcut(backKey)}
               onClick={popMapDialog}
             >
               <span aria-hidden="true">‹</span> Back
@@ -180,7 +180,7 @@ export function MapDialogShell({
             type="button"
             className="place-overlay-close"
             aria-label="Close"
-            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
+            aria-keyshortcuts={closeKey === undefined ? undefined : ariaKeyshortcut(closeKey)}
             onClick={clearMapDialogStack}
           >
             <span aria-hidden="true">×</span>

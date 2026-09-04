@@ -5,11 +5,16 @@
  */
 import { fireEvent, render } from "@testing-library/react";
 import type { RefObject } from "react";
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { Scope } from "./shortcuts.data";
+import type { Scope, ShortcutDef } from "./shortcuts.data";
 import { useShortcut } from "./use-shortcut";
-import { resolveActiveScope, type ShortcutsAppState, ShortcutsProvider } from "./use-shortcuts";
+import {
+  resolveActiveScope,
+  type ShortcutsAppState,
+  ShortcutsProvider,
+  useShortcutsRegister,
+} from "./use-shortcuts";
 
 const SHELL_STATE: ShortcutsAppState = {
   traceOpen: false,
@@ -133,6 +138,30 @@ function renderProvider(
       {children}
     </ShortcutsProvider>,
   );
+}
+
+/** Talks to `register` directly (`useShortcutsRegister`), bypassing `useShortcut`'s own
+ *  `SHORTCUTS`-table lookup, so a test can register a synthetic `ShortcutDef` — two
+ *  different ids sharing one key is not something any real, data-driven control can do
+ *  (the per-scope collision invariant in `shortcuts.data.test.ts` forbids it), but the
+ *  registration stack itself (code review MINOR: a duplicate-key unregister must not
+ *  evict a still-mounted OLDER control) needs to be exercised directly at this seam. */
+function RawProbe({
+  scope,
+  def,
+  onActivate,
+  enabled = true,
+}: {
+  scope: Scope;
+  def: ShortcutDef;
+  onActivate: () => void;
+  enabled?: boolean;
+}) {
+  const register = useShortcutsRegister();
+  useEffect(() => {
+    return register(scope, def, onActivate, enabled);
+  }, [register, scope, def, onActivate, enabled]);
+  return null;
 }
 
 describe("the dispatcher: a matching keydown", () => {
@@ -318,5 +347,81 @@ describe("StrictMode", () => {
     fireEvent.keyDown(document.body, { key: "m" });
 
     expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Code review finding (MINOR): the live registration map used to hold a single entry
+// per (scope, key), so a duplicate unregister deleted the key even when an OLDER
+// control was still mounted underneath it. The fix is a stack: register pushes,
+// unregister removes its own entry and (if it was the top and others remain) restores
+// the previous one, and the key is only fully removed once the stack empties.
+describe("registration stack: a duplicate (scope,key) unregister restores the older control", () => {
+  const KEY_DEF_A: ShortcutDef = { id: "raw-probe-a", key: "Q", label: "A" };
+  const KEY_DEF_B: ShortcutDef = { id: "raw-probe-b", key: "Q", label: "B" };
+
+  it("register A, register B (same scope+key): B (most recent) dispatches, A does not", () => {
+    const activateA = vi.fn();
+    const activateB = vi.fn();
+    renderProvider(
+      SHELL_STATE,
+      <>
+        <RawProbe scope="shell" def={KEY_DEF_A} onActivate={activateA} />
+        <RawProbe scope="shell" def={KEY_DEF_B} onActivate={activateB} />
+      </>,
+    );
+
+    fireEvent.keyDown(document.body, { key: "q" });
+
+    expect(activateB).toHaveBeenCalledTimes(1);
+    expect(activateA).not.toHaveBeenCalled();
+  });
+
+  it("unregistering B (the top) restores A's handler, rather than deleting the key", () => {
+    const activateA = vi.fn();
+    const activateB = vi.fn();
+    const { rerender } = render(
+      <ShortcutsProvider appState={SHELL_STATE}>
+        <RawProbe scope="shell" def={KEY_DEF_A} onActivate={activateA} />
+        <RawProbe scope="shell" def={KEY_DEF_B} onActivate={activateB} />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: "q" });
+    expect(activateB).toHaveBeenCalledTimes(1);
+
+    // B unmounts (its cleanup calls the unregister its effect returned); A is still
+    // mounted underneath, exactly the "older control still mounted" scenario the
+    // review finding names.
+    rerender(
+      <ShortcutsProvider appState={SHELL_STATE}>
+        <RawProbe scope="shell" def={KEY_DEF_A} onActivate={activateA} />
+      </ShortcutsProvider>,
+    );
+
+    fireEvent.keyDown(document.body, { key: "q" });
+
+    expect(activateA).toHaveBeenCalledTimes(1);
+    expect(activateB).toHaveBeenCalledTimes(1); // unchanged: B is gone
+  });
+
+  it("still throws in DEV on a genuine duplicate live registration (same id twice, never unregistered)", () => {
+    const activate = vi.fn();
+    const def: ShortcutDef = { id: "raw-probe-dup", key: "Q", label: "Dup" };
+
+    function DoubleRegister() {
+      const register = useShortcutsRegister();
+      useEffect(() => {
+        register("shell", def, activate, true); // leaked on purpose: never unregistered
+        return register("shell", def, activate, true); // same id again -> genuine duplicate
+      }, [register]);
+      return null;
+    }
+
+    expect(() =>
+      render(
+        <ShortcutsProvider appState={SHELL_STATE}>
+          <DoubleRegister />
+        </ShortcutsProvider>,
+      ),
+    ).toThrow(/duplicate live registration/i);
   });
 });

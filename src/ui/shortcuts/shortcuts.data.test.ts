@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assignedKey, kbdGlyph, RESERVED, type Scope, SHORTCUTS } from "./shortcuts.data";
+import {
+  ariaKeyshortcut,
+  assignedKey,
+  kbdGlyph,
+  RESERVED,
+  type Scope,
+  SHORTCUTS,
+} from "./shortcuts.data";
 
 // Every `Scope` member, spelled out explicitly rather than derived from
 // `Object.keys(SHORTCUTS)` (which TypeScript can only type as `string[]`) — this keeps
@@ -40,6 +47,32 @@ describe("kbdGlyph", () => {
   it("passes a plain letter or digit through unchanged", () => {
     expect(kbdGlyph("M")).toBe("M");
     expect(kbdGlyph("1")).toBe("1");
+  });
+});
+
+// Code review finding (MAJOR): `kbdGlyph` used to back BOTH the visible `<kbd>` badge
+// and `aria-keyshortcuts`, so Escape rendered the invalid WAI-ARIA token "Esc" on every
+// owning control. `ariaKeyshortcut` is the separate serializer for `aria-keyshortcuts`:
+// canonical tokens (https://www.w3.org/TR/wai-aria-1.1/#aria-keyshortcuts), distinct
+// from `kbdGlyph`'s short on-screen glyphs.
+describe("ariaKeyshortcut", () => {
+  it("emits the canonical Escape token, not kbdGlyph's Esc glyph", () => {
+    expect(ariaKeyshortcut("Escape")).toBe("Escape");
+    expect(ariaKeyshortcut("Escape")).not.toBe(kbdGlyph("Escape"));
+  });
+
+  it("emits the canonical arrow tokens, not kbdGlyph's arrow glyphs", () => {
+    expect(ariaKeyshortcut("ArrowLeft")).toBe("ArrowLeft");
+    expect(ariaKeyshortcut("ArrowRight")).toBe("ArrowRight");
+  });
+
+  it("emits Space for the literal space key", () => {
+    expect(ariaKeyshortcut(" ")).toBe("Space");
+  });
+
+  it("passes a plain letter or digit through, uppercased per convention", () => {
+    expect(ariaKeyshortcut("M")).toBe("M");
+    expect(ariaKeyshortcut("1")).toBe("1");
   });
 });
 

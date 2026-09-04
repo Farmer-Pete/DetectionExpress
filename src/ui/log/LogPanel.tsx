@@ -66,7 +66,7 @@ import type { WorldLogEvent } from "../../sim/world-log";
 import { sensorCodeFor } from "../../sim/world-log";
 import { sensorIcon } from "../icons/sensor-icons";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { isEditableTarget } from "../shortcuts/text-entry";
 import { useShortcut } from "../shortcuts/use-shortcut";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
@@ -230,7 +230,7 @@ function SpeedButton({ id, value, label, active, onSelect }: SpeedButtonProps) {
       type="button"
       className={`transport-speed${active ? " transport-speed-on" : ""}`}
       aria-pressed={active}
-      aria-keyshortcuts={key === undefined ? undefined : kbdGlyph(key)}
+      aria-keyshortcuts={key === undefined ? undefined : ariaKeyshortcut(key)}
       onClick={() => onSelect(value)}
     >
       {label}
@@ -362,7 +362,7 @@ export function LogPanel({
             type="button"
             className={`transport-freeze${frozen ? " transport-freeze-on" : ""}`}
             aria-pressed={frozen}
-            aria-keyshortcuts={freezeKey === undefined ? undefined : kbdGlyph(freezeKey)}
+            aria-keyshortcuts={freezeKey === undefined ? undefined : ariaKeyshortcut(freezeKey)}
             onClick={() => setFrozen(!frozen)}
           >
             <span className="transport-dot" aria-hidden="true" />

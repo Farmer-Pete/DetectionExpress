@@ -22,7 +22,7 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { useGameStore } from "../../game/store";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { useShortcut } from "../shortcuts/use-shortcut";
 import {
   buildFindingGroups,
@@ -134,7 +134,7 @@ export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}
             <button
               type="button"
               className="findings-more"
-              aria-keyshortcuts={moreKey === undefined ? undefined : kbdGlyph(moreKey)}
+              aria-keyshortcuts={moreKey === undefined ? undefined : ariaKeyshortcut(moreKey)}
               onClick={() => setExpanded(true)}
             >
               +{hiddenCount} more

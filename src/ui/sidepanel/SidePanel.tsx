@@ -78,7 +78,7 @@ import { ChaosLadder } from "../ChaosLadder";
 import { chaosLevels, liveScenarioFrom } from "../content/narrative";
 import { focusableControls, installOutsidePointerDismiss, trapTab } from "../focus";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { useShortcut } from "../shortcuts/use-shortcut";
 
 export type SidePanelTab = "chaos" | "algorithm" | "options";
@@ -274,6 +274,7 @@ export function SidePanel({
                   id={`sidepanel-tab-${entry.id}`}
                   aria-selected={active}
                   aria-controls={`sidepanel-tabpanel-${entry.id}`}
+                  aria-keyshortcuts="ArrowLeft ArrowRight"
                   tabIndex={active ? 0 : -1}
                   disabled={isTour}
                   className={active ? "sidepanel-tab sidepanel-tab-active" : "sidepanel-tab"}
@@ -288,12 +289,21 @@ export function SidePanel({
                 </button>
               );
             })}
+            {/* Code review MAJOR fix: the plan lists the tabs' ←/→ roving nav as
+                badge-only (already handled by `onTabKeyDown` above; arrows are
+                RESERVED, so this never goes through `useShortcut`/the mnemonic
+                dispatcher). One hint for the whole strip, not one per tab — three
+                repeats of the same "←/→" would just be noise. */}
+            <span className="sidepanel-tablist-hint" aria-hidden="true">
+              <Kbd shortcutKey="ArrowLeft" />
+              <Kbd shortcutKey="ArrowRight" />
+            </span>
           </div>
           <button
             type="button"
             className="sidepanel-close"
             aria-label="Close panel"
-            aria-keyshortcuts={closeKey === undefined ? undefined : kbdGlyph(closeKey)}
+            aria-keyshortcuts={closeKey === undefined ? undefined : ariaKeyshortcut(closeKey)}
             disabled={isTour}
             onClick={() => {
               if (!isTour) {
@@ -341,7 +351,9 @@ export function SidePanel({
             <button
               type="button"
               className="sidepanel-options-button"
-              aria-keyshortcuts={mapToggleKey === undefined ? undefined : kbdGlyph(mapToggleKey)}
+              aria-keyshortcuts={
+                mapToggleKey === undefined ? undefined : ariaKeyshortcut(mapToggleKey)
+              }
               onClick={onToggleMap}
             >
               {mapShown ? "Hide metro view" : "Show metro view"}
@@ -350,7 +362,9 @@ export function SidePanel({
             <button
               type="button"
               className="sidepanel-options-button"
-              aria-keyshortcuts={retakeTourKey === undefined ? undefined : kbdGlyph(retakeTourKey)}
+              aria-keyshortcuts={
+                retakeTourKey === undefined ? undefined : ariaKeyshortcut(retakeTourKey)
+              }
               onClick={onStartTour}
             >
               Retake tour

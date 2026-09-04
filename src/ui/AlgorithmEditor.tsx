@@ -14,11 +14,17 @@
  * `active={tab === "algorithm"}` — this component is one of three tabpanels that stay
  * mounted (just `hidden`) while another tab is active, so `active` mirrors that real
  * visibility the same way a hidden tabpanel's controls are meant to (`use-shortcut.ts`).
+ * Apply's badge renders whenever the button itself renders and carries an assigned
+ * key — including while `runPending` (code review MINOR fix: hiding it there hid the
+ * discovery hint exactly when a player might wonder whether "A" still does anything).
+ * `enabled={active && !runPending}` on the `useShortcut` call, not the badge, is what
+ * actually keeps the dispatcher from firing while a run is pending — the same way the
+ * native `disabled={runPending}` keeps a click from firing.
  */
 import { referenceSource } from "../game/engine-source";
 import { useGameStore } from "../game/store";
 import { Kbd } from "./shortcuts/Kbd";
-import { kbdGlyph } from "./shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "./shortcuts/shortcuts.data";
 import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface AlgorithmEditorProps {
@@ -56,7 +62,7 @@ export function AlgorithmEditor({ onRun, active = true }: AlgorithmEditorProps) 
         <button
           type="button"
           className="editor-reset"
-          aria-keyshortcuts={resetKey === undefined ? undefined : kbdGlyph(resetKey)}
+          aria-keyshortcuts={resetKey === undefined ? undefined : ariaKeyshortcut(resetKey)}
           onClick={resetToDefault}
         >
           Reset to default
@@ -65,12 +71,12 @@ export function AlgorithmEditor({ onRun, active = true }: AlgorithmEditorProps) 
         <button
           type="button"
           className="editor-apply"
-          aria-keyshortcuts={applyKey === undefined ? undefined : kbdGlyph(applyKey)}
+          aria-keyshortcuts={applyKey === undefined ? undefined : ariaKeyshortcut(applyKey)}
           onClick={onRun}
           disabled={runPending}
         >
           {runPending ? "Checking..." : "Apply"}
-          {!runPending && applyKey !== undefined ? <Kbd shortcutKey={applyKey} /> : null}
+          {applyKey !== undefined ? <Kbd shortcutKey={applyKey} /> : null}
         </button>
       </div>
       <textarea

@@ -10,7 +10,7 @@ import { createRef, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tourCopy } from "../content/narrative";
 import { hasSeenTour, markTourSeen } from "../onboarding-storage";
-import type { TourDriverConfig, TourDriverInstance } from "./driver-factory";
+import type { TourDriverConfig, TourDriverFactory, TourDriverInstance } from "./driver-factory";
 import { tourSteps } from "./tour-steps.data";
 import { resetTourAutoStartForTests, useTour } from "./use-tour";
 
@@ -530,5 +530,75 @@ describe("useTour tourOwnsKeyboardRef (GH137-PLAN.md)", () => {
       act(() => result.current.startTour());
       act(() => configs[0]?.onDestroyed?.());
     }).not.toThrow();
+  });
+
+  // Code review finding (MAJOR): a throw from `createDriver()`/`instance.drive()` used
+  // to leave `tourOwnsKeyboardRef.current` stuck `true` forever — driver.js never got
+  // a chance to run its own keyboard handling, and the shortcuts dispatcher's bail
+  // check #1 would suppress every mnemonic for the rest of the session. `startTour`
+  // must reset to the same state an unmount/onDestroyed would leave: the ref cleared,
+  // `active` false, and the session/driver refs reset, then rethrow so the caller still
+  // learns about the failure.
+  it("a factory whose drive() throws leaves tourOwnsKeyboardRef.current false and active false", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingCreateDriver: TourDriverFactory = () => ({
+      drive() {
+        throw new Error("drive() boom");
+      },
+      destroy() {},
+      moveNext() {},
+      movePrevious() {},
+      moveTo() {},
+      getActiveIndex() {
+        return 0;
+      },
+    });
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingCreateDriver, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow("drive() boom");
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
+  it("a factory that itself throws (before drive()) also leaves the ref/active reset", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingFactory: TourDriverFactory = () => {
+      throw new Error("createDriver boom");
+    };
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingFactory, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow("createDriver boom");
+
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
+  it("a later, real startTour still works after a prior failed start (session/driver refs reset)", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    let shouldThrow = true;
+    const flakyFactory: TourDriverFactory = (config) => {
+      if (shouldThrow) {
+        throw new Error("first attempt boom");
+      }
+      return fakeDriverInstance(config);
+    };
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: flakyFactory, tourOwnsKeyboardRef }),
+    );
+
+    expect(() => act(() => result.current.startTour())).toThrow();
+    shouldThrow = false;
+
+    act(() => result.current.startTour());
+    expect(tourOwnsKeyboardRef.current).toBe(true);
+    expect(result.current.active).toBe(true);
   });
 });

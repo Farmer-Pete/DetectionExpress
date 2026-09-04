@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { referenceSource } from "../game/engine-source";
 import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
@@ -1446,7 +1446,7 @@ describe("App keyboard shortcuts, side panel composite scopes (GH137-PLAN.md M2)
     openPanelOnTab(/options/i);
 
     const close = screen.getByRole("button", { name: "Close panel" });
-    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
     const retake = screen.getByRole("button", { name: "Retake tour" });
     expect(retake.getAttribute("aria-keyshortcuts")).toBe("T");
     const mapToggle = screen.getByRole("button", { name: "Hide metro view" });
@@ -1523,7 +1523,7 @@ describe("App keyboard shortcuts, map/event dialog scopes (GH137-PLAN.md M2)", (
     const openPlace = screen.getByRole("button", { name: "Open place" });
     expect(openPlace.getAttribute("aria-keyshortcuts")).toBe("O");
     const close = screen.getByRole("button", { name: "Close" });
-    expect(close.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
 
     fireEvent.click(openPlace);
     const back = screen.getByRole("button", { name: "Back" });
@@ -1531,27 +1531,63 @@ describe("App keyboard shortcuts, map/event dialog scopes (GH137-PLAN.md M2)", (
   });
 });
 
+// The `L` shortcut only registers on a narrow screen (code review MAJOR fix,
+// MetroView.tsx's `useNarrowScreen`): the legend chip it belongs to is CSS-hidden at
+// >=720px, so these tests stub `matchMedia` narrow, the same way `use-tour.test.ts`'s
+// `stubNarrow` does for the tour's own breakpoint read.
 describe("App keyboard shortcuts, legend (GH137-PLAN.md M2)", () => {
-  it("pressing L opens the legend dialog", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function stubNarrowScreen(narrow: boolean): void {
+    vi.stubGlobal("matchMedia", (query: string) => {
+      let matches = false;
+      if (query === "(max-width: 719.98px)") {
+        matches = narrow;
+      } else if (query === "(min-width: 720px)") {
+        matches = !narrow;
+      }
+      return {
+        matches,
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      };
+    });
+  }
+
+  it("pressing L opens the legend dialog on a narrow screen", () => {
+    stubNarrowScreen(true);
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.keyDown(document.body, { key: "l" });
     expect(screen.getByRole("dialog", { name: "Legend" })).toBeDefined();
   });
 
+  it("pressing L does nothing on a desktop-width screen (the shortcut is not registered)", () => {
+    stubNarrowScreen(false);
+    render(<App createPipelineController={() => stubController()} />);
+    fireEvent.keyDown(document.body, { key: "l" });
+    expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
+  });
+
   it("L does not open the legend while the side panel is open (scope precedence)", () => {
+    stubNarrowScreen(true);
     render(<App createPipelineController={() => stubController()} />);
     openPanel();
     fireEvent.keyDown(document.body, { key: "l" });
     expect(screen.queryByRole("dialog", { name: "Legend" })).toBeNull();
   });
 
-  it("shows an Esc badge on the legend Close, aria-keyshortcuts set", () => {
+  it("shows an Esc badge on the legend Close, aria-keyshortcuts set to the canonical Escape token", () => {
+    stubNarrowScreen(true);
     render(<App createPipelineController={() => stubController()} />);
     fireEvent.keyDown(document.body, { key: "l" });
-    const close = screen
-      .getByRole("dialog", { name: "Legend" })
-      .querySelector(".legend-dialog-close");
-    expect(close?.getAttribute("aria-keyshortcuts")).toBe("Esc");
+    const close = within(screen.getByRole("dialog", { name: "Legend" })).getByRole("button", {
+      name: "Close",
+    });
+    expect(close.getAttribute("aria-keyshortcuts")).toBe("Escape");
+    expect(close.querySelector(".kbd")?.textContent).toBe("Esc");
   });
 });
 

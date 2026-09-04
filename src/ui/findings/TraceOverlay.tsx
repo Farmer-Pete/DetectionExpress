@@ -51,7 +51,7 @@ import { outcomeLabel } from "../decisions/view-model";
 import { installOutsidePointerDismiss, trapTab } from "../focus";
 import { formatClock } from "../log/formatters";
 import { Kbd } from "../shortcuts/Kbd";
-import { kbdGlyph } from "../shortcuts/shortcuts.data";
+import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { useShortcut } from "../shortcuts/use-shortcut";
 import {
   buildDecisionTraceViewModel,
@@ -362,7 +362,7 @@ function CloseButton({ onClose }: { onClose: () => void }) {
       type="button"
       className="trace-close"
       aria-label="Close trace"
-      aria-keyshortcuts={key === undefined ? undefined : kbdGlyph(key)}
+      aria-keyshortcuts={key === undefined ? undefined : ariaKeyshortcut(key)}
       onClick={onClose}
     >
       <span aria-hidden="true">×</span>

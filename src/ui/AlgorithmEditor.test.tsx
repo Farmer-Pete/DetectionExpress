@@ -81,10 +81,17 @@ describe("AlgorithmEditor keyboard shortcut badges (GH137-PLAN.md M2)", () => {
     expect(apply.querySelector(".kbd")?.textContent).toBe("A");
   });
 
-  it("renders no A badge while Checking... (Apply disabled)", () => {
+  // Code review MINOR fix: the badge used to be hidden while runPending, which hid the
+  // discovery hint exactly when a player might wonder whether "A" still does anything.
+  // The badge is a static hint about the control's assigned key, not a live "it will
+  // fire right now" indicator (compare Reset's own badge, shown even though nothing
+  // stops a player from pressing it) — `enabled={active && !runPending}` on the
+  // `useShortcut` call is what actually keeps the dispatcher from firing while pending.
+  it("still shows the A badge while Checking... (Apply disabled, badge stays for discovery)", () => {
     useGameStore.setState({ runPending: true });
     render(<AlgorithmEditor onRun={() => {}} />);
     const apply = screen.getByRole("button", { name: "Checking..." });
-    expect(apply.querySelector(".kbd")).toBeNull();
+    expect(apply.getAttribute("aria-keyshortcuts")).toBe("A");
+    expect(apply.querySelector(".kbd")?.textContent).toBe("A");
   });
 });
