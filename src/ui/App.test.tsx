@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { referenceSource } from "../game/engine-source";
 import { defaultEntry } from "../game/registry";
 import type { RunController } from "../game/run-controller";
@@ -8,17 +8,18 @@ import { useGameStore } from "../game/store";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldLogEvent } from "../sim/world-log";
 import { App } from "./App";
-import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
-import { hasSeenTour, markIntroSeen } from "./onboarding-storage";
+import { hireMe, liveScenarioFrom } from "./content/narrative";
+import { hasSeenTour, markTourSeen } from "./onboarding-storage";
 import type { TourDriverConfig, TourDriverInstance } from "./tour/driver-factory";
+import { resetTourAutoStartForTests } from "./tour/use-tour";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
 // The zustand store is a singleton shared across test files, so reset the fields
 // this file reads before each test. Mirrors the reset pattern in store.test.ts.
 //
-// The onboarding overlay covers the shell on first load. Shell tests seed the seen
-// flag so the overlay stays closed; the onboarding tests clear it to see the overlay.
+// The guided tour auto-starts on first load (GH132-PLAN.md M3). Shell tests seed the
+// tour's seen flag so it never fires; the dedicated auto-start tests below clear it.
 beforeEach(() => {
   useGameStore.setState({
     source: referenceSource,
@@ -30,7 +31,8 @@ beforeEach(() => {
     mapDialogStack: [],
     snapshot: emptySnapshot(),
   });
-  markIntroSeen();
+  markTourSeen();
+  resetTourAutoStartForTests();
 });
 
 /** Clicks the hamburger: opens the side panel on whatever tab was last active
@@ -424,19 +426,6 @@ describe("App event dialog opener guard (GH124-PLAN.md Checkpoint 5, consistency
     ]);
   });
 
-  it("is mutually exclusive with the intro overlay: a log-row click while it is open never also opens the event dialog", () => {
-    localStorage.clear(); // show the intro overlay on this render (beforeEach marks it seen)
-    render(<App createPipelineController={() => stubController()} />);
-    act(() => {
-      useGameStore.setState({ snapshot: { ...emptySnapshot(), worldEvents: [fareGateEvent(5)] } });
-    });
-    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
-
-    fireEvent.click(screen.getByTestId("log-row-5"));
-
-    expect(useGameStore.getState().mapDialogStack).toEqual([]);
-  });
-
   it("is mutually exclusive with the trace dialog: a log-row click while a finding/decision is selected never also opens the event dialog", () => {
     render(<App createPipelineController={() => stubController()} />);
     act(() => {
@@ -618,88 +607,106 @@ describe("App map/event dialog navigation stack (GH124 follow-up: Back)", () => 
   });
 });
 
-describe("App onboarding", () => {
-  // Record the anchor id each scrollIntoView lands on, so a test asserts the target.
-  let scrollTargets: string[];
-  const original = Element.prototype.scrollIntoView;
+// GH132-PLAN.md M3: the tour auto-starts on first load, replacing the old intro
+// overlay entirely. `beforeEach` above marks the tour seen so unrelated tests never
+// see it fire; these tests clear that flag to exercise the real "unseen" path.
+describe("App tour auto-start (GH132-PLAN.md M3)", () => {
+  /** Flushes the auto-start effect's deferred macrotask (`use-tour.ts`'s
+   *  `setTimeout(fn, 0)`). */
+  async function flushDeferredAutoStart(): Promise<void> {
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+  }
 
-  beforeEach(() => {
-    localStorage.clear(); // show the overlay on first load
-    scrollTargets = [];
-    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
-      scrollTargets.push(this.id);
-    };
-  });
-
-  afterEach(() => {
-    Element.prototype.scrollIntoView = original;
-  });
-
-  it("shows the intro overlay on first load and hides it after dismiss", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("opens the side panel on the chaos tab after Cause chaos closes the intro, without scrolling", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
-    expect(screen.queryByRole("dialog", { name: introCopy.title })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
-    expect(screen.getByRole("tab", { name: /chaos/i }).getAttribute("aria-selected")).toBe("true");
-    expect(scrollTargets).toEqual([]);
-  });
-
-  it("opens the side panel on the algorithm tab after Edit the Engine closes the intro, without scrolling", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
-    expect(screen.queryByRole("dialog", { name: introCopy.title })).toBeNull();
-    expect(screen.getByRole("tab", { name: /algorithm/i }).getAttribute("aria-selected")).toBe(
-      "true",
+  it("starts the tour once on first load when unseen", async () => {
+    localStorage.clear();
+    const { createDriver, instances } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
     );
-    expect(scrollTargets).toEqual([]);
+
+    await flushDeferredAutoStart();
+
+    expect(createDriver).toHaveBeenCalledTimes(1);
+    expect(instances[0]?.driveCalls).toBe(1);
   });
 
-  it("restores focus to the hamburger menu trigger when the panel opened via Cause chaos then closes (the intro's own button is gone)", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.chaosLabel }));
-    const panel = screen.getByRole("dialog", { name: "Side panel" });
-    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
+  it("does not auto-start when hasSeenTour() is already true", async () => {
+    // beforeEach's markTourSeen() already covers this; assert it explicitly.
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
 
-    fireEvent.keyDown(panel, { key: "Escape" });
+    await flushDeferredAutoStart();
 
-    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
-    expect(document.activeElement).toBe(hamburgerTrigger);
+    expect(createDriver).not.toHaveBeenCalled();
   });
 
-  it("restores focus to the hamburger menu trigger when the panel opened via Edit the Engine then closes", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.editLabel }));
-    const panel = screen.getByRole("dialog", { name: "Side panel" });
-    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
+  it("a Strict Mode setup/teardown/setup cancels the first deferred start without marking seen, and the surviving setup starts exactly once", async () => {
+    localStorage.clear();
+    const { createDriver, instances } = fakeTourDriverFactory();
+    render(
+      <StrictMode>
+        <App createPipelineController={() => stubController()} createTourDriver={createDriver} />
+      </StrictMode>,
+    );
 
-    fireEvent.keyDown(panel, { key: "Escape" });
+    await flushDeferredAutoStart();
 
-    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
-    expect(document.activeElement).toBe(hamburgerTrigger);
+    expect(createDriver).toHaveBeenCalledTimes(1);
+    expect(instances[0]?.driveCalls).toBe(1);
+    expect(hasSeenTour()).toBe(false); // still running: nothing has called onDestroyed
   });
 
-  it("does not restart or dispose the controller when the overlay dismisses", () => {
-    const controller = stubController();
-    render(<App createPipelineController={() => controller} />);
-    expect(controller.runs).toBe(1);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-    expect(controller.runs).toBe(1);
-    expect(controller.disposes).toBe(0);
+  it("a blocked-storage session still auto-starts at most once, across a from-scratch remount", async () => {
+    // A stub whose reads always throw, replacing `localStorage` outright rather than
+    // patching `Storage.prototype`: `hasSeenTour()` must see every read as "blocked"
+    // regardless of which concrete `Storage` instance/prototype the DOM environment
+    // hands out for `globalThis.localStorage`.
+    const blockedStorage: Storage = {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    };
+    vi.stubGlobal("localStorage", blockedStorage);
+    try {
+      const first = fakeTourDriverFactory();
+      const firstRender = render(
+        <App
+          createPipelineController={() => stubController()}
+          createTourDriver={first.createDriver}
+        />,
+      );
+      await flushDeferredAutoStart();
+      expect(first.createDriver).toHaveBeenCalledTimes(1);
+      firstRender.unmount();
+
+      const second = fakeTourDriverFactory();
+      render(
+        <App
+          createPipelineController={() => stubController()}
+          createTourDriver={second.createDriver}
+        />,
+      );
+      await flushDeferredAutoStart();
+      expect(second.createDriver).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
 // GH132-PLAN.md M2: "Retake tour" replaces M1's "How this works" Options-tab button.
-// Both share the same close-panel-first transition (App.tsx's "The start-tour
-// transition"), so these tests mirror the removed reopen-intro ones' shape, retargeted
-// at the tour. The old intro still auto-starts on first load in M2 (untouched above);
-// `markIntroSeen()` in this file's `beforeEach` keeps it out of the way here.
+// These tests mirror the removed reopen-intro ones' shape, retargeted at the tour.
+// `markTourSeen()` in this file's `beforeEach` keeps the M3 auto-start out of the way
+// here, so these only ever exercise the manual, user-triggered `startTour`.
 describe("App tour (GH132-PLAN.md M2)", () => {
   it('the Options tab\'s "Retake tour" button closes the panel, then starts the tour once it has actually closed', () => {
     const { createDriver, instances } = fakeTourDriverFactory();
@@ -763,6 +770,7 @@ describe("App tour (GH132-PLAN.md M2)", () => {
   });
 
   it("marks the tour seen once it ends", async () => {
+    localStorage.clear(); // undo this file's beforeEach markTourSeen(): start unseen
     const { createDriver, configs } = fakeTourDriverFactory();
     render(
       <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
@@ -892,14 +900,14 @@ describe("App wave shake (#38 juice item 1)", () => {
     expect(shell?.className).not.toMatch(/shake/);
   });
 
-  it("shakes .app-shell, not the intro overlay's ancestor, so the overlay escapes it (F006)", () => {
-    localStorage.clear(); // show the overlay so it is on screen while .app-shell shakes
+  it("shakes .app-shell, not an open overlay's ancestor, so the overlay escapes it (F006)", () => {
     vi.useFakeTimers();
     try {
       setWave({ phase: "incoming", index: 0, ticksUntilNext: 1, eventsPerTick: null });
       const { container } = render(<App createPipelineController={() => stubController()} />);
+      openPanel(); // show an overlay (the side panel) so it is on screen while .app-shell shakes
       const shell = container.querySelector(".app-shell");
-      const overlay = container.querySelector(".intro-overlay-backdrop");
+      const overlay = container.querySelector(".sidepanel-backdrop");
       expect(overlay).not.toBeNull();
 
       act(() => {

@@ -1,8 +1,9 @@
 /**
  * The single source of the onboarding prose. This is UI copy, not simulation
- * logic, so it lives in `ui/`. It holds the intro overlay text, the Hire Me pitch,
- * the chaos ladder (levels 0 through 5, GH126-PLAN.md M3), and the source repo
- * link. No React. Each type is
+ * logic, so it lives in `ui/`. It holds the guided tour's premise (step 1, reused
+ * from the old intro overlay's opening paragraphs), the Hire Me pitch, the chaos
+ * ladder (levels 0 through 5, GH126-PLAN.md M3), and the source repo link. No
+ * React. Each type is
  * consumed by a component through its props, so the values reach the screen and
  * Knip stays clean.
  *
@@ -21,15 +22,13 @@ import type { ScenarioRegistryEntry } from "../../game/registry";
  *  0 is the calm baseline (no attack); 1 through 5 escalate (GH126-PLAN.md M3, Q3). */
 type ChaosLevelNumber = 0 | 1 | 2 | 3 | 4 | 5;
 
-/** The intro overlay copy: premise, invitation, and the action and link labels. */
+/** The onboarding premise: title and body paragraphs. GH132-PLAN.md M3 removed the
+ *  old intro overlay; this survives only because the guided tour's step 1 (`tourCopy.
+ *  map`) reuses it verbatim, so the two never say two different things about what the
+ *  map shows. */
 export interface IntroCopy {
   title: string;
   paragraphs: string[];
-  invitation: string;
-  observeLabel: string;
-  chaosLabel: string;
-  sourceLabel: string;
-  editLabel: string;
 }
 
 /** One tour step's popover content: a title and one paragraph of body copy. Not
@@ -88,11 +87,6 @@ export const introCopy: IntroCopy = {
     "This is a live simulation of a working metro. Riders tap fare cards, trigger door sensors, board and exit trains, even get spotted by cameras.",
     "Watching over it is a detection Engine that looks for attackers trying to abuse the system. It reads the whole stream of sensor data and finds threats hiding inside ordinary traffic.",
   ],
-  invitation: "The simulation loads in a clean, steady state. It's your job to introduce chaos!",
-  observeLabel: "Observe the simulation",
-  chaosLabel: "Cause chaos",
-  sourceLabel: "Get the source",
-  editLabel: "Edit the Engine",
 };
 
 /** The guided tour's eight steps, in `tourSteps`' order (`ui/tour/tour-steps.data.ts`,

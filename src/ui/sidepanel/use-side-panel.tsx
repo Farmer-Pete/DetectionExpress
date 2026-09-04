@@ -2,10 +2,10 @@
  * The side panel's controller: the chaos ladder and Algorithm editor tabs, moved
  * off the main column and behind a right-edge overlay (GH118-PLAN.md). It owns
  * `open` and `tab`, the two intake actions `openChaos`/`openAlgorithm`, the
- * dismiss action `close`, and the panel-owned Apply protocol `onApply`. It returns the ready-to-mount
- * `sidePanel` node, mirroring `useIntroOverlay`'s shape: `SidePanel` is only ever
- * mounted while `open` is true, so `SidePanel`'s own mount/unmount lifecycle IS the
- * panel's open/close lifecycle.
+ * dismiss action `close`, and the panel-owned Apply protocol `onApply`. It returns the
+ * ready-to-mount `sidePanel` node: `SidePanel` is only ever mounted while `open` (or
+ * `tourOpen`) is true, so `SidePanel`'s own mount/unmount lifecycle IS the panel's
+ * open/close lifecycle.
  *
  * Pause ownership runs through the store's `transport.frozen`, not a direct controller
  * call — the reflection effect in `use-pipeline-controller.ts` mirrors it onto
@@ -61,8 +61,6 @@ import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useStat
 import type { RunController } from "../../game/run-controller";
 import { useGameStore } from "../../game/store";
 import { SidePanel, type SidePanelTab } from "./SidePanel";
-
-export type { SidePanelTab } from "./SidePanel";
 
 export interface UseSidePanelArgs {
   controllerRef: RefObject<RunController | null>;

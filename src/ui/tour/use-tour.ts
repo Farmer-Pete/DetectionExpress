@@ -1,13 +1,28 @@
 /**
- * The guided tour's controller (GH132-PLAN.md M2, docs/adr/0012-guided-tour.md). Owns
+ * The guided tour's controller (GH132-PLAN.md M2/M3, docs/adr/0012-guided-tour.md). Owns
  * the one driver.js instance behind an injected factory (`createTourDriver` by default,
  * `driver-factory.ts`), so tests supply a fake and never load the real library.
  *
- * `startTour` is user-triggered in M2 (the side panel's Options tab, "Retake tour") — it
- * always starts, ignoring any seen flag. M3 adds the auto-start-on-mount effect (a lazy
- * `hasSeenTour()` read plus a cancellable deferred `drive()`, StrictMode-safe); this hook
- * already carries the two pieces that effect will need on top:
+ * `startTour` is user-triggered from the side panel's Options tab ("Retake tour") — it
+ * always starts, ignoring both the seen flag and the auto-start session guard below.
  *
+ * - **Auto-start on first load, StrictMode-safe** (GH132-PLAN.md M3, "Tour wiring"
+ *   finding 1): `hasSeenAtMount` is a pure `hasSeenTour()` read taken once, in a lazy
+ *   `useState` initializer, so it can never observe a write this same session makes.
+ *   The mount effect below only SCHEDULES the drive, via a deferred macrotask
+ *   (`setTimeout(fn, 0)`) it can still cancel: React Strict Mode's dev-only
+ *   mount -> cleanup -> mount runs the cleanup (which cancels the pending timeout)
+ *   before that timeout ever fires, so the FIRST setup's deferred task never drives,
+ *   and only the SURVIVING setup's timeout actually calls `startTour`. The module-level
+ *   `autoStartedThisSession` guard is set inside that deferred callback, right before
+ *   `startTour()` — never at scheduling time — so a cancelled first task can never
+ *   suppress the surviving one. It lives OUTSIDE the component (not a ref), so a
+ *   from-scratch remount within the same page load (e.g. storage blocked, which always
+ *   reads `hasSeenTour()` as false) still auto-starts at most once per loaded session,
+ *   which a ref reset on every fresh mount could not guarantee. On cleanup: cancel the
+ *   pending timeout FIRST (so a not-yet-fired auto-start can never run after teardown
+ *   starts), then set the seen-suppression flag, then `destroy()` the instance — the
+ *   same order and the same cleanup this hook already needed for a real unmount.
  * - **Seen-flag via `onDestroyed`** (Tour wiring, finding 6): driver.js's `onDestroyed`
  *   fires on Done, close, Escape, backdrop dismissal, AND a programmatic `destroy()` call
  *   — the path this hook's own unmount cleanup takes. `suppressSeenRef` is set right
@@ -23,7 +38,7 @@
  */
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { tourCopy } from "../content/narrative";
-import { markTourSeen } from "../onboarding-storage";
+import { hasSeenTour, markTourSeen } from "../onboarding-storage";
 import {
   createTourDriver,
   type TourDriverFactory,
@@ -33,6 +48,21 @@ import {
 import { tourSteps } from "./tour-steps.data";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+// In-memory, module-scoped (deliberately NOT component state): "at most one auto-start
+// per loaded session" (GH132-PLAN.md M3, "Session guard" finding 9) has to survive past
+// any single hook instance's lifetime — a ref would reset on a fresh mount, defeating
+// the guard exactly when storage is blocked and `hasSeenTour()` always reads false.
+// Read and set only inside the deferred auto-start callback below; `startTour()` (a
+// manual retake) never consults it.
+let autoStartedThisSession = false;
+
+/** Test-only: clears the module-level auto-start guard. Without this, one test's
+ *  auto-start would leave every later test in the same file unable to auto-start,
+ *  since the guard otherwise lives for the whole module's lifetime by design. */
+export function resetTourAutoStartForTests(): void {
+  autoStartedThisSession = false;
+}
 
 export interface UseTourArgs {
   /** Focus-restore target once the tour ends: the Topbar hamburger button's ref. */
@@ -99,6 +129,10 @@ export function useTour({
   closeDrawer,
 }: UseTourArgs): TourController {
   const [active, setActive] = useState(false);
+  // A pure, one-time read (GH132-PLAN.md M3): taken in a lazy initializer, so it can
+  // never see a `markTourSeen()` write this same render/session makes, and its value
+  // never changes across re-renders regardless of what the tour does afterward.
+  const [hasSeenAtMount] = useState(() => hasSeenTour());
   const driverRef = useRef<TourDriverInstance | null>(null);
   // One-shot: set right before an unmount's `destroy()`, so the `onDestroyed` it
   // triggers is never mistaken for a real dismissal. Cleared the instant `onDestroyed`
@@ -184,14 +218,41 @@ export function useTour({
     instance.drive();
   }, [createDriver, triggerRef, openDrawer, closeDrawer]);
 
+  // `startTour`'s identity churns whenever `openDrawer`/`closeDrawer` do (App.tsx
+  // rebuilds those two callbacks every render), so the auto-start effect below reads
+  // it through this ref instead of listing it as a dependency — the same bridge
+  // pattern App.tsx itself uses for `closeSidePanelRef`/`openDrawerRef`. Written every
+  // render, never inside an effect, so it is never one render stale.
+  const startTourRef = useRef(startTour);
+  startTourRef.current = startTour;
+
+  // Auto-start on first load, StrictMode-safe (GH132-PLAN.md M3, see the module doc):
+  // `hasSeenAtMount` is fixed for this hook instance's whole life, so this effect's
+  // dependency array never actually changes across re-renders — it runs (and its
+  // cleanup runs) only on a true mount/unmount, exactly like the plain `[]` unmount
+  // effect it replaces.
   useEffect(() => {
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    if (!hasSeenAtMount) {
+      pending = setTimeout(() => {
+        pending = null;
+        if (autoStartedThisSession) {
+          return; // a prior mount (this session) already auto-started; retake is unaffected
+        }
+        autoStartedThisSession = true;
+        startTourRef.current();
+      }, 0);
+    }
     return () => {
+      if (pending !== null) {
+        clearTimeout(pending); // cancel FIRST: a Strict Mode teardown must never fire this
+      }
       focusGenerationRef.current += 1;
       sessionRef.current += 1;
       suppressSeenRef.current = true;
       driverRef.current?.destroy();
     };
-  }, []);
+  }, [hasSeenAtMount]);
 
   return { startTour, active };
 }

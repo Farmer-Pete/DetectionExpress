@@ -14,11 +14,6 @@ function allProse(): string {
   return [
     introCopy.title,
     ...introCopy.paragraphs,
-    introCopy.invitation,
-    introCopy.observeLabel,
-    introCopy.chaosLabel,
-    introCopy.sourceLabel,
-    introCopy.editLabel,
     hireMe.heading,
     ...hireMe.body,
     ...chaosLevels.map((level) => `${level.label} ${level.blurb}`),

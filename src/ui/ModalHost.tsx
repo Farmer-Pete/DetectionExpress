@@ -7,8 +7,9 @@
  * never part of that subtree in the first place.
  *
  * Dumb and presentational: no state, no logic beyond the two class-name branches.
- * `IntroOverlay` and `TraceOverlay` both route through it, so "the shell is inert
- * while a modal is open" is one tested invariant, not two copies of it.
+ * Every overlay — `TraceOverlay`, `PlaceDialog`/`EventDialog`, and the side panel —
+ * routes through it, so "the shell is inert while a modal is open" is one tested
+ * invariant, not several copies of it.
  */
 import type { ReactNode } from "react";
 

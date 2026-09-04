@@ -1,16 +1,10 @@
 /**
- * A guarded wrapper over `localStorage` for the persisted bits of onboarding state:
- * whether the player has seen the intro, and (GH132-PLAN.md M2) whether they have seen
- * the guided tour. Every access is guarded, so a missing, blocked, or throwing
- * `localStorage` never breaks the app. A failed read is treated as "not seen", and a
- * failed write never blocks a dismissal.
- *
- * The tour's flag is a fresh key (`detection-express:tour-seen`), not a reuse of the
- * intro's: a player who already dismissed the old intro still sees the new tour once
- * (docs/adr/0012-guided-tour.md).
+ * A guarded wrapper over `localStorage` for the persisted bit of onboarding state:
+ * whether the player has seen the guided tour (GH132-PLAN.md M2). Every access is
+ * guarded, so a missing, blocked, or throwing `localStorage` never breaks the app. A
+ * failed read is treated as "not seen", and a failed write never blocks a dismissal.
  */
 
-const STORAGE_KEY = "detection-express:intro-seen";
 const TOUR_STORAGE_KEY = "detection-express:tour-seen";
 const SEEN_VALUE = "true";
 
@@ -20,32 +14,6 @@ function readStorage(): Storage | null {
     return globalThis.localStorage ?? null;
   } catch {
     return null;
-  }
-}
-
-/** True only when the seen flag is present and set. Any failure reads as false. */
-export function hasSeenIntro(): boolean {
-  const storage = readStorage();
-  if (storage === null) {
-    return false;
-  }
-  try {
-    return storage.getItem(STORAGE_KEY) === SEEN_VALUE;
-  } catch {
-    return false;
-  }
-}
-
-/** Persist the seen flag. A missing or throwing store is swallowed, never raised. */
-export function markIntroSeen(): void {
-  const storage = readStorage();
-  if (storage === null) {
-    return;
-  }
-  try {
-    storage.setItem(STORAGE_KEY, SEEN_VALUE);
-  } catch {
-    // A write failure never blocks a dismissal. The overlay still closes.
   }
 }
 

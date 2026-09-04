@@ -15,12 +15,12 @@ import type { LiveFinding } from "../sim/correctness";
 import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import { App } from "./App";
 import { caughtDecision } from "./decisions/decision-fixtures";
-import { markIntroSeen } from "./onboarding-storage";
+import { markTourSeen } from "./onboarding-storage";
 
 // The zustand store is a singleton shared across test files, so reset every field
 // this file reads or writes before each test, or a leaked value would bleed across
-// (mirrors App.test.tsx's own reset). Every test here needs the intro closed to reach
-// the shell, except the one regression test that deliberately reopens it.
+// (mirrors App.test.tsx's own reset). The guided tour auto-starts on first load
+// (GH132-PLAN.md M3); every test here seeds the seen flag so it never fires.
 beforeEach(() => {
   useGameStore.setState({
     snapshot: emptySnapshot(),
@@ -31,7 +31,7 @@ beforeEach(() => {
     transport: { frozen: false, speed: 1 },
     overlayOpen: false,
   });
-  markIntroSeen();
+  markTourSeen();
 });
 
 /** A no-op pipeline controller: the app never touches the real loader or engine. */
@@ -223,20 +223,5 @@ describe("App browse-mode isolation (GH105)", () => {
     expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
     expect(screen.getByRole("dialog")).toBeDefined();
     expect(useGameStore.getState().transport.frozen).toBe(true);
-  });
-
-  it("still inerts the shell while the intro overlay is open (regression)", () => {
-    localStorage.clear(); // override this file's beforeEach markIntroSeen(): show the intro
-    render(<App createPipelineController={stubController} />);
-
-    const shell = document.querySelector(".app-shell");
-    if (shell === null) {
-      throw new Error("expected an .app-shell element");
-    }
-    expect(shell.hasAttribute("inert")).toBe(true);
-
-    const introDialog = screen.getByRole("dialog");
-    expect(isInInertSubtree(introDialog)).toBe(false);
-    expect(introDialog.closest(".app-shell")).toBeNull();
   });
 });

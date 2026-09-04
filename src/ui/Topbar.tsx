@@ -13,10 +13,9 @@
  * actions that used to live in the popup (Chaos ladder, Edit Engine, the map
  * toggle) and the standalone "How this works" reopen button are gone from here
  * too: the side panel's own "Options" tab (`SidePanel.tsx`) now carries the map
- * toggle and the intro-reopen action. `hamburgerTriggerRef` is exposed the same
- * way the old `reopenRef` was, so `App` can hand it to the side panel as its
- * focus-restore fallback — the one stable trigger left once the standalone
- * buttons are gone.
+ * toggle and (from M2 onward) the "Retake tour" button. `hamburgerTriggerRef` is
+ * exposed so `App` can hand it to the side panel as its focus-restore fallback —
+ * the one stable trigger left once the standalone buttons are gone.
  *
  * The hamburger sits at the far right of the header, after `<HireMe>`: both
  * live inside `.topbar-actions`, in DOM order Hire Me then hamburger, so the
