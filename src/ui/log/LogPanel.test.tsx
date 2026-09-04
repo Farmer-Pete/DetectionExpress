@@ -116,6 +116,7 @@ describe("LogPanel", () => {
     setSnapshot([kioskEvent(3)]);
     render(<LogPanel />);
     const name = screen.getByTestId("log-row-3").getAttribute("aria-label");
+    expect(name).toContain("Account kiosk"); // the sensor label, from sensorLabel(view.sensor)
     expect(name).toContain("acct-3");
     expect(name).toContain("K1");
     expect(name).toContain("OK");

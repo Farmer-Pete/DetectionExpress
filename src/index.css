@@ -2486,6 +2486,18 @@ body {
   .log-row-where {
     display: none;
   }
+
+  /* The base `.log-row > *` rule sets `overflow-wrap: anywhere`, so a long token in a
+     still-visible cell (e.g. a JSON-fallback result) would keep breaking mid-word even
+     after the collapse. Truncate the visible cells to one line instead; the row's
+     `aria-label` still carries the full text, and a tap opens the full event dialog
+     (CodeRabbit review, PR #138). */
+  .log-row > * {
+    overflow-wrap: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @keyframes fx-cite {
