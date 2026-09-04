@@ -9,7 +9,8 @@ import { emptySnapshot, type SimSnapshot } from "../sim/snapshot";
 import type { WorldLogEvent } from "../sim/world-log";
 import { App } from "./App";
 import { hireMe, introCopy, liveScenarioFrom } from "./content/narrative";
-import { markIntroSeen } from "./onboarding-storage";
+import { hasSeenTour, markIntroSeen } from "./onboarding-storage";
+import type { TourDriverConfig, TourDriverInstance } from "./tour/driver-factory";
 
 const liveScenario = liveScenarioFrom(defaultEntry);
 
@@ -45,13 +46,51 @@ function openPanelOnTab(name: RegExp): void {
   fireEvent.click(screen.getByRole("tab", { name }));
 }
 
-/** Reopens the intro from the side panel's Options tab (GH132-PLAN.md M1,
- *  design revision: the Topbar's standalone "How this works" button is gone).
- *  This closes the panel first, then the intro opens once the panel has
- *  actually unmounted — see App.tsx's "The reopen-intro transition". */
-function reopenIntroFromOptions(): void {
+/** Starts the guided tour from the side panel's Options tab (GH132-PLAN.md M2,
+ *  replacing M1's "How this works" intro-reopen). This closes the panel first, then
+ *  the tour starts once the panel has actually unmounted — see App.tsx's "The
+ *  start-tour transition". */
+function startTourFromOptions(): void {
   openPanelOnTab(/options/i);
-  fireEvent.click(screen.getByRole("button", { name: "How this works" }));
+  fireEvent.click(screen.getByRole("button", { name: "Retake tour" }));
+}
+
+/** A fake driver.js instance for the App-level tour tests: records `drive()` and, on
+ *  `destroy()`, fires the `onDestroyed` callback it was built with — the same
+ *  programmatic-destroy path `tour/use-tour.test.ts`'s own fake exercises. */
+function fakeTourDriver(config: TourDriverConfig): TourDriverInstance & { driveCalls: number } {
+  let driveCalls = 0;
+  return {
+    get driveCalls() {
+      return driveCalls;
+    },
+    drive() {
+      driveCalls += 1;
+    },
+    destroy() {
+      config.onDestroyed?.();
+    },
+    moveNext() {},
+    movePrevious() {},
+    moveTo() {},
+    getActiveIndex() {
+      return 0;
+    },
+  };
+}
+
+/** A spy driver.js factory: records every config it was built with, so a test can
+ *  reach into the built steps or fire `onDestroyed` directly. */
+function fakeTourDriverFactory() {
+  const configs: TourDriverConfig[] = [];
+  const instances: ReturnType<typeof fakeTourDriver>[] = [];
+  const createDriver = vi.fn((config: TourDriverConfig) => {
+    configs.push(config);
+    const instance = fakeTourDriver(config);
+    instances.push(instance);
+    return instance;
+  });
+  return { createDriver, configs, instances };
 }
 
 /** A fare-gate world-log event at Central (`cen`), for the log-row-click tests below. */
@@ -118,12 +157,15 @@ function stubController(): RunController & {
 }
 
 describe("App shell", () => {
-  it("renders the heading and the run-status pill", () => {
-    const { container } = render(<App createPipelineController={() => stubController()} />);
-    // getByRole/getByText throw if missing, so finding them is the assertion.
+  it("renders the heading", () => {
+    render(<App createPipelineController={() => stubController()} />);
     const heading = screen.getByRole("heading", { name: "Detection Express" });
     expect(heading.textContent).toBe("Detection Express");
-    expect(container.querySelector(".status-pill")?.textContent).toBe("Running");
+  });
+
+  it("renders no run-status pill (GH132-PLAN.md M2: the RUNNING badge is gone)", () => {
+    const { container } = render(<App createPipelineController={() => stubController()} />);
+    expect(container.querySelector(".status-pill")).toBeNull();
   });
 
   it("has no gauge strip on screen at rest: the Metrics UI is retired for now, though the sim still computes the values", () => {
@@ -643,41 +685,6 @@ describe("App onboarding", () => {
     expect(document.activeElement).toBe(hamburgerTrigger);
   });
 
-  it("reopens the overlay from the side panel's Options tab without clearing the seen flag", () => {
-    const { unmount } = render(<App createPipelineController={() => stubController()} />);
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    reopenIntroFromOptions();
-    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
-    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-
-    // Reopen must not clear the flag. Unmount first so only one App tree is ever
-    // mounted, then a fresh mount still treats the intro as seen.
-    unmount();
-    const { container } = render(<App createPipelineController={() => stubController()} />);
-    expect(container.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it("returns focus to the hamburger trigger after a reopen (via Options) and dismiss, since the Options button is already gone", () => {
-    render(<App createPipelineController={() => stubController()} />);
-    // The overlay is open on first load. Dismiss it, so the shell is live again.
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    // Reopen via the Options tab (which closes the panel first), then dismiss
-    // again. The Options button that triggered the reopen is gone by the time the
-    // intro closes, so focus falls back to the hamburger trigger.
-    reopenIntroFromOptions();
-    expect(screen.getByRole("dialog", { name: introCopy.title })).toBeDefined();
-    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
-    fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
-
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.activeElement).toBe(hamburgerTrigger);
-  });
-
   it("does not restart or dispose the controller when the overlay dismisses", () => {
     const controller = stubController();
     render(<App createPipelineController={() => controller} />);
@@ -685,6 +692,90 @@ describe("App onboarding", () => {
     fireEvent.click(screen.getByRole("button", { name: introCopy.observeLabel }));
     expect(controller.runs).toBe(1);
     expect(controller.disposes).toBe(0);
+  });
+});
+
+// GH132-PLAN.md M2: "Retake tour" replaces M1's "How this works" Options-tab button.
+// Both share the same close-panel-first transition (App.tsx's "The start-tour
+// transition"), so these tests mirror the removed reopen-intro ones' shape, retargeted
+// at the tour. The old intro still auto-starts on first load in M2 (untouched above);
+// `markIntroSeen()` in this file's `beforeEach` keeps it out of the way here.
+describe("App tour (GH132-PLAN.md M2)", () => {
+  it('the Options tab\'s "Retake tour" button closes the panel, then starts the tour once it has actually closed', () => {
+    const { createDriver, instances } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+
+    startTourFromOptions();
+
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+    expect(createDriver).toHaveBeenCalledTimes(1);
+    expect(instances[0]?.driveCalls).toBe(1);
+  });
+
+  it("builds one driver.js step per data-tour anchor the tour targets", () => {
+    const { createDriver, configs } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+
+    startTourFromOptions();
+
+    const elements = configs[0]?.steps.map((step) => step.element);
+    expect(elements).toContain('[data-tour="map"]');
+    expect(elements).toContain('[data-tour="chaos"]');
+    expect(elements).toContain('[data-tour="log"]');
+    expect(elements).toContain('[data-tour="findings"]');
+    expect(elements).toContain('[data-tour="decisions"]');
+    expect(elements).toContain('[data-tour="hire"]');
+  });
+
+  it("does not inert the shell while the tour drives: it is not a modal, and the sim shell stays live", () => {
+    const { createDriver } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+
+    startTourFromOptions();
+
+    // Not inert: the shell stays interactive so the tour can spotlight live elements.
+    expect(document.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+    // overlayOpen IS true while the tour runs (GH132-PLAN.md M2, Codex fix 1): it
+    // suppresses LogPanel's global Space-to-freeze during the tour, without inerting.
+    expect(useGameStore.getState().overlayOpen).toBe(true);
+  });
+
+  it("restores focus to the hamburger trigger once the tour ends (the Options button that started it is already gone)", async () => {
+    const { createDriver, configs } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+    const hamburgerTrigger = screen.getByRole("button", { name: /menu/i });
+
+    startTourFromOptions();
+    await act(async () => {
+      configs[0]?.onDestroyed?.();
+      await Promise.resolve();
+    });
+
+    expect(document.activeElement).toBe(hamburgerTrigger);
+  });
+
+  it("marks the tour seen once it ends", async () => {
+    const { createDriver, configs } = fakeTourDriverFactory();
+    render(
+      <App createPipelineController={() => stubController()} createTourDriver={createDriver} />,
+    );
+
+    startTourFromOptions();
+    expect(hasSeenTour()).toBe(false);
+    await act(async () => {
+      configs[0]?.onDestroyed?.();
+      await Promise.resolve();
+    });
+
+    expect(hasSeenTour()).toBe(true);
   });
 });
 

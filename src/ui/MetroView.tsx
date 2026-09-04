@@ -174,7 +174,7 @@ export function MetroView({ onSelect, mapRegionRef }: MetroViewProps) {
       {/* Two grid children, not overlays: the map region (so the full map, Harbor to
           World's End, and every site, is never hidden under a panel) and the key,
           each placed by `.metro-view`'s CSS grid areas — no width check here. */}
-      <div className="metro-map-region" ref={mapRegionRef} tabIndex={-1}>
+      <div className="metro-map-region" ref={mapRegionRef} tabIndex={-1} data-tour="map">
         <MetroMap onSelect={onSelect} />
         <WaveOutcomeBanner />
       </div>

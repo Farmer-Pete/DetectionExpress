@@ -24,19 +24,25 @@
  *   its `open`/`tab` state, the pause protocol (see "Pause ownership" below), and the
  *   Apply-on-success-only wiring. The intro's two panel-opening actions
  *   (`openChaos`/`openAlgorithm`) and the hamburger's own opener (`openPanel`) all
- *   route through it. `mapShown`/`onToggleMap`/`onReopenIntro` (GH132-PLAN.md M1,
- *   see "The reopen-intro transition" below) feed its Options tab.
+ *   route through it. `mapShown`/`onToggleMap`/`onStartTour` (GH132-PLAN.md M2,
+ *   see "The start-tour transition" below) feed its Options tab.
+ * - `useTour` (tour/) owns the one driver.js instance behind an injected factory
+ *   (`createTourDriver`, `tour/driver-factory.ts`; `App`'s own `createTourDriver` prop
+ *   overrides it for tests, mirroring `createPipelineController`). `startTour` is
+ *   user-triggered in M2, from the Options tab's "Retake tour" button; M3 adds the
+ *   auto-start-on-first-load effect. The tour is NOT a modal (docs/adr/0012), so it
+ *   never feeds `modalOpen` below.
  * - `Topbar` renders the header: the title, the slice tag, the hamburger button
  *   (GH132-PLAN.md M1, design revision — a plain icon button that opens the side
  *   panel directly, no popup), and Hire Me. The map toggle and the intro-reopen
  *   action that used to live here as standalone buttons now live in the side
  *   panel's own Options tab instead.
  *
- * Only the run-status pill (`StatusPill`, read by `Topbar`) lives in the top bar;
- * the sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
- * nothing currently displays them. The pending side-panel-tab dispatch below (see
- * "The intro transition") switches over both tabs instead of treating "not chaos"
- * as "algorithm".
+ * The sim keeps computing throughput/queue/compute/correctness (`SimSnapshot`), but
+ * nothing currently displays them; the top bar's own run-status pill (`StatusPill`,
+ * the "RUNNING" badge) is gone too (GH132-PLAN.md M2). The pending side-panel-tab
+ * dispatch below (see "The intro transition") switches over both tabs instead of
+ * treating "not chaos" as "algorithm".
  *
  * `App` owns `.app` / `.app-shell` only indirectly: `ModalHost` (GH105-PLAN.md) is the
  * component that actually renders them and holds the shell-inert invariant. `App`
@@ -86,18 +92,18 @@
  * pending-tab switch below covers both intro-routed tabs explicitly, rather than
  * treating "not chaos" as "algorithm".
  *
- * ## The reopen-intro transition (GH132-PLAN.md M1)
- * The side panel's Options tab carries a "How this works" button that reopens the
- * intro overlay. The panel and the intro are both modals, so `onReopenIntro`
- * cannot open the intro directly while the panel is still open — the same
- * one-modal-at-a-time reasoning as "The intro transition" above, run in reverse:
- * it records the request (`pendingReopenIntroRef`) and closes the panel first; a
- * plain `useEffect` here reopens the intro once `sidePanel.open` has actually gone
- * false. `closeSidePanelRef` exists only to break the circularity of handing
- * `onReopenIntro` INTO `useSidePanel` while it needs `useSidePanel`'s own `close`
- * function: the ref is written every render (not in an effect, so it is never one
- * render stale) and `onReopenIntro` reads it lazily, at click time, not at
- * definition time.
+ * ## The start-tour transition (GH132-PLAN.md M2, replacing M1's reopen-intro one)
+ * The side panel's Options tab carries a "Retake tour" button that starts the guided
+ * tour. The panel is a modal (the shell goes `inert` behind it) and the tour's targets
+ * — including the hamburger itself — sit inside that shell, so `onStartTour` cannot
+ * start the tour while the panel is still open: the same one-modal-at-a-time
+ * reasoning as "The intro transition" above, run in reverse. It records the request
+ * (`pendingStartTourRef`) and closes the panel first; a plain `useEffect` here starts
+ * the tour once `sidePanel.open` has actually gone false. `closeSidePanelRef` exists
+ * only to break the circularity of handing `onStartTour` INTO `useSidePanel` while it
+ * needs `useSidePanel`'s own `close` function: the ref is written every render (not
+ * in an effect, so it is never one render stale) and `onStartTour` reads it lazily,
+ * at click time, not at definition time.
  *
  * ## Pause ownership (GH118-PLAN.md)
  * The pause runs through the store's `transport.frozen`, not a direct controller
@@ -135,6 +141,8 @@ import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
 import { type SidePanelTab, useSidePanel } from "./sidepanel/use-side-panel";
 import { Topbar } from "./Topbar";
+import type { TourDriverFactory } from "./tour/driver-factory";
+import { useTour } from "./tour/use-tour";
 import { useOneShotFlag } from "./wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "./wave/use-wave-phase-edge";
 
@@ -145,9 +153,13 @@ interface AppProps {
   // The controller FACTORY: builds a FRESH controller on mount and disposes it on
   // unmount (disposal is permanent). Tests inject a stub factory.
   createPipelineController?: () => RunController;
+  // The tour's driver.js factory (GH132-PLAN.md M2), forwarded to `useTour`. Tests
+  // inject a fake, mirroring `createPipelineController` above; defaults to the real
+  // driver.js wrapper (`useTour`'s own default) when omitted.
+  createTourDriver?: TourDriverFactory;
 }
 
-export function App({ createPipelineController }: AppProps = {}) {
+export function App({ createPipelineController, createTourDriver }: AppProps = {}) {
   // Whether the embedded metro map region shows (GH117 Part F). Purely a display
   // toggle now: the one merged engine keeps running underneath either way, so
   // flipping it never builds or tears down a controller.
@@ -249,16 +261,33 @@ export function App({ createPipelineController }: AppProps = {}) {
     createController: createPipelineController,
   });
 
-  // The reopen-intro transition (GH132-PLAN.md M1, see the module doc): the
-  // Options tab's "How this works" button closes the panel first, then this
-  // effect reopens the intro once the panel has actually closed.
-  // `closeSidePanelRef` breaks the circularity of `onReopenIntro` needing
-  // `sidePanel.close` while it is itself an argument to the `useSidePanel` call
-  // that produces `sidePanel` — written every render, read lazily at click time.
+  // The tour (GH132-PLAN.md M2, see the module doc): `startTour` is user-triggered
+  // this milestone, from the Options tab's "Retake tour" button. Focus restores to
+  // the same hamburger trigger ref the side panel already falls back to.
+  //
+  // Drawer-open wiring ("Step 2 drawer-open"): the tour opens the side panel to
+  // spotlight the chaos ladder. `useTour` is created before `useSidePanel` (whose own
+  // `onStartTour` depends on the tour), so these refs bridge the cycle the same way
+  // `closeSidePanelRef` does below: written every render, read lazily at click time.
+  const openDrawerRef = useRef<() => void>(() => {});
+  const closeDrawerRef = useRef<() => void>(() => {});
+  const tour = useTour({
+    triggerRef: hamburgerTriggerRef,
+    createDriver: createTourDriver,
+    openDrawer: () => openDrawerRef.current(),
+    closeDrawer: () => closeDrawerRef.current(),
+  });
+
+  // The start-tour transition (GH132-PLAN.md M2, see the module doc): the Options
+  // tab's "Retake tour" button closes the panel first, then this effect starts the
+  // tour once the panel has actually closed. `closeSidePanelRef` breaks the
+  // circularity of `onStartTour` needing `sidePanel.close` while it is itself an
+  // argument to the `useSidePanel` call that produces `sidePanel` — written every
+  // render, read lazily at click time.
   const closeSidePanelRef = useRef<() => void>(() => {});
-  const pendingReopenIntroRef = useRef(false);
-  const onReopenIntro = useCallback(() => {
-    pendingReopenIntroRef.current = true;
+  const pendingStartTourRef = useRef(false);
+  const onStartTour = useCallback(() => {
+    pendingStartTourRef.current = true;
     closeSidePanelRef.current();
   }, []);
 
@@ -272,20 +301,22 @@ export function App({ createPipelineController }: AppProps = {}) {
     optionsFocusRef: hamburgerTriggerRef,
     mapShown,
     onToggleMap: () => setMapShown(!mapShown),
-    onReopenIntro,
+    onStartTour,
   });
   closeSidePanelRef.current = sidePanel.close;
+  openDrawerRef.current = () => sidePanel.openForTour("chaos");
+  closeDrawerRef.current = sidePanel.closeForTour;
 
   useEffect(() => {
     if (sidePanel.open) {
       return;
     }
-    if (!pendingReopenIntroRef.current) {
+    if (!pendingStartTourRef.current) {
       return;
     }
-    pendingReopenIntroRef.current = false;
-    intro.onReopen();
-  }, [sidePanel.open, intro.onReopen]);
+    pendingStartTourRef.current = false;
+    tour.startTour();
+  }, [sidePanel.open, tour.startTour]);
 
   // No-op while another overlay is already open (mirrors useSidePanel's own openWith
   // exclusivity check): the shell being inert already blocks a real pointer/keyboard
@@ -348,14 +379,18 @@ export function App({ createPipelineController }: AppProps = {}) {
 
   const modalOpen = intro.introOpen || traceOpen || sidePanel.open || stackOpen;
 
-  // Publish `modalOpen` to the store as `overlayOpen`, in the same commit
-  // ModalHost's `inert` change lands in (`useLayoutEffect`, not a passive effect):
-  // LogPanel's Space-to-freeze listener has no idea the shell is inert, so this is
-  // what keeps Space from resuming a run hidden behind an overlay.
+  // Publish overlay-open to the store, in the same commit ModalHost's `inert` change
+  // lands in (`useLayoutEffect`, not a passive effect): LogPanel's Space-to-freeze
+  // listener has no idea the shell is inert, so this is what keeps Space from resuming a
+  // run hidden behind an overlay. The guided tour is NOT a modal (it never inerts the
+  // shell), but Space must stay suppressed while it runs (GH132-PLAN.md M2, Codex fix
+  // 1), so `tour.active` is ORed in HERE only — ModalHost's inert below still keys on
+  // `modalOpen` alone, so the shell stays interactive during the tour.
+  const overlayOrTourActive = modalOpen || tour.active;
   const setOverlayOpen = useGameStore((s) => s.setOverlayOpen);
   useLayoutEffect(() => {
-    setOverlayOpen(modalOpen);
-  }, [modalOpen, setOverlayOpen]);
+    setOverlayOpen(overlayOrTourActive);
+  }, [overlayOrTourActive, setOverlayOpen]);
   // A separate effect, not the cleanup of the one above: its cleanup should fire
   // only on a real App unmount, not on every modalOpen change. Guards against an
   // unmount while an overlay is open leaving `overlayOpen` stuck true forever.

@@ -32,6 +32,29 @@ export interface IntroCopy {
   editLabel: string;
 }
 
+/** One tour step's popover content: a title and one paragraph of body copy. Not
+ *  exported beyond this file: every other module reaches it only through `TourCopy`'s
+ *  own fields. */
+interface TourStepCopy {
+  title: string;
+  description: string;
+}
+
+/** The guided tour's prose (GH132-PLAN.md "Tour redesign (M2 feedback): 8 steps,
+ *  drawer-open step 2", docs/adr/0012-guided-tour.md), keyed by `TourStep.copyKey`
+ *  (`ui/tour/tour-steps.data.ts`). Lives here, not in `ui/tour/`, so this file
+ *  stays the one home for onboarding prose. */
+export interface TourCopy {
+  map: TourStepCopy;
+  chaos: TourStepCopy;
+  click: TourStepCopy;
+  log: TourStepCopy;
+  findings: TourStepCopy;
+  decisions: TourStepCopy;
+  hire: TourStepCopy;
+  summary: TourStepCopy;
+}
+
 /** The Hire Me card copy: heading, body paragraphs, and the two contact links. */
 export interface HireMeCopy {
   heading: string;
@@ -70,6 +93,53 @@ export const introCopy: IntroCopy = {
   chaosLabel: "Cause chaos",
   sourceLabel: "Get the source",
   editLabel: "Edit the Engine",
+};
+
+/** The guided tour's eight steps, in `tourSteps`' order (`ui/tour/tour-steps.data.ts`,
+ *  GH132-PLAN.md "Tour redesign (M2 feedback): 8 steps, drawer-open step 2"). Step 1
+ *  reuses the intro's own premise, so the two never say two different things about
+ *  what the map shows. Step 2, "cause chaos", opens the side panel itself (in tour
+ *  mode) rather than telling the player to find a menu — see `ui/tour/use-tour.ts`'s
+ *  destination-aware navigation. */
+export const tourCopy: TourCopy = {
+  map: {
+    title: introCopy.title,
+    description: introCopy.paragraphs.join(" "),
+  },
+  chaos: {
+    title: "Cause chaos",
+    description:
+      "Pick a level to unleash attackers on the metro. Each level includes every level below it, so the chaos only ever piles up.",
+  },
+  click: {
+    title: "Click the map",
+    description:
+      "Stations, trains, and sensors on the map are all clickable. Click any of them to inspect it.",
+  },
+  log: {
+    title: "The sensor log",
+    description:
+      "Every sensor reading lands here the instant it happens. Fare taps, door sensors, camera spots, all of it.",
+  },
+  findings: {
+    title: "Findings",
+    description:
+      '"Watching" means the Engine is building a case on a pattern in the log. An alert means it\'s confident. Click any finding for its full trace.',
+  },
+  decisions: {
+    title: "Decisions",
+    description:
+      "Every judgment the Engine makes lands in this strip, newest first: caught, missed, or a false alert. Click one to see why.",
+  },
+  hire: {
+    title: "Hire me",
+    description: "I've built a lot of data processing engines and I'm looking for work!",
+  },
+  summary: {
+    title: "You're ready",
+    description:
+      "That's the loop: watch the map, turn up the chaos, and see what the Engine catches. Have fun!",
+  },
 };
 
 export const hireMe: HireMeCopy = {

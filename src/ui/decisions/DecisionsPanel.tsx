@@ -31,7 +31,13 @@ export function DecisionsPanel({ panelRef }: DecisionsPanelProps = {}) {
   const selectedSeq = decisionSelection?.seq ?? null;
 
   return (
-    <section ref={panelRef} className="decisions-panel" aria-label="Decisions" tabIndex={-1}>
+    <section
+      ref={panelRef}
+      className="decisions-panel"
+      aria-label="Decisions"
+      tabIndex={-1}
+      data-tour="decisions"
+    >
       {rows.length === 0 ? (
         <EmptyState />
       ) : (

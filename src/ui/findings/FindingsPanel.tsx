@@ -80,7 +80,13 @@ export function FindingsPanel({ panelRef: externalRef }: FindingsPanelProps = {}
     .join(" ");
 
   return (
-    <section ref={panelRef} className={panelClass} aria-label="Findings" tabIndex={-1}>
+    <section
+      ref={panelRef}
+      className={panelClass}
+      aria-label="Findings"
+      tabIndex={-1}
+      data-tour="findings"
+    >
       {/* A persistent role="status" live region: this node is a direct child of the
           section, so it always exists — even with zero findings — and the browser
           is already watching it before any text change. That change is what

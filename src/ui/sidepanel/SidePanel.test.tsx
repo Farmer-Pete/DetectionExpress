@@ -24,22 +24,23 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
   const onClose = overrides.onClose ?? vi.fn();
   const onApply = overrides.onApply ?? vi.fn();
   const onToggleMap = overrides.onToggleMap ?? vi.fn();
-  const onReopenIntro = overrides.onReopenIntro ?? vi.fn();
+  const onStartTour = overrides.onStartTour ?? vi.fn();
   const mapShown = overrides.mapShown ?? true;
   const tab = overrides.tab ?? "chaos";
   const utils = render(
     <SidePanel
+      mode={overrides.mode}
       tab={tab}
       onSelectTab={onSelectTab}
       onClose={onClose}
       onApply={onApply}
       mapShown={mapShown}
       onToggleMap={onToggleMap}
-      onReopenIntro={onReopenIntro}
+      onStartTour={onStartTour}
       fallbackFocusRef={overrides.fallbackFocusRef}
     />,
   );
-  return { ...utils, onSelectTab, onClose, onApply, onToggleMap, onReopenIntro };
+  return { ...utils, onSelectTab, onClose, onApply, onToggleMap, onStartTour };
 }
 
 describe("SidePanel", () => {
@@ -113,14 +114,14 @@ describe("SidePanel", () => {
     const onClose = vi.fn();
     const onApply = vi.fn();
     const onToggleMap = vi.fn();
-    const onReopenIntro = vi.fn();
+    const onStartTour = vi.fn();
     const baseProps = {
       onSelectTab,
       onClose,
       onApply,
       mapShown: true,
       onToggleMap,
-      onReopenIntro,
+      onStartTour,
     };
     const { rerender } = render(<SidePanel tab="chaos" {...baseProps} />);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
@@ -157,7 +158,11 @@ describe("SidePanel", () => {
 
   it("wires the chaos ladder to the store: indicates the selected level and calling onSelectLevel writes it back", () => {
     useGameStore.setState({ chaosLevel: 1 });
-    const setChaosLevel = vi.spyOn(useGameStore.getState(), "setChaosLevel");
+    // Do not call through: this test only asserts the callback fires. Letting the real
+    // action run would mutate the shared store mid-test and leak into the next one.
+    const setChaosLevel = vi
+      .spyOn(useGameStore.getState(), "setChaosLevel")
+      .mockImplementation(() => {});
     renderPanel({ tab: "chaos" });
 
     const level1Radio = screen.getByRole("radio", { name: /level 1/i });
@@ -205,10 +210,10 @@ describe("SidePanel", () => {
     expect(screen.queryByRole("button", { name: "Hide metro view" })).toBeNull();
   });
 
-  it("the options tab's How this works button calls onReopenIntro", () => {
-    const { onReopenIntro } = renderPanel({ tab: "options" });
-    fireEvent.click(screen.getByRole("button", { name: "How this works" }));
-    expect(onReopenIntro).toHaveBeenCalledTimes(1);
+  it("the options tab's Retake tour button calls onStartTour", () => {
+    const { onStartTour } = renderPanel({ tab: "options" });
+    fireEvent.click(screen.getByRole("button", { name: "Retake tour" }));
+    expect(onStartTour).toHaveBeenCalledTimes(1);
   });
 
   it("Escape calls onClose", () => {
@@ -282,5 +287,105 @@ describe("SidePanel", () => {
     unmount();
     expect(document.activeElement).toBe(fallback);
     fallback.remove();
+  });
+
+  it("renders the chaos tabpanel content with the data-tour anchor the tour's step 2 targets", () => {
+    renderPanel({ tab: "chaos" });
+    expect(document.querySelector('[data-tour="chaos"]')).not.toBeNull();
+  });
+});
+
+// GH132-PLAN.md M2, "Tour redesign: 8 steps, drawer-open step 2" — "Step 2 drawer-open:
+// Codex fixes (accepted)" rule 3. `mode="tour"` is how `use-tour.ts`'s `openForTour`
+// renders this component mid-tour: open, but non-modal, with driver.js (not this
+// component) owning focus and Escape.
+describe("SidePanel in tour mode", () => {
+  it("renders a labelled non-modal region, not a dialog: no role=dialog, no aria-modal", () => {
+    renderPanel({ mode: "tour", tab: "chaos" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const region = screen.getByRole("region", { name: "Side panel" });
+    expect(region.hasAttribute("aria-modal")).toBe(false);
+  });
+
+  it("still exposes the chaos data-tour anchor, so the driver can spotlight it", () => {
+    renderPanel({ mode: "tour", tab: "chaos" });
+    expect(document.querySelector('[data-tour="chaos"]')).not.toBeNull();
+  });
+
+  it("semantically disables the tabs and the close button", () => {
+    renderPanel({ mode: "tour", tab: "chaos" });
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab).toHaveProperty("disabled", true);
+    }
+    expect(screen.getByRole("button", { name: /close/i })).toHaveProperty("disabled", true);
+  });
+
+  it("clicking a disabled tab never calls onSelectTab", () => {
+    const { onSelectTab } = renderPanel({ mode: "tour", tab: "chaos" });
+    fireEvent.click(screen.getByRole("tab", { name: /algorithm/i }));
+    expect(onSelectTab).not.toHaveBeenCalled();
+  });
+
+  it("clicking the disabled close button never calls onClose", () => {
+    const { onClose } = renderPanel({ mode: "tour", tab: "chaos" });
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("semantically disables every chaos level, so the narrated ladder can't be clicked through", () => {
+    const setChaosLevel = vi.spyOn(useGameStore.getState(), "setChaosLevel");
+    renderPanel({ mode: "tour", tab: "chaos" });
+    for (const radio of screen.getAllByRole("radio")) {
+      expect(radio).toHaveProperty("disabled", true);
+    }
+    fireEvent.click(screen.getByRole("radio", { name: /level 0/i }));
+    expect(setChaosLevel).not.toHaveBeenCalled();
+  });
+
+  it("does not move focus into the panel on mount", () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "open";
+    document.body.append(trigger);
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    renderPanel({ mode: "tour", tab: "chaos" });
+    // driver.js, not this component, owns focus while the tour drives the panel.
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+
+  it("does not restore focus on unmount (driver.js's own focus-restore runs instead)", () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "open";
+    document.body.append(trigger);
+    trigger.focus();
+
+    const other = document.createElement("button");
+    document.body.append(other);
+
+    const { unmount } = renderPanel({ mode: "tour", tab: "chaos" });
+    other.focus(); // simulate driver.js moving focus onto its own popover control
+    unmount();
+    expect(document.activeElement).toBe(other);
+
+    trigger.remove();
+    other.remove();
+  });
+
+  it("Escape does not call onClose", () => {
+    const { onClose } = renderPanel({ mode: "tour", tab: "chaos" });
+    fireEvent.keyDown(screen.getByRole("region", { name: "Side panel" }), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("a backdrop click does not call onClose", () => {
+    const { onClose, container } = renderPanel({ mode: "tour", tab: "chaos" });
+    const backdrop = container.querySelector(".sidepanel-backdrop");
+    expect(backdrop).not.toBeNull();
+    if (backdrop) {
+      fireEvent.click(backdrop);
+    }
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

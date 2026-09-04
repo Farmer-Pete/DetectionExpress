@@ -26,6 +26,11 @@ interface ChaosLadderProps {
   phase: ChaosPhase;
   /** Reports a click on a playable rung. Never called for a locked rung. */
   onSelectLevel: (level: number) => void;
+  /** Semantically disables every radio, playable or not (GH132-PLAN.md M2, "Step 2
+   *  drawer-open: Codex fixes (accepted)" rule 3): `SidePanel` sets this while it
+   *  renders in tour mode, so the narrated ladder can never be clicked through.
+   *  Defaults to false. */
+  disabled?: boolean | undefined;
 }
 
 const RADIO_GROUP_NAME = "chaos-level";
@@ -53,6 +58,7 @@ export function ChaosLadder({
   selectedLevel,
   phase,
   onSelectLevel,
+  disabled = false,
 }: ChaosLadderProps) {
   const phaseLine = phaseText(phase);
   return (
@@ -61,6 +67,7 @@ export function ChaosLadder({
       className="chaos-ladder"
       aria-labelledby="chaos-ladder-title"
       tabIndex={-1}
+      data-tour="chaos"
     >
       <h2 id="chaos-ladder-title" className="chaos-ladder-title">
         The chaos ladder
@@ -73,6 +80,11 @@ export function ChaosLadder({
       <div className="chaos-ladder-list" role="radiogroup" aria-labelledby="chaos-ladder-title">
         {levels.map((level) => {
           const locked = !level.playable;
+          // Guards the handler itself, not just the native `disabled` attribute: a
+          // click on the ALREADY-selected radio (the common case for level 0, the
+          // default) fires no native state change to gate on, so the guard must be
+          // explicit rather than leaning on the browser's disabled-click suppression.
+          const isDisabled = locked || disabled;
           const selected = level.level === selectedLevel;
           const isLiveRung = level.playable && level.level === liveScenario.level;
           const className = [
@@ -92,8 +104,12 @@ export function ChaosLadder({
                   name={RADIO_GROUP_NAME}
                   value={level.level}
                   checked={selected}
-                  disabled={locked}
-                  onChange={() => onSelectLevel(level.level)}
+                  disabled={isDisabled}
+                  onChange={() => {
+                    if (!isDisabled) {
+                      onSelectLevel(level.level);
+                    }
+                  }}
                   aria-label={`Level ${level.level}: ${level.label}`}
                 />
                 <span className="chaos-ladder-rung">Level {level.level}</span>

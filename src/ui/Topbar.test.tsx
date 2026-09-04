@@ -1,11 +1,12 @@
 /**
  * `Topbar` is the extracted header (GH109-PLAN.md): title, slice tag, the
- * run-status pill, the hamburger button, and Hire Me. GH132-PLAN.md M1 (design
- * revision): the hamburger is a plain icon button that opens the side panel
- * directly (`onOpenMenu`) — it renders no popup of its own, so these tests only
- * assert it exists, is wired to the given ref, and fires `onOpenMenu` on click.
- * `StatusPill` reads the game store itself, so these tests seed the store
- * rather than a prop.
+ * hamburger button, and Hire Me. GH132-PLAN.md M1 (design revision): the
+ * hamburger is a plain icon button that opens the side panel directly
+ * (`onOpenMenu`) — it renders no popup of its own, so these tests only assert it
+ * exists, is wired to the given ref, and fires `onOpenMenu` on click.
+ *
+ * GH132-PLAN.md M2 (8-step tour redesign): the run-status pill (`StatusPill`,
+ * the "RUNNING" badge) is gone.
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { createRef } from "react";
@@ -74,11 +75,8 @@ describe("Topbar", () => {
     expect(screen.queryByRole("button", { name: "Metrics" })).toBeNull();
   });
 
-  it("renders the run-status pill, reading the store directly", () => {
-    useGameStore.setState({
-      snapshot: { ...emptySnapshot(), status: "won", failureReason: null },
-    });
+  it("renders no run-status pill (GH132-PLAN.md M2: the RUNNING badge is gone)", () => {
     renderTopbar();
-    expect(screen.getByRole("status").textContent).toBe("Won");
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

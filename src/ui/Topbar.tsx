@@ -1,7 +1,10 @@
 /**
  * The app header, extracted from `App.tsx` (GH109-PLAN.md, GH118-PLAN.md): the
- * title, the slice tag, the run-status pill, the hamburger button, and
- * `<HireMe>`.
+ * title, the slice tag, the hamburger button, and `<HireMe>`.
+ *
+ * GH132-PLAN.md M2 (8-step tour redesign): the run-status pill (`StatusPill`,
+ * the "RUNNING" badge) is gone. It duplicated what the live map and log already
+ * show, and the tour never had a step for it.
  *
  * GH132-PLAN.md M1 (design revision, "SUPERSEDES the popup menu"): the hamburger
  * is now a plain icon button, not a popup-menu trigger. Clicking it opens the
@@ -24,7 +27,6 @@ import { Menu as MenuIcon } from "lucide-react";
 import type { RefObject } from "react";
 import { hireMe } from "./content/narrative";
 import { HireMe } from "./HireMe";
-import { StatusPill } from "./hud/StatusPill";
 
 interface TopbarProps {
   /** Opens the side panel (to whatever tab was last active, chaos by default). */
@@ -39,7 +41,6 @@ export function Topbar({ onOpenMenu, hamburgerTriggerRef }: TopbarProps) {
     <header className="topbar">
       <h1>Detection Express</h1>
       <span className="slice-tag">The Engine brings the detections. You bring the chaos.</span>
-      <StatusPill />
       <div className="topbar-actions">
         <HireMe copy={hireMe} />
         <button

@@ -24,7 +24,7 @@ function baseArgs(controllerRef: RefObject<RunController | null>) {
     controllerRef,
     mapShown: true,
     onToggleMap: vi.fn(),
-    onReopenIntro: vi.fn(),
+    onStartTour: vi.fn(),
   };
 }
 
