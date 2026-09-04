@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  Source for public/og-image.png — the social link-preview card (Open Graph / Twitter).
+  Render: open this file at a 1200x630 viewport and screenshot .og-card, or run the
+  headless capture described in docs/design/README-og-image.md. Colors are the
+  Vibrant Tones HUD palette (docs/design/hud-palette.md); the metro lines are an
+  abstract motif, not the real network.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+  <style>
+    :root {
+      --bg: #0f303d;
+      --ink: #fbd57b;
+      --dim: #938c60;
+      --a1: #f8961e;
+      --display: "Chakra Petch", "Trebuchet MS", sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #0b2530; }
+    .og-card {
+      position: relative;
+      width: 1200px;
+      height: 630px;
+      overflow: hidden;
+      background: linear-gradient(180deg, var(--bg), #0b2530);
+      font-family: var(--display);
+    }
+    .og-card .map { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .overlay {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+      padding: 60px 72px 54px;
+      background: linear-gradient(0deg, rgba(9, 28, 36, 0.95) 32%, transparent);
+    }
+    .wordmark {
+      font-weight: 700; letter-spacing: 0.02em; line-height: 0.94;
+      color: var(--ink); font-size: 92px;
+    }
+    .wordmark .express { color: var(--a1); }
+    .tagline {
+      font-family: var(--mono); font-size: 35px;
+      color: color-mix(in srgb, var(--dim) 22%, var(--ink));
+      margin-top: 22px;
+    }
+  </style>
+</head>
+<body>
+  <div class="og-card">
+    <svg class="map" viewBox="0 0 1200 630" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g fill="none" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" opacity="0.92">
+        <path d="M80 150 L360 150 L520 310 L520 560" stroke="#f8961e"/>
+        <path d="M120 470 L400 470 L560 310 L900 310 L1080 130" stroke="#43aa8b"/>
+        <path d="M260 60 L260 360 L620 360 L780 520 L1120 520" stroke="#277da1"/>
+        <path d="M980 80 L820 240 L820 470 L1120 470" stroke="#f94144"/>
+      </g>
+      <g fill="#0f303d" stroke="#fbd57b" stroke-width="5">
+        <circle cx="360" cy="150" r="11"/><circle cx="520" cy="310" r="11"/>
+        <circle cx="560" cy="310" r="11"/><circle cx="820" cy="360" r="11"/>
+        <circle cx="620" cy="360" r="11"/><circle cx="780" cy="520" r="11"/>
+        <circle cx="260" cy="360" r="11"/><circle cx="900" cy="310" r="11"/>
+      </g>
+      <g>
+        <circle cx="820" cy="240" r="13" fill="#0f303d" stroke="#f94144" stroke-width="6"/>
+        <circle cx="820" cy="240" r="27" fill="none" stroke="#f94144" stroke-width="4" opacity="0.55"/>
+      </g>
+    </svg>
+    <div class="overlay">
+      <div class="wordmark">DETECTION <span class="express">EXPRESS</span></div>
+      <div class="tagline">Learn cybersecurity detection engineering.</div>
+    </div>
+  </div>
+</body>
+</html>
