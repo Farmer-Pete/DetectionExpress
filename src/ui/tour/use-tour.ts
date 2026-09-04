@@ -49,6 +49,11 @@ import { tourSteps } from "./tour-steps.data";
 
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
+/** The mobile breakpoint (GH133-PLAN.md): the identical string `src/index.css` uses
+ *  for `.metro-view`/`.metro-key`'s own mobile rules, so `startTour`'s one-time read
+ *  and the CSS never drift apart. */
+const NARROW_QUERY = "(max-width: 719.98px)";
+
 // In-memory, module-scoped (deliberately NOT component state): "at most one auto-start
 // per loaded session" (GH132-PLAN.md M3, "Session guard" finding 9) has to survive past
 // any single hook instance's lifetime — a ref would reset on a fresh mount, defeating
@@ -107,8 +112,13 @@ function waitFor(predicate: () => boolean, isCurrent: () => boolean): Promise<vo
   });
 }
 
-/** `tourSteps` + `tourCopy`, resolved into driver.js's own step shape. */
-function buildSteps(): TourDriveStepConfig[] {
+/** `tourSteps` + `tourCopy`, resolved into driver.js's own step shape. On a narrow
+ *  screen (GH133-PLAN.md), every step's `side` is forced to `"bottom"`: the desktop
+ *  `side` values in `tour-steps.data.ts` assume room to a step's left/right/top that
+ *  a phone viewport does not have, and driver.js itself flips to top near the page
+ *  bottom when there is no room below. Not exported: only `startTour` (below) ever
+ *  needs it, so it stays this module's own concern. */
+function buildSteps(isNarrow: boolean): TourDriveStepConfig[] {
   return tourSteps.map((step) => {
     const copy = tourCopy[step.copyKey];
     return {
@@ -116,7 +126,7 @@ function buildSteps(): TourDriveStepConfig[] {
       popover: {
         title: copy.title,
         description: copy.description,
-        side: step.side,
+        side: isNarrow ? "bottom" : step.side,
       },
     };
   });
@@ -208,9 +218,13 @@ export function useTour({
     };
 
     const reducedMotion = window.matchMedia(REDUCED_MOTION_QUERY).matches;
+    // A one-time read (GH133-PLAN.md), not a listener: driver.js recomputes its own
+    // popover geometry on resize and falls back to a fitting side, so a rotated
+    // popover stays usable even though this value does not re-place mid-tour.
+    const isNarrow = window.matchMedia(NARROW_QUERY).matches;
 
     const instance = createDriver({
-      steps: buildSteps(),
+      steps: buildSteps(isNarrow),
       disableActiveInteraction: true,
       animate: !reducedMotion,
       onNextClick: () => navigate(1),

@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGameStore } from "../game/store";
 import { emptySnapshot } from "../sim/snapshot";
 import { MetroView } from "./MetroView";
@@ -83,6 +83,15 @@ describe("MetroView", () => {
     expect(screen.queryByText("LIVING METRO")).toBeNull();
     expect(screen.queryByRole("slider")).toBeNull();
     expect(screen.queryByRole("button", { name: /pause|play/i })).toBeNull();
+  });
+});
+
+describe("MetroView mobile legend chip (GH133-PLAN.md)", () => {
+  it("renders a Show legend button and calls onOpenLegend on click", () => {
+    const onOpenLegend = vi.fn();
+    render(<MetroView onSelect={() => {}} onOpenLegend={onOpenLegend} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show legend" }));
+    expect(onOpenLegend).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1253,15 +1253,18 @@ body {
    so the whole network stays visible. The scored pipeline transport (freeze,
    0.5x/1x/2x) is the one clock now, so this region carries no header, counts, or
    speed control of its own — those retired with the standalone metro view.
-   The key (Lines, Actors, Sensors) is a single element, `MetroKey`, that this grid
-   repositions by breakpoint alone: below the map (as a row of three columns) under
-   the breakpoint, on the left as a stacked vertical rail at or above it. See the
-   @media block near `.metro-key` for the desktop rule. */
+   The key (Lines, Actors, Sensors) is a single element, `MetroKey`, rendered once as
+   the desktop rail (GH133-PLAN.md): below 720px it is CSS-hidden entirely (see the
+   @media block near `.metro-key`) and the map area fills the whole box on its own, so
+   a narrow screen never starves the map of height; the same Lines/Actors/Sensors
+   content instead lives behind the floating `.metro-legend-button` chip, which opens
+   it as a standalone dialog (`LegendDialog.tsx`). At or above 720px, `.metro-key`
+   becomes a left rail beside the map, per the desktop rule below. */
 .metro-view {
   display: grid;
-  grid-template-areas: "map" "key";
+  grid-template-areas: "map";
   grid-template-columns: 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr;
   gap: 10px;
   height: clamp(360px, 56vh, 520px);
   margin: 0 1.5rem 1rem;
@@ -1289,6 +1292,39 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+/* The mobile legend chip (GH133-PLAN.md): floating top-right of the map region,
+   opens the Lines/Actors/Sensors sections as a standalone dialog
+   (`LegendDialog.tsx`). Hidden at/above 720px, where the desktop rail (`.metro-key`)
+   already shows the same sections inline instead. */
+.metro-legend-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(21, 68, 87, 0.86);
+  backdrop-filter: blur(3px);
+  color: var(--ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.metro-legend-button:hover {
+  border-color: var(--a1);
+}
+
+@media (min-width: 720px) {
+  .metro-legend-button {
+    display: none;
+  }
 }
 
 /* The wave-outcome banner (GH126-PLAN.md M3b): shown over the map region while a
@@ -1428,9 +1464,14 @@ body {
 }
 
 /* Key: one element (`MetroKey`, rendered once) holding the Lines/Actors/Sensors
-   sections, with its own scroll if the content ever outgrows the bounded height.
-   Below the map as a 3-column row by default; the @media rule above turns this into
-   a single-column left rail (sections stacked top to bottom) at the same breakpoint. */
+   sections (`LegendSections.tsx`), with its own scroll if the content ever outgrows
+   the bounded height. This is the DESKTOP rail only (GH133-PLAN.md): below 720px it
+   is hidden outright by the `@media (max-width: 719.98px)` rule directly below —
+   never on this base rule, so the desktop rail is never hidden — and the same
+   sections instead render inside `LegendDialog.tsx`, opened from the floating
+   `.metro-legend-button` chip. The base `display: grid` here stays the left-rail
+   layout the desktop `@media (min-width: 720px)` rule below refines (a single
+   column, full height), since this component now only ever renders at that width. */
 .metro-key {
   grid-area: key;
   display: grid;
@@ -1446,6 +1487,16 @@ body {
   color: var(--dim);
   font-size: 11px;
   line-height: 1.55;
+}
+
+/* Mobile-only hide (Codex BLOCKER, GH133-PLAN.md): equal specificity to the base
+   rule above, placed AFTER it so this wins below 720px. Every legend selector stays
+   scoped like this — never a bare `.metro-key` change on the base rule — so the
+   desktop rail is never accidentally hidden. */
+@media (max-width: 719.98px) {
+  .metro-key {
+    display: none;
+  }
 }
 
 @media (min-width: 720px) {
@@ -1513,6 +1564,81 @@ body {
   justify-content: center;
   width: 13px;
   height: 13px;
+}
+
+/* Legend dialog (GH133-PLAN.md): the mobile legend chip's standalone modal — NOT
+   `MapDialogShell`, whose close/focus are bound to the map/event dialog stack (see
+   `LegendDialog.tsx`'s module doc). Mirrors `.place-overlay-backdrop`/`.place-overlay`
+   so it reads as one more member of the same modal family. */
+.legend-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 22, 29, 0.72);
+}
+
+.legend-dialog {
+  width: min(420px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.2rem 1.4rem;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.legend-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.legend-dialog-title {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.legend-dialog-close {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.legend-dialog-close:hover {
+  border-color: var(--a1);
+}
+
+/* The three `LegendSections` columns, laid out directly (no intervening `.metro-key`
+   wrapper) since the dialog surface above already supplies the panel chrome. */
+.legend-dialog-body {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 16px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+/* A very narrow screen drops the three legend columns to one, matching
+   `.place-device-list`'s own narrow-screen fold. */
+@media (max-width: 480px) {
+  .legend-dialog-body {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Topbar actions: the Hire Me surface and the hamburger button, pushed to the
@@ -2154,6 +2280,15 @@ body {
     0 0 20px color-mix(in srgb, var(--a1) 35%, transparent);
 }
 
+/* A narrow phone viewport (GH133-PLAN.md defect: the tour): driver.js's own popover
+   width can exceed the viewport at 390-500px, forcing horizontal scroll. Capped to
+   the viewport minus a small margin on both sides. */
+@media (max-width: 480px) {
+  .driver-popover {
+    max-width: calc(100vw - 24px);
+  }
+}
+
 /* Log panel: it fills the inspector-stream cell, which supplies the panel chrome. */
 .log-panel {
   display: flex;
@@ -2338,6 +2473,21 @@ body {
   animation: fx-cite 1.2s ease;
 }
 
+/* Narrow phones (GH133-PLAN.md defect #3): the who/where columns wrap mid-word at
+   the full five-column width. Collapse to time . sensor . result; who/where stay in
+   the row's `aria-label` (LogPanel.tsx), so the accessible name never loses them even
+   though the visual cells disappear. */
+@media (max-width: 480px) {
+  .log-row {
+    grid-template-columns: 3.5rem 1.4rem 1fr;
+  }
+
+  .log-row-who,
+  .log-row-where {
+    display: none;
+  }
+}
+
 @keyframes fx-cite {
   0% {
     background: color-mix(in srgb, var(--hunt-color) 20%, transparent);
@@ -2467,5 +2617,25 @@ body {
   }
   100% {
     opacity: 0;
+  }
+}
+
+/* Touch targets (GH133-PLAN.md defect #4): a coarse pointer (touch, not a mouse or
+   trackpad) gets a 44px minimum in both dimensions on every primary control below —
+   the WCAG 2.5.5 AAA target size. `.log-row` takes min-height only: a min-width
+   there would force it wider than its own grid track and break the row layout. */
+@media (pointer: coarse) {
+  .transport-freeze,
+  .transport-speed,
+  .topbar-menu-button,
+  .hire-me-toggle,
+  .metro-legend-button,
+  .legend-dialog-close {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .log-row {
+    min-height: 44px;
   }
 }
