@@ -25,7 +25,9 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
   const onApply = overrides.onApply ?? vi.fn();
   const onToggleMap = overrides.onToggleMap ?? vi.fn();
   const onStartTour = overrides.onStartTour ?? vi.fn();
+  const onToggleShortcuts = overrides.onToggleShortcuts ?? vi.fn();
   const mapShown = overrides.mapShown ?? true;
+  const shortcutsEnabled = overrides.shortcutsEnabled ?? true;
   const tab = overrides.tab ?? "chaos";
   const utils = render(
     <SidePanel
@@ -37,10 +39,20 @@ function renderPanel(overrides: Partial<Parameters<typeof SidePanel>[0]> = {}) {
       mapShown={mapShown}
       onToggleMap={onToggleMap}
       onStartTour={onStartTour}
+      shortcutsEnabled={shortcutsEnabled}
+      onToggleShortcuts={onToggleShortcuts}
       fallbackFocusRef={overrides.fallbackFocusRef}
     />,
   );
-  return { ...utils, onSelectTab, onClose, onApply, onToggleMap, onStartTour };
+  return {
+    ...utils,
+    onSelectTab,
+    onClose,
+    onApply,
+    onToggleMap,
+    onStartTour,
+    onToggleShortcuts,
+  };
 }
 
 describe("SidePanel", () => {
@@ -115,6 +127,7 @@ describe("SidePanel", () => {
     const onApply = vi.fn();
     const onToggleMap = vi.fn();
     const onStartTour = vi.fn();
+    const onToggleShortcuts = vi.fn();
     const baseProps = {
       onSelectTab,
       onClose,
@@ -122,6 +135,8 @@ describe("SidePanel", () => {
       mapShown: true,
       onToggleMap,
       onStartTour,
+      shortcutsEnabled: true,
+      onToggleShortcuts,
     };
     const { rerender } = render(<SidePanel tab="chaos" {...baseProps} />);
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });
@@ -214,6 +229,51 @@ describe("SidePanel", () => {
     const { onStartTour } = renderPanel({ tab: "options" });
     fireEvent.click(screen.getByRole("button", { name: "Retake tour" }));
     expect(onStartTour).toHaveBeenCalledTimes(1);
+  });
+
+  // GH137-PLAN.md code review fix 4: WCAG 2.1.4's "turn off" mechanism, surfaced as a
+  // real, labeled, keyboard-operable checkbox — not a button (a toggle needs
+  // checked-state semantics a plain button doesn't carry), and deliberately wired
+  // through NO `useShortcut` call: giving the shortcuts on/off control its own
+  // mnemonic would be circular (turning shortcuts off would disable the very control
+  // that turns them back on).
+  describe("the options tab's Keyboard shortcuts toggle", () => {
+    it("is a real checkbox, labeled, reflecting shortcutsEnabled", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      expect(toggle).toHaveProperty("checked", true);
+    });
+
+    it("reflects shortcutsEnabled: false as unchecked", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: false });
+      expect(screen.getByRole("checkbox", { name: "Keyboard shortcuts" })).toHaveProperty(
+        "checked",
+        false,
+      );
+    });
+
+    it("clicking it calls onToggleShortcuts", () => {
+      const { onToggleShortcuts } = renderPanel({ tab: "options", shortcutsEnabled: true });
+      fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+      expect(onToggleShortcuts).toHaveBeenCalledTimes(1);
+    });
+
+    it("is keyboard-operable: Space toggles a focused checkbox via its native activation", () => {
+      const { onToggleShortcuts } = renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      toggle.focus();
+      // happy-dom's native checkbox activation fires a real click on Space, exactly
+      // like a browser; the control needs no keydown handler of its own.
+      fireEvent.click(toggle);
+      expect(onToggleShortcuts).toHaveBeenCalledTimes(1);
+    });
+
+    it("carries no aria-keyshortcuts and no Kbd badge of its own (no mnemonic, avoiding circularity)", () => {
+      renderPanel({ tab: "options", shortcutsEnabled: true });
+      const toggle = screen.getByRole("checkbox", { name: "Keyboard shortcuts" });
+      expect(toggle.hasAttribute("aria-keyshortcuts")).toBe(false);
+      expect(toggle.closest("label")?.querySelector(".kbd")).toBeNull();
+    });
   });
 
   it("Escape calls onClose", () => {
@@ -354,6 +414,7 @@ describe("SidePanel tab strip's arrow-key hint (GH137 review)", () => {
     const onApply = vi.fn();
     const onToggleMap = vi.fn();
     const onStartTour = vi.fn();
+    const onToggleShortcuts = vi.fn();
     render(
       <SidePanel
         tab="chaos"
@@ -363,6 +424,8 @@ describe("SidePanel tab strip's arrow-key hint (GH137 review)", () => {
         mapShown={true}
         onToggleMap={onToggleMap}
         onStartTour={onStartTour}
+        shortcutsEnabled={true}
+        onToggleShortcuts={onToggleShortcuts}
       />,
     );
     const chaosTab = screen.getByRole("tab", { name: /chaos/i });

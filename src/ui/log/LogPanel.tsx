@@ -69,6 +69,7 @@ import { Kbd } from "../shortcuts/Kbd";
 import { ariaKeyshortcut } from "../shortcuts/shortcuts.data";
 import { isEditableTarget } from "../shortcuts/text-entry";
 import { useShortcut } from "../shortcuts/use-shortcut";
+import { useShortcutsEnabled } from "../shortcuts/use-shortcuts";
 import { useOneShotFlag } from "../wave/use-one-shot-flag";
 import { useWavePhaseEdge } from "../wave/use-wave-phase-edge";
 import { formatClock, type LogRow as LogRowView, sensorLabel, toLogRow } from "./formatters";
@@ -264,6 +265,13 @@ export function LogPanel({
 }: LogPanelProps = {}) {
   const ownRef = useRef<HTMLDivElement>(null);
   const panelRef = externalRef ?? ownRef;
+  // The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4): Space-to-freeze is a
+  // genuinely global single-character shortcut (unlike Escape/the arrows, it is not
+  // scoped to a focused component), so it needs its own bail below, distinct from
+  // `useShortcut`'s badge suppression — Space is dispatched through THIS component's
+  // own `window` listener, never through the shell shortcut dispatcher (Space already
+  // has that owner there; see `shortcuts.data.ts`).
+  const shortcutsEnabled = useShortcutsEnabled();
   const worldEvents = useGameStore((s) => s.snapshot.worldEvents);
   const wave = useGameStore((s) => s.snapshot.wave);
   const status = useGameStore((s) => s.snapshot.status);
@@ -313,6 +321,9 @@ export function LogPanel({
       if (event.repeat || isEditableTarget(event.target)) {
         return;
       }
+      if (!shortcutsEnabled) {
+        return; // WCAG 2.1.4 off-switch: this global shortcut does nothing while OFF
+      }
       if (useGameStore.getState().overlayOpen) {
         return; // an overlay owns the run; the inert shell must not resume it
       }
@@ -330,7 +341,7 @@ export function LogPanel({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setFrozen]);
+  }, [setFrozen, shortcutsEnabled]);
 
   const newestFirst = worldEvents.slice().reverse();
   // `running` (F003) also gates the readout text: a concluded run's stale

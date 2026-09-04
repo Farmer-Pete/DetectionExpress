@@ -167,10 +167,21 @@ function buildHintBadge(glyph: string): HTMLElement {
  *  animation under reduced motion (`animate: !reducedMotion` in `startTour` below),
  *  so no extra reduced-motion handling is needed here. Runs on every step (driver.js
  *  calls `onPopoverRender` once per step's own popover build), so it never needs to
- *  guard against appending twice to the SAME footer node. */
+ *  guard against appending twice to the SAME footer node.
+ *
+ *  Code review fix 3: every `<kbd>` here is already `aria-hidden` (`buildHintBadge`),
+ *  but the plain "move"/"exit" text sitting next to them was NOT — so a screen reader
+ *  used to hear only "move ... exit", naming no keys at all. The glyph row is now
+ *  wrapped in its own `aria-hidden` container (so the whole decorative row is skipped
+ *  as one unit), and a `.visually-hidden` sibling — the same class the rest of the app
+ *  uses for spoken-only text — carries the real accessible sentence instead. The
+ *  sighted layout is unchanged: the glyph row's own markup/classes are untouched. */
 function appendShortcutHint(popover: TourPopoverDom): void {
   const hint = document.createElement("p");
   hint.className = "shortcut-hint";
+
+  const glyphRow = document.createElement("span");
+  glyphRow.setAttribute("aria-hidden", "true");
 
   const move = document.createElement("span");
   move.className = "shortcut-hint-entry";
@@ -183,14 +194,19 @@ function appendShortcutHint(popover: TourPopoverDom): void {
 
   const sep = document.createElement("span");
   sep.className = "shortcut-hint-sep";
-  sep.setAttribute("aria-hidden", "true");
   sep.textContent = " · ";
 
   const exit = document.createElement("span");
   exit.className = "shortcut-hint-entry";
   exit.append(buildHintBadge("Esc"), document.createTextNode(" exit"));
 
-  hint.append(move, sep, exit);
+  glyphRow.append(move, sep, exit);
+
+  const hiddenLabel = document.createElement("span");
+  hiddenLabel.className = "visually-hidden";
+  hiddenLabel.textContent = "Left and right arrow keys to move, Escape to exit";
+
+  hint.append(glyphRow, hiddenLabel);
   popover.footer.append(hint);
 }
 

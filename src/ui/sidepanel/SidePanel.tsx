@@ -118,6 +118,14 @@ export interface SidePanelProps {
    *  hamburger, sit inside `.app-shell`), so `App.tsx` closes this panel first, then
    *  starts the tour once it has actually unmounted. */
   onStartTour: () => void;
+  /** The player's persisted keyboard-shortcuts on/off preference (GH137-PLAN.md code
+   *  review fix 4, WCAG 2.1.4's "turn off" mechanism), so the Options tab's toggle
+   *  reflects the real state. */
+  shortcutsEnabled: boolean;
+  /** Flips `shortcutsEnabled`, wired to the Options tab's "Keyboard shortcuts"
+   *  checkbox. Deliberately carries no mnemonic of its own (no `useShortcut` call): a
+   *  shortcut for the shortcuts-off switch would be circular. */
+  onToggleShortcuts: () => void;
   /** Focus-restore fallback for when the trigger element is gone on unmount (decision
    *  14's TraceOverlay pattern), e.g. the intro path in a later stage. */
   fallbackFocusRef?: RefObject<HTMLElement | null> | undefined;
@@ -132,6 +140,8 @@ export function SidePanel({
   mapShown,
   onToggleMap,
   onStartTour,
+  shortcutsEnabled,
+  onToggleShortcuts,
   fallbackFocusRef,
 }: SidePanelProps) {
   const isTour = mode === "tour";
@@ -370,6 +380,17 @@ export function SidePanel({
               Retake tour
               {retakeTourKey !== undefined ? <Kbd shortcutKey={retakeTourKey} /> : null}
             </button>
+            {/* GH137-PLAN.md code review fix 4: WCAG 2.1.4's "turn off" mechanism for
+                every single-character shortcut this app dispatches. A real, labeled
+                checkbox (not a button — the toggle has genuine checked-state
+                semantics), keyboard-operable and focus-ring'd for free (a native
+                `<input type="checkbox">`). Deliberately carries no `useShortcut` call
+                and no `<Kbd>` badge of its own: giving the on/off switch its own
+                mnemonic would be circular. */}
+            <label className="sidepanel-options-toggle">
+              <input type="checkbox" checked={shortcutsEnabled} onChange={onToggleShortcuts} />
+              Keyboard shortcuts
+            </label>
           </div>
         </div>
       </div>

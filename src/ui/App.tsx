@@ -126,6 +126,7 @@ import { ModalHost } from "./ModalHost";
 import { LegendDialog } from "./metro/LegendDialog";
 import { PlaceDialog } from "./metro/PlaceDialog";
 import { usePipelineController } from "./run/use-pipeline-controller";
+import { readShortcutsEnabled, writeShortcutsEnabled } from "./shortcuts/shortcuts-preference";
 import type { ShortcutsAppState } from "./shortcuts/use-shortcuts";
 import { ShortcutsProvider } from "./shortcuts/use-shortcuts";
 import { useSidePanel } from "./sidepanel/use-side-panel";
@@ -282,6 +283,20 @@ export function App({
   // The shortcuts dispatcher's bail-check-1 flag (GH137-PLAN.md): owned here, shared
   // with both `useTour` (which flips it) and `ShortcutsProvider` below (which reads it).
   const tourOwnsKeyboardRef = useRef(false);
+  // The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4): the player's
+  // persisted keyboard-shortcuts on/off preference. Read once, lazily, from
+  // `shortcuts-preference.ts`'s guarded `localStorage` wrapper (mirroring
+  // `useTour`'s own `hasSeenAtMount` read); every toggle writes straight through, so
+  // it survives a reload. `ShortcutsProvider` reads it to bail its dispatcher/
+  // registration; the Options tab's checkbox (via `useSidePanel`) reads and flips it.
+  const [shortcutsEnabled, setShortcutsEnabledState] = useState(() => readShortcutsEnabled());
+  const onToggleShortcuts = useCallback(() => {
+    setShortcutsEnabledState((prev) => {
+      const next = !prev;
+      writeShortcutsEnabled(next);
+      return next;
+    });
+  }, []);
   const tour = useTour({
     triggerRef: hamburgerTriggerRef,
     createDriver: createTourDriver,
@@ -319,6 +334,8 @@ export function App({
     mapShown,
     onToggleMap: () => setMapShown(!mapShown),
     onStartTour,
+    shortcutsEnabled,
+    onToggleShortcuts,
   });
   closeSidePanelRef.current = sidePanel.close;
   openDrawerRef.current = () => sidePanel.openForTour("chaos");
@@ -481,7 +498,11 @@ export function App({
     // The `ShortcutsProvider` wraps the whole shell (GH137-PLAN.md): it hosts the one
     // keyboard-shortcut dispatcher, reading `shortcutsAppState` for the active scope
     // and `tourOwnsKeyboardRef` to stand down while the tour drives.
-    <ShortcutsProvider appState={shortcutsAppState} tourOwnsKeyboardRef={tourOwnsKeyboardRef}>
+    <ShortcutsProvider
+      appState={shortcutsAppState}
+      tourOwnsKeyboardRef={tourOwnsKeyboardRef}
+      shortcutsEnabled={shortcutsEnabled}
+    >
       <ModalHost
         modalOpen={modalOpen}
         shellExtraClass={shaking && status === "running" && !tour.active ? "shake" : undefined}

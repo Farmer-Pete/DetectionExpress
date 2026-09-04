@@ -440,7 +440,7 @@ describe("useTour auto-start (GH132-PLAN.md M3)", () => {
 // tests fire that hook directly against a bare-DOM footer node, the same way real
 // driver.js would call it once per step.
 describe("useTour popover shortcut hint (GH137-PLAN.md M3)", () => {
-  it("passes an onPopoverRender that appends the shortcut hint to the step's footer", () => {
+  it("passes an onPopoverRender that appends the shortcut hint's decorative glyph row to the step's footer", () => {
     const { createDriver, configs } = spyFactory();
     const triggerRef = createRef<HTMLButtonElement>();
     const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
@@ -452,10 +452,14 @@ describe("useTour popover shortcut hint (GH137-PLAN.md M3)", () => {
 
     const hint = footer.querySelector(".shortcut-hint");
     expect(hint).not.toBeNull();
-    expect(hint?.textContent).toBe("← → move · Esc exit");
+    // The visible glyph row, scoped past the visually-hidden accessible label added
+    // below it (code review fix 3) so this assertion still pins the exact sighted
+    // layout ("← → move · Esc exit") on its own.
+    const glyphRow = hint?.querySelector(":scope > [aria-hidden='true']");
+    expect(glyphRow?.textContent).toBe("← → move · Esc exit");
   });
 
-  it("renders the hint's keys as aria-hidden .kbd badges, not plain text", () => {
+  it("renders the hint's keys as aria-hidden .kbd badges inside an aria-hidden glyph row, not plain text", () => {
     const { createDriver, configs } = spyFactory();
     const triggerRef = createRef<HTMLButtonElement>();
     const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
@@ -469,7 +473,30 @@ describe("useTour popover shortcut hint (GH137-PLAN.md M3)", () => {
     expect(badges).toHaveLength(3); // ←, →, Esc
     for (const badge of badges) {
       expect(badge.getAttribute("aria-hidden")).toBe("true");
+      expect(badge.closest("[aria-hidden='true']")).not.toBeNull();
     }
+  });
+
+  // Code review fix 3: the decorative row above is entirely aria-hidden (every <kbd>,
+  // now also its own wrapper), so a screen reader used to hear only the plain text
+  // sitting next to those badges — "move ... exit" — naming no keys at all. This
+  // visually-hidden span (the same `.visually-hidden` class the rest of the app uses)
+  // carries the real accessible text instead, without changing what a sighted player
+  // sees (the glyph row above is unchanged).
+  it("names the arrow keys and Escape in a visually-hidden span, for a screen reader", () => {
+    const { createDriver, configs } = spyFactory();
+    const triggerRef = createRef<HTMLButtonElement>();
+    const { result } = renderHook(() => useTour({ triggerRef, createDriver }));
+
+    act(() => result.current.startTour());
+
+    const footer = document.createElement("div");
+    configs[0]?.onPopoverRender?.({ footer });
+
+    const hidden = footer.querySelector(".shortcut-hint .visually-hidden");
+    expect(hidden).not.toBeNull();
+    expect(hidden?.hasAttribute("aria-hidden")).toBe(false);
+    expect(hidden?.textContent).toBe("Left and right arrow keys to move, Escape to exit");
   });
 
   it("appends a fresh hint to each step's own footer, without disturbing existing footer content", () => {

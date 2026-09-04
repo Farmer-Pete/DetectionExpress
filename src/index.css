@@ -2211,6 +2211,28 @@ body {
   border-color: var(--a1);
 }
 
+/* The keyboard-shortcuts on/off toggle (GH137-PLAN.md code review fix 4, WCAG
+   2.1.4's "turn off" mechanism): a real labeled checkbox, styled to sit alongside
+   the two buttons above it without reading as one itself. */
+.sidepanel-options-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.sidepanel-options-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.sidepanel-options-toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--a3);
+  outline-offset: 2px;
+}
+
 /* Guided tour (GH132-PLAN.md M2, docs/adr/0012-guided-tour.md): driver.js's own
    `driver.css` is imported once at the entry (`main.tsx`) — the one allowed
    exception to "all CSS lives here" (ADR 0012's "Consequences"), since hand-

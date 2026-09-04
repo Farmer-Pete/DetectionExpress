@@ -334,6 +334,53 @@ describe("LogPanel keyboard shortcut badges (GH137-PLAN.md M1)", () => {
   });
 });
 
+// GH137-PLAN.md code review fix 4: the WCAG 2.1.4 off-switch. Freeze's Space toggle is
+// genuinely global (not scoped to a focused component), dispatched through LogPanel's
+// OWN `window` listener rather than the shell shortcut dispatcher (Space already has
+// that owner) — so this listener needs its own bail, alongside the badge it already
+// loses via `useShortcut`'s `key: undefined` (asserted above, "keyboard shortcut
+// badges").
+describe("LogPanel Space-to-freeze respects the WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4)", () => {
+  it("does nothing while shortcutsEnabled is false", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("resumes once toggled back to true", () => {
+    const { rerender } = render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+
+    rerender(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={true}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(true);
+  });
+
+  it("hides the Freeze badge and aria-keyshortcuts while off", () => {
+    render(
+      <ShortcutsProvider appState={SHELL_APP_STATE} shortcutsEnabled={false}>
+        <LogPanel />
+      </ShortcutsProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Freeze" });
+    expect(button.hasAttribute("aria-keyshortcuts")).toBe(false);
+    expect(button.querySelector(".kbd")).toBeNull();
+  });
+});
+
 describe("LogPanel speed control", () => {
   it("dispatches setSpeed from each speed button", () => {
     render(<LogPanel />);

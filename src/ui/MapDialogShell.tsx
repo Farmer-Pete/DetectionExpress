@@ -42,8 +42,11 @@ import { useShortcut } from "./shortcuts/use-shortcut";
 
 interface MapDialogShellProps {
   /** Which `mapDialog:*` scope this instance's Back/Close shortcuts register under
-   *  (GH137-PLAN.md M2) — `EventDialog`/`PlaceDialog` each pass their own. */
-  scope: Scope;
+   *  (GH137-PLAN.md M2) — `EventDialog`/`PlaceDialog` each pass their own. Narrowed to
+   *  the `mapDialog:*` member of `Scope` (code review fix 1): this shell only ever
+   *  registers under a map-dialog scope, so a caller passing `"shell"`/`"hireMe"`/etc.
+   *  is a compile-time error instead of a silent runtime mismatch. */
+  scope: Extract<Scope, `mapDialog:${string}`>;
   /** The dialog's accessible name (`aria-label`). Distinct from `title` because the
    *  event dialog labels itself "<sensor> reading" while its header shows just the
    *  sensor name. */
@@ -104,11 +107,19 @@ export function MapDialogShell({
     onActivate: popMapDialog,
     enabled: canGoBack,
   });
+  // Code review fix 2: Close's Escape badge/aria-keyshortcuts are only accurate while
+  // there is no Back — `onKeyDown` below routes Escape to `popMapDialog` (Back), not
+  // `clearMapDialogStack` (Close), whenever `canGoBack` is true. `enabled: !canGoBack`
+  // mirrors that same routing predicate (this entry is badge-only regardless, since
+  // Escape is RESERVED/dispatch:false — see `shortcuts.data.ts` — so `enabled` never
+  // gates a live dispatch here, only keeps the two facts from drifting apart); the
+  // render below additionally gates the badge/aria themselves on `!canGoBack`, since
+  // `key` alone does not carry that condition.
   const { key: closeKey } = useShortcut({
     scope,
     id: "close",
     onActivate: () => {},
-    enabled: true,
+    enabled: !canGoBack,
   });
 
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -180,11 +191,13 @@ export function MapDialogShell({
             type="button"
             className="place-overlay-close"
             aria-label="Close"
-            aria-keyshortcuts={closeKey === undefined ? undefined : ariaKeyshortcut(closeKey)}
+            aria-keyshortcuts={
+              canGoBack || closeKey === undefined ? undefined : ariaKeyshortcut(closeKey)
+            }
             onClick={clearMapDialogStack}
           >
             <span aria-hidden="true">×</span>
-            {closeKey !== undefined ? <Kbd shortcutKey={closeKey} /> : null}
+            {!canGoBack && closeKey !== undefined ? <Kbd shortcutKey={closeKey} /> : null}
           </button>
         </header>
 

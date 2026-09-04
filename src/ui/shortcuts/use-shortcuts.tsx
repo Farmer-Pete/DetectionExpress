@@ -59,6 +59,32 @@
  * `Space`/`Escape`/the arrows are never dispatched here at all (refused at registration,
  * per the invariant above), so there is no double-handling with LogPanel's own Space
  * listener, `focus.ts`'s Escape, the side-panel tab arrows, or driver.js.
+ *
+ * ## The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4)
+ * `shortcutsEnabled` (default `true`) is the player's persisted "turn off" preference
+ * for single-character shortcuts (`shortcuts-preference.ts`; `App.tsx` owns the state
+ * and the read/write). It covers exactly the shortcuts WCAG 2.1.4 requires an
+ * off-switch for: global, unmodified single-character mnemonics dispatched from this
+ * one `window` listener regardless of what has focus (M, T, P, R, A, F, L, H, B, O,
+ * the digit speeds). Escape/the arrows are exempt — WCAG 2.1.4 excuses a shortcut
+ * "only active when a particular user interface component has focus", and every one
+ * of those is scoped to whichever dialog/tablist owns it, handled by that
+ * component's own `onKeyDown`, never through this dispatcher at all (they are
+ * RESERVED/`dispatch: false` for exactly that reason). Freeze's Space is the one
+ * exception needing its own bail (`LogPanel.tsx`): it is genuinely global, but
+ * dispatched through LogPanel's own `window` listener, not this one, since Space
+ * already has that owner.
+ *
+ * While `false`: `register` refuses every call outright (mirroring the RESERVED/
+ * `dispatch: false` refusal above), so nothing is EVER live-registered, and the
+ * dispatcher's keydown handler bails first, before any of its six checks, as a second,
+ * independent guard against a stale/leaked registration. `useShortcut` (the only
+ * caller of `register`) additionally skips calling it at all while `false` (belt and
+ * suspenders: the effect's own dependency array includes the live `enabled` context
+ * value, so a toggle re-runs it), and returns `key: undefined` — every consuming
+ * control already renders its `<Kbd>` badge and `aria-keyshortcuts` conditionally on
+ * `key !== undefined`, so one flag suppresses every badge in the app without touching
+ * each control.
  */
 import {
   createContext,
@@ -130,9 +156,16 @@ const noopRegister: Register = () => noopUnregister;
 
 interface ShortcutsContextValue {
   register: Register;
+  /** The WCAG 2.1.4 off-switch (module doc). Defaults `true` (enabled) so a bare
+   *  control (an isolated component test rendered with no `ShortcutsProvider`) keeps
+   *  rendering its badge exactly as before this feature existed. */
+  enabled: boolean;
 }
 
-const ShortcutsContext = createContext<ShortcutsContextValue>({ register: noopRegister });
+const ShortcutsContext = createContext<ShortcutsContextValue>({
+  register: noopRegister,
+  enabled: true,
+});
 
 /** `use-shortcut.ts`'s accessor. Defaults to a no-op registration when no
  *  `ShortcutsProvider` is mounted (an isolated component test renders the control bare),
@@ -142,6 +175,14 @@ export function useShortcutsRegister(): Register {
   return useContext(ShortcutsContext).register;
 }
 
+/** `use-shortcut.ts`'s accessor for the WCAG 2.1.4 off-switch (module doc). A live
+ *  React value (not a ref): consumers must re-render when it flips, so their badge
+ *  and their registration effect both react to a toggle, not just to their own next
+ *  mount. */
+export function useShortcutsEnabled(): boolean {
+  return useContext(ShortcutsContext).enabled;
+}
+
 export interface ShortcutsProviderProps {
   /** The state `resolveActiveScope` reads, owned by `App`. */
   appState: ShortcutsAppState;
@@ -149,16 +190,34 @@ export interface ShortcutsProviderProps {
    *  shared with `useTour`; defaults to a locally-owned ref (always `false`), so a bare
    *  provider — an isolated test with no tour in the tree — still works. */
   tourOwnsKeyboardRef?: RefObject<boolean> | undefined;
+  /** The WCAG 2.1.4 off-switch (module doc): the player's persisted "turn off"
+   *  preference. Defaults `true` (enabled), so a bare provider — an isolated test
+   *  that never passes it — dispatches exactly as it did before this feature
+   *  existed. `App.tsx` owns the state (`shortcuts-preference.ts`) and passes it
+   *  through here. */
+  shortcutsEnabled?: boolean | undefined;
   children: ReactNode;
 }
 
 export function ShortcutsProvider({
   appState,
   tourOwnsKeyboardRef: externalTourRef,
+  shortcutsEnabled = true,
   children,
 }: ShortcutsProviderProps) {
   const ownTourRef = useRef(false);
   const tourOwnsKeyboardRef = externalTourRef ?? ownTourRef;
+  // Commit-fresh read for the KEYDOWN LISTENER only (module doc "Commit-fresh reads"):
+  // a real keyboard event always arrives after every effect from the triggering commit
+  // has already flushed, so a ref refreshed in a `useLayoutEffect` below is safe there.
+  // `register`, below, must NOT use this ref: React commits a CHILD's layout effects
+  // (e.g. `useShortcut`'s own registration effect) before this PROVIDER's, so on the
+  // very commit that flips `shortcutsEnabled`, a child's effect would call `register`
+  // before this ref had a chance to catch up. `register` instead closes over the
+  // `shortcutsEnabled` prop directly (its own `useCallback` depends on it), which is
+  // already the current render's value the moment `register` is (re)created — no
+  // ordering hazard.
+  const shortcutsEnabledRef = useRef(shortcutsEnabled);
 
   // Registrations live in a ref, mutated directly by `register`/its returned
   // unregister — never React state, so a control mounting or unmounting never forces
@@ -170,47 +229,58 @@ export function ShortcutsProvider({
   // layout effect below on every commit (module doc: "commit-fresh reads").
   const activeScopeRef = useRef<Scope>(resolveActiveScope(appState));
 
-  const register = useCallback<Register>((scope, def, handler, enabled) => {
-    if (RESERVED.has(def.key) || def.dispatch === false) {
-      return noopUnregister; // the key already has an owner; never take over its dispatch
-    }
-    const normalizedKey = def.key.toLowerCase();
-    let scopeMap = handlersRef.current.get(scope);
-    if (scopeMap === undefined) {
-      scopeMap = new Map<string, RegistrationEntry[]>();
-      handlersRef.current.set(scope, scopeMap);
-    }
-    const liveScopeMap = scopeMap;
-    let stack = liveScopeMap.get(normalizedKey);
-    if (stack === undefined) {
-      stack = [];
-      liveScopeMap.set(normalizedKey, stack);
-    }
-    const liveStack = stack;
-    // A genuine duplicate: the SAME id already live on this stack, never unregistered —
-    // a caller bug (a leaked registration, or two mounted instances of what should be a
-    // singleton control). Two DIFFERENT ids sharing a key legitimately stack instead
-    // (module doc): e.g. a control mid-transition whose replacement has already
-    // registered before its own cleanup runs.
-    if (import.meta.env.DEV && liveStack.some((entry) => entry.id === def.id)) {
-      throw new Error(
-        `useShortcut: duplicate live registration for scope "${scope}", key "${def.key}" ` +
-          `(id "${def.id}"). The same control registered twice without unregistering first.`,
-      );
-    }
-    const entry: RegistrationEntry = { id: def.id, handler, enabled };
-    liveStack.push(entry);
-    return () => {
-      const index = liveStack.indexOf(entry);
-      if (index === -1) {
-        return;
+  const register = useCallback<Register>(
+    (scope, def, handler, enabled) => {
+      // WCAG 2.1.4 off-switch (module doc): reads the PROP directly, not a ref — this
+      // callback is recreated (via the `[shortcutsEnabled]` dep below) whenever the
+      // preference changes, so it always closes over the current render's value the
+      // instant it exists, with no ordering hazard against a child's own layout effect
+      // in the same commit (see the `shortcutsEnabledRef` comment above).
+      if (!shortcutsEnabled) {
+        return noopUnregister; // register nothing while OFF
       }
-      liveStack.splice(index, 1);
-      if (liveStack.length === 0) {
-        liveScopeMap.delete(normalizedKey);
+      if (RESERVED.has(def.key) || def.dispatch === false) {
+        return noopUnregister; // the key already has an owner; never take over its dispatch
       }
-    };
-  }, []);
+      const normalizedKey = def.key.toLowerCase();
+      let scopeMap = handlersRef.current.get(scope);
+      if (scopeMap === undefined) {
+        scopeMap = new Map<string, RegistrationEntry[]>();
+        handlersRef.current.set(scope, scopeMap);
+      }
+      const liveScopeMap = scopeMap;
+      let stack = liveScopeMap.get(normalizedKey);
+      if (stack === undefined) {
+        stack = [];
+        liveScopeMap.set(normalizedKey, stack);
+      }
+      const liveStack = stack;
+      // A genuine duplicate: the SAME id already live on this stack, never unregistered —
+      // a caller bug (a leaked registration, or two mounted instances of what should be a
+      // singleton control). Two DIFFERENT ids sharing a key legitimately stack instead
+      // (module doc): e.g. a control mid-transition whose replacement has already
+      // registered before its own cleanup runs.
+      if (import.meta.env.DEV && liveStack.some((entry) => entry.id === def.id)) {
+        throw new Error(
+          `useShortcut: duplicate live registration for scope "${scope}", key "${def.key}" ` +
+            `(id "${def.id}"). The same control registered twice without unregistering first.`,
+        );
+      }
+      const entry: RegistrationEntry = { id: def.id, handler, enabled };
+      liveStack.push(entry);
+      return () => {
+        const index = liveStack.indexOf(entry);
+        if (index === -1) {
+          return;
+        }
+        liveStack.splice(index, 1);
+        if (liveStack.length === 0) {
+          liveScopeMap.delete(normalizedKey);
+        }
+      };
+    },
+    [shortcutsEnabled],
+  );
 
   const activeScope = resolveActiveScope(appState);
   useLayoutEffect(() => {
@@ -218,7 +288,14 @@ export function ShortcutsProvider({
   }, [activeScope]);
 
   useLayoutEffect(() => {
+    shortcutsEnabledRef.current = shortcutsEnabled;
+  }, [shortcutsEnabled]);
+
+  useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (!shortcutsEnabledRef.current) {
+        return; // WCAG 2.1.4 off-switch: dispatch nothing while OFF
+      }
       if (tourOwnsKeyboardRef.current) {
         return;
       }
@@ -246,7 +323,10 @@ export function ShortcutsProvider({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [tourOwnsKeyboardRef]);
 
-  const value = useMemo<ShortcutsContextValue>(() => ({ register }), [register]);
+  const value = useMemo<ShortcutsContextValue>(
+    () => ({ register, enabled: shortcutsEnabled }),
+    [register, shortcutsEnabled],
+  );
 
   return <ShortcutsContext.Provider value={value}>{children}</ShortcutsContext.Provider>;
 }

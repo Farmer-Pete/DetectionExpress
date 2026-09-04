@@ -1460,6 +1460,83 @@ describe("App keyboard shortcuts, side panel composite scopes (GH137-PLAN.md M2)
   });
 });
 
+// GH137-PLAN.md code review fix 4: WCAG 2.1.4's "turn off" mechanism, wired end-to-end
+// through the real App-owned ShortcutsProvider and the Options tab's real checkbox —
+// the same "not a hand-wrapped test provider" rationale the sections above state.
+describe("App keyboard shortcuts off-switch (GH137-PLAN.md code review fix 4)", () => {
+  it("the Options tab shows a Keyboard shortcuts checkbox, checked by default", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    openPanelOnTab(/options/i);
+    expect(screen.getByRole("checkbox", { name: "Keyboard shortcuts" })).toHaveProperty(
+      "checked",
+      true,
+    );
+  });
+
+  it("turning it off makes a real mnemonic (M) do nothing, and its badge disappears; turning it back on restores both", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    const hamburger = screen.getByRole("button", { name: "Open side panel" });
+    expect(hamburger.getAttribute("aria-keyshortcuts")).toBe("M");
+
+    openPanelOnTab(/options/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    // The badge is gone the instant the preference flips, even before any keypress.
+    expect(
+      screen.getByRole("button", { name: "Open side panel" }).hasAttribute("aria-keyshortcuts"),
+    ).toBe(false);
+
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(screen.queryByRole("dialog", { name: "Side panel" })).toBeNull();
+
+    // Turn it back on: M works again and the badge returns.
+    fireEvent.click(screen.getByRole("button", { name: "Open side panel" }));
+    fireEvent.click(screen.getByRole("tab", { name: /options/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+    expect(
+      screen.getByRole("button", { name: "Close panel" }).getAttribute("aria-keyshortcuts"),
+    ).toBe("Escape");
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    expect(
+      screen.getByRole("button", { name: "Open side panel" }).getAttribute("aria-keyshortcuts"),
+    ).toBe("M");
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(screen.getByRole("dialog", { name: "Side panel" })).toBeDefined();
+  });
+
+  it("turning it off also stops Freeze's global Space toggle (LogPanel's own listener), and its badge disappears", () => {
+    render(<App createPipelineController={() => stubController()} />);
+    const freeze = screen.getByRole("button", { name: "Freeze" });
+    expect(freeze.getAttribute("aria-keyshortcuts")).toBe("Space");
+
+    openPanelOnTab(/options/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+
+    expect(screen.getByRole("button", { name: "Freeze" }).hasAttribute("aria-keyshortcuts")).toBe(
+      false,
+    );
+    fireEvent.keyDown(document.body, { code: "Space", key: " " });
+    expect(useGameStore.getState().transport.frozen).toBe(false);
+  });
+
+  it("the preference persists across a remount", () => {
+    const { unmount } = render(<App createPipelineController={() => stubController()} />);
+    openPanelOnTab(/options/i);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Keyboard shortcuts" }));
+    unmount();
+
+    render(<App createPipelineController={() => stubController()} />);
+    openPanelOnTab(/options/i);
+    expect(screen.getByRole("checkbox", { name: "Keyboard shortcuts" })).toHaveProperty(
+      "checked",
+      false,
+    );
+  });
+});
+
 describe("App keyboard shortcuts, map/event dialog scopes (GH137-PLAN.md M2)", () => {
   it("pressing O (Open place) from the event dialog pushes the place dialog on top", () => {
     render(<App createPipelineController={() => stubController()} />);

@@ -15,10 +15,18 @@
  * predicate as the control's own `disabled`/visibility (e.g. a hidden tabpanel's
  * controls pass `enabled={activeTab === "..."}`), since it is re-read on every
  * registration and the dispatcher itself skips a disabled entry even if found.
+ *
+ * The WCAG 2.1.4 off-switch (GH137-PLAN.md code review fix 4, `use-shortcuts.tsx`'s own
+ * module doc): while the player has turned shortcuts off, this returns `key: undefined`
+ * regardless of what `SHORTCUTS` declares, and skips calling `register` at all. Every
+ * consuming control already renders its `<Kbd>` badge and `aria-keyshortcuts`
+ * conditionally on `key !== undefined` (the same branch that already covers "this id
+ * names no entry"), so one flag here suppresses every badge/aria-keyshortcuts in the
+ * app, with no change needed at any call site.
  */
 import { useEffectEvent, useLayoutEffect } from "react";
 import { type Scope, SHORTCUTS } from "./shortcuts.data";
-import { useShortcutsRegister } from "./use-shortcuts";
+import { useShortcutsEnabled, useShortcutsRegister } from "./use-shortcuts";
 
 export interface UseShortcutArgs {
   scope: Scope;
@@ -31,13 +39,15 @@ export interface UseShortcutArgs {
 export interface ShortcutBadge {
   /** The raw key, for `<Kbd shortcutKey={key} />` and `aria-keyshortcuts`. `undefined`
    *  when `id` names no entry in `scope`'s table (a caller bug — every wired id is
-   *  declared). */
+   *  declared), OR the player has turned shortcuts off (the WCAG 2.1.4 off-switch,
+   *  module doc). */
   key: string | undefined;
   label: string;
 }
 
 export function useShortcut({ scope, id, onActivate, enabled }: UseShortcutArgs): ShortcutBadge {
   const register = useShortcutsRegister();
+  const shortcutsEnabled = useShortcutsEnabled();
   const def = SHORTCUTS[scope].find((entry) => entry.id === id);
 
   const activate = useEffectEvent((): void => {
@@ -45,16 +55,20 @@ export function useShortcut({ scope, id, onActivate, enabled }: UseShortcutArgs)
   });
 
   useLayoutEffect(() => {
-    if (def === undefined) {
-      return;
+    if (def === undefined || !shortcutsEnabled) {
+      return; // no entry, or the WCAG 2.1.4 off-switch is OFF: register nothing
     }
     return register(scope, def, activate, enabled);
     // `def` is a stable reference (SHORTCUTS is a module-level constant, `find` returns
     // the same object every render), so this effect re-runs only on a real scope/id/
-    // enabled change — never on every render. `activate` (an Effect Event) is
-    // intentionally omitted: its identity is always stable and it always reads the
-    // latest `onActivate`, the same convention `tour/use-tour.ts`'s `autoStart` uses.
-  }, [register, scope, def, enabled]);
+    // enabled/shortcutsEnabled change — never on every render. `activate` (an Effect
+    // Event) is intentionally omitted: its identity is always stable and it always
+    // reads the latest `onActivate`, the same convention `tour/use-tour.ts`'s
+    // `autoStart` uses.
+  }, [register, scope, def, enabled, shortcutsEnabled]);
 
-  return { key: def?.key, label: def?.label ?? "" };
+  return {
+    key: shortcutsEnabled ? def?.key : undefined,
+    label: def?.label ?? "",
+  };
 }

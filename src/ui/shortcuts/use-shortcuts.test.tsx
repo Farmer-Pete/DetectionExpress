@@ -3,7 +3,7 @@
  * dispatcher is exercised through the public API (`ShortcutsProvider` + `useShortcut`,
  * both real), never through internals, mirroring how a real control would register.
  */
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { RefObject } from "react";
 import { StrictMode, useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -132,12 +132,36 @@ function renderProvider(
   appState: ShortcutsAppState,
   children: React.ReactNode,
   tourOwnsKeyboardRef?: RefObject<boolean>,
+  shortcutsEnabled?: boolean,
 ) {
   return render(
-    <ShortcutsProvider appState={appState} tourOwnsKeyboardRef={tourOwnsKeyboardRef}>
+    <ShortcutsProvider
+      appState={appState}
+      tourOwnsKeyboardRef={tourOwnsKeyboardRef}
+      shortcutsEnabled={shortcutsEnabled}
+    >
       {children}
     </ShortcutsProvider>,
   );
+}
+
+/** A probe that renders the raw `key` `useShortcut` returns, so a test can assert on
+ *  badge suppression (GH137-PLAN.md code review fix 4: `key` reads `undefined` while
+ *  the global preference is off, which is what every consuming control's own
+ *  `key !== undefined ? <Kbd .../> : null` / `aria-keyshortcuts` conditional reads). */
+function KeyProbe({
+  scope,
+  id,
+  onActivate,
+  enabled = true,
+}: {
+  scope: Scope;
+  id: string;
+  onActivate: () => void;
+  enabled?: boolean;
+}) {
+  const { key } = useShortcut({ scope, id, onActivate, enabled });
+  return <span data-testid="key-probe">{key ?? "none"}</span>;
 }
 
 /** Talks to `register` directly (`useShortcutsRegister`), bypassing `useShortcut`'s own
@@ -423,5 +447,83 @@ describe("registration stack: a duplicate (scope,key) unregister restores the ol
         </ShortcutsProvider>,
       ),
     ).toThrow(/duplicate live registration/i);
+  });
+});
+
+// GH137-PLAN.md code review fix 4: WCAG 2.1.4's "turn off" mechanism. `shortcutsEnabled`
+// defaults to true (every test above this block never passes it, and still dispatches
+// normally), so this is purely additive.
+describe("the WCAG 2.1.4 off-switch: shortcutsEnabled", () => {
+  it("defaults to true when the prop is omitted: dispatch still fires", () => {
+    const onActivate = vi.fn();
+    renderProvider(SHELL_STATE, <ShortcutProbe scope="shell" id="menu" onActivate={onActivate} />);
+
+    fireEvent.keyDown(document.body, { key: "m" });
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("bails the dispatcher entirely while false: a real, declared mnemonic does nothing", () => {
+    const onActivate = vi.fn();
+    renderProvider(
+      SHELL_STATE,
+      <ShortcutProbe scope="shell" id="menu" onActivate={onActivate} />,
+      undefined,
+      false,
+    );
+
+    fireEvent.keyDown(document.body, { key: "m" });
+
+    expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("useShortcut returns key: undefined while false, so every consumer's badge/aria-keyshortcuts disappears", () => {
+    renderProvider(
+      SHELL_STATE,
+      <KeyProbe scope="shell" id="menu" onActivate={() => {}} />,
+      undefined,
+      false,
+    );
+
+    expect(screen.getByTestId("key-probe").textContent).toBe("none");
+  });
+
+  it("returns the real key again once toggled back to true", () => {
+    const onActivate = vi.fn();
+    const { rerender } = render(
+      <ShortcutsProvider appState={SHELL_STATE} shortcutsEnabled={false}>
+        <KeyProbe scope="shell" id="menu" onActivate={onActivate} />
+      </ShortcutsProvider>,
+    );
+    expect(screen.getByTestId("key-probe").textContent).toBe("none");
+
+    rerender(
+      <ShortcutsProvider appState={SHELL_STATE} shortcutsEnabled={true}>
+        <KeyProbe scope="shell" id="menu" onActivate={onActivate} />
+      </ShortcutsProvider>,
+    );
+    expect(screen.getByTestId("key-probe").textContent).toBe("M");
+
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggling false again re-bails a previously-live registration (a real remount toggle, not just initial mount)", () => {
+    const onActivate = vi.fn();
+    const { rerender } = render(
+      <ShortcutsProvider appState={SHELL_STATE} shortcutsEnabled={true}>
+        <ShortcutProbe scope="shell" id="menu" onActivate={onActivate} />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(onActivate).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ShortcutsProvider appState={SHELL_STATE} shortcutsEnabled={false}>
+        <ShortcutProbe scope="shell" id="menu" onActivate={onActivate} />
+      </ShortcutsProvider>,
+    );
+    fireEvent.keyDown(document.body, { key: "m" });
+    expect(onActivate).toHaveBeenCalledTimes(1); // unchanged: the second press never fired
   });
 });
