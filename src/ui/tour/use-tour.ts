@@ -36,7 +36,7 @@
  *   a microtask, gated by a generation token bumped on every `startTour()` call and on
  *   unmount, so a stale restore from a superseded or torn-down tour never fires.
  */
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { tourCopy } from "../content/narrative";
 import { hasSeenTour, markTourSeen } from "../onboarding-storage";
 import {
@@ -237,13 +237,21 @@ export function useTour({
     instance.drive();
   }, [createDriver, triggerRef, openDrawer, closeDrawer]);
 
-  // `startTour`'s identity churns whenever `openDrawer`/`closeDrawer` do (App.tsx
-  // rebuilds those two callbacks every render), so the auto-start effect below reads
-  // it through this ref instead of listing it as a dependency — the same bridge
-  // pattern App.tsx itself uses for `closeSidePanelRef`/`openDrawerRef`. Written every
-  // render, never inside an effect, so it is never one render stale.
-  const startTourRef = useRef(startTour);
-  startTourRef.current = startTour;
+  // The auto-start action, as an Effect Event. It always reads the LATEST COMMITTED
+  // `startTour` (whose identity churns as App.tsx rebuilds `openDrawer`/`closeDrawer`
+  // every render), so the auto-start effect below need not depend on it, and there is no
+  // render-phase ref a discarded concurrent render could leave stale (CodeRabbit review).
+  // `useEffectEvent` is the right tool here precisely because this callback is only ever
+  // called locally, from the effect's own timer — never passed down (unlike App.tsx's
+  // `openDrawer`/`closeDrawer` refs, which are handed to `useTour` and so cannot be
+  // Effect Events).
+  const autoStart = useEffectEvent((): void => {
+    if (autoStartedThisSession) {
+      return; // a prior mount (this session) already auto-started; retake is unaffected
+    }
+    autoStartedThisSession = true;
+    startTour();
+  });
 
   // Auto-start on first load, StrictMode-safe (GH132-PLAN.md M3, see the module doc):
   // `hasSeenAtMount` is fixed for this hook instance's whole life, so this effect's
@@ -255,11 +263,7 @@ export function useTour({
     if (!hasSeenAtMount) {
       pending = setTimeout(() => {
         pending = null;
-        if (autoStartedThisSession) {
-          return; // a prior mount (this session) already auto-started; retake is unaffected
-        }
-        autoStartedThisSession = true;
-        startTourRef.current();
+        autoStart();
       }, 0);
     }
     return () => {
