@@ -350,6 +350,7 @@ export function useTour({
       // cleanly, and nothing here may mask the original error.
       const failed = driverRef.current;
       driverRef.current = null;
+      const hadDrawer = drawerOpenRef.current;
       suppressSeenRef.current = true;
       try {
         failed?.destroy();
@@ -357,6 +358,17 @@ export function useTour({
         // a half-initialized driver may not tear down cleanly; the throw below matters
       }
       suppressSeenRef.current = false;
+      // Close the drawer this attempt opened EXACTLY ONCE (Codex review): a successful
+      // destroy() re-entered `onDestroyed`, which already cleared `drawerOpenRef` and
+      // closed the panel — so `drawerOpenRef` still reading true means `onDestroyed` did
+      // NOT run (destroy() threw or fired no callback), and the panel is still open.
+      if (hadDrawer && drawerOpenRef.current) {
+        try {
+          closeDrawer?.();
+        } catch {
+          // internal state is reset below regardless; the original error still rethrows
+        }
+      }
       // Re-assert the synchronous invariants UNCONDITIONALLY, whether or not
       // destroy()/onDestroyed ran, so keyboard ownership can never be left stuck.
       sessionRef.current += 1;

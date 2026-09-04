@@ -602,6 +602,34 @@ describe("useTour tourOwnsKeyboardRef (GH137-PLAN.md)", () => {
     expect(result.current.active).toBe(true);
   });
 
+  it("a failed start whose destroy() also throws still resets ownership and rethrows the original drive() error", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    const tourOwnsKeyboardRef = { current: false };
+    const throwingBothFactory: TourDriverFactory = () => ({
+      drive() {
+        throw new Error("drive() boom");
+      },
+      destroy() {
+        throw new Error("destroy() boom");
+      },
+      moveNext() {},
+      movePrevious() {},
+      moveTo() {},
+      getActiveIndex() {
+        return 0;
+      },
+    });
+    const { result } = renderHook(() =>
+      useTour({ triggerRef, createDriver: throwingBothFactory, tourOwnsKeyboardRef }),
+    );
+
+    // The original drive() error propagates (the swallowed destroy() failure never masks
+    // it), and keyboard ownership is still released.
+    expect(() => act(() => result.current.startTour())).toThrow("drive() boom");
+    expect(tourOwnsKeyboardRef.current).toBe(false);
+    expect(result.current.active).toBe(false);
+  });
+
   it("clears keyboard ownership from onDestroyed even when closeDrawer throws (Codex review: internal state resets before the external callback)", () => {
     const triggerRef = createRef<HTMLButtonElement>();
     const tourOwnsKeyboardRef = { current: false };
